@@ -16,8 +16,8 @@ import { InventoryView } from "./InventoryView";
 import { BudgetView } from "./BudgetView";
 import { NotesView } from "./NotesView";
 import { DashboardView } from "./DashboardView";
-import { appWindow, LogicalSize } from "@tauri-apps/api/window";
-import { whenReady } from "@tauri-apps/api/app";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+const appWindow = getCurrentWindow();
 
 type View =
   | "dashboard"
@@ -291,11 +291,9 @@ window.addEventListener("DOMContentLoaded", () => {
     navigate("settings");
   });
   navigate("dashboard");
-  whenReady().then(async () => {
-    // v2 exposes label(); add optional chaining to avoid TS yelling in some setups
-    // @ts-expect-error label() is v2-only
-    const label = await appWindow.label?.();
-    console.log("Runtime window label:", label);
+  // Next tick so the DOM has painted at least once
+  requestAnimationFrame(() => {
+    console.log("Runtime window label:", appWindow.label);
     setupDynamicMinSize();
   });
 });
