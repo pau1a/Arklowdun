@@ -1,13 +1,15 @@
 // Simple tabbed UI scaffold for Arklowdun
 
 import { CalendarView } from "./CalendarView";
+import { FilesView } from "./FilesView";
 
 type View =
   | "dashboard"
   | "primary"
   | "secondary"
   | "tertiary"
-  | "calendar";
+  | "calendar"
+  | "files";
 
 const viewEl = () => document.querySelector<HTMLElement>("#view");
 const linkDashboard = () =>
@@ -20,6 +22,8 @@ const linkTertiary = () =>
   document.querySelector<HTMLAnchorElement>("#nav-tertiary");
 const linkCalendar = () =>
   document.querySelector<HTMLAnchorElement>("#nav-calendar");
+const linkFiles = () =>
+  document.querySelector<HTMLAnchorElement>("#nav-files");
 
 function setActive(tab: View) {
   const tabs: Record<View, HTMLAnchorElement | null> = {
@@ -28,6 +32,7 @@ function setActive(tab: View) {
     secondary: linkSecondary(),
     tertiary: linkTertiary(),
     calendar: linkCalendar(),
+    files: linkFiles(),
   };
   (Object.keys(tabs) as View[]).forEach((name) => {
     const el = tabs[name];
@@ -50,6 +55,10 @@ function navigate(to: View) {
   if (!el) return;
   if (to === "calendar") {
     CalendarView(el);
+    return;
+  }
+  if (to === "files") {
+    FilesView(el);
     return;
   }
   const title = to.charAt(0).toUpperCase() + to.slice(1);
@@ -76,6 +85,10 @@ window.addEventListener("DOMContentLoaded", () => {
   linkCalendar()?.addEventListener("click", (e) => {
     e.preventDefault();
     navigate("calendar");
+  });
+  linkFiles()?.addEventListener("click", (e) => {
+    e.preventDefault();
+    navigate("files");
   });
   navigate("dashboard");
 });
