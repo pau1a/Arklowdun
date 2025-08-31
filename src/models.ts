@@ -45,3 +45,11 @@ export interface Pet {
   medical: PetMedicalRecord[];
 }
 
+export interface FamilyMember {
+  id: number;
+  name: string;
+  birthday: string; // ISO string
+  notes: string;
+  documents: string[]; // file paths
+}
+
