@@ -291,5 +291,11 @@ window.addEventListener("DOMContentLoaded", () => {
     navigate("settings");
   });
   navigate("dashboard");
-  whenReady().then(setupDynamicMinSize);
+  whenReady().then(async () => {
+    // v2 exposes label(); add optional chaining to avoid TS yelling in some setups
+    // @ts-expect-error label() is v2-only
+    const label = await appWindow.label?.();
+    console.log("Runtime window label:", label);
+    setupDynamicMinSize();
+  });
 });
