@@ -16,9 +16,8 @@ import { InventoryView } from "./InventoryView";
 import { BudgetView } from "./BudgetView";
 import { NotesView } from "./NotesView";
 import { DashboardView } from "./DashboardView";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
-
-const appWindow = getCurrentWindow();
+import { appWindow, LogicalSize } from "@tauri-apps/api/window";
+import { whenReady } from "@tauri-apps/api/app";
 
 type View =
   | "dashboard"
@@ -91,16 +90,20 @@ let raf: number | null = null;
 
 async function enforceMinNow() {
   const { w, h } = requiredLogicalSize();
-  await appWindow.setMinSize(new LogicalSize(w, h));
+  try {
+    await appWindow.setMinSize(new LogicalSize(w, h));
 
-  const current = await appWindow.innerSize();
-  const sf = await appWindow.scaleFactor();
-  const curW = current.width / sf;
-  const curH = current.height / sf;
-  if (curW < w || curH < h) {
-    await appWindow.setSize(
-      new LogicalSize(Math.max(curW, w), Math.max(curH, h))
-    );
+    const current = await appWindow.innerSize();
+    const sf = await appWindow.scaleFactor();
+    const curW = current.width / sf;
+    const curH = current.height / sf;
+    if (curW < w || curH < h) {
+      await appWindow.setSize(
+        new LogicalSize(Math.max(curW, w), Math.max(curH, h))
+      );
+    }
+  } catch (e) {
+    console.warn("enforceMinNow failed", e);
   }
 }
 
@@ -288,5 +291,5 @@ window.addEventListener("DOMContentLoaded", () => {
     navigate("settings");
   });
   navigate("dashboard");
-  setupDynamicMinSize();
+  whenReady().then(setupDynamicMinSize);
 });

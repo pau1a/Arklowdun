@@ -1,0 +1,10 @@
+{
+  "identifier": "window-management",
+  "description": "Allow dynamic window sizing and min-size enforcement.",
+  "permissions": [
+    "core:window:allow-set-min-size",
+    "core:window:allow-set-size",
+    "core:window:allow-inner-size",
+    "core:window:allow-scale-factor"
+  ]
+}
