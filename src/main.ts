@@ -15,9 +15,9 @@ type View =
   | "tertiary"
   | "calendar"
   | "files"
-  | "shopping";
+  | "shopping"
   | "bills"
-  | "insurance";
+  | "insurance"
 
 const viewEl = () => document.querySelector<HTMLElement>("#view");
 const linkDashboard = () =>
@@ -70,6 +70,7 @@ function navigate(to: View) {
   setActive(to);
   const el = viewEl();
   if (!el) return;
+
   if (to === "calendar") {
     CalendarView(el);
     return;
@@ -80,6 +81,8 @@ function navigate(to: View) {
   }
   if (to === "shopping") {
     ShoppingListView(el);
+    return;
+  }
   if (to === "bills") {
     BillsView(el);
     return;
@@ -88,6 +91,7 @@ function navigate(to: View) {
     InsuranceView(el);
     return;
   }
+
   const title = to.charAt(0).toUpperCase() + to.slice(1);
   renderBlank(title);
 }
@@ -120,6 +124,7 @@ window.addEventListener("DOMContentLoaded", () => {
   linkShopping()?.addEventListener("click", (e) => {
     e.preventDefault();
     navigate("shopping");
+  });
   linkBills()?.addEventListener("click", (e) => {
     e.preventDefault();
     navigate("bills");
@@ -128,6 +133,6 @@ window.addEventListener("DOMContentLoaded", () => {
     e.preventDefault();
     navigate("insurance");
   });
+
   navigate("dashboard");
 });
-
