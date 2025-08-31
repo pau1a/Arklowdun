@@ -10,6 +10,7 @@ import { InsuranceView } from "./InsuranceView";
 import { VehiclesView } from "./VehiclesView";
 import { PetsView } from "./PetsView";
 import { FamilyView } from "./FamilyView";
+import { PropertyView } from "./PropertyView";
 
 type View =
   | "dashboard"
@@ -21,6 +22,7 @@ type View =
   | "shopping"
   | "bills"
   | "insurance"
+  | "property"
   | "vehicles"
   | "pets"
   | "family";
@@ -44,6 +46,8 @@ const linkBills = () =>
   document.querySelector<HTMLAnchorElement>("#nav-bills");
 const linkInsurance = () =>
   document.querySelector<HTMLAnchorElement>("#nav-insurance");
+const linkProperty = () =>
+  document.querySelector<HTMLAnchorElement>("#nav-property");
 const linkVehicles = () =>
   document.querySelector<HTMLAnchorElement>("#nav-vehicles");
 const linkPets = () => document.querySelector<HTMLAnchorElement>("#nav-pets");
@@ -61,6 +65,7 @@ function setActive(tab: View) {
     shopping: linkShopping(),
     bills: linkBills(),
     insurance: linkInsurance(),
+    property: linkProperty(),
     vehicles: linkVehicles(),
     pets: linkPets(),
     family: linkFamily(),
@@ -103,6 +108,10 @@ function navigate(to: View) {
   }
   if (to === "insurance") {
     InsuranceView(el);
+    return;
+  }
+  if (to === "property") {
+    PropertyView(el);
     return;
   }
   if (to === "vehicles") {
@@ -157,6 +166,10 @@ window.addEventListener("DOMContentLoaded", () => {
   linkInsurance()?.addEventListener("click", (e) => {
     e.preventDefault();
     navigate("insurance");
+  });
+  linkProperty()?.addEventListener("click", (e) => {
+    e.preventDefault();
+    navigate("property");
   });
   linkVehicles()?.addEventListener("click", (e) => {
     e.preventDefault();
