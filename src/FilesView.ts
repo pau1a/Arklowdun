@@ -1,11 +1,11 @@
-import { open } from "@tauri-apps/api/dialog";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   readDir,
-  writeFile,
+  writeTextFile,
   removeFile,
   removeDir,
   createDir,
-} from "@tauri-apps/api/fs";
+} from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
@@ -129,7 +129,7 @@ export async function FilesView(container: HTMLElement) {
     e.preventDefault();
     if (!currentDir || !fileNameInput) return;
     const path = await join(currentDir, fileNameInput.value);
-    await writeFile({ path, contents: "" });
+    await writeTextFile(path, "");
     fileNameInput.value = "";
     if (listEl && previewEl && pathEl)
       await listDirectory(currentDir, listEl, previewEl, pathEl, setDir);
