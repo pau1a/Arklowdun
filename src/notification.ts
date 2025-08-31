@@ -1,20 +1,17 @@
+import {
+  isPermissionGranted as tauriIsPermissionGranted,
+  requestPermission as tauriRequestPermission,
+  sendNotification as tauriSendNotification,
+} from "@tauri-apps/plugin-notification";
+
 export async function isPermissionGranted(): Promise<boolean> {
-  return (
-    (await (window as any).__TAURI__?.notification?.isPermissionGranted?.()) ??
-    false
-  );
+  return tauriIsPermissionGranted();
 }
 
-export async function requestPermission(): Promise<string> {
-  return (
-    (await (window as any).__TAURI__?.notification?.requestPermission?.()) ??
-    "denied"
-  );
+export async function requestPermission(): Promise<"granted" | "denied" | "default"> {
+  return tauriRequestPermission();
 }
 
-export async function sendNotification(options: {
-  title: string;
-  body: string;
-}): Promise<void> {
-  await (window as any).__TAURI__?.notification?.sendNotification?.(options);
+export async function sendNotification(options: { title: string; body: string }): Promise<void> {
+  await tauriSendNotification(options);
 }
