@@ -11,14 +11,17 @@
   },
   "app": {
     "withGlobalTauri": true,
+    "capabilities": [
+      "default",
+      "window-management"
+    ],
     "windows": [
       {
         "label": "main",
         "title": "arklowdun",
         "width": 800,
         "height": 600,
-        "backgroundColor": "#ffffffff",
-        "capabilities": ["default", "window-management"]
+        "backgroundColor": "#ffffffff"
       }
     ],
     "security": {
