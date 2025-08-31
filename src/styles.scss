@@ -171,3 +171,41 @@ button {
     color: $color-white;
   }
 }
+
+.notes-canvas {
+  position: relative;
+  min-height: 300px;
+}
+
+.note {
+  position: absolute;
+  padding: 0.5rem;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.note.dragging {
+  cursor: grabbing;
+}
+
+.note textarea {
+  border: none;
+  background: transparent;
+  resize: none;
+  width: 100px;
+  height: 100px;
+  font: inherit;
+  outline: none;
+}
+
+.note button.delete {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}

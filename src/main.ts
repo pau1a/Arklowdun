@@ -14,6 +14,7 @@ import { PropertyView } from "./PropertyView";
 import { SettingsView } from "./SettingsView";
 import { InventoryView } from "./InventoryView";
 import { BudgetView } from "./BudgetView";
+import { NotesView } from "./NotesView";
 
 type View =
   | "dashboard"
@@ -31,6 +32,7 @@ type View =
   | "family"
   | "inventory"
   | "budget"
+  | "notes"
   | "settings";
 
 const viewEl = () => document.querySelector<HTMLElement>("#view");
@@ -63,6 +65,8 @@ const linkInventory = () =>
   document.querySelector<HTMLAnchorElement>("#nav-inventory");
 const linkBudget = () =>
   document.querySelector<HTMLAnchorElement>("#nav-budget");
+const linkNotes = () =>
+  document.querySelector<HTMLAnchorElement>("#nav-notes");
 const linkSettings = () =>
   document.querySelector<HTMLAnchorElement>("#nav-settings");
 
@@ -83,6 +87,7 @@ function setActive(tab: View) {
     family: linkFamily(),
     inventory: linkInventory(),
     budget: linkBudget(),
+    notes: linkNotes(),
     settings: linkSettings(),
   };
   (Object.keys(tabs) as View[]).forEach((name) => {
@@ -147,6 +152,10 @@ function navigate(to: View) {
   }
   if (to === "budget") {
     BudgetView(el);
+    return;
+  }
+  if (to === "notes") {
+    NotesView(el);
     return;
   }
   if (to === "settings") {
@@ -217,6 +226,10 @@ window.addEventListener("DOMContentLoaded", () => {
   linkBudget()?.addEventListener("click", (e) => {
     e.preventDefault();
     navigate("budget");
+  });
+  linkNotes()?.addEventListener("click", (e) => {
+    e.preventDefault();
+    navigate("notes");
   });
   linkSettings()?.addEventListener("click", (e) => {
     e.preventDefault();
