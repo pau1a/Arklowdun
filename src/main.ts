@@ -4,6 +4,7 @@
 import "./styles.scss";
 import { CalendarView } from "./CalendarView";
 import { FilesView } from "./FilesView";
+import { ShoppingListView } from "./ShoppingListView";
 
 type View =
   | "dashboard"
@@ -11,7 +12,8 @@ type View =
   | "secondary"
   | "tertiary"
   | "calendar"
-  | "files";
+  | "files"
+  | "shopping";
 
 const viewEl = () => document.querySelector<HTMLElement>("#view");
 const linkDashboard = () =>
@@ -26,6 +28,8 @@ const linkCalendar = () =>
   document.querySelector<HTMLAnchorElement>("#nav-calendar");
 const linkFiles = () =>
   document.querySelector<HTMLAnchorElement>("#nav-files");
+const linkShopping = () =>
+  document.querySelector<HTMLAnchorElement>("#nav-shopping");
 
 function setActive(tab: View) {
   const tabs: Record<View, HTMLAnchorElement | null> = {
@@ -35,6 +39,7 @@ function setActive(tab: View) {
     tertiary: linkTertiary(),
     calendar: linkCalendar(),
     files: linkFiles(),
+    shopping: linkShopping(),
   };
   (Object.keys(tabs) as View[]).forEach((name) => {
     const el = tabs[name];
@@ -61,6 +66,10 @@ function navigate(to: View) {
   }
   if (to === "files") {
     FilesView(el);
+    return;
+  }
+  if (to === "shopping") {
+    ShoppingListView(el);
     return;
   }
   const title = to.charAt(0).toUpperCase() + to.slice(1);
@@ -91,6 +100,10 @@ window.addEventListener("DOMContentLoaded", () => {
   linkFiles()?.addEventListener("click", (e) => {
     e.preventDefault();
     navigate("files");
+  });
+  linkShopping()?.addEventListener("click", (e) => {
+    e.preventDefault();
+    navigate("shopping");
   });
   navigate("dashboard");
 });
