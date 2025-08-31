@@ -15,6 +15,7 @@ import { SettingsView } from "./SettingsView";
 import { InventoryView } from "./InventoryView";
 import { BudgetView } from "./BudgetView";
 import { NotesView } from "./NotesView";
+import { DashboardView } from "./DashboardView";
 
 type View =
   | "dashboard"
@@ -110,6 +111,10 @@ function navigate(to: View) {
   const el = viewEl();
   if (!el) return;
 
+  if (to === "dashboard") {
+    DashboardView(el);
+    return;
+  }
   if (to === "calendar") {
     CalendarView(el);
     return;
