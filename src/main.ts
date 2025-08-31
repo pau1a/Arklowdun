@@ -1,61 +1,62 @@
 // Simple tabbed UI scaffold for Arklowdun
 
-type View = "files" | "calendar";
+type View = "dashboard" | "primary" | "secondary" | "tertiary";
 
 const viewEl = () => document.querySelector<HTMLElement>("#view");
-const btnFiles = () => document.querySelector<HTMLButtonElement>("#nav-files");
-const btnCalendar = () =>
-  document.querySelector<HTMLButtonElement>("#nav-calendar");
+const linkDashboard = () =>
+  document.querySelector<HTMLAnchorElement>("#nav-dashboard");
+const linkPrimary = () =>
+  document.querySelector<HTMLAnchorElement>("#nav-primary");
+const linkSecondary = () =>
+  document.querySelector<HTMLAnchorElement>("#nav-secondary");
+const linkTertiary = () =>
+  document.querySelector<HTMLAnchorElement>("#nav-tertiary");
 
 function setActive(tab: View) {
-  const filesBtn = btnFiles();
-  const calBtn = btnCalendar();
-  filesBtn?.classList.toggle("active", tab === "files");
-  calBtn?.classList.toggle("active", tab === "calendar");
-  filesBtn?.setAttribute("aria-pressed", String(tab === "files"));
-  calBtn?.setAttribute("aria-pressed", String(tab === "calendar"));
+  const tabs: Record<View, HTMLAnchorElement | null> = {
+    dashboard: linkDashboard(),
+    primary: linkPrimary(),
+    secondary: linkSecondary(),
+    tertiary: linkTertiary(),
+  };
+  (Object.keys(tabs) as View[]).forEach((name) => {
+    const el = tabs[name];
+    const active = name === tab;
+    el?.classList.toggle("active", active);
+    if (active) el?.setAttribute("aria-current", "page");
+    else el?.removeAttribute("aria-current");
+  });
 }
 
-function renderFiles() {
+function renderBlank(title: string) {
   const el = viewEl();
   if (!el) return;
-  el.innerHTML = `
-    <section>
-      <h2>Files</h2>
-      <p>Connect a folder to manage your home documents.</p>
-      <div class="row">
-        <button id="choose-folder">Choose Folder</button>
-        <button id="new-file" disabled title="Coming soon">New File</button>
-      </div>
-      <div id="file-list" class="list empty">No folder selected.</div>
-    </section>
-  `;
-}
-
-function renderCalendar() {
-  const el = viewEl();
-  if (!el) return;
-  el.innerHTML = `
-    <section>
-      <h2>Calendar</h2>
-      <p>Track events, reminders, and recurring tasks (coming soon).</p>
-      <div class="row">
-        <button disabled title="Coming soon">Add Event</button>
-        <button disabled title="Coming soon">Import .ics</button>
-      </div>
-      <div class="calendar-empty">Calendar view placeholder</div>
-    </section>
-  `;
+  el.innerHTML = `<section><h2>${title}</h2></section>`;
 }
 
 function navigate(to: View) {
   setActive(to);
-  if (to === "files") renderFiles();
-  else renderCalendar();
+  const title = to.charAt(0).toUpperCase() + to.slice(1);
+  renderBlank(title);
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  btnFiles()?.addEventListener("click", () => navigate("files"));
-  btnCalendar()?.addEventListener("click", () => navigate("calendar"));
-  navigate("files");
+  linkDashboard()?.addEventListener("click", (e) => {
+    e.preventDefault();
+    navigate("dashboard");
+  });
+  linkPrimary()?.addEventListener("click", (e) => {
+    e.preventDefault();
+    navigate("primary");
+  });
+  linkSecondary()?.addEventListener("click", (e) => {
+    e.preventDefault();
+    navigate("secondary");
+  });
+  linkTertiary()?.addEventListener("click", (e) => {
+    e.preventDefault();
+    navigate("tertiary");
+  });
+  navigate("dashboard");
 });
+
