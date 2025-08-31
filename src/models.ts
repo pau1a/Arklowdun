@@ -31,3 +31,17 @@ export interface Vehicle {
   maintenance: MaintenanceEntry[];
 }
 
+export interface PetMedicalRecord {
+  date: string; // ISO string
+  description: string;
+  document: string; // file path
+  reminder?: number; // timestamp ms
+}
+
+export interface Pet {
+  id: number;
+  name: string;
+  type: string;
+  medical: PetMedicalRecord[];
+}
+
