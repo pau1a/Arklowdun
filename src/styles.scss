@@ -31,10 +31,36 @@ $color-white: #ffffff;
   -moz-osx-font-smoothing: grayscale;
   -webkit-text-size-adjust: 100%;
 }
+/* 1) Make the document able to match the viewport */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%; // lets 100% height descendants work
+  background: inherit; // keeps existing colour system; removes “edge” gaps
+}
 
+/* 4) Optional: avoid micro scrollbars during rapid resize */
 body {
   display: flex;
   margin: 0;
+  overflow: hidden; // switch to 'auto' if you need full-page scroll
+}
+
+/* 2) Ensure your app root always covers the viewport */
+#app {
+  min-height: 100vh; // desktop Tauri: vh is fine
+  min-width: 100vw;
+  display: flex; // if you already use flex, keep it; otherwise harmless
+  flex-direction: column;
+}
+
+/* 3) The primary content area should absorb extra space cleanly */
+#content,
+main {
+  flex: 1 1 auto;
+  min-height: 0; // critical: prevents flex children forcing overflow gaps
+  overflow: auto; // or 'hidden' if you manage internal scrolls
 }
 
 .container {
