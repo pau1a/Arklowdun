@@ -4,6 +4,7 @@
 import "./styles.scss";
 import { CalendarView } from "./CalendarView";
 import { FilesView } from "./FilesView";
+import { ShoppingListView } from "./ShoppingListView";
 import { BillsView } from "./BillsView";
 import { InsuranceView } from "./InsuranceView";
 
@@ -14,6 +15,7 @@ type View =
   | "tertiary"
   | "calendar"
   | "files"
+  | "shopping";
   | "bills"
   | "insurance";
 
@@ -30,6 +32,8 @@ const linkCalendar = () =>
   document.querySelector<HTMLAnchorElement>("#nav-calendar");
 const linkFiles = () =>
   document.querySelector<HTMLAnchorElement>("#nav-files");
+const linkShopping = () =>
+  document.querySelector<HTMLAnchorElement>("#nav-shopping");
 const linkBills = () =>
   document.querySelector<HTMLAnchorElement>("#nav-bills");
 const linkInsurance = () =>
@@ -43,6 +47,7 @@ function setActive(tab: View) {
     tertiary: linkTertiary(),
     calendar: linkCalendar(),
     files: linkFiles(),
+    shopping: linkShopping(),
     bills: linkBills(),
     insurance: linkInsurance(),
   };
@@ -73,6 +78,8 @@ function navigate(to: View) {
     FilesView(el);
     return;
   }
+  if (to === "shopping") {
+    ShoppingListView(el);
   if (to === "bills") {
     BillsView(el);
     return;
@@ -110,6 +117,9 @@ window.addEventListener("DOMContentLoaded", () => {
     e.preventDefault();
     navigate("files");
   });
+  linkShopping()?.addEventListener("click", (e) => {
+    e.preventDefault();
+    navigate("shopping");
   linkBills()?.addEventListener("click", (e) => {
     e.preventDefault();
     navigate("bills");
