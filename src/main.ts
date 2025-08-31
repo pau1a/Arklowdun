@@ -7,6 +7,7 @@ import { FilesView } from "./FilesView";
 import { ShoppingListView } from "./ShoppingListView";
 import { BillsView } from "./BillsView";
 import { InsuranceView } from "./InsuranceView";
+import { VehiclesView } from "./VehiclesView";
 
 type View =
   | "dashboard"
@@ -15,9 +16,10 @@ type View =
   | "tertiary"
   | "calendar"
   | "files"
-  | "shopping";
+  | "shopping"
   | "bills"
-  | "insurance";
+  | "insurance"
+  | "vehicles";
 
 const viewEl = () => document.querySelector<HTMLElement>("#view");
 const linkDashboard = () =>
@@ -38,6 +40,8 @@ const linkBills = () =>
   document.querySelector<HTMLAnchorElement>("#nav-bills");
 const linkInsurance = () =>
   document.querySelector<HTMLAnchorElement>("#nav-insurance");
+const linkVehicles = () =>
+  document.querySelector<HTMLAnchorElement>("#nav-vehicles");
 
 function setActive(tab: View) {
   const tabs: Record<View, HTMLAnchorElement | null> = {
@@ -50,6 +54,7 @@ function setActive(tab: View) {
     shopping: linkShopping(),
     bills: linkBills(),
     insurance: linkInsurance(),
+    vehicles: linkVehicles(),
   };
   (Object.keys(tabs) as View[]).forEach((name) => {
     const el = tabs[name];
@@ -80,12 +85,18 @@ function navigate(to: View) {
   }
   if (to === "shopping") {
     ShoppingListView(el);
+    return;
+  }
   if (to === "bills") {
     BillsView(el);
     return;
   }
   if (to === "insurance") {
     InsuranceView(el);
+    return;
+  }
+  if (to === "vehicles") {
+    VehiclesView(el);
     return;
   }
   const title = to.charAt(0).toUpperCase() + to.slice(1);
@@ -120,6 +131,7 @@ window.addEventListener("DOMContentLoaded", () => {
   linkShopping()?.addEventListener("click", (e) => {
     e.preventDefault();
     navigate("shopping");
+  });
   linkBills()?.addEventListener("click", (e) => {
     e.preventDefault();
     navigate("bills");
@@ -127,6 +139,10 @@ window.addEventListener("DOMContentLoaded", () => {
   linkInsurance()?.addEventListener("click", (e) => {
     e.preventDefault();
     navigate("insurance");
+  });
+  linkVehicles()?.addEventListener("click", (e) => {
+    e.preventDefault();
+    navigate("vehicles");
   });
   navigate("dashboard");
 });
