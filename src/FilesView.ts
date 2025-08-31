@@ -2,8 +2,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   readDir,
   writeTextFile,
-  removeFile,
-  removeDir,
+  remove,
   createDir,
 } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
@@ -33,8 +32,7 @@ async function listDirectory(
     del.addEventListener("click", async (e) => {
       e.stopPropagation();
       try {
-        if (entry.children) await removeDir(entry.path, { recursive: true });
-        else await removeFile(entry.path);
+        await remove(entry.path, { recursive: Boolean(entry.children) });
         await listDirectory(dir, listEl, previewEl, pathEl, setDir);
       } catch (err) {
         console.error("Failed to delete", err);
