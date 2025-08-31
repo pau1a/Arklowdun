@@ -15,7 +15,7 @@ async function listDirectory(
   pathEl: HTMLElement,
   setDir: (d: string) => void,
 ) {
-  const entries = await readDir(dir);
+  const entries = await readDir(dir); // entries expose isDirectory/isFile
   listEl.innerHTML = "";
   if (entries.length === 0) {
     const empty = document.createElement("li");
@@ -32,7 +32,7 @@ async function listDirectory(
     del.addEventListener("click", async (e) => {
       e.stopPropagation();
       try {
-        await remove(entry.path, { recursive: Boolean(entry.children) });
+        await remove(entry.path, { recursive: entry.isDirectory === true });
         await listDirectory(dir, listEl, previewEl, pathEl, setDir);
       } catch (err) {
         console.error("Failed to delete", err);
@@ -40,7 +40,7 @@ async function listDirectory(
     });
     li.appendChild(del);
     li.addEventListener("click", async () => {
-      if (entry.children) {
+      if (entry.isDirectory) {
         setDir(entry.path);
         pathEl.textContent = entry.path;
         await listDirectory(entry.path, listEl, previewEl, pathEl, setDir);
