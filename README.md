@@ -1,7 +1,18 @@
-# Tauri + Vanilla TS
+# Arklowdun — Home Management App
 
-This template should help get you started developing with Tauri in vanilla HTML, CSS and Typescript.
+Arklowdun is a desktop app for home management, centered around a filestore and a calendar.
 
-## Recommended IDE Setup
+Current state: basic app shell with two tabs (Files, Calendar). Functionality is stubbed and will be implemented iteratively.
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+## Roadmap (initial)
+
+- Files: choose a base folder and list files; create folders/files; quick search; favorite locations.
+- Calendar: month/week/day views; reminders and recurring events; import/export `.ics`.
+- Extras: links between files and events; household members and roles; backups.
+
+## Dev
+
+- `npm run dev` — run Vite dev server (Tauri will attach).
+- `npm run tauri` — run Tauri CLI (build/dev/bundle).
+
+Recommended IDE: VS Code with Tauri and rust-analyzer extensions.
