@@ -61,3 +61,12 @@ export interface FamilyMember {
   documents: string[]; // file paths
 }
 
+export interface InventoryItem {
+  id: number;
+  name: string;
+  purchaseDate: string; // ISO string
+  warrantyExpiry: string; // ISO string
+  document: string; // file path
+  reminder?: number; // timestamp ms
+}
+
