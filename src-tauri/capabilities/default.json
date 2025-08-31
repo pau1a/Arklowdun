@@ -11,7 +11,6 @@
     "core:webview:default",
     "dialog:default",
     "fs:default",
-    // For dev, allow broad FS access; tighten later.
     "fs:read-all",
     "fs:write-all",
     "fs:allow-mkdir",
