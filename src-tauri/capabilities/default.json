@@ -11,11 +11,13 @@
     "core:webview:default",
     "dialog:default",
     "fs:default",
+    "fs:scope-applocaldata-recursive",
     "fs:read-all",
     "fs:write-all",
     "fs:allow-mkdir",
     "fs:allow-remove",
     "notification:default",
-    "opener:default"
+    "opener:default",
+    "opener:allow-open-path"
   ]
 }
