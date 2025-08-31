@@ -75,6 +75,7 @@ function navigate(to: View) {
   setActive(to);
   const el = viewEl();
   if (!el) return;
+
   if (to === "calendar") {
     CalendarView(el);
     return;
@@ -146,4 +147,3 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   navigate("dashboard");
 });
-
