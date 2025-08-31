@@ -9,6 +9,7 @@ import { BillsView } from "./BillsView";
 import { InsuranceView } from "./InsuranceView";
 import { VehiclesView } from "./VehiclesView";
 import { PetsView } from "./PetsView";
+import { FamilyView } from "./FamilyView";
 
 type View =
   | "dashboard"
@@ -21,7 +22,8 @@ type View =
   | "bills"
   | "insurance"
   | "vehicles"
-  | "pets";
+  | "pets"
+  | "family";
 
 const viewEl = () => document.querySelector<HTMLElement>("#view");
 const linkDashboard = () =>
@@ -45,6 +47,8 @@ const linkInsurance = () =>
 const linkVehicles = () =>
   document.querySelector<HTMLAnchorElement>("#nav-vehicles");
 const linkPets = () => document.querySelector<HTMLAnchorElement>("#nav-pets");
+const linkFamily = () =>
+  document.querySelector<HTMLAnchorElement>("#nav-family");
 
 function setActive(tab: View) {
   const tabs: Record<View, HTMLAnchorElement | null> = {
@@ -59,6 +63,7 @@ function setActive(tab: View) {
     insurance: linkInsurance(),
     vehicles: linkVehicles(),
     pets: linkPets(),
+    family: linkFamily(),
   };
   (Object.keys(tabs) as View[]).forEach((name) => {
     const el = tabs[name];
@@ -106,6 +111,10 @@ function navigate(to: View) {
   }
   if (to === "pets") {
     PetsView(el);
+    return;
+  }
+  if (to === "family") {
+    FamilyView(el);
     return;
   }
   const title = to.charAt(0).toUpperCase() + to.slice(1);
@@ -156,6 +165,10 @@ window.addEventListener("DOMContentLoaded", () => {
   linkPets()?.addEventListener("click", (e) => {
     e.preventDefault();
     navigate("pets");
+  });
+  linkFamily()?.addEventListener("click", (e) => {
+    e.preventDefault();
+    navigate("family");
   });
   navigate("dashboard");
 });
