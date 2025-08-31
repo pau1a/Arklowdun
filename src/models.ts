@@ -14,6 +14,14 @@ export interface Policy {
   reminder?: number; // timestamp ms
 }
 
+export interface PropertyDocument {
+  id: number;
+  description: string;
+  renewalDate: string; // ISO string
+  document: string; // file path
+  reminder?: number; // timestamp ms
+}
+
 export interface MaintenanceEntry {
   date: string; // ISO string
   type: string;
