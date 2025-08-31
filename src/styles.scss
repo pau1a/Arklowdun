@@ -134,9 +134,14 @@ button {
   flex-direction: column;
   gap: 0.5rem;
   margin-top: 1rem;
+  flex: 1;
 }
 .nav a.active {
   color: $color-green;
+}
+
+#nav-settings {
+  margin-top: auto;
 }
 
 .list.empty, .calendar-empty {
