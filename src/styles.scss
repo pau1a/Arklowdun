@@ -151,6 +151,26 @@ button {
   border-radius: 8px;
 }
 
+@media (max-width: 600px) {
+  body {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100%;
+  }
+
+  .nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .container {
+    flex: 1;
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     color: $color-white;
