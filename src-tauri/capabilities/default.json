@@ -17,6 +17,7 @@
     "fs:allow-mkdir",
     "fs:allow-remove",
     "notification:default",
-    "opener:default"
+    "opener:default",
+    "opener:allow-open-path"
   ]
 }
