@@ -13,6 +13,7 @@ import { FamilyView } from "./FamilyView";
 import { PropertyView } from "./PropertyView";
 import { SettingsView } from "./SettingsView";
 import { InventoryView } from "./InventoryView";
+import { BudgetView } from "./BudgetView";
 
 type View =
   | "dashboard"
@@ -29,6 +30,7 @@ type View =
   | "pets"
   | "family"
   | "inventory"
+  | "budget"
   | "settings";
 
 const viewEl = () => document.querySelector<HTMLElement>("#view");
@@ -59,6 +61,8 @@ const linkFamily = () =>
   document.querySelector<HTMLAnchorElement>("#nav-family");
 const linkInventory = () =>
   document.querySelector<HTMLAnchorElement>("#nav-inventory");
+const linkBudget = () =>
+  document.querySelector<HTMLAnchorElement>("#nav-budget");
 const linkSettings = () =>
   document.querySelector<HTMLAnchorElement>("#nav-settings");
 
@@ -78,6 +82,7 @@ function setActive(tab: View) {
     pets: linkPets(),
     family: linkFamily(),
     inventory: linkInventory(),
+    budget: linkBudget(),
     settings: linkSettings(),
   };
   (Object.keys(tabs) as View[]).forEach((name) => {
@@ -138,6 +143,10 @@ function navigate(to: View) {
   }
   if (to === "inventory") {
     InventoryView(el);
+    return;
+  }
+  if (to === "budget") {
+    BudgetView(el);
     return;
   }
   if (to === "settings") {
@@ -204,6 +213,10 @@ window.addEventListener("DOMContentLoaded", () => {
   linkInventory()?.addEventListener("click", (e) => {
     e.preventDefault();
     navigate("inventory");
+  });
+  linkBudget()?.addEventListener("click", (e) => {
+    e.preventDefault();
+    navigate("budget");
   });
   linkSettings()?.addEventListener("click", (e) => {
     e.preventDefault();

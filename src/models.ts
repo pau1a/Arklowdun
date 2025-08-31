@@ -70,3 +70,17 @@ export interface InventoryItem {
   reminder?: number; // timestamp ms
 }
 
+export interface BudgetCategory {
+  id: number;
+  name: string;
+  monthlyBudget: number;
+}
+
+export interface Expense {
+  id: number;
+  categoryId: number;
+  amount: number;
+  date: string; // ISO string
+  description: string;
+}
+
