@@ -1,7 +1,7 @@
 $color-burgundy: #f05411;
 $color-green: #34783d;
-$color-burgundy_pastel: #f69870;
-$color-green_pastel: #71c17c;
+$color-burgundy_pastel: lighten($color-burgundy, 50%);
+$color-green_pastel: lighten($color-green, 50%);
 $color-green_shade_hi: #5ab867; // 20% lighter than $color-green
 $color-green_shade_lo: #153119; // 20% darker than $color-green
 $color-white: #ffffff;
@@ -42,6 +42,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  background-color: $color-green_pastel;
 }
 
 .logo {
