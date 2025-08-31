@@ -11,10 +11,6 @@
   },
   "app": {
     "withGlobalTauri": true,
-    "capabilities": [
-      "default",
-      "window-management"
-    ],
     "windows": [
       {
         "label": "main",
@@ -25,7 +21,11 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "capabilities": [
+        "default",
+        "window-management"
+      ]
     }
   },
   "bundle": {
