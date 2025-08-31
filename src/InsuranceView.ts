@@ -1,4 +1,4 @@
-import { openPath } from "@tauri-apps/plugin-opener";
+import * as opener from "@tauri-apps/plugin-opener";
 import {
   readTextFile,
   writeTextFile,
@@ -53,7 +53,7 @@ function renderPolicies(listEl: HTMLUListElement, policies: Policy[]) {
     li.textContent = `${money.format(p.amount)} renews ${new Date(p.dueDate).toLocaleDateString()} `;
     const btn = document.createElement("button");
     btn.textContent = "Open document";
-    btn.addEventListener("click", () => openPath(p.document));
+    btn.addEventListener("click", () => opener.open(p.document));
     li.appendChild(btn);
     listEl.appendChild(li);
   });
