@@ -11,6 +11,8 @@
     "core:webview:default",
     "dialog:default",
     "fs:default",
+    "fs:allow-mkdir",
+    "fs:allow-remove",
     "notification:default",
     "opener:default"
   ]

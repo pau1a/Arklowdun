@@ -3,7 +3,7 @@ import {
   readDir,
   writeTextFile,
   remove,
-  createDir,
+  mkdir,
 } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
@@ -137,7 +137,7 @@ export async function FilesView(container: HTMLElement) {
     e.preventDefault();
     if (!currentDir || !folderNameInput) return;
     const path = await join(currentDir, folderNameInput.value);
-    await createDir(path, { recursive: true });
+    await mkdir(path, { recursive: true });
     folderNameInput.value = "";
     if (listEl && previewEl && pathEl)
       await listDirectory(currentDir, listEl, previewEl, pathEl, setDir);
