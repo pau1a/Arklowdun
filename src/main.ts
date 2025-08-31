@@ -16,6 +16,9 @@ import { InventoryView } from "./InventoryView";
 import { BudgetView } from "./BudgetView";
 import { NotesView } from "./NotesView";
 import { DashboardView } from "./DashboardView";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+
+const appWindow = getCurrentWindow();
 
 type View =
   | "dashboard"
@@ -70,6 +73,50 @@ const linkNotes = () =>
   document.querySelector<HTMLAnchorElement>("#nav-notes");
 const linkSettings = () =>
   document.querySelector<HTMLAnchorElement>("#nav-settings");
+
+function requiredLogicalSize(): { w: number; h: number } {
+  const appEl = document.body;
+  const sidebarEl = document.querySelector<HTMLElement>(".sidebar");
+  const minContentWidth = 720;
+  const minContentHeight = 480;
+  if (!sidebarEl) return { w: minContentWidth, h: minContentHeight };
+  const appRect = appEl.getBoundingClientRect();
+  const sidebarRect = sidebarEl.getBoundingClientRect();
+  const w = Math.ceil(sidebarRect.width + minContentWidth);
+  const h = Math.ceil(Math.max(appRect.height, minContentHeight));
+  return { w, h };
+}
+
+let raf: number | null = null;
+
+async function enforceMinNow() {
+  const { w, h } = requiredLogicalSize();
+  await appWindow.setMinSize(new LogicalSize(w, h));
+
+  const current = await appWindow.innerSize();
+  const sf = await appWindow.scaleFactor();
+  const curW = current.width / sf;
+  const curH = current.height / sf;
+  if (curW < w || curH < h) {
+    await appWindow.setSize(
+      new LogicalSize(Math.max(curW, w), Math.max(curH, h))
+    );
+  }
+}
+
+function setupDynamicMinSize() {
+  const sidebarEl = document.querySelector<HTMLElement>(".sidebar");
+  if (!sidebarEl) return;
+  const ro = new ResizeObserver(() => {
+    if (raf) cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => {
+      enforceMinNow();
+    });
+  });
+  ro.observe(sidebarEl);
+  document.addEventListener("sidebar:toggled", enforceMinNow);
+  enforceMinNow();
+}
 
 function setActive(tab: View) {
   const tabs: Record<View, HTMLAnchorElement | null> = {
@@ -241,4 +288,5 @@ window.addEventListener("DOMContentLoaded", () => {
     navigate("settings");
   });
   navigate("dashboard");
+  setupDynamicMinSize();
 });
