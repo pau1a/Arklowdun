@@ -1,7 +1,7 @@
 export interface Bill {
   id: string;
   amount: number;
-  dueDate: string; // ISO string
+  dueDate: number; // timestamp ms
   document: string; // file path
   reminder?: number; // timestamp ms
 }
@@ -9,7 +9,7 @@ export interface Bill {
 export interface Policy {
   id: string;
   amount: number;
-  dueDate: string; // ISO string
+  dueDate: number; // timestamp ms
   document: string; // file path
   reminder?: number; // timestamp ms
 }
@@ -17,13 +17,13 @@ export interface Policy {
 export interface PropertyDocument {
   id: string;
   description: string;
-  renewalDate: string; // ISO string
+  renewalDate: number; // timestamp ms
   document: string; // file path
   reminder?: number; // timestamp ms
 }
 
 export interface MaintenanceEntry {
-  date: string; // ISO string
+  date: number; // timestamp ms
   type: string;
   cost: number;
   document: string; // file path
@@ -32,15 +32,15 @@ export interface MaintenanceEntry {
 export interface Vehicle {
   id: string;
   name: string;
-  motDate: string; // ISO string
-  serviceDate: string; // ISO string
+  motDate: number; // timestamp ms
+  serviceDate: number; // timestamp ms
   motReminder?: number; // timestamp ms
   serviceReminder?: number; // timestamp ms
   maintenance: MaintenanceEntry[];
 }
 
 export interface PetMedicalRecord {
-  date: string; // ISO string
+  date: number; // timestamp ms
   description: string;
   document: string; // file path
   reminder?: number; // timestamp ms
@@ -56,7 +56,7 @@ export interface Pet {
 export interface FamilyMember {
   id: string;
   name: string;
-  birthday: string; // ISO string
+  birthday: number; // timestamp ms
   notes: string;
   documents: string[]; // file paths
 }
@@ -64,8 +64,8 @@ export interface FamilyMember {
 export interface InventoryItem {
   id: string;
   name: string;
-  purchaseDate: string; // ISO string
-  warrantyExpiry: string; // ISO string
+  purchaseDate: number; // timestamp ms
+  warrantyExpiry: number; // timestamp ms
   document: string; // file path
   reminder?: number; // timestamp ms
 }
@@ -80,7 +80,7 @@ export interface Expense {
   id: string;
   categoryId: string;
   amount: number;
-  date: string; // ISO string
+  date: number; // timestamp ms
   description: string;
 }
 

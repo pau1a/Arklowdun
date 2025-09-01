@@ -13,6 +13,8 @@ import {
 } from "./notification";
 import type { Vehicle, MaintenanceEntry } from "./models";
 import { newUuidV7 } from "./db/id";
+import { nowMs, toDate } from "./db/time";
+import { toMs } from "./db/normalize";
 
 const money = new Intl.NumberFormat(undefined, {
   style: "currency",
@@ -21,7 +23,7 @@ const money = new Intl.NumberFormat(undefined, {
 
 const MAX_TIMEOUT = 2_147_483_647; // ~24.8 days
 function scheduleAt(ts: number, cb: () => void) {
-  const delay = ts - Date.now();
+  const delay = ts - nowMs();
   if (delay <= 0) return void cb();
   const chunk = Math.min(delay, MAX_TIMEOUT);
   setTimeout(() => scheduleAt(ts, cb), chunk);
@@ -34,7 +36,36 @@ async function loadVehicles(): Promise<Vehicle[]> {
   try {
     const p = await join(STORE_DIR, FILE_NAME);
     const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
-    return JSON.parse(json) as Vehicle[];
+    let arr = JSON.parse(json) as any[];
+    let changed = false;
+    arr = arr.map((i: any) => {
+      if (typeof i.id === "number") {
+        i.id = newUuidV7();
+        changed = true;
+      }
+      for (const k of ["motDate", "serviceDate", "motReminder", "serviceReminder"]) {
+        if (k in i) {
+          const ms = toMs(i[k]);
+          if (ms !== undefined) {
+            if (ms !== i[k]) changed = true;
+            i[k] = ms;
+          }
+        }
+      }
+      if (Array.isArray(i.maintenance)) {
+        i.maintenance = i.maintenance.map((m: any) => {
+          const ms = toMs(m.date);
+          if (ms !== undefined) {
+            if (ms !== m.date) changed = true;
+            m.date = ms;
+          }
+          return m;
+        });
+      }
+      return i;
+    });
+    if (changed) await saveVehicles(arr as Vehicle[]);
+    return arr as Vehicle[];
   } catch {
     return [];
   }
@@ -51,7 +82,7 @@ function renderVehicles(listEl: HTMLUListElement, vehicles: Vehicle[]) {
   listEl.innerHTML = "";
   vehicles.forEach((v) => {
     const li = document.createElement("li");
-    li.textContent = `${v.name} (MOT ${new Date(v.motDate).toLocaleDateString()}, Service ${new Date(v.serviceDate).toLocaleDateString()}) `;
+    li.textContent = `${v.name} (MOT ${toDate(v.motDate).toLocaleDateString()}, Service ${toDate(v.serviceDate).toLocaleDateString()}) `;
     const btn = document.createElement("button");
     btn.textContent = "Open";
     btn.dataset.id = v.id;
@@ -64,7 +95,7 @@ function renderMaintenance(listEl: HTMLUListElement, entries: MaintenanceEntry[]
   listEl.innerHTML = "";
   entries.forEach((m) => {
     const li = document.createElement("li");
-    li.textContent = `${new Date(m.date).toLocaleDateString()} ${m.type} ${money.format(m.cost)} `;
+    li.textContent = `${toDate(m.date).toLocaleDateString()} ${m.type} ${money.format(m.cost)} `;
     if (m.document) {
       const btn = document.createElement("button");
       btn.textContent = "Open document";
@@ -81,37 +112,37 @@ async function scheduleVehicleReminders(vehicles: Vehicle[]) {
     granted = (await requestPermission()) === "granted";
   }
   if (!granted) return;
-  const now = Date.now();
+  const now = nowMs();
   vehicles.forEach((v) => {
-    const motTs = Date.parse(v.motDate);
-    if (v.motReminder && !isNaN(motTs)) {
+    const motTs = v.motDate;
+    if (v.motReminder) {
       if (v.motReminder > now) {
         scheduleAt(v.motReminder, () => {
           sendNotification({
             title: "MOT Due",
-            body: `${v.name} MOT on ${new Date(motTs).toLocaleDateString()}`,
+            body: `${v.name} MOT on ${toDate(motTs).toLocaleDateString()}`,
           });
         });
       } else if (now < motTs) {
         sendNotification({
           title: "MOT Due",
-          body: `${v.name} MOT on ${new Date(motTs).toLocaleDateString()}`,
+          body: `${v.name} MOT on ${toDate(motTs).toLocaleDateString()}`,
         });
       }
     }
-    const serviceTs = Date.parse(v.serviceDate);
-    if (v.serviceReminder && !isNaN(serviceTs)) {
+    const serviceTs = v.serviceDate;
+    if (v.serviceReminder) {
       if (v.serviceReminder > now) {
         scheduleAt(v.serviceReminder, () => {
           sendNotification({
             title: "Service Due",
-            body: `${v.name} service on ${new Date(serviceTs).toLocaleDateString()}`,
+            body: `${v.name} service on ${toDate(serviceTs).toLocaleDateString()}`,
           });
         });
       } else if (now < serviceTs) {
         sendNotification({
           title: "Service Due",
-          body: `${v.name} service on ${new Date(serviceTs).toLocaleDateString()}`,
+          body: `${v.name} service on ${toDate(serviceTs).toLocaleDateString()}`,
         });
       }
     }
@@ -124,14 +155,6 @@ export async function VehiclesView(container: HTMLElement) {
   container.appendChild(section);
 
   let vehicles: Vehicle[] = await loadVehicles();
-  let migrated = false;
-  vehicles.forEach((v) => {
-    if (typeof v.id === "number") {
-      v.id = newUuidV7();
-      migrated = true;
-    }
-  });
-  if (migrated) await saveVehicles(vehicles);
   await scheduleVehicleReminders(vehicles);
 
   function showList() {
@@ -165,8 +188,8 @@ export async function VehiclesView(container: HTMLElement) {
       const vehicle: Vehicle = {
         id: newUuidV7(),
         name: nameInput.value,
-        motDate: motDate.toISOString(),
-        serviceDate: serviceDate.toISOString(),
+        motDate: motDate.getTime(),
+        serviceDate: serviceDate.getTime(),
         motReminder,
         serviceReminder,
         maintenance: [],
@@ -193,8 +216,8 @@ export async function VehiclesView(container: HTMLElement) {
       <button id="back">Back</button>
       <h2>${vehicle.name}</h2>
       <form id="dates-form">
-        <label>MOT: <input id="mot-date" type="date" value="${vehicle.motDate.slice(0, 10)}" required /></label>
-        <label>Service: <input id="service-date" type="date" value="${vehicle.serviceDate.slice(0, 10)}" required /></label>
+        <label>MOT: <input id="mot-date" type="date" value="${toDate(vehicle.motDate).toISOString().slice(0, 10)}" required /></label>
+        <label>Service: <input id="service-date" type="date" value="${toDate(vehicle.serviceDate).toISOString().slice(0, 10)}" required /></label>
         <button type="submit">Update Dates</button>
       </form>
       <h3>Maintenance</h3>
@@ -229,11 +252,11 @@ export async function VehiclesView(container: HTMLElement) {
       if (!motDateInput || !serviceDateInput) return;
       const [y1, m1, d1] = motDateInput.value.split("-").map(Number);
       const motDate = new Date(y1, (m1 ?? 1) - 1, d1 ?? 1, 12, 0, 0, 0);
-      vehicle.motDate = motDate.toISOString();
+      vehicle.motDate = motDate.getTime();
       vehicle.motReminder = motDate.getTime() - 7 * 24 * 60 * 60 * 1000;
       const [y2, m2, d2] = serviceDateInput.value.split("-").map(Number);
       const serviceDate = new Date(y2, (m2 ?? 1) - 1, d2 ?? 1, 12, 0, 0, 0);
-      vehicle.serviceDate = serviceDate.toISOString();
+      vehicle.serviceDate = serviceDate.getTime();
       vehicle.serviceReminder = serviceDate.getTime() - 7 * 24 * 60 * 60 * 1000;
       saveVehicles(vehicles).then(() => scheduleVehicleReminders([vehicle]));
     });
@@ -244,7 +267,7 @@ export async function VehiclesView(container: HTMLElement) {
       const [y, m, d] = maintDate.value.split("-").map(Number);
       const entryDate = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0);
       const entry: MaintenanceEntry = {
-        date: entryDate.toISOString(),
+        date: entryDate.getTime(),
         type: maintType.value,
         cost: parseFloat(maintCost.value),
         document: maintDoc?.value ?? "",

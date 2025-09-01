@@ -2,6 +2,8 @@ import { readTextFile, BaseDirectory } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
 import { invoke } from "@tauri-apps/api/core";
 import { newUuidV7 } from "./db/id";
+import { nowMs, toDate } from "./db/time";
+import { toMs } from "./db/normalize";
 import type { Bill, Policy, Vehicle } from "./models";
 
 const STORE_DIR = "Arklowdun";
@@ -11,15 +13,38 @@ const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "G
 interface DashEvent {
   id: string;
   title: string;
-  datetime: string; // ISO string
+  datetime: number; // timestamp ms
 }
 
 async function loadJson<T>(file: string): Promise<T[]> {
   try {
     const p = await join(STORE_DIR, file);
     const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
-    const arr = JSON.parse(json) as any[];
-    return arr.map((i) => (typeof i.id === "number" ? { ...i, id: newUuidV7() } : i)) as T[];
+    let arr = JSON.parse(json) as any[];
+    arr = arr.map((i: any) => {
+      if (typeof i.id === "number") i.id = newUuidV7();
+      for (const k of [
+        "dueDate",
+        "renewalDate",
+        "warrantyExpiry",
+        "purchaseDate",
+        "date",
+        "motDate",
+        "serviceDate",
+        "datetime",
+        "reminder",
+        "motReminder",
+        "serviceReminder",
+        "birthday",
+      ]) {
+        if (k in i) {
+          const ms = toMs(i[k]);
+          if (ms !== undefined) i[k] = ms;
+        }
+      }
+      return i as T;
+    });
+    return arr as T[];
   } catch {
     return [];
   }
@@ -49,52 +74,52 @@ export async function DashboardView(container: HTMLElement) {
 
   const listEl = section.querySelector<HTMLUListElement>("#dash-list");
   const items: { date: number; text: string }[] = [];
-  const now = Date.now();
+  const now = nowMs();
 
   const bills = await loadJson<Bill>("bills.json");
   const nextBill = bills
-    .filter((b) => Date.parse(b.dueDate) >= now)
-    .sort((a, b) => Date.parse(a.dueDate) - Date.parse(b.dueDate))[0];
+    .filter((b) => b.dueDate >= now)
+    .sort((a, b) => a.dueDate - b.dueDate)[0];
   if (nextBill) {
-    const due = Date.parse(nextBill.dueDate);
+    const due = nextBill.dueDate;
     items.push({
       date: due,
-      text: `Bill ${money.format(nextBill.amount)} due ${new Date(due).toLocaleDateString()}`,
+      text: `Bill ${money.format(nextBill.amount)} due ${toDate(due).toLocaleDateString()}`,
     });
   }
 
   const policies = await loadJson<Policy>("policies.json");
   const nextPolicy = policies
-    .filter((p) => Date.parse(p.dueDate) >= now)
-    .sort((a, b) => Date.parse(a.dueDate) - Date.parse(b.dueDate))[0];
+    .filter((p) => p.dueDate >= now)
+    .sort((a, b) => a.dueDate - b.dueDate)[0];
   if (nextPolicy) {
-    const due = Date.parse(nextPolicy.dueDate);
+    const due = nextPolicy.dueDate;
     items.push({
       date: due,
-      text: `Policy ${money.format(nextPolicy.amount)} renews ${new Date(due).toLocaleDateString()}`,
+      text: `Policy ${money.format(nextPolicy.amount)} renews ${toDate(due).toLocaleDateString()}`,
     });
   }
 
   const vehicles = await loadJson<Vehicle>("vehicles.json");
   const vehicleDates: { date: number; text: string }[] = [];
   vehicles.forEach((v) => {
-    const mot = Date.parse(v.motDate);
-    if (!isNaN(mot) && mot >= now)
-      vehicleDates.push({ date: mot, text: `${v.name} MOT ${new Date(mot).toLocaleDateString()}` });
-    const service = Date.parse(v.serviceDate);
-    if (!isNaN(service) && service >= now)
-      vehicleDates.push({ date: service, text: `${v.name} service ${new Date(service).toLocaleDateString()}` });
+    const mot = v.motDate;
+    if (mot >= now)
+      vehicleDates.push({ date: mot, text: `${v.name} MOT ${toDate(mot).toLocaleDateString()}` });
+    const service = v.serviceDate;
+    if (service >= now)
+      vehicleDates.push({ date: service, text: `${v.name} service ${toDate(service).toLocaleDateString()}` });
   });
   vehicleDates.sort((a, b) => a.date - b.date);
   if (vehicleDates[0]) items.push(vehicleDates[0]);
 
   const events = await loadEvents();
   const nextEvent = events
-    .filter((e) => Date.parse(e.datetime) >= now)
-    .sort((a, b) => Date.parse(a.datetime) - Date.parse(b.datetime))[0];
+    .filter((e) => e.datetime >= now)
+    .sort((a, b) => a.datetime - b.datetime)[0];
   if (nextEvent) {
-    const dt = Date.parse(nextEvent.datetime);
-    items.push({ date: dt, text: `${nextEvent.title} ${new Date(dt).toLocaleString()}` });
+    const dt = nextEvent.datetime;
+    items.push({ date: dt, text: `${nextEvent.title} ${toDate(dt).toLocaleString()}` });
   }
 
   items.sort((a, b) => a.date - b.date);

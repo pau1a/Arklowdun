@@ -4,25 +4,28 @@ import {
   requestPermission,
   sendNotification,
 } from "./notification";
+import { nowMs, toDate } from "./db/time";
 
 export interface CalendarEvent {
   id: string;
   title: string;
-  datetime: string; // ISO string
+  datetime: number; // timestamp in ms
   reminder?: number; // timestamp in ms
+  created_at: number;
+  updated_at: number;
 }
 
 async function fetchEvents(): Promise<CalendarEvent[]> {
   return await invoke<CalendarEvent[]>("get_events");
 }
 
-async function saveEvent(event: Omit<CalendarEvent, "id">): Promise<CalendarEvent> {
+async function saveEvent(event: Omit<CalendarEvent, "id" | "created_at" | "updated_at">): Promise<CalendarEvent> {
   return await invoke<CalendarEvent>("add_event", { event });
 }
 
 function renderMonth(root: HTMLElement, events: CalendarEvent[]) {
   root.innerHTML = "";
-  const now = new Date();
+  const now = toDate(nowMs());
   const year = now.getFullYear();
   const month = now.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
@@ -46,8 +49,15 @@ function renderMonth(root: HTMLElement, events: CalendarEvent[]) {
     }
     const cell = document.createElement("td");
     cell.innerHTML = `<div class="date">${day}</div>`;
-    const dateStr = new Date(year, month, day).toISOString().split("T")[0];
-    const dayEvents = events.filter((e) => e.datetime.startsWith(dateStr));
+    const cellDate = new Date(year, month, day);
+    const dayEvents = events.filter((e) => {
+      const a = toDate(e.datetime);
+      return (
+        a.getFullYear() === cellDate.getFullYear() &&
+        a.getMonth() === cellDate.getMonth() &&
+        a.getDate() === cellDate.getDate()
+      );
+    });
     dayEvents.forEach((ev) => {
       const div = document.createElement("div");
       div.className = "event";
@@ -66,13 +76,13 @@ async function scheduleNotifications(events: CalendarEvent[]) {
     granted = (await requestPermission()) === "granted";
   }
   if (!granted) return;
-  const now = Date.now();
+  const now = nowMs();
   events.forEach((ev) => {
     if (ev.reminder && ev.reminder > now) {
       setTimeout(() => {
         sendNotification({
           title: ev.title,
-          body: new Date(ev.datetime).toLocaleString(),
+        body: toDate(ev.datetime).toLocaleString(),
         });
       }, ev.reminder - now);
     }
@@ -108,7 +118,7 @@ export async function CalendarView(container: HTMLElement) {
     const dt = new Date(dateInput.value);
     const ev = await saveEvent({
       title: titleInput.value,
-      datetime: dt.toISOString(),
+      datetime: dt.getTime(),
       reminder: dt.getTime(),
     });
     events.push(ev);

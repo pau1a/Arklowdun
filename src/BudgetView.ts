@@ -2,6 +2,8 @@ import { readTextFile, writeTextFile, mkdir, BaseDirectory } from "@tauri-apps/p
 import { join } from "@tauri-apps/api/path";
 import type { BudgetCategory, Expense } from "./models";
 import { newUuidV7 } from "./db/id";
+import { nowMs, toDate } from "./db/time";
+import { toMs } from "./db/normalize";
 
 interface BudgetData {
   categories: BudgetCategory[];
@@ -44,7 +46,13 @@ async function loadData(): Promise<BudgetData> {
         catId = idMap.get(catId) ?? String(catId);
         changed = true;
       }
-      return { ...e, id, categoryId: catId };
+      let date = e.date;
+      const ms = toMs(date);
+      if (ms !== undefined) {
+        if (ms !== date) changed = true;
+        date = ms;
+      }
+      return { ...e, id, categoryId: catId, date };
     });
     if (changed) await saveData(data);
     return data as BudgetData;
@@ -72,14 +80,14 @@ function updateCategoryOptions(sel: HTMLSelectElement, cats: BudgetCategory[]) {
 }
 
 function renderSummary(tbody: HTMLTableSectionElement, data: BudgetData) {
-  const now = new Date();
+  const now = toDate(nowMs());
   const m = now.getMonth();
   const y = now.getFullYear();
   tbody.innerHTML = "";
   data.categories.forEach((c) => {
     const spent = data.expenses
       .filter((e) => {
-        const d = new Date(e.date);
+        const d = toDate(e.date);
         return e.categoryId === c.id && d.getMonth() === m && d.getFullYear() === y;
       })
       .reduce((s, e) => s + e.amount, 0);
@@ -107,7 +115,7 @@ async function exportCsv(data: BudgetData) {
     const cat = data.categories.find((c) => c.id === e.categoryId);
     const name = cat ? cat.name : "";
     lines.push(
-      [e.date, name, String(e.amount), e.description ?? ""]
+      [toDate(e.date).toISOString(), name, String(e.amount), e.description ?? ""]
         .map(csvEscape)
         .join(",")
     );
@@ -195,7 +203,7 @@ export async function BudgetView(container: HTMLElement) {
       id: newUuidV7(),
       categoryId: expCategory.value,
       amount: Number(expAmount.value),
-      date: dateLocalNoon.toISOString(),
+      date: dateLocalNoon.getTime(),
       description: expDesc?.value || "",
     };
     data.expenses.push(exp);
