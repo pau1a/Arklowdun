@@ -24,7 +24,8 @@
       "csp": null,
       "capabilities": [
         "default",
-        "window-management"
+        "window-management",
+        "sql"
       ]
     }
   },

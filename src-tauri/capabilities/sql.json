@@ -1,0 +1,8 @@
+{
+  "identifier": "sql",
+  "description": "Allow opening and executing SQL queries.",
+  "permissions": [
+    "sql:default",
+    "sql:allow-execute"
+  ]
+}
