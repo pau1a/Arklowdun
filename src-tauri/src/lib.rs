@@ -20,6 +20,7 @@ struct Event {
 enum RawEvent {
     New(Event),
     Old {
+        #[serde(rename = "id")]
         _id: u32,
         title: String,
         datetime: String,
