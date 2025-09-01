@@ -1,4 +1,4 @@
-import * as opener from "@tauri-apps/plugin-opener";
+import { openPath } from "@tauri-apps/plugin-opener";
 import {
   readTextFile,
   writeTextFile,
@@ -52,7 +52,7 @@ function renderBills(listEl: HTMLUListElement, bills: Bill[]) {
     li.textContent = `${money.format(b.amount)} due ${new Date(b.dueDate).toLocaleDateString()} `;
     const btn = document.createElement("button");
     btn.textContent = "Open document";
-    btn.addEventListener("click", () => opener.open(b.document));
+    btn.addEventListener("click", () => openPath(b.document));
     li.appendChild(btn);
     listEl.appendChild(li);
   });

@@ -1,4 +1,4 @@
-import * as opener from "@tauri-apps/plugin-opener";
+import { openPath } from "@tauri-apps/plugin-opener";
 import type { Pet, PetMedicalRecord } from "./models";
 
 function renderRecords(listEl: HTMLUListElement, records: PetMedicalRecord[]) {
@@ -14,7 +14,7 @@ function renderRecords(listEl: HTMLUListElement, records: PetMedicalRecord[]) {
     if (r.document) {
       const btn = document.createElement("button");
       btn.textContent = "Open document";
-      btn.addEventListener("click", () => opener.open(r.document));
+      btn.addEventListener("click", () => openPath(r.document));
       li.appendChild(btn);
     }
     listEl.appendChild(li);

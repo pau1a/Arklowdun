@@ -1,4 +1,4 @@
-import * as opener from "@tauri-apps/plugin-opener";
+import { openPath } from "@tauri-apps/plugin-opener";
 import {
   readTextFile,
   writeTextFile,
@@ -68,7 +68,7 @@ function renderMaintenance(listEl: HTMLUListElement, entries: MaintenanceEntry[]
     if (m.document) {
       const btn = document.createElement("button");
       btn.textContent = "Open document";
-      btn.addEventListener("click", () => opener.open(m.document));
+      btn.addEventListener("click", () => openPath(m.document));
       li.appendChild(btn);
     }
     listEl.appendChild(li);

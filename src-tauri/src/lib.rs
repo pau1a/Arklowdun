@@ -20,7 +20,7 @@ struct Event {
 enum RawEvent {
     New(Event),
     Old {
-        id: u32,
+        _id: u32,
         title: String,
         datetime: String,
         reminder: Option<i64>,

@@ -1,4 +1,4 @@
-import * as opener from "@tauri-apps/plugin-opener";
+import { openPath } from "@tauri-apps/plugin-opener";
 import {
   readTextFile,
   writeTextFile,
@@ -48,7 +48,7 @@ function renderItems(listEl: HTMLUListElement, items: InventoryItem[]) {
     li.textContent = `${i.name} warranty expires ${new Date(i.warrantyExpiry).toLocaleDateString()} `;
     const btn = document.createElement("button");
     btn.textContent = "Open document";
-    btn.addEventListener("click", () => opener.open(i.document));
+    btn.addEventListener("click", () => openPath(i.document));
     li.appendChild(btn);
     listEl.appendChild(li);
   });

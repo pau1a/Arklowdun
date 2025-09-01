@@ -1,5 +1,5 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import * as opener from "@tauri-apps/plugin-opener";
+import { openPath } from "@tauri-apps/plugin-opener";
 import {
   readTextFile,
   writeTextFile,
@@ -50,7 +50,7 @@ function renderDocuments(listEl: HTMLUListElement, docs: PropertyDocument[]) {
     li.textContent = `${d.description} renews ${new Date(d.renewalDate).toLocaleDateString()} `;
     const btn = document.createElement("button");
     btn.textContent = "Open document";
-    btn.addEventListener("click", () => opener.open(d.document));
+    btn.addEventListener("click", () => openPath(d.document));
     li.appendChild(btn);
     listEl.appendChild(li);
   });
