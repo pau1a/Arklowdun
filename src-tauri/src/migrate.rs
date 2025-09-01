@@ -3,7 +3,7 @@ use sqlx::{
     Executor, Row, SqlitePool,
 };
 use std::{collections::HashSet, fs};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::time::now_ms;
 
@@ -32,12 +32,15 @@ pub async fn init_db(app: &AppHandle) -> anyhow::Result<SqlitePool> {
         .foreign_keys(true);
     let pool = SqlitePoolOptions::new().connect_with(opts).await?;
 
-    // Reassert pragmas in case the options are ignored.
+    // Reassert pragmas just in case.
     pool.execute("PRAGMA journal_mode=WAL").await?;
     pool.execute("PRAGMA foreign_keys=ON").await?;
     pool
         .execute(
-            "CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS schema_migrations (
+               version TEXT PRIMARY KEY,
+               applied_at INTEGER NOT NULL
+             )",
         )
         .await?;
 
@@ -46,25 +49,47 @@ pub async fn init_db(app: &AppHandle) -> anyhow::Result<SqlitePool> {
         .await?;
     let applied: HashSet<String> = rows
         .into_iter()
-        .filter_map(|r| r.try_get::<String, _>("version").ok())
+        .filter_map(|r| r.try_get("version").ok())
         .collect();
 
-    for (filename, sql) in MIGRATIONS {
+    for (filename, raw_sql) in MIGRATIONS {
         if applied.contains(*filename) {
             continue;
         }
-        for stmt in sql.split(';') {
+
+        // Remove comment lines and blanks before splitting statements.
+        let cleaned = raw_sql
+            .lines()
+            .filter(|line| {
+                let t = line.trim_start();
+                !(t.is_empty() || t.starts_with("--"))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Execute each file within a transaction and ignore file-level BEGIN/COMMIT.
+        let mut tx = pool.begin().await?;
+        for stmt in cleaned.split(';') {
             let s = stmt.trim();
             if s.is_empty() {
                 continue;
             }
-            pool.execute(s).await?;
+            let upper = s.to_ascii_uppercase();
+            if upper == "BEGIN" || upper == "COMMIT" {
+                continue;
+            }
+            sqlx::query(s).execute(&mut *tx).await?;
         }
-        sqlx::query("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)")
-            .bind(*filename)
-            .bind(now_ms())
-            .execute(&pool)
-            .await?;
+
+        sqlx::query(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        )
+        .bind(*filename)
+        .bind(now_ms())
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
     }
 
     Ok(pool)
