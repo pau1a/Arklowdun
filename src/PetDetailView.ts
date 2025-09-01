@@ -1,13 +1,14 @@
 import { openPath } from "@tauri-apps/plugin-opener";
 import type { Pet, PetMedicalRecord } from "./models";
+import { toDate } from "./db/time";
 
 function renderRecords(listEl: HTMLUListElement, records: PetMedicalRecord[]) {
   listEl.innerHTML = "";
   records.forEach((r) => {
     const li = document.createElement("li");
-    let text = `${new Date(r.date).toLocaleDateString()} ${r.description}`;
+    let text = `${toDate(r.date).toLocaleDateString()} ${r.description}`;
     if (r.reminder) {
-      text += ` (reminder ${new Date(r.reminder).toLocaleDateString()})`;
+      text += ` (reminder ${toDate(r.reminder).toLocaleDateString()})`;
     }
     text += " ";
     li.textContent = text;
@@ -65,7 +66,7 @@ export function PetDetailView(
       reminder = remDate.getTime();
     }
     const record: PetMedicalRecord = {
-      date: recordDate.toISOString(),
+      date: recordDate.getTime(),
       description: descInput.value,
       document: docInput?.value ?? "",
       reminder,

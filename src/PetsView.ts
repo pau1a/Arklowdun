@@ -9,10 +9,12 @@ import { isPermissionGranted, requestPermission, sendNotification } from "./noti
 import type { Pet } from "./models";
 import { PetDetailView } from "./PetDetailView";
 import { newUuidV7 } from "./db/id";
+import { nowMs } from "./db/time";
+import { toMs } from "./db/normalize";
 
 const MAX_TIMEOUT = 2_147_483_647; // ~24.8 days
 function scheduleAt(ts: number, cb: () => void) {
-  const delay = ts - Date.now();
+  const delay = ts - nowMs();
   if (delay <= 0) return void cb();
   const chunk = Math.min(delay, MAX_TIMEOUT);
   setTimeout(() => scheduleAt(ts, cb), chunk);
@@ -25,7 +27,31 @@ async function loadPets(): Promise<Pet[]> {
   try {
     const p = await join(STORE_DIR, FILE_NAME);
     const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
-    return JSON.parse(json) as Pet[];
+    let arr = JSON.parse(json) as any[];
+    let changed = false;
+    arr = arr.map((i: any) => {
+      if (typeof i.id === "number") {
+        i.id = newUuidV7();
+        changed = true;
+      }
+      if (Array.isArray(i.medical)) {
+        i.medical = i.medical.map((m: any) => {
+          for (const k of ["date", "reminder"]) {
+            if (k in m) {
+              const ms = toMs(m[k]);
+              if (ms !== undefined) {
+                if (ms !== m[k]) changed = true;
+                m[k] = ms;
+              }
+            }
+          }
+          return m;
+        });
+      }
+      return i;
+    });
+    if (changed) await savePets(arr as Pet[]);
+    return arr as Pet[];
   } catch {
     return [];
   }
@@ -57,7 +83,7 @@ async function schedulePetReminders(pets: Pet[]) {
     granted = (await requestPermission()) === "granted";
   }
   if (!granted) return;
-  const now = Date.now();
+  const now = nowMs();
   pets.forEach((p) => {
     p.medical.forEach((r) => {
       if (!r.reminder) return;
@@ -66,7 +92,7 @@ async function schedulePetReminders(pets: Pet[]) {
           sendNotification({ title: "Pet Reminder", body: `${p.name}: ${r.description}` });
         });
       } else {
-        const due = Date.parse(r.date);
+        const due = r.date;
         if (now < due) {
           sendNotification({ title: "Pet Reminder", body: `${p.name}: ${r.description}` });
         }
@@ -81,14 +107,6 @@ export async function PetsView(container: HTMLElement) {
   container.appendChild(section);
 
   let pets: Pet[] = await loadPets();
-  let migrated = false;
-  pets.forEach((p) => {
-    if (typeof p.id === "number") {
-      p.id = newUuidV7();
-      migrated = true;
-    }
-  });
-  if (migrated) await savePets(pets);
   await schedulePetReminders(pets);
 
   function showList() {

@@ -13,6 +13,8 @@ import {
 } from "./notification";
 import type { Bill } from "./models";
 import { newUuidV7 } from "./db/id";
+import { nowMs, toDate } from "./db/time";
+import { toMs } from "./db/normalize";
 
 const money = new Intl.NumberFormat(undefined, {
   style: "currency",
@@ -21,7 +23,7 @@ const money = new Intl.NumberFormat(undefined, {
 
 const MAX_TIMEOUT = 2_147_483_647; // ~24.8 days
 function scheduleAt(ts: number, cb: () => void) {
-  const delay = ts - Date.now();
+  const delay = ts - nowMs();
   if (delay <= 0) return void cb();
   const chunk = Math.min(delay, MAX_TIMEOUT);
   setTimeout(() => scheduleAt(ts, cb), chunk);
@@ -34,7 +36,26 @@ async function loadBills(): Promise<Bill[]> {
   try {
     const p = await join(STORE_DIR, FILE_NAME);
     const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
-    return JSON.parse(json) as Bill[];
+    let arr = JSON.parse(json) as any[];
+    let changed = false;
+    arr = arr.map((i: any) => {
+      if (typeof i.id === "number") {
+        i.id = newUuidV7();
+        changed = true;
+      }
+      for (const k of ["dueDate", "reminder"]) {
+        if (k in i) {
+          const ms = toMs(i[k]);
+          if (ms !== undefined) {
+            if (ms !== i[k]) changed = true;
+            i[k] = ms;
+          }
+        }
+      }
+      return i;
+    });
+    if (changed) await saveBills(arr as Bill[]);
+    return arr as Bill[];
   } catch {
     return [];
   }
@@ -49,7 +70,7 @@ function renderBills(listEl: HTMLUListElement, bills: Bill[]) {
   listEl.innerHTML = "";
   bills.forEach((b) => {
     const li = document.createElement("li");
-    li.textContent = `${money.format(b.amount)} due ${new Date(b.dueDate).toLocaleDateString()} `;
+    li.textContent = `${money.format(b.amount)} due ${toDate(b.dueDate).toLocaleDateString()} `;
     const btn = document.createElement("button");
     btn.textContent = "Open document";
     btn.addEventListener("click", () => openPath(b.document));
@@ -64,22 +85,22 @@ async function scheduleBillReminders(bills: Bill[]) {
     granted = (await requestPermission()) === "granted";
   }
   if (!granted) return;
-  const now = Date.now();
+  const now = nowMs();
   bills.forEach((b) => {
-    const dueTs = Date.parse(b.dueDate);
-    if (!b.reminder || isNaN(dueTs)) return;
+    const dueTs = b.dueDate;
+    if (!b.reminder) return;
     if (b.reminder > now) {
       scheduleAt(b.reminder, () => {
         sendNotification({
           title: "Bill Due",
-          body: `${money.format(b.amount)} due on ${new Date(dueTs).toLocaleDateString()}`,
+          body: `${money.format(b.amount)} due on ${toDate(dueTs).toLocaleDateString()}`,
         });
       });
     } else if (now < dueTs) {
       // catch-up if the app was closed at reminder time
       sendNotification({
         title: "Bill Due",
-        body: `${money.format(b.amount)} due on ${new Date(dueTs).toLocaleDateString()}`,
+        body: `${money.format(b.amount)} due on ${toDate(dueTs).toLocaleDateString()}`,
       });
     }
   });
@@ -107,14 +128,6 @@ export async function BillsView(container: HTMLElement) {
   const docInput = section.querySelector<HTMLInputElement>("#bill-doc");
 
   let bills: Bill[] = await loadBills();
-  let migrated = false;
-  bills.forEach((b) => {
-    if (typeof b.id === "number") {
-      b.id = newUuidV7();
-      migrated = true;
-    }
-  });
-  if (migrated) await saveBills(bills);
   if (listEl) renderBills(listEl, bills);
   await scheduleBillReminders(bills);
 
@@ -129,7 +142,7 @@ export async function BillsView(container: HTMLElement) {
     const bill: Bill = {
       id: newUuidV7(),
       amount: parseFloat(amountInput.value),
-      dueDate: dueLocalNoon.toISOString(),
+      dueDate: dueTs,
       document: docInput.value,
       reminder,
     };

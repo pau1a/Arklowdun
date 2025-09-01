@@ -13,10 +13,12 @@ import {
 } from "./notification";
 import type { InventoryItem } from "./models";
 import { newUuidV7 } from "./db/id";
+import { nowMs, toDate } from "./db/time";
+import { toMs } from "./db/normalize";
 
 const MAX_TIMEOUT = 2_147_483_647;
 function scheduleAt(ts: number, cb: () => void) {
-  const delay = ts - Date.now();
+  const delay = ts - nowMs();
   if (delay <= 0) return void cb();
   const chunk = Math.min(delay, MAX_TIMEOUT);
   setTimeout(() => scheduleAt(ts, cb), chunk);
@@ -28,7 +30,26 @@ async function loadItems(): Promise<InventoryItem[]> {
   try {
     const p = await join(STORE_DIR, FILE_NAME);
     const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
-    return JSON.parse(json) as InventoryItem[];
+    let arr = JSON.parse(json) as any[];
+    let changed = false;
+    arr = arr.map((i: any) => {
+      if (typeof i.id === "number") {
+        i.id = newUuidV7();
+        changed = true;
+      }
+      for (const k of ["purchaseDate", "warrantyExpiry", "reminder"]) {
+        if (k in i) {
+          const ms = toMs(i[k]);
+          if (ms !== undefined) {
+            if (ms !== i[k]) changed = true;
+            i[k] = ms;
+          }
+        }
+      }
+      return i;
+    });
+    if (changed) await saveItems(arr as InventoryItem[]);
+    return arr as InventoryItem[];
   } catch {
     return [];
   }
@@ -45,7 +66,7 @@ function renderItems(listEl: HTMLUListElement, items: InventoryItem[]) {
   listEl.innerHTML = "";
   items.forEach((i) => {
     const li = document.createElement("li");
-    li.textContent = `${i.name} warranty expires ${new Date(i.warrantyExpiry).toLocaleDateString()} `;
+    li.textContent = `${i.name} warranty expires ${toDate(i.warrantyExpiry).toLocaleDateString()} `;
     const btn = document.createElement("button");
     btn.textContent = "Open document";
     btn.addEventListener("click", () => openPath(i.document));
@@ -60,21 +81,21 @@ async function scheduleWarrantyReminders(items: InventoryItem[]) {
     granted = (await requestPermission()) === "granted";
   }
   if (!granted) return;
-  const now = Date.now();
+  const now = nowMs();
   items.forEach((i) => {
-    const expTs = Date.parse(i.warrantyExpiry);
-    if (!i.reminder || isNaN(expTs)) return;
+    const expTs = i.warrantyExpiry;
+    if (!i.reminder) return;
     if (i.reminder > now) {
       scheduleAt(i.reminder, () => {
         sendNotification({
           title: "Warranty Expiry",
-          body: `${i.name} warranty expires on ${new Date(expTs).toLocaleDateString()}`,
+          body: `${i.name} warranty expires on ${toDate(expTs).toLocaleDateString()}`,
         });
       });
     } else if (now < expTs) {
       sendNotification({
         title: "Warranty Expiry",
-        body: `${i.name} warranty expires on ${new Date(expTs).toLocaleDateString()}`,
+        body: `${i.name} warranty expires on ${toDate(expTs).toLocaleDateString()}`,
       });
     }
   });
@@ -104,14 +125,6 @@ export async function InventoryView(container: HTMLElement) {
   const docInput = section.querySelector<HTMLInputElement>("#inv-doc");
 
   let items: InventoryItem[] = await loadItems();
-  let migrated = false;
-  items.forEach((i) => {
-    if (typeof i.id === "number") {
-      i.id = newUuidV7();
-      migrated = true;
-    }
-  });
-  if (migrated) await saveItems(items);
   if (listEl) renderItems(listEl, items);
   await scheduleWarrantyReminders(items);
 
@@ -127,8 +140,8 @@ export async function InventoryView(container: HTMLElement) {
     const item: InventoryItem = {
       id: newUuidV7(),
       name: nameInput.value,
-      purchaseDate: purchaseLocalNoon.toISOString(),
-      warrantyExpiry: warrantyLocalNoon.toISOString(),
+      purchaseDate: purchaseLocalNoon.getTime(),
+      warrantyExpiry: warrantyLocalNoon.getTime(),
       document: docInput.value,
       reminder,
     };

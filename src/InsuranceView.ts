@@ -13,6 +13,8 @@ import {
 } from "./notification";
 import type { Policy } from "./models";
 import { newUuidV7 } from "./db/id";
+import { nowMs, toDate } from "./db/time";
+import { toMs } from "./db/normalize";
 
 const money = new Intl.NumberFormat(undefined, {
   style: "currency",
@@ -21,7 +23,7 @@ const money = new Intl.NumberFormat(undefined, {
 
 const MAX_TIMEOUT = 2_147_483_647;
 function scheduleAt(ts: number, cb: () => void) {
-  const delay = ts - Date.now();
+  const delay = ts - nowMs();
   if (delay <= 0) return void cb();
   const chunk = Math.min(delay, MAX_TIMEOUT);
   setTimeout(() => scheduleAt(ts, cb), chunk);
@@ -34,7 +36,26 @@ async function loadPolicies(): Promise<Policy[]> {
   try {
     const p = await join(STORE_DIR, FILE_NAME);
     const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
-    return JSON.parse(json) as Policy[];
+    let arr = JSON.parse(json) as any[];
+    let changed = false;
+    arr = arr.map((i: any) => {
+      if (typeof i.id === "number") {
+        i.id = newUuidV7();
+        changed = true;
+      }
+      for (const k of ["dueDate", "reminder"]) {
+        if (k in i) {
+          const ms = toMs(i[k]);
+          if (ms !== undefined) {
+            if (ms !== i[k]) changed = true;
+            i[k] = ms;
+          }
+        }
+      }
+      return i;
+    });
+    if (changed) await savePolicies(arr as Policy[]);
+    return arr as Policy[];
   } catch {
     return [];
   }
@@ -49,7 +70,7 @@ function renderPolicies(listEl: HTMLUListElement, policies: Policy[]) {
   listEl.innerHTML = "";
   policies.forEach((p) => {
     const li = document.createElement("li");
-    li.textContent = `${money.format(p.amount)} renews ${new Date(p.dueDate).toLocaleDateString()} `;
+    li.textContent = `${money.format(p.amount)} renews ${toDate(p.dueDate).toLocaleDateString()} `;
     const btn = document.createElement("button");
     btn.textContent = "Open document";
     btn.addEventListener("click", () => openPath(p.document));
@@ -64,21 +85,21 @@ async function schedulePolicyReminders(policies: Policy[]) {
     granted = (await requestPermission()) === "granted";
   }
   if (!granted) return;
-  const now = Date.now();
+  const now = nowMs();
   policies.forEach((p) => {
-    const dueTs = Date.parse(p.dueDate);
-    if (!p.reminder || isNaN(dueTs)) return;
+    const dueTs = p.dueDate;
+    if (!p.reminder) return;
     if (p.reminder > now) {
       scheduleAt(p.reminder, () => {
         sendNotification({
           title: "Policy Renewal",
-          body: `${money.format(p.amount)} policy renews on ${new Date(dueTs).toLocaleDateString()}`,
+          body: `${money.format(p.amount)} policy renews on ${toDate(dueTs).toLocaleDateString()}`,
         });
       });
     } else if (now < dueTs) {
       sendNotification({
         title: "Policy Renewal",
-        body: `${money.format(p.amount)} policy renews on ${new Date(dueTs).toLocaleDateString()}`,
+        body: `${money.format(p.amount)} policy renews on ${toDate(dueTs).toLocaleDateString()}`,
       });
     }
   });
@@ -106,14 +127,6 @@ export async function InsuranceView(container: HTMLElement) {
   const docInput = section.querySelector<HTMLInputElement>("#policy-doc");
 
   let policies: Policy[] = await loadPolicies();
-  let migrated = false;
-  policies.forEach((p) => {
-    if (typeof p.id === "number") {
-      p.id = newUuidV7();
-      migrated = true;
-    }
-  });
-  if (migrated) await savePolicies(policies);
   if (listEl) renderPolicies(listEl, policies);
   await schedulePolicyReminders(policies);
 
@@ -127,7 +140,7 @@ export async function InsuranceView(container: HTMLElement) {
     const policy: Policy = {
       id: newUuidV7(),
       amount: parseFloat(amountInput.value),
-      dueDate: dueLocalNoon.toISOString(),
+      dueDate: dueTs,
       document: docInput.value,
       reminder,
     };

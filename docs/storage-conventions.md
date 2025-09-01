@@ -4,18 +4,37 @@ All persistent records use [UUIDv7](https://uuid6.github.io/uuid7/) identifiers.
 Primary and foreign key columns in SQLite migrations are declared as `TEXT` and
 contain canonical UUID strings.
 
+Timestamps are stored as milliseconds since the Unix epoch in `INTEGER` fields.
+When generating times, use helper functions to ensure consistency.
+
+On load, legacy ISO 8601 timestamp strings are coerced to milliseconds and
+written back to disk. This keeps existing files working while moving them to
+the integer format.
+
+```ts
+import { toMs } from "../src/db/normalize";
+
+const ms = toMs("2023-07-16T12:34:56Z"); // => 1689510896000
+```
+
 ## Generating IDs
 
 ```ts
 import { newUuidV7 } from "../src/db/id";
+import { nowMs, toDate } from "../src/db/time";
 
 const id = newUuidV7();
+const created = nowMs();
+const when = toDate(created);
 ```
 
 ```rust
 use crate::id::new_uuid_v7;
+use crate::time::{now_ms, to_date};
 
 let id = new_uuid_v7();
+let created = now_ms();
+let when = to_date(created);
 ```
 
 ## Example
@@ -23,7 +42,9 @@ let id = new_uuid_v7();
 ```sql
 CREATE TABLE example (
   id TEXT PRIMARY KEY,
-  parent_id TEXT REFERENCES example(id)
+  parent_id TEXT REFERENCES example(id),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
 );
 ```
 

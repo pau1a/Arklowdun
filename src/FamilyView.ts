@@ -2,6 +2,8 @@ import { readTextFile, writeTextFile, mkdir, BaseDirectory } from "@tauri-apps/p
 import { join } from "@tauri-apps/api/path";
 import type { FamilyMember } from "./models";
 import { newUuidV7 } from "./db/id";
+import { toDate } from "./db/time";
+import { toMs } from "./db/normalize";
 
 // ----- storage -----
 const STORE_DIR = "Arklowdun";
@@ -10,7 +12,24 @@ async function loadMembers(): Promise<FamilyMember[]> {
   try {
     const p = await join(STORE_DIR, FILE_NAME);
     const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
-    return JSON.parse(json) as FamilyMember[];
+    let arr = JSON.parse(json) as any[];
+    let changed = false;
+    arr = arr.map((i: any) => {
+      if (typeof i.id === "number") {
+        i.id = newUuidV7();
+        changed = true;
+      }
+      if ("birthday" in i) {
+        const ms = toMs(i.birthday);
+        if (ms !== undefined) {
+          if (ms !== i.birthday) changed = true;
+          i.birthday = ms;
+        }
+      }
+      return i;
+    });
+    if (changed) await saveMembers(arr as FamilyMember[]);
+    return arr as FamilyMember[];
   } catch {
     return [];
   }
@@ -76,7 +95,7 @@ export async function FamilyView(container: HTMLElement) {
       const member: FamilyMember = {
         id: newUuidV7(),
         name: nameInput.value,
-        birthday: bday.toISOString(),
+        birthday: bday.getTime(),
         notes: "",
         documents: [],
       };
@@ -101,7 +120,7 @@ export async function FamilyView(container: HTMLElement) {
       <h2>${member.name}</h2>
       <button id="family-back">Back</button>
       <div>
-        <label>Birthday: <input id="profile-bday" type="date" value="${member.birthday ? new Date(member.birthday).toISOString().slice(0,10) : ""}" /></label>
+        <label>Birthday: <input id="profile-bday" type="date" value="${member.birthday ? toDate(member.birthday).toISOString().slice(0,10) : ""}" /></label>
       </div>
       <div>
         <textarea id="profile-notes" placeholder="Notes">${member.notes ?? ""}</textarea>
@@ -140,7 +159,7 @@ export async function FamilyView(container: HTMLElement) {
       if (bdayInput && bdayInput.value) {
         const [y, m, d] = bdayInput.value.split("-").map(Number);
         const dt = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0);
-        member.birthday = dt.toISOString();
+        member.birthday = dt.getTime();
       }
       saveMembers(members).then(() => showList());
     });
@@ -153,7 +172,7 @@ export async function FamilyView(container: HTMLElement) {
     bdayInput?.addEventListener("change", () => {
       const [y, m, d] = bdayInput.value.split("-").map(Number);
       const dt = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0);
-      member.birthday = dt.toISOString();
+      member.birthday = dt.getTime();
       saveMembers(members);
     });
 

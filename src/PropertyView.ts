@@ -14,10 +14,12 @@ import {
 } from "./notification";
 import type { PropertyDocument } from "./models";
 import { newUuidV7 } from "./db/id";
+import { nowMs, toDate } from "./db/time";
+import { toMs } from "./db/normalize";
 
 const MAX_TIMEOUT = 2_147_483_647;
 function scheduleAt(ts: number, cb: () => void) {
-  const delay = ts - Date.now();
+  const delay = ts - nowMs();
   if (delay <= 0) return void cb();
   const chunk = Math.min(delay, MAX_TIMEOUT);
   setTimeout(() => scheduleAt(ts, cb), chunk);
@@ -30,7 +32,26 @@ async function loadDocuments(): Promise<PropertyDocument[]> {
   try {
     const p = await join(STORE_DIR, FILE_NAME);
     const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
-    return JSON.parse(json) as PropertyDocument[];
+    let arr = JSON.parse(json) as any[];
+    let changed = false;
+    arr = arr.map((i: any) => {
+      if (typeof i.id === "number") {
+        i.id = newUuidV7();
+        changed = true;
+      }
+      for (const k of ["renewalDate", "reminder"]) {
+        if (k in i) {
+          const ms = toMs(i[k]);
+          if (ms !== undefined) {
+            if (ms !== i[k]) changed = true;
+            i[k] = ms;
+          }
+        }
+      }
+      return i;
+    });
+    if (changed) await saveDocuments(arr as PropertyDocument[]);
+    return arr as PropertyDocument[];
   } catch {
     return [];
   }
@@ -47,7 +68,7 @@ function renderDocuments(listEl: HTMLUListElement, docs: PropertyDocument[]) {
   listEl.innerHTML = "";
   docs.forEach((d) => {
     const li = document.createElement("li");
-    li.textContent = `${d.description} renews ${new Date(d.renewalDate).toLocaleDateString()} `;
+    li.textContent = `${d.description} renews ${toDate(d.renewalDate).toLocaleDateString()} `;
     const btn = document.createElement("button");
     btn.textContent = "Open document";
     btn.addEventListener("click", () => openPath(d.document));
@@ -62,21 +83,21 @@ async function scheduleDocReminders(docs: PropertyDocument[]) {
     granted = (await requestPermission()) === "granted";
   }
   if (!granted) return;
-  const now = Date.now();
+  const now = nowMs();
   docs.forEach((d) => {
-    const dueTs = Date.parse(d.renewalDate);
-    if (!d.reminder || isNaN(dueTs)) return;
+    const dueTs = d.renewalDate;
+    if (!d.reminder) return;
     if (d.reminder > now) {
       scheduleAt(d.reminder, () => {
         sendNotification({
           title: "Property Renewal",
-          body: `${d.description} renews on ${new Date(dueTs).toLocaleDateString()}`,
+          body: `${d.description} renews on ${toDate(dueTs).toLocaleDateString()}`,
         });
       });
     } else if (now < dueTs) {
       sendNotification({
         title: "Property Renewal",
-        body: `${d.description} renews on ${new Date(dueTs).toLocaleDateString()}`,
+        body: `${d.description} renews on ${toDate(dueTs).toLocaleDateString()}`,
       });
     }
   });
@@ -106,14 +127,6 @@ export async function PropertyView(container: HTMLElement) {
   const chooseBtn = section.querySelector<HTMLButtonElement>("#prop-choose");
 
   let docs: PropertyDocument[] = await loadDocuments();
-  let migrated = false;
-  docs.forEach((d) => {
-    if (typeof d.id === "number") {
-      d.id = newUuidV7();
-      migrated = true;
-    }
-  });
-  if (migrated) await saveDocuments(docs);
   if (listEl) renderDocuments(listEl, docs);
   await scheduleDocReminders(docs);
 
@@ -146,7 +159,7 @@ export async function PropertyView(container: HTMLElement) {
     const doc: PropertyDocument = {
       id: newUuidV7(),
       description: descInput.value,
-      renewalDate: dueLocalNoon.toISOString(),
+      renewalDate: dueTs,
       document: docInput.value,
       reminder,
     };
