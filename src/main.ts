@@ -73,33 +73,48 @@ const linkNotes = () =>
 const linkSettings = () =>
   document.querySelector<HTMLAnchorElement>("#nav-settings");
 
-function requiredLogicalSize(): { w: number; h: number } {
-  const appEl = document.body;
+// Compute the minimum *height* so the entire sidebar is visible.
+// Width is not constrained here; we keep whatever min width we already have.
+function requiredLogicalFloor(): { w: number; h: number } {
+  const MIN_WIDTH = 800;          // baseline; match tauri.conf.json
+  const MIN_CONTENT_HEIGHT = 480; // your main-panel minimum
+  const MIN_APP_HEIGHT = 600;     // overall baseline
+
   const sidebarEl = document.querySelector<HTMLElement>(".sidebar");
-  const minContentWidth = 720;
-  const minContentHeight = 480;
-  if (!sidebarEl) return { w: minContentWidth, h: minContentHeight };
-  const appRect = appEl.getBoundingClientRect();
-  const sidebarRect = sidebarEl.getBoundingClientRect();
-  const w = Math.ceil(sidebarRect.width + minContentWidth);
-  const h = Math.ceil(Math.max(appRect.height, minContentHeight));
-  return { w, h };
+  const headerEl = document.querySelector<HTMLElement>("#titlebar");
+  const footerEl = document.querySelector<HTMLElement>("footer");
+
+  const headerH = headerEl?.getBoundingClientRect().height ?? 0;
+  const footerH = footerEl?.getBoundingClientRect().height ?? 0;
+  // scrollHeight = how tall the sidebar *wants* to be (even if currently scrolling)
+  const sidebarH = sidebarEl ? Math.ceil(sidebarEl.scrollHeight) : 0;
+
+  const neededH = Math.max(
+    MIN_APP_HEIGHT,
+    headerH + footerH + Math.max(MIN_CONTENT_HEIGHT, sidebarH)
+  );
+
+  return { w: MIN_WIDTH, h: neededH };
 }
 
 let raf: number | null = null;
-
-async function enforceMinNow() {
-  const { w, h } = requiredLogicalSize();
+let lastMin = { w: 0, h: 0 };
+async function enforceMinNow(growOnly = true) {
+  const { w, h } = requiredLogicalFloor();
+  // Never shrink width; grow height only (by default).
+  const nextW = lastMin.w ? Math.max(w, lastMin.w) : w;
+  const nextH = lastMin.h && growOnly ? Math.max(h, lastMin.h) : h;
   try {
-    await appWindow.setMinSize(new LogicalSize(w, h));
+    await appWindow.setMinSize(new LogicalSize(nextW, nextH));
+    lastMin = { w: nextW, h: nextH };
 
     const current = await appWindow.innerSize();
     const sf = await appWindow.scaleFactor();
     const curW = current.width / sf;
     const curH = current.height / sf;
-    if (curW < w || curH < h) {
+    if (curW < nextW || curH < nextH) {
       await appWindow.setSize(
-        new LogicalSize(Math.max(curW, w), Math.max(curH, h))
+        new LogicalSize(Math.max(curW, nextW), Math.max(curH, nextH))
       );
     }
   } catch (e) {
@@ -110,15 +125,20 @@ async function enforceMinNow() {
 function setupDynamicMinSize() {
   const sidebarEl = document.querySelector<HTMLElement>(".sidebar");
   if (!sidebarEl) return;
+  // Re-enforce on real box-size changes
   const ro = new ResizeObserver(() => {
     if (raf) cancelAnimationFrame(raf);
-    raf = requestAnimationFrame(() => {
-      enforceMinNow();
-    });
+    raf = requestAnimationFrame(() => enforceMinNow(true));
   });
   ro.observe(sidebarEl);
-  document.addEventListener("sidebar:toggled", enforceMinNow);
-  enforceMinNow();
+  // Re-enforce when sidebar content changes (more items, different labels, etc.)
+  const mo = new MutationObserver(() => {
+    if (raf) cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => enforceMinNow(true));
+  });
+  mo.observe(sidebarEl, { childList: true, subtree: true, characterData: true });
+  // Initial pass on first paint
+  requestAnimationFrame(() => enforceMinNow(true));
 }
 
 function setActive(tab: View) {
