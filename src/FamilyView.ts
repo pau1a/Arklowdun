@@ -1,8 +1,7 @@
 import { readTextFile, writeTextFile, mkdir, BaseDirectory } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
 import type { FamilyMember } from "./models";
-
-let nextId = 1;
+import { newUuidV7 } from "./db/id";
 
 // ----- storage -----
 const STORE_DIR = "Arklowdun";
@@ -31,7 +30,7 @@ function renderMembers(listEl: HTMLUListElement, members: FamilyMember[]) {
     li.textContent = `${m.name} `;
     const btn = document.createElement("button");
     btn.textContent = "Open";
-    btn.dataset.id = String(m.id);
+    btn.dataset.id = m.id;
     li.appendChild(btn);
     listEl.appendChild(li);
   });
@@ -43,7 +42,14 @@ export async function FamilyView(container: HTMLElement) {
   container.appendChild(section);
 
   let members: FamilyMember[] = await loadMembers();
-  nextId = members.reduce((m, f) => Math.max(m, f.id), 0) + 1;
+  let migrated = false;
+  members.forEach((m) => {
+    if (typeof m.id === "number") {
+      m.id = newUuidV7();
+      migrated = true;
+    }
+  });
+  if (migrated) await saveMembers(members);
 
   function showList() {
     section.innerHTML = `
@@ -68,7 +74,7 @@ export async function FamilyView(container: HTMLElement) {
       const [y, m, d] = bdayInput.value.split("-").map(Number);
       const bday = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0);
       const member: FamilyMember = {
-        id: nextId++,
+        id: newUuidV7(),
         name: nameInput.value,
         birthday: bday.toISOString(),
         notes: "",
@@ -84,7 +90,7 @@ export async function FamilyView(container: HTMLElement) {
     listEl?.addEventListener("click", (e) => {
       const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-id]");
       if (!btn) return;
-      const id = Number(btn.dataset.id);
+      const id = btn.dataset.id!;
       const member = members.find((m) => m.id === id);
       if (member) showProfile(member);
     });

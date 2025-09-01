@@ -81,6 +81,7 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-opener",
  "tauri-plugin-sql",
+ "uuid",
 ]
 
 [[package]]

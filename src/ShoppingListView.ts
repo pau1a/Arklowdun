@@ -1,7 +1,8 @@
 import { readTextFile, writeTextFile, BaseDirectory } from "@tauri-apps/plugin-fs";
+import { newUuidV7 } from "./db/id";
 
 interface ShoppingItem {
-  id: number;
+  id: string;
   text: string;
   completed: boolean;
 }
@@ -13,7 +14,17 @@ async function loadItems(): Promise<ShoppingItem[]> {
     const content = await readTextFile(FILE, {
       baseDir: BaseDirectory.AppLocalData,
     });
-    return JSON.parse(content) as ShoppingItem[];
+    const items = JSON.parse(content) as ShoppingItem[] | any[];
+    let changed = false;
+    const fixed = items.map((i) => {
+      if (typeof i.id === "number") {
+        changed = true;
+        return { ...i, id: newUuidV7() };
+      }
+      return i;
+    });
+    if (changed) await saveItems(fixed);
+    return fixed as ShoppingItem[];
   } catch {
     return [];
   }
@@ -88,7 +99,7 @@ export async function ShoppingListView(container: HTMLElement) {
     if (!input) return;
     const text = input.value.trim();
     if (!text) return;
-    const id = items.reduce((m, i) => Math.max(m, i.id), 0) + 1;
+    const id = newUuidV7();
     items.push({ id, text, completed: false });
     await saveItems(items);
     input.value = "";

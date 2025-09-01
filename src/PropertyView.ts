@@ -13,8 +13,7 @@ import {
   sendNotification,
 } from "./notification";
 import type { PropertyDocument } from "./models";
-
-let nextId = 1;
+import { newUuidV7 } from "./db/id";
 
 const MAX_TIMEOUT = 2_147_483_647;
 function scheduleAt(ts: number, cb: () => void) {
@@ -107,9 +106,16 @@ export async function PropertyView(container: HTMLElement) {
   const chooseBtn = section.querySelector<HTMLButtonElement>("#prop-choose");
 
   let docs: PropertyDocument[] = await loadDocuments();
+  let migrated = false;
+  docs.forEach((d) => {
+    if (typeof d.id === "number") {
+      d.id = newUuidV7();
+      migrated = true;
+    }
+  });
+  if (migrated) await saveDocuments(docs);
   if (listEl) renderDocuments(listEl, docs);
   await scheduleDocReminders(docs);
-  nextId = docs.reduce((m, d) => Math.max(m, d.id), 0) + 1;
 
   chooseBtn?.addEventListener("click", async () => {
     const selected = await openDialog({
@@ -138,7 +144,7 @@ export async function PropertyView(container: HTMLElement) {
     const dueTs = dueLocalNoon.getTime();
     const reminder = dueTs - 24 * 60 * 60 * 1000; // 1 day before
     const doc: PropertyDocument = {
-      id: nextId++,
+      id: newUuidV7(),
       description: descInput.value,
       renewalDate: dueLocalNoon.toISOString(),
       document: docInput.value,

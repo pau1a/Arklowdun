@@ -4,12 +4,27 @@ use std::{fs, path::PathBuf};
 use tauri::Manager;
 use tauri_plugin_sql;
 
+mod id;
+
 #[derive(Serialize, Deserialize, Clone)]
 struct Event {
-    id: u32,
+    #[serde(default)]
+    id: String,
     title: String,
     datetime: String,
     reminder: Option<i64>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum RawEvent {
+    New(Event),
+    Old {
+        id: u32,
+        title: String,
+        datetime: String,
+        reminder: Option<i64>,
+    },
 }
 
 fn events_path(app: &tauri::AppHandle) -> PathBuf {
@@ -21,8 +36,28 @@ fn events_path(app: &tauri::AppHandle) -> PathBuf {
 
 fn read_events(app: &tauri::AppHandle) -> Vec<Event> {
     let path = events_path(app);
-    if let Ok(data) = fs::read_to_string(path) {
-        serde_json::from_str(&data).unwrap_or_default()
+    if let Ok(data) = fs::read_to_string(&path) {
+        let raw: Vec<RawEvent> = serde_json::from_str(&data).unwrap_or_default();
+        let mut converted = Vec::new();
+        let mut changed = false;
+        for r in raw {
+            match r {
+                RawEvent::New(ev) => converted.push(ev),
+                RawEvent::Old { title, datetime, reminder, .. } => {
+                    changed = true;
+                    converted.push(Event {
+                        id: crate::id::new_uuid_v7(),
+                        title,
+                        datetime,
+                        reminder,
+                    });
+                }
+            }
+        }
+        if changed {
+            let _ = write_events(app, &converted);
+        }
+        converted
     } else {
         Vec::new()
     }
@@ -45,8 +80,7 @@ fn get_events(app: tauri::AppHandle) -> Result<Vec<Event>, String> {
 #[tauri::command]
 fn add_event(app: tauri::AppHandle, mut event: Event) -> Result<Event, String> {
     let mut events = read_events(&app);
-    let next_id = events.iter().map(|e| e.id).max().unwrap_or(0) + 1;
-    event.id = next_id;
+    event.id = crate::id::new_uuid_v7();
     events.push(event.clone());
     write_events(&app, &events)?;
     Ok(event)
@@ -64,7 +98,7 @@ fn update_event(app: tauri::AppHandle, event: Event) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn delete_event(app: tauri::AppHandle, id: u32) -> Result<(), String> {
+fn delete_event(app: tauri::AppHandle, id: String) -> Result<(), String> {
     let mut events = read_events(&app);
     let len_before = events.len();
     events.retain(|e| e.id != id);

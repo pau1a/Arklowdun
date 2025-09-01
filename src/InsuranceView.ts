@@ -12,8 +12,7 @@ import {
   sendNotification,
 } from "./notification";
 import type { Policy } from "./models";
-
-let nextId = 1;
+import { newUuidV7 } from "./db/id";
 
 const money = new Intl.NumberFormat(undefined, {
   style: "currency",
@@ -107,9 +106,16 @@ export async function InsuranceView(container: HTMLElement) {
   const docInput = section.querySelector<HTMLInputElement>("#policy-doc");
 
   let policies: Policy[] = await loadPolicies();
+  let migrated = false;
+  policies.forEach((p) => {
+    if (typeof p.id === "number") {
+      p.id = newUuidV7();
+      migrated = true;
+    }
+  });
+  if (migrated) await savePolicies(policies);
   if (listEl) renderPolicies(listEl, policies);
   await schedulePolicyReminders(policies);
-  nextId = policies.reduce((m, p) => Math.max(m, p.id), 0) + 1;
 
   form?.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -119,7 +125,7 @@ export async function InsuranceView(container: HTMLElement) {
     const dueTs = dueLocalNoon.getTime();
     const reminder = dueTs - 24 * 60 * 60 * 1000; // 1 day before
     const policy: Policy = {
-      id: nextId++,
+      id: newUuidV7(),
       amount: parseFloat(amountInput.value),
       dueDate: dueLocalNoon.toISOString(),
       document: docInput.value,

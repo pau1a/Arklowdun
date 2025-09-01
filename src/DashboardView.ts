@@ -1,6 +1,7 @@
 import { readTextFile, BaseDirectory } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
 import { invoke } from "@tauri-apps/api/core";
+import { newUuidV7 } from "./db/id";
 import type { Bill, Policy, Vehicle } from "./models";
 
 const STORE_DIR = "Arklowdun";
@@ -8,7 +9,7 @@ const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "G
 
 // Keep this local so Dashboard doesn't depend on CalendarView exports.
 interface DashEvent {
-  id: number;
+  id: string;
   title: string;
   datetime: string; // ISO string
 }
@@ -17,7 +18,8 @@ async function loadJson<T>(file: string): Promise<T[]> {
   try {
     const p = await join(STORE_DIR, file);
     const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
-    return JSON.parse(json) as T[];
+    const arr = JSON.parse(json) as any[];
+    return arr.map((i) => (typeof i.id === "number" ? { ...i, id: newUuidV7() } : i)) as T[];
   } catch {
     return [];
   }

@@ -12,8 +12,7 @@ import {
   sendNotification,
 } from "./notification";
 import type { Vehicle, MaintenanceEntry } from "./models";
-
-let nextVehicleId = 1;
+import { newUuidV7 } from "./db/id";
 
 const money = new Intl.NumberFormat(undefined, {
   style: "currency",
@@ -55,7 +54,7 @@ function renderVehicles(listEl: HTMLUListElement, vehicles: Vehicle[]) {
     li.textContent = `${v.name} (MOT ${new Date(v.motDate).toLocaleDateString()}, Service ${new Date(v.serviceDate).toLocaleDateString()}) `;
     const btn = document.createElement("button");
     btn.textContent = "Open";
-    btn.dataset.id = String(v.id);
+    btn.dataset.id = v.id;
     li.appendChild(btn);
     listEl.appendChild(li);
   });
@@ -125,7 +124,14 @@ export async function VehiclesView(container: HTMLElement) {
   container.appendChild(section);
 
   let vehicles: Vehicle[] = await loadVehicles();
-  nextVehicleId = vehicles.reduce((m, v) => Math.max(m, v.id), 0) + 1;
+  let migrated = false;
+  vehicles.forEach((v) => {
+    if (typeof v.id === "number") {
+      v.id = newUuidV7();
+      migrated = true;
+    }
+  });
+  if (migrated) await saveVehicles(vehicles);
   await scheduleVehicleReminders(vehicles);
 
   function showList() {
@@ -157,7 +163,7 @@ export async function VehiclesView(container: HTMLElement) {
       const serviceDate = new Date(y2, (m2 ?? 1) - 1, d2 ?? 1, 12, 0, 0, 0);
       const serviceReminder = serviceDate.getTime() - 7 * 24 * 60 * 60 * 1000;
       const vehicle: Vehicle = {
-        id: nextVehicleId++,
+        id: newUuidV7(),
         name: nameInput.value,
         motDate: motDate.toISOString(),
         serviceDate: serviceDate.toISOString(),
@@ -176,7 +182,7 @@ export async function VehiclesView(container: HTMLElement) {
     listEl?.addEventListener("click", (e) => {
       const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-id]");
       if (!btn) return;
-      const id = Number(btn.dataset.id);
+      const id = btn.dataset.id!;
       const vehicle = vehicles.find((v) => v.id === id);
       if (vehicle) renderVehicleDetail(vehicle);
     });
