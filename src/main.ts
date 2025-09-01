@@ -73,11 +73,11 @@ const linkNotes = () =>
 const linkSettings = () =>
   document.querySelector<HTMLAnchorElement>("#nav-settings");
 
-// Compute the minimum *height* so the entire sidebar is visible.
-// Width is not constrained here; we keep whatever min width we already have.
+// --- HEIGHT-ONLY floor: ensure full sidebar is visible ---
+// Width is not constrained here.
 function requiredLogicalFloor(): { w: number; h: number } {
-  const MIN_WIDTH = 800;          // baseline; match tauri.conf.json
-  const MIN_CONTENT_HEIGHT = 480; // your main-panel minimum
+  const MIN_WIDTH = 800;          // keep your existing baseline
+  const MIN_CONTENT_HEIGHT = 480; // main panel baseline
   const MIN_APP_HEIGHT = 600;     // overall baseline
 
   const sidebarEl = document.querySelector<HTMLElement>(".sidebar");
@@ -86,14 +86,25 @@ function requiredLogicalFloor(): { w: number; h: number } {
 
   const headerH = headerEl?.getBoundingClientRect().height ?? 0;
   const footerH = footerEl?.getBoundingClientRect().height ?? 0;
-  // scrollHeight = how tall the sidebar *wants* to be (even if currently scrolling)
-  const sidebarH = sidebarEl ? Math.ceil(sidebarEl.scrollHeight) : 0;
+
+  // Prefer a sidebar content wrapper if present (more "intrinsic").
+  const contentRoot =
+    sidebarEl?.querySelector<HTMLElement>('[data-sidebar-content], .sidebar-content, nav, ul, .menu, .items') ||
+    sidebarEl || null;
+
+  // Intrinsic content height (independent of current viewport height as much as possible).
+  // Fallback to scrollHeight but clamp with child heights to avoid tracking container growth.
+  let intrinsic = 0;
+  if (contentRoot) {
+    const childHeights = Array.from(contentRoot.children)
+      .reduce((s, el) => s + (el as HTMLElement).getBoundingClientRect().height, 0);
+    intrinsic = Math.max(contentRoot.scrollHeight, Math.ceil(childHeights));
+  }
 
   const neededH = Math.max(
     MIN_APP_HEIGHT,
-    headerH + footerH + Math.max(MIN_CONTENT_HEIGHT, sidebarH)
+    headerH + footerH + Math.max(MIN_CONTENT_HEIGHT, intrinsic)
   );
-
   return { w: MIN_WIDTH, h: neededH };
 }
 
@@ -101,9 +112,8 @@ let raf: number | null = null;
 let lastMin = { w: 0, h: 0 };
 async function enforceMinNow(growOnly = true) {
   const { w, h } = requiredLogicalFloor();
-  // Never shrink width; grow height only (by default).
-  const nextW = lastMin.w ? Math.max(w, lastMin.w) : w;
-  const nextH = lastMin.h && growOnly ? Math.max(h, lastMin.h) : h;
+  const nextW = lastMin.w ? Math.max(w, lastMin.w) : w;      // never shrink width floor
+  const nextH = lastMin.h && growOnly ? Math.max(h, lastMin.h) : h; // grow-only by default
   try {
     await appWindow.setMinSize(new LogicalSize(nextW, nextH));
     lastMin = { w: nextW, h: nextH };
@@ -125,20 +135,20 @@ async function enforceMinNow(growOnly = true) {
 function setupDynamicMinSize() {
   const sidebarEl = document.querySelector<HTMLElement>(".sidebar");
   if (!sidebarEl) return;
-  // Re-enforce on real box-size changes
-  const ro = new ResizeObserver(() => {
-    if (raf) cancelAnimationFrame(raf);
-    raf = requestAnimationFrame(() => enforceMinNow(true));
-  });
-  ro.observe(sidebarEl);
-  // Re-enforce when sidebar content changes (more items, different labels, etc.)
+  // IMPORTANT: Do NOT track window resizes; they caused the min height to ratchet up.
+  // Only react to CONTENT changes (items added/removed/text updates).
   const mo = new MutationObserver(() => {
     if (raf) cancelAnimationFrame(raf);
-    raf = requestAnimationFrame(() => enforceMinNow(true));
+    raf = requestAnimationFrame(() => enforceMinNow(true)); // grow-only
   });
   mo.observe(sidebarEl, { childList: true, subtree: true, characterData: true });
-  // Initial pass on first paint
+
+  // Initial passes: after first paint, after fonts, and a tiny timeout for late DOM.
   requestAnimationFrame(() => enforceMinNow(true));
+  // Fonts can change line heights; re-run once they load (supported in modern engines).
+  // @ts-expect-error optional
+  document.fonts?.ready?.then?.(() => enforceMinNow(true));
+  setTimeout(() => enforceMinNow(true), 200);
 }
 
 function setActive(tab: View) {
