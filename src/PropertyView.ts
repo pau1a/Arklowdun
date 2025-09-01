@@ -15,6 +15,7 @@ import {
 import type { PropertyDocument } from "./models";
 import { newUuidV7 } from "./db/id";
 import { nowMs, toDate } from "./db/time";
+import { defaultHouseholdId } from "./db/household";
 import { toMs } from "./db/normalize";
 
 const MAX_TIMEOUT = 2_147_483_647;
@@ -34,6 +35,7 @@ async function loadDocuments(): Promise<PropertyDocument[]> {
     const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
     let arr = JSON.parse(json) as any[];
     let changed = false;
+    const hh = await defaultHouseholdId();
     arr = arr.map((i: any) => {
       if (typeof i.id === "number") {
         i.id = newUuidV7();
@@ -47,6 +49,10 @@ async function loadDocuments(): Promise<PropertyDocument[]> {
             i[k] = ms;
           }
         }
+      }
+      if (!i.household_id) {
+        i.household_id = hh;
+        changed = true;
       }
       return i;
     });
@@ -149,7 +155,7 @@ export async function PropertyView(container: HTMLElement) {
     }
   });
 
-  form?.addEventListener("submit", (e) => {
+  form?.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!descInput || !dueInput || !docInput) return;
     const [y, m, d] = dueInput.value.split("-").map(Number);
@@ -162,6 +168,7 @@ export async function PropertyView(container: HTMLElement) {
       renewalDate: dueTs,
       document: docInput.value,
       reminder,
+      household_id: await defaultHouseholdId(),
     };
     docs.push(doc);
     saveDocuments(docs).then(() => {

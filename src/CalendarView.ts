@@ -11,6 +11,7 @@ export interface CalendarEvent {
   title: string;
   datetime: number; // timestamp in ms
   reminder?: number; // timestamp in ms
+  household_id: string;
   created_at: number;
   updated_at: number;
 }
@@ -19,7 +20,7 @@ async function fetchEvents(): Promise<CalendarEvent[]> {
   return await invoke<CalendarEvent[]>("get_events");
 }
 
-async function saveEvent(event: Omit<CalendarEvent, "id" | "created_at" | "updated_at">): Promise<CalendarEvent> {
+async function saveEvent(event: Omit<CalendarEvent, "id" | "created_at" | "updated_at" | "household_id">): Promise<CalendarEvent> {
   return await invoke<CalendarEvent>("add_event", { event });
 }
 

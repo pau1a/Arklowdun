@@ -14,6 +14,7 @@ import {
 import type { Bill } from "./models";
 import { newUuidV7 } from "./db/id";
 import { nowMs, toDate } from "./db/time";
+import { defaultHouseholdId } from "./db/household";
 import { toMs } from "./db/normalize";
 
 const money = new Intl.NumberFormat(undefined, {
@@ -38,6 +39,7 @@ async function loadBills(): Promise<Bill[]> {
     const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
     let arr = JSON.parse(json) as any[];
     let changed = false;
+    const hh = await defaultHouseholdId();
     arr = arr.map((i: any) => {
       if (typeof i.id === "number") {
         i.id = newUuidV7();
@@ -51,6 +53,10 @@ async function loadBills(): Promise<Bill[]> {
             i[k] = ms;
           }
         }
+      }
+      if (!i.household_id) {
+        i.household_id = hh;
+        changed = true;
       }
       return i;
     });
@@ -131,7 +137,7 @@ export async function BillsView(container: HTMLElement) {
   if (listEl) renderBills(listEl, bills);
   await scheduleBillReminders(bills);
 
-  form?.addEventListener("submit", (e) => {
+  form?.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!amountInput || !dueInput || !docInput) return;
     // parse YYYY-MM-DD safely: store due at local noon to avoid UTC date shifts
@@ -145,6 +151,7 @@ export async function BillsView(container: HTMLElement) {
       dueDate: dueTs,
       document: docInput.value,
       reminder,
+      household_id: await defaultHouseholdId(),
     };
     bills.push(bill);
     saveBills(bills).then(() => {

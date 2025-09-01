@@ -1,6 +1,7 @@
 import { openPath } from "@tauri-apps/plugin-opener";
 import type { Pet, PetMedicalRecord } from "./models";
 import { toDate } from "./db/time";
+import { defaultHouseholdId } from "./db/household";
 
 function renderRecords(listEl: HTMLUListElement, records: PetMedicalRecord[]) {
   listEl.innerHTML = "";
@@ -54,7 +55,7 @@ export function PetDetailView(
 
   backBtn?.addEventListener("click", () => onBack());
 
-  form?.addEventListener("submit", (e) => {
+  form?.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!dateInput || !descInput || !listEl) return;
     const [y, m, d] = dateInput.value.split("-").map(Number);
@@ -70,6 +71,7 @@ export function PetDetailView(
       description: descInput.value,
       document: docInput?.value ?? "",
       reminder,
+      household_id: pet.household_id || (await defaultHouseholdId()),
     };
     pet.medical.push(record);
     onChange();

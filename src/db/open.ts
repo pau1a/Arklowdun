@@ -6,7 +6,7 @@ let dbPromise: Promise<Database> | null = null;
 export function openDb(): Promise<Database> {
   if (!dbPromise) {
     dbPromise = (async () => {
-      // This path is relative to the app’s config dir, e.g.
+      // This path is relative to the app’s data dir, e.g.
       // ~/Library/Application Support/com.paula.arklowdun/app.sqlite
       const db = await Database.load("sqlite:app.sqlite");
 

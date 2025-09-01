@@ -11,6 +11,7 @@ import { PetDetailView } from "./PetDetailView";
 import { newUuidV7 } from "./db/id";
 import { nowMs } from "./db/time";
 import { toMs } from "./db/normalize";
+import { defaultHouseholdId } from "./db/household";
 
 const MAX_TIMEOUT = 2_147_483_647; // ~24.8 days
 function scheduleAt(ts: number, cb: () => void) {
@@ -29,6 +30,7 @@ async function loadPets(): Promise<Pet[]> {
     const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
     let arr = JSON.parse(json) as any[];
     let changed = false;
+    const hh = await defaultHouseholdId();
     arr = arr.map((i: any) => {
       if (typeof i.id === "number") {
         i.id = newUuidV7();
@@ -45,8 +47,16 @@ async function loadPets(): Promise<Pet[]> {
               }
             }
           }
+          if (!m.household_id) {
+            m.household_id = hh;
+            changed = true;
+          }
           return m;
         });
+      }
+      if (!i.household_id) {
+        i.household_id = hh;
+        changed = true;
       }
       return i;
     });
@@ -126,7 +136,7 @@ export async function PetsView(container: HTMLElement) {
 
     if (listEl) renderPets(listEl, pets);
 
-    form?.addEventListener("submit", (e) => {
+    form?.addEventListener("submit", async (e) => {
       e.preventDefault();
       if (!nameInput || !typeInput || !listEl) return;
       const pet: Pet = {
@@ -134,6 +144,7 @@ export async function PetsView(container: HTMLElement) {
         name: nameInput.value,
         type: typeInput.value,
         medical: [],
+        household_id: await defaultHouseholdId(),
       };
       pets.push(pet);
       savePets(pets).then(() => {
