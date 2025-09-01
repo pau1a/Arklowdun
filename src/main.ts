@@ -75,6 +75,26 @@ const linkSettings = () =>
 
 // --- HEIGHT-ONLY floor: ensure full sidebar is visible ---
 // Width is not constrained here.
+function findScrollableContent(root: HTMLElement): HTMLElement {
+  // pick the descendant with the largest scrollHeight among scrollable nodes
+  let best = root;
+  let bestSH = root.scrollHeight;
+  const stack: HTMLElement[] = [root];
+  while (stack.length) {
+    const el = stack.pop()!;
+    const cs = getComputedStyle(el);
+    if (/(auto|scroll)/.test(cs.overflowY)) {
+      const sh = el.scrollHeight;
+      if (sh > bestSH) {
+        best = el;
+        bestSH = sh;
+      }
+    }
+    stack.push(...(Array.from(el.children) as HTMLElement[]));
+  }
+  return best;
+}
+
 function requiredLogicalFloor(): { w: number; h: number } {
   const MIN_WIDTH = 800;          // keep your existing baseline
   const MIN_CONTENT_HEIGHT = 480; // main panel baseline
@@ -87,19 +107,9 @@ function requiredLogicalFloor(): { w: number; h: number } {
   const headerH = headerEl?.getBoundingClientRect().height ?? 0;
   const footerH = footerEl?.getBoundingClientRect().height ?? 0;
 
-  // Prefer a sidebar content wrapper if present (more "intrinsic").
-  const contentRoot =
-    sidebarEl?.querySelector<HTMLElement>('[data-sidebar-content], .sidebar-content, nav, ul, .menu, .items') ||
-    sidebarEl || null;
-
-  // Intrinsic content height (independent of current viewport height as much as possible).
-  // Fallback to scrollHeight but clamp with child heights to avoid tracking container growth.
-  let intrinsic = 0;
-  if (contentRoot) {
-    const childHeights = Array.from(contentRoot.children)
-      .reduce((s, el) => s + (el as HTMLElement).getBoundingClientRect().height, 0);
-    intrinsic = Math.max(contentRoot.scrollHeight, Math.ceil(childHeights));
-  }
+  // Intrinsic sidebar content height (not the visible slice).
+  const contentRoot = sidebarEl ? findScrollableContent(sidebarEl) : null;
+  const intrinsic = contentRoot ? contentRoot.scrollHeight : 0;
 
   const neededH = Math.max(
     MIN_APP_HEIGHT,
@@ -132,6 +142,26 @@ async function enforceMinNow(growOnly = true) {
   }
 }
 
+// One-shot startup calibration: keep re-measuring for a short window
+// to catch fonts and late DOM. Stops as soon as height stops increasing,
+// or after ~1s max.
+function calibrateMinHeight(durationMs = 1000) {
+  const start = performance.now();
+  const tick = async () => {
+    const before = lastMin.h;
+    await enforceMinNow(true); // may raise floor and size
+    const after = lastMin.h;
+    if (after > before) {
+      // grew; check again next frame
+      if (performance.now() - start < durationMs) requestAnimationFrame(tick);
+      return;
+    }
+    // no growth; keep probing until timeout in case fonts/images finish late
+    if (performance.now() - start < durationMs) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
 function setupDynamicMinSize() {
   const sidebarEl = document.querySelector<HTMLElement>(".sidebar");
   if (!sidebarEl) return;
@@ -143,12 +173,8 @@ function setupDynamicMinSize() {
   });
   mo.observe(sidebarEl, { childList: true, subtree: true, characterData: true });
 
-  // Initial passes: after first paint, after fonts, and a tiny timeout for late DOM.
-  requestAnimationFrame(() => enforceMinNow(true));
-  // Fonts can change line heights; re-run once they load (supported in modern engines).
-  // @ts-expect-error optional
-  document.fonts?.ready?.then?.(() => enforceMinNow(true));
-  setTimeout(() => enforceMinNow(true), 200);
+  // Startup calibration: quickly converge on the real needed height.
+  calibrateMinHeight(1000);
 }
 
 function setActive(tab: View) {
