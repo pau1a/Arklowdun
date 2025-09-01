@@ -14,6 +14,7 @@ import {
 import type { InventoryItem } from "./models";
 import { newUuidV7 } from "./db/id";
 import { nowMs, toDate } from "./db/time";
+import { defaultHouseholdId } from "./db/household";
 import { toMs } from "./db/normalize";
 
 const MAX_TIMEOUT = 2_147_483_647;
@@ -32,6 +33,7 @@ async function loadItems(): Promise<InventoryItem[]> {
     const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
     let arr = JSON.parse(json) as any[];
     let changed = false;
+    const hh = await defaultHouseholdId();
     arr = arr.map((i: any) => {
       if (typeof i.id === "number") {
         i.id = newUuidV7();
@@ -45,6 +47,10 @@ async function loadItems(): Promise<InventoryItem[]> {
             i[k] = ms;
           }
         }
+      }
+      if (!i.household_id) {
+        i.household_id = hh;
+        changed = true;
       }
       return i;
     });
@@ -128,7 +134,7 @@ export async function InventoryView(container: HTMLElement) {
   if (listEl) renderItems(listEl, items);
   await scheduleWarrantyReminders(items);
 
-  form?.addEventListener("submit", (e) => {
+  form?.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!nameInput || !purchaseInput || !warrantyInput || !docInput) return;
     const [py, pm, pd] = purchaseInput.value.split("-").map(Number);
@@ -144,6 +150,7 @@ export async function InventoryView(container: HTMLElement) {
       warrantyExpiry: warrantyLocalNoon.getTime(),
       document: docInput.value,
       reminder,
+      household_id: await defaultHouseholdId(),
     };
     items.push(item);
     saveItems(items).then(() => {

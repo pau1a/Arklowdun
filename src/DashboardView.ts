@@ -1,8 +1,9 @@
-import { readTextFile, BaseDirectory } from "@tauri-apps/plugin-fs";
+import { readTextFile, writeTextFile, BaseDirectory } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
 import { invoke } from "@tauri-apps/api/core";
 import { newUuidV7 } from "./db/id";
 import { nowMs, toDate } from "./db/time";
+import { defaultHouseholdId } from "./db/household";
 import { toMs } from "./db/normalize";
 import type { Bill, Policy, Vehicle } from "./models";
 
@@ -21,6 +22,8 @@ async function loadJson<T>(file: string): Promise<T[]> {
     const p = await join(STORE_DIR, file);
     const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
     let arr = JSON.parse(json) as any[];
+    const hh = await defaultHouseholdId();
+    let changed = false;
     arr = arr.map((i: any) => {
       if (typeof i.id === "number") i.id = newUuidV7();
       for (const k of [
@@ -39,11 +42,21 @@ async function loadJson<T>(file: string): Promise<T[]> {
       ]) {
         if (k in i) {
           const ms = toMs(i[k]);
-          if (ms !== undefined) i[k] = ms;
+          if (ms !== undefined) {
+            if (ms !== i[k]) changed = true;
+            i[k] = ms;
+          }
         }
+      }
+      if (!i.household_id) {
+        i.household_id = hh;
+        changed = true;
       }
       return i as T;
     });
+    if (changed) {
+      await writeTextFile(p, JSON.stringify(arr), { baseDir: BaseDirectory.AppLocalData });
+    }
     return arr as T[];
   } catch {
     return [];

@@ -17,7 +17,7 @@ import { BudgetView } from "./BudgetView";
 import { NotesView } from "./NotesView";
 import { DashboardView } from "./DashboardView";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
-import { openDb } from "./db/open";
+import { defaultHouseholdId } from "./db/household";
 const appWindow = getCurrentWindow();
 
 type View =
@@ -268,7 +268,7 @@ function navigate(to: View) {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  openDb().catch((e) => console.error("DB open failed:", e));
+  defaultHouseholdId().catch((e) => console.error("DB init failed:", e));
 
   linkDashboard()?.addEventListener("click", (e) => {
     e.preventDefault();

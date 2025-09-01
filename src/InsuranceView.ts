@@ -14,6 +14,7 @@ import {
 import type { Policy } from "./models";
 import { newUuidV7 } from "./db/id";
 import { nowMs, toDate } from "./db/time";
+import { defaultHouseholdId } from "./db/household";
 import { toMs } from "./db/normalize";
 
 const money = new Intl.NumberFormat(undefined, {
@@ -38,6 +39,7 @@ async function loadPolicies(): Promise<Policy[]> {
     const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
     let arr = JSON.parse(json) as any[];
     let changed = false;
+    const hh = await defaultHouseholdId();
     arr = arr.map((i: any) => {
       if (typeof i.id === "number") {
         i.id = newUuidV7();
@@ -51,6 +53,10 @@ async function loadPolicies(): Promise<Policy[]> {
             i[k] = ms;
           }
         }
+      }
+      if (!i.household_id) {
+        i.household_id = hh;
+        changed = true;
       }
       return i;
     });
@@ -130,7 +136,7 @@ export async function InsuranceView(container: HTMLElement) {
   if (listEl) renderPolicies(listEl, policies);
   await schedulePolicyReminders(policies);
 
-  form?.addEventListener("submit", (e) => {
+  form?.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!amountInput || !dueInput || !docInput) return;
     const [y, m, d] = dueInput.value.split("-").map(Number);
@@ -143,6 +149,7 @@ export async function InsuranceView(container: HTMLElement) {
       dueDate: dueTs,
       document: docInput.value,
       reminder,
+      household_id: await defaultHouseholdId(),
     };
     policies.push(policy);
     savePolicies(policies).then(() => {

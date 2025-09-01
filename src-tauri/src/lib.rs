@@ -6,11 +6,16 @@ use tauri_plugin_sql;
 
 mod id;
 mod time;
+mod household;
+mod state;
+mod migrate;
 
 #[derive(Serialize, Deserialize, Clone)]
 struct Event {
     #[serde(default)]
     id: String,
+    #[serde(default)]
+    household_id: String,
     title: String,
     datetime: i64,
     reminder: Option<i64>,
@@ -46,8 +51,9 @@ fn events_path(app: &tauri::AppHandle) -> PathBuf {
         .join("events.json")
 }
 
-fn read_events(app: &tauri::AppHandle) -> Vec<Event> {
+fn read_events(app: &tauri::AppHandle, state: &tauri::State<state::AppState>) -> Vec<Event> {
     let path = events_path(app);
+    let default_hh = state.default_household_id.clone();
     if let Ok(data) = fs::read_to_string(&path) {
         let raw: Vec<RawEvent> = serde_json::from_str(&data).unwrap_or_default();
         let mut converted = Vec::new();
@@ -57,6 +63,7 @@ fn read_events(app: &tauri::AppHandle) -> Vec<Event> {
                 RawEvent::New(mut ev) => {
                     if ev.created_at == 0 { ev.created_at = time::now_ms(); changed = true; }
                     if ev.updated_at == 0 { ev.updated_at = ev.created_at; changed = true; }
+                    if ev.household_id.is_empty() { ev.household_id = default_hh.clone(); changed = true; }
                     converted.push(ev);
                 }
                 RawEvent::OldNumericId { title, datetime, reminder, .. } => {
@@ -66,6 +73,7 @@ fn read_events(app: &tauri::AppHandle) -> Vec<Event> {
                         .unwrap_or_else(|_| time::now_ms());
                     converted.push(Event {
                         id: crate::id::new_uuid_v7(),
+                        household_id: default_hh.clone(),
                         title,
                         datetime: dt,
                         reminder,
@@ -80,6 +88,7 @@ fn read_events(app: &tauri::AppHandle) -> Vec<Event> {
                         .unwrap_or_else(|_| time::now_ms());
                     converted.push(Event {
                         id,
+                        household_id: default_hh.clone(),
                         title,
                         datetime: dt,
                         reminder,
@@ -108,29 +117,33 @@ fn write_events(app: &tauri::AppHandle, events: &Vec<Event>) -> Result<(), Strin
 }
 
 #[tauri::command]
-fn get_events(app: tauri::AppHandle) -> Result<Vec<Event>, String> {
-    Ok(read_events(&app))
+fn get_events(app: tauri::AppHandle, state: tauri::State<state::AppState>) -> Result<Vec<Event>, String> {
+    Ok(read_events(&app, &state))
 }
 
 #[tauri::command]
-fn add_event(app: tauri::AppHandle, mut event: Event) -> Result<Event, String> {
-    let mut events = read_events(&app);
+fn add_event(app: tauri::AppHandle, state: tauri::State<state::AppState>, mut event: Event) -> Result<Event, String> {
+    let mut events = read_events(&app, &state);
     event.id = crate::id::new_uuid_v7();
     let now = time::now_ms();
     event.created_at = now;
     event.updated_at = now;
+    if event.household_id.is_empty() {
+        event.household_id = state.default_household_id.clone();
+    }
     events.push(event.clone());
     write_events(&app, &events)?;
     Ok(event)
 }
 
 #[tauri::command]
-fn update_event(app: tauri::AppHandle, event: Event) -> Result<(), String> {
-    let mut events = read_events(&app);
+fn update_event(app: tauri::AppHandle, state: tauri::State<state::AppState>, event: Event) -> Result<(), String> {
+    let mut events = read_events(&app, &state);
     if let Some(e) = events.iter_mut().find(|e| e.id == event.id) {
         let mut new_event = event;
         new_event.created_at = e.created_at;
         new_event.updated_at = time::now_ms();
+        new_event.household_id = e.household_id.clone();
         *e = new_event;
         write_events(&app, &events)
     } else {
@@ -139,8 +152,8 @@ fn update_event(app: tauri::AppHandle, event: Event) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn delete_event(app: tauri::AppHandle, id: String) -> Result<(), String> {
-    let mut events = read_events(&app);
+fn delete_event(app: tauri::AppHandle, state: tauri::State<state::AppState>, id: String) -> Result<(), String> {
+    let mut events = read_events(&app, &state);
     let len_before = events.len();
     events.retain(|e| e.id != id);
     if events.len() == len_before {
@@ -157,6 +170,13 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
+        .setup(|app| {
+            let handle = app.handle();
+            let pool = tauri::async_runtime::block_on(crate::migrate::init_db(&handle))?;
+            let hh = tauri::async_runtime::block_on(crate::household::default_household_id(&pool))?;
+            app.manage(crate::state::AppState { default_household_id: hh });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_events,
             add_event,

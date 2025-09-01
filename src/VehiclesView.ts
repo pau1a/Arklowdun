@@ -14,6 +14,7 @@ import {
 import type { Vehicle, MaintenanceEntry } from "./models";
 import { newUuidV7 } from "./db/id";
 import { nowMs, toDate } from "./db/time";
+import { defaultHouseholdId } from "./db/household";
 import { toMs } from "./db/normalize";
 
 const money = new Intl.NumberFormat(undefined, {
@@ -38,6 +39,7 @@ async function loadVehicles(): Promise<Vehicle[]> {
     const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
     let arr = JSON.parse(json) as any[];
     let changed = false;
+    const hh = await defaultHouseholdId();
     arr = arr.map((i: any) => {
       if (typeof i.id === "number") {
         i.id = newUuidV7();
@@ -59,8 +61,16 @@ async function loadVehicles(): Promise<Vehicle[]> {
             if (ms !== m.date) changed = true;
             m.date = ms;
           }
+          if (!m.household_id) {
+            m.household_id = hh;
+            changed = true;
+          }
           return m;
         });
+      }
+      if (!i.household_id) {
+        i.household_id = hh;
+        changed = true;
       }
       return i;
     });
@@ -176,7 +186,7 @@ export async function VehiclesView(container: HTMLElement) {
 
     if (listEl) renderVehicles(listEl, vehicles);
 
-    form?.addEventListener("submit", (e) => {
+    form?.addEventListener("submit", async (e) => {
       e.preventDefault();
       if (!nameInput || !motInput || !serviceInput || !listEl) return;
       const [y1, m1, d1] = motInput.value.split("-").map(Number);
@@ -193,6 +203,7 @@ export async function VehiclesView(container: HTMLElement) {
         motReminder,
         serviceReminder,
         maintenance: [],
+        household_id: await defaultHouseholdId(),
       };
       vehicles.push(vehicle);
       saveVehicles(vehicles).then(() => {
@@ -261,7 +272,7 @@ export async function VehiclesView(container: HTMLElement) {
       saveVehicles(vehicles).then(() => scheduleVehicleReminders([vehicle]));
     });
 
-    maintForm?.addEventListener("submit", (e) => {
+    maintForm?.addEventListener("submit", async (e) => {
       e.preventDefault();
       if (!maintDate || !maintType || !maintCost || !maintList) return;
       const [y, m, d] = maintDate.value.split("-").map(Number);
@@ -271,6 +282,7 @@ export async function VehiclesView(container: HTMLElement) {
         type: maintType.value,
         cost: parseFloat(maintCost.value),
         document: maintDoc?.value ?? "",
+        household_id: vehicle.household_id,
       };
       vehicle.maintenance.push(entry);
       saveVehicles(vehicles).then(() => {

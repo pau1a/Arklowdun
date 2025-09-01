@@ -4,6 +4,7 @@ export interface Bill {
   dueDate: number; // timestamp ms
   document: string; // file path
   reminder?: number; // timestamp ms
+  household_id?: string;
 }
 
 export interface Policy {
@@ -12,6 +13,7 @@ export interface Policy {
   dueDate: number; // timestamp ms
   document: string; // file path
   reminder?: number; // timestamp ms
+  household_id?: string;
 }
 
 export interface PropertyDocument {
@@ -20,6 +22,7 @@ export interface PropertyDocument {
   renewalDate: number; // timestamp ms
   document: string; // file path
   reminder?: number; // timestamp ms
+  household_id?: string;
 }
 
 export interface MaintenanceEntry {
@@ -27,6 +30,7 @@ export interface MaintenanceEntry {
   type: string;
   cost: number;
   document: string; // file path
+  household_id?: string;
 }
 
 export interface Vehicle {
@@ -37,6 +41,7 @@ export interface Vehicle {
   motReminder?: number; // timestamp ms
   serviceReminder?: number; // timestamp ms
   maintenance: MaintenanceEntry[];
+  household_id?: string;
 }
 
 export interface PetMedicalRecord {
@@ -44,6 +49,7 @@ export interface PetMedicalRecord {
   description: string;
   document: string; // file path
   reminder?: number; // timestamp ms
+  household_id?: string;
 }
 
 export interface Pet {
@@ -51,6 +57,7 @@ export interface Pet {
   name: string;
   type: string;
   medical: PetMedicalRecord[];
+  household_id?: string;
 }
 
 export interface FamilyMember {
@@ -59,6 +66,7 @@ export interface FamilyMember {
   birthday: number; // timestamp ms
   notes: string;
   documents: string[]; // file paths
+  household_id?: string;
 }
 
 export interface InventoryItem {
@@ -68,12 +76,14 @@ export interface InventoryItem {
   warrantyExpiry: number; // timestamp ms
   document: string; // file path
   reminder?: number; // timestamp ms
+  household_id?: string;
 }
 
 export interface BudgetCategory {
   id: string;
   name: string;
   monthlyBudget: number;
+  household_id?: string;
 }
 
 export interface Expense {
@@ -82,5 +92,6 @@ export interface Expense {
   amount: number;
   date: number; // timestamp ms
   description: string;
+  household_id?: string;
 }
 

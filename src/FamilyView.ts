@@ -4,6 +4,7 @@ import type { FamilyMember } from "./models";
 import { newUuidV7 } from "./db/id";
 import { toDate } from "./db/time";
 import { toMs } from "./db/normalize";
+import { defaultHouseholdId } from "./db/household";
 
 // ----- storage -----
 const STORE_DIR = "Arklowdun";
@@ -14,6 +15,7 @@ async function loadMembers(): Promise<FamilyMember[]> {
     const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
     let arr = JSON.parse(json) as any[];
     let changed = false;
+    const hh = await defaultHouseholdId();
     arr = arr.map((i: any) => {
       if (typeof i.id === "number") {
         i.id = newUuidV7();
@@ -25,6 +27,10 @@ async function loadMembers(): Promise<FamilyMember[]> {
           if (ms !== i.birthday) changed = true;
           i.birthday = ms;
         }
+      }
+      if (!i.household_id) {
+        i.household_id = hh;
+        changed = true;
       }
       return i;
     });
@@ -87,7 +93,7 @@ export async function FamilyView(container: HTMLElement) {
 
     if (listEl) renderMembers(listEl, members);
 
-    form?.addEventListener("submit", (e) => {
+    form?.addEventListener("submit", async (e) => {
       e.preventDefault();
       if (!nameInput || !bdayInput || !listEl) return;
       const [y, m, d] = bdayInput.value.split("-").map(Number);
@@ -98,6 +104,7 @@ export async function FamilyView(container: HTMLElement) {
         birthday: bday.getTime(),
         notes: "",
         documents: [],
+        household_id: await defaultHouseholdId(),
       };
       members.push(member);
       saveMembers(members).then(() => {

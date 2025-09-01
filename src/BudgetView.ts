@@ -4,6 +4,7 @@ import type { BudgetCategory, Expense } from "./models";
 import { newUuidV7 } from "./db/id";
 import { nowMs, toDate } from "./db/time";
 import { toMs } from "./db/normalize";
+import { defaultHouseholdId } from "./db/household";
 
 interface BudgetData {
   categories: BudgetCategory[];
@@ -25,6 +26,7 @@ async function loadData(): Promise<BudgetData> {
     const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
     const data = JSON.parse(json) as BudgetData | any;
     let changed = false;
+    const hh = await defaultHouseholdId();
     const idMap = new Map<number, string>();
     data.categories = data.categories.map((c: any) => {
       if (typeof c.id === "number") {
@@ -32,6 +34,10 @@ async function loadData(): Promise<BudgetData> {
         idMap.set(c.id, id);
         changed = true;
         return { ...c, id };
+      }
+      if (!c.household_id) {
+        changed = true;
+        return { ...c, household_id: hh };
       }
       return c;
     });
@@ -52,7 +58,8 @@ async function loadData(): Promise<BudgetData> {
         if (ms !== date) changed = true;
         date = ms;
       }
-      return { ...e, id, categoryId: catId, date };
+      if (!e.household_id) changed = true;
+      return { ...e, id, categoryId: catId, date, household_id: e.household_id ?? hh };
     });
     if (changed) await saveData(data);
     return data as BudgetData;
@@ -174,13 +181,14 @@ export async function BudgetView(container: HTMLElement) {
   if (expCategory) updateCategoryOptions(expCategory, data.categories);
   if (summaryBody) renderSummary(summaryBody, data);
 
-  catForm?.addEventListener("submit", (e) => {
+  catForm?.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!catName || !catBudget || !expCategory || !summaryBody) return;
     const cat: BudgetCategory = {
       id: newUuidV7(),
       name: catName.value,
       monthlyBudget: Number(catBudget.value),
+      household_id: await defaultHouseholdId(),
     };
     data.categories.push(cat);
     saveData(data).then(() => {
@@ -190,7 +198,7 @@ export async function BudgetView(container: HTMLElement) {
     });
   });
 
-  expForm?.addEventListener("submit", (e) => {
+  expForm?.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!expCategory || !expAmount || !expDate || !summaryBody) return;
     if (!expCategory.value) {
@@ -205,6 +213,7 @@ export async function BudgetView(container: HTMLElement) {
       amount: Number(expAmount.value),
       date: dateLocalNoon.getTime(),
       description: expDesc?.value || "",
+      household_id: await defaultHouseholdId(),
     };
     data.expenses.push(exp);
     saveData(data).then(() => {
