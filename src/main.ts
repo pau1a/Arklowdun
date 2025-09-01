@@ -297,3 +297,15 @@ window.addEventListener("DOMContentLoaded", () => {
     setupDynamicMinSize();
   });
 });
+
+// expose a minimal debug API for the console (DEV only)
+// @ts-ignore import.meta.env is provided by the bundler during dev
+if (import.meta.env.DEV) {
+  // @ts-expect-error attach to window for debugging
+  window.__win = {
+    label: appWindow.label, // string in v2
+    setMin: (w = 1200, h = 800) => appWindow.setMinSize(new LogicalSize(w, h)),
+    setSize: (w = 1200, h = 800) => appWindow.setSize(new LogicalSize(w, h)),
+  };
+  console.log("__win ready:", appWindow.label);
+}
