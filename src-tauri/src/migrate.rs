@@ -1,4 +1,7 @@
-use sqlx::{sqlite::SqlitePoolOptions, Executor, Row, SqlitePool};
+use sqlx::{
+    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
+    Executor, Row, SqlitePool,
+};
 use std::{collections::HashSet, fs};
 use tauri::{AppHandle, Manager};
 
@@ -20,9 +23,16 @@ pub async fn init_db(app: &AppHandle) -> anyhow::Result<SqlitePool> {
     let dir = app.path().app_data_dir().expect("data dir");
     fs::create_dir_all(&dir)?;
     let db_path = dir.join("app.sqlite");
-    let conn = format!("sqlite://{}", db_path.to_string_lossy());
-    let pool = SqlitePoolOptions::new().connect(&conn).await?;
 
+    // Build options from a filesystem path to avoid URL encoding issues.
+    let opts = SqliteConnectOptions::new()
+        .filename(&db_path)
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal)
+        .foreign_keys(true);
+    let pool = SqlitePoolOptions::new().connect_with(opts).await?;
+
+    // Reassert pragmas in case the options are ignored.
     pool.execute("PRAGMA journal_mode=WAL").await?;
     pool.execute("PRAGMA foreign_keys=ON").await?;
     pool
