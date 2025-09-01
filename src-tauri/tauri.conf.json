@@ -13,6 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
+        "label": "main",
         "title": "arklowdun",
         "width": 800,
         "height": 600,
@@ -20,7 +21,11 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "capabilities": [
+        "default",
+        "window-management"
+      ]
     }
   },
   "bundle": {
