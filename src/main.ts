@@ -17,6 +17,7 @@ import { BudgetView } from "./BudgetView";
 import { NotesView } from "./NotesView";
 import { DashboardView } from "./DashboardView";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { openDb } from "./db/open";
 const appWindow = getCurrentWindow();
 
 type View =
@@ -76,7 +77,6 @@ const linkSettings = () =>
 // --- HEIGHT-ONLY floor: ensure full sidebar is visible ---
 // Width is not constrained here.
 function findScrollableContent(root: HTMLElement): HTMLElement {
-  // pick the descendant with the largest scrollHeight among scrollable nodes
   let best = root;
   let bestSH = root.scrollHeight;
   const stack: HTMLElement[] = [root];
@@ -96,9 +96,9 @@ function findScrollableContent(root: HTMLElement): HTMLElement {
 }
 
 function requiredLogicalFloor(): { w: number; h: number } {
-  const MIN_WIDTH = 800;          // keep your existing baseline
-  const MIN_CONTENT_HEIGHT = 480; // main panel baseline
-  const MIN_APP_HEIGHT = 600;     // overall baseline
+  const MIN_WIDTH = 800;
+  const MIN_CONTENT_HEIGHT = 480;
+  const MIN_APP_HEIGHT = 600;
 
   const sidebarEl = document.querySelector<HTMLElement>(".sidebar");
   const headerEl = document.querySelector<HTMLElement>("#titlebar");
@@ -107,7 +107,6 @@ function requiredLogicalFloor(): { w: number; h: number } {
   const headerH = headerEl?.getBoundingClientRect().height ?? 0;
   const footerH = footerEl?.getBoundingClientRect().height ?? 0;
 
-  // Intrinsic sidebar content height (not the visible slice).
   const contentRoot = sidebarEl ? findScrollableContent(sidebarEl) : null;
   const intrinsic = contentRoot ? contentRoot.scrollHeight : 0;
 
@@ -122,8 +121,8 @@ let raf: number | null = null;
 let lastMin = { w: 0, h: 0 };
 async function enforceMinNow(growOnly = true) {
   const { w, h } = requiredLogicalFloor();
-  const nextW = lastMin.w ? Math.max(w, lastMin.w) : w;      // never shrink width floor
-  const nextH = lastMin.h && growOnly ? Math.max(h, lastMin.h) : h; // grow-only by default
+  const nextW = lastMin.w ? Math.max(w, lastMin.w) : w;
+  const nextH = lastMin.h && growOnly ? Math.max(h, lastMin.h) : h;
   try {
     await appWindow.setMinSize(new LogicalSize(nextW, nextH));
     lastMin = { w: nextW, h: nextH };
@@ -142,21 +141,16 @@ async function enforceMinNow(growOnly = true) {
   }
 }
 
-// One-shot startup calibration: keep re-measuring for a short window
-// to catch fonts and late DOM. Stops as soon as height stops increasing,
-// or after ~1s max.
 function calibrateMinHeight(durationMs = 1000) {
   const start = performance.now();
   const tick = async () => {
     const before = lastMin.h;
-    await enforceMinNow(true); // may raise floor and size
+    await enforceMinNow(true);
     const after = lastMin.h;
     if (after > before) {
-      // grew; check again next frame
       if (performance.now() - start < durationMs) requestAnimationFrame(tick);
       return;
     }
-    // no growth; keep probing until timeout in case fonts/images finish late
     if (performance.now() - start < durationMs) requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
@@ -165,15 +159,11 @@ function calibrateMinHeight(durationMs = 1000) {
 function setupDynamicMinSize() {
   const sidebarEl = document.querySelector<HTMLElement>(".sidebar");
   if (!sidebarEl) return;
-  // IMPORTANT: Do NOT track window resizes; they caused the min height to ratchet up.
-  // Only react to CONTENT changes (items added/removed/text updates).
   const mo = new MutationObserver(() => {
     if (raf) cancelAnimationFrame(raf);
-    raf = requestAnimationFrame(() => enforceMinNow(true)); // grow-only
+    raf = requestAnimationFrame(() => enforceMinNow(true));
   });
   mo.observe(sidebarEl, { childList: true, subtree: true, characterData: true });
-
-  // Startup calibration: quickly converge on the real needed height.
   calibrateMinHeight(1000);
 }
 
@@ -278,6 +268,8 @@ function navigate(to: View) {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
+  openDb().catch((e) => console.error("DB open failed:", e));
+
   linkDashboard()?.addEventListener("click", (e) => {
     e.preventDefault();
     navigate("dashboard");
@@ -347,21 +339,19 @@ window.addEventListener("DOMContentLoaded", () => {
     navigate("settings");
   });
   navigate("dashboard");
-  // Next tick so the DOM has painted at least once
   requestAnimationFrame(() => {
     console.log("Runtime window label:", appWindow.label);
     setupDynamicMinSize();
   });
 });
 
-// expose a minimal debug API for the console (DEV only)
-// @ts-ignore import.meta.env is provided by the bundler during dev
-if (import.meta.env.DEV) {
-  // @ts-expect-error attach to window for debugging
-  window.__win = {
-    label: appWindow.label, // string in v2
+// minimal debug handle without ts-expect-error
+const DEV = (import.meta as any)?.env?.DEV ?? false;
+if (DEV) {
+  (window as any).__win = {
+    label: (appWindow as any).label,
     setMin: (w = 1200, h = 800) => appWindow.setMinSize(new LogicalSize(w, h)),
     setSize: (w = 1200, h = 800) => appWindow.setSize(new LogicalSize(w, h)),
   };
-  console.log("__win ready:", appWindow.label);
+  console.log("__win ready:", (appWindow as any).label);
 }
