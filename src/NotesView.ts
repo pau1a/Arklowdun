@@ -1,8 +1,9 @@
 import { readTextFile, writeTextFile, mkdir, BaseDirectory } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
+import { newUuidV7 } from "./db/id";
 
 interface Note {
-  id: number;
+  id: string;
   text: string;
   color: string;
   x: number;
@@ -16,7 +17,17 @@ async function loadNotes(): Promise<Note[]> {
   try {
     const p = await join(STORE_DIR, FILE_NAME);
     const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
-    return JSON.parse(json) as Note[];
+    const notes = JSON.parse(json) as Note[] | any[];
+    let changed = false;
+    const fixed = notes.map((n) => {
+      if (typeof n.id === "number") {
+        changed = true;
+        return { ...n, id: newUuidV7() };
+      }
+      return n;
+    });
+    if (changed) await saveNotes(fixed);
+    return fixed as Note[];
   } catch {
     return [];
   }
@@ -27,8 +38,6 @@ async function saveNotes(notes: Note[]): Promise<void> {
   const p = await join(STORE_DIR, FILE_NAME);
   await writeTextFile(p, JSON.stringify(notes, null, 2), { baseDir: BaseDirectory.AppLocalData });
 }
-
-let nextId = 1;
 
 export async function NotesView(container: HTMLElement) {
   const section = document.createElement("section");
@@ -50,7 +59,6 @@ export async function NotesView(container: HTMLElement) {
   const canvas = section.querySelector<HTMLDivElement>("#notes-canvas")!;
 
   let notes: Note[] = await loadNotes();
-  nextId = notes.reduce((m, n) => Math.max(m, n.id), 0) + 1;
 
   let saveTimer: number | undefined;
   const saveSoon = () => {
@@ -119,7 +127,7 @@ export async function NotesView(container: HTMLElement) {
     e.preventDefault();
     if (!textInput || !colorInput) return;
     const note: Note = {
-      id: nextId++,
+      id: newUuidV7(),
       text: textInput.value,
       color: colorInput.value,
       x: 10,

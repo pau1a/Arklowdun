@@ -8,8 +8,7 @@ import { join } from "@tauri-apps/api/path";
 import { isPermissionGranted, requestPermission, sendNotification } from "./notification";
 import type { Pet } from "./models";
 import { PetDetailView } from "./PetDetailView";
-
-let nextPetId = 1;
+import { newUuidV7 } from "./db/id";
 
 const MAX_TIMEOUT = 2_147_483_647; // ~24.8 days
 function scheduleAt(ts: number, cb: () => void) {
@@ -46,7 +45,7 @@ function renderPets(listEl: HTMLUListElement, pets: Pet[]) {
     li.textContent = `${p.name} (${p.type}) `;
     const btn = document.createElement("button");
     btn.textContent = "Open";
-    btn.dataset.id = String(p.id);
+    btn.dataset.id = p.id;
     li.appendChild(btn);
     listEl.appendChild(li);
   });
@@ -82,8 +81,15 @@ export async function PetsView(container: HTMLElement) {
   container.appendChild(section);
 
   let pets: Pet[] = await loadPets();
+  let migrated = false;
+  pets.forEach((p) => {
+    if (typeof p.id === "number") {
+      p.id = newUuidV7();
+      migrated = true;
+    }
+  });
+  if (migrated) await savePets(pets);
   await schedulePetReminders(pets);
-  nextPetId = pets.reduce((m, p) => Math.max(m, p.id), 0) + 1;
 
   function showList() {
     section.innerHTML = `
@@ -106,7 +112,7 @@ export async function PetsView(container: HTMLElement) {
       e.preventDefault();
       if (!nameInput || !typeInput || !listEl) return;
       const pet: Pet = {
-        id: nextPetId++,
+        id: newUuidV7(),
         name: nameInput.value,
         type: typeInput.value,
         medical: [],
@@ -121,7 +127,7 @@ export async function PetsView(container: HTMLElement) {
     listEl?.addEventListener("click", (e) => {
       const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-id]");
       if (!btn) return;
-      const id = Number(btn.dataset.id);
+      const id = btn.dataset.id!;
       const pet = pets.find((p) => p.id === id);
       if (pet) {
         PetDetailView(

@@ -1,6 +1,7 @@
 import { readTextFile, writeTextFile, mkdir, BaseDirectory } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
 import type { BudgetCategory, Expense } from "./models";
+import { newUuidV7 } from "./db/id";
 
 interface BudgetData {
   categories: BudgetCategory[];
@@ -16,14 +17,37 @@ const money = new Intl.NumberFormat(undefined, {
   currency: "GBP",
 });
 
-let nextCatId = 1;
-let nextExpId = 1;
-
 async function loadData(): Promise<BudgetData> {
   try {
     const p = await join(STORE_DIR, FILE_NAME);
     const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
-    return JSON.parse(json) as BudgetData;
+    const data = JSON.parse(json) as BudgetData | any;
+    let changed = false;
+    const idMap = new Map<number, string>();
+    data.categories = data.categories.map((c: any) => {
+      if (typeof c.id === "number") {
+        const id = newUuidV7();
+        idMap.set(c.id, id);
+        changed = true;
+        return { ...c, id };
+      }
+      return c;
+    });
+    data.expenses = data.expenses.map((e: any) => {
+      let id = e.id;
+      if (typeof id === "number") {
+        id = newUuidV7();
+        changed = true;
+      }
+      let catId = e.categoryId;
+      if (typeof catId === "number") {
+        catId = idMap.get(catId) ?? String(catId);
+        changed = true;
+      }
+      return { ...e, id, categoryId: catId };
+    });
+    if (changed) await saveData(data);
+    return data as BudgetData;
   } catch {
     return { categories: [], expenses: [] };
   }
@@ -139,8 +163,6 @@ export async function BudgetView(container: HTMLElement) {
   const exportBtn = section.querySelector<HTMLButtonElement>("#export-csv");
 
   const data = await loadData();
-  nextCatId = data.categories.reduce((m, c) => Math.max(m, c.id), 0) + 1;
-  nextExpId = data.expenses.reduce((m, e) => Math.max(m, e.id), 0) + 1;
   if (expCategory) updateCategoryOptions(expCategory, data.categories);
   if (summaryBody) renderSummary(summaryBody, data);
 
@@ -148,7 +170,7 @@ export async function BudgetView(container: HTMLElement) {
     e.preventDefault();
     if (!catName || !catBudget || !expCategory || !summaryBody) return;
     const cat: BudgetCategory = {
-      id: nextCatId++,
+      id: newUuidV7(),
       name: catName.value,
       monthlyBudget: Number(catBudget.value),
     };
@@ -170,8 +192,8 @@ export async function BudgetView(container: HTMLElement) {
     const [y, m, d] = expDate.value.split("-").map(Number);
     const dateLocalNoon = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0);
     const exp: Expense = {
-      id: nextExpId++,
-      categoryId: Number(expCategory.value),
+      id: newUuidV7(),
+      categoryId: expCategory.value,
       amount: Number(expAmount.value),
       date: dateLocalNoon.toISOString(),
       description: expDesc?.value || "",

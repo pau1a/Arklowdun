@@ -1,5 +1,5 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import * as opener from "@tauri-apps/plugin-opener";
+import { openPath } from "@tauri-apps/plugin-opener";
 import {
   readTextFile,
   writeTextFile,
@@ -13,8 +13,7 @@ import {
   sendNotification,
 } from "./notification";
 import type { PropertyDocument } from "./models";
-
-let nextId = 1;
+import { newUuidV7 } from "./db/id";
 
 const MAX_TIMEOUT = 2_147_483_647;
 function scheduleAt(ts: number, cb: () => void) {
@@ -51,7 +50,7 @@ function renderDocuments(listEl: HTMLUListElement, docs: PropertyDocument[]) {
     li.textContent = `${d.description} renews ${new Date(d.renewalDate).toLocaleDateString()} `;
     const btn = document.createElement("button");
     btn.textContent = "Open document";
-    btn.addEventListener("click", () => opener.open(d.document));
+    btn.addEventListener("click", () => openPath(d.document));
     li.appendChild(btn);
     listEl.appendChild(li);
   });
@@ -107,9 +106,16 @@ export async function PropertyView(container: HTMLElement) {
   const chooseBtn = section.querySelector<HTMLButtonElement>("#prop-choose");
 
   let docs: PropertyDocument[] = await loadDocuments();
+  let migrated = false;
+  docs.forEach((d) => {
+    if (typeof d.id === "number") {
+      d.id = newUuidV7();
+      migrated = true;
+    }
+  });
+  if (migrated) await saveDocuments(docs);
   if (listEl) renderDocuments(listEl, docs);
   await scheduleDocReminders(docs);
-  nextId = docs.reduce((m, d) => Math.max(m, d.id), 0) + 1;
 
   chooseBtn?.addEventListener("click", async () => {
     const selected = await openDialog({
@@ -138,7 +144,7 @@ export async function PropertyView(container: HTMLElement) {
     const dueTs = dueLocalNoon.getTime();
     const reminder = dueTs - 24 * 60 * 60 * 1000; // 1 day before
     const doc: PropertyDocument = {
-      id: nextId++,
+      id: newUuidV7(),
       description: descInput.value,
       renewalDate: dueLocalNoon.toISOString(),
       document: docInput.value,

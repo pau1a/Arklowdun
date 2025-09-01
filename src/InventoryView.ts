@@ -1,4 +1,4 @@
-import * as opener from "@tauri-apps/plugin-opener";
+import { openPath } from "@tauri-apps/plugin-opener";
 import {
   readTextFile,
   writeTextFile,
@@ -12,8 +12,7 @@ import {
   sendNotification,
 } from "./notification";
 import type { InventoryItem } from "./models";
-
-let nextId = 1;
+import { newUuidV7 } from "./db/id";
 
 const MAX_TIMEOUT = 2_147_483_647;
 function scheduleAt(ts: number, cb: () => void) {
@@ -49,7 +48,7 @@ function renderItems(listEl: HTMLUListElement, items: InventoryItem[]) {
     li.textContent = `${i.name} warranty expires ${new Date(i.warrantyExpiry).toLocaleDateString()} `;
     const btn = document.createElement("button");
     btn.textContent = "Open document";
-    btn.addEventListener("click", () => opener.open(i.document));
+    btn.addEventListener("click", () => openPath(i.document));
     li.appendChild(btn);
     listEl.appendChild(li);
   });
@@ -105,9 +104,16 @@ export async function InventoryView(container: HTMLElement) {
   const docInput = section.querySelector<HTMLInputElement>("#inv-doc");
 
   let items: InventoryItem[] = await loadItems();
+  let migrated = false;
+  items.forEach((i) => {
+    if (typeof i.id === "number") {
+      i.id = newUuidV7();
+      migrated = true;
+    }
+  });
+  if (migrated) await saveItems(items);
   if (listEl) renderItems(listEl, items);
   await scheduleWarrantyReminders(items);
-  nextId = items.reduce((m, i) => Math.max(m, i.id), 0) + 1;
 
   form?.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -119,7 +125,7 @@ export async function InventoryView(container: HTMLElement) {
     const expTs = warrantyLocalNoon.getTime();
     const reminder = expTs - 24 * 60 * 60 * 1000;
     const item: InventoryItem = {
-      id: nextId++,
+      id: newUuidV7(),
       name: nameInput.value,
       purchaseDate: purchaseLocalNoon.toISOString(),
       warrantyExpiry: warrantyLocalNoon.toISOString(),

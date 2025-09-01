@@ -1,4 +1,4 @@
-import * as opener from "@tauri-apps/plugin-opener";
+import { openPath } from "@tauri-apps/plugin-opener";
 import {
   readTextFile,
   writeTextFile,
@@ -12,8 +12,7 @@ import {
   sendNotification,
 } from "./notification";
 import type { Bill } from "./models";
-
-let nextId = 1;
+import { newUuidV7 } from "./db/id";
 
 const money = new Intl.NumberFormat(undefined, {
   style: "currency",
@@ -53,7 +52,7 @@ function renderBills(listEl: HTMLUListElement, bills: Bill[]) {
     li.textContent = `${money.format(b.amount)} due ${new Date(b.dueDate).toLocaleDateString()} `;
     const btn = document.createElement("button");
     btn.textContent = "Open document";
-    btn.addEventListener("click", () => opener.open(b.document));
+    btn.addEventListener("click", () => openPath(b.document));
     li.appendChild(btn);
     listEl.appendChild(li);
   });
@@ -108,11 +107,16 @@ export async function BillsView(container: HTMLElement) {
   const docInput = section.querySelector<HTMLInputElement>("#bill-doc");
 
   let bills: Bill[] = await loadBills();
+  let migrated = false;
+  bills.forEach((b) => {
+    if (typeof b.id === "number") {
+      b.id = newUuidV7();
+      migrated = true;
+    }
+  });
+  if (migrated) await saveBills(bills);
   if (listEl) renderBills(listEl, bills);
-  // schedule reminders for anything already saved
   await scheduleBillReminders(bills);
-  // ensure IDs keep increasing across restarts
-  nextId = bills.reduce((m, b) => Math.max(m, b.id), 0) + 1;
 
   form?.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -123,7 +127,7 @@ export async function BillsView(container: HTMLElement) {
     const dueTs = dueLocalNoon.getTime();
     const reminder = dueTs - 24 * 60 * 60 * 1000; // 1 day before
     const bill: Bill = {
-      id: nextId++,
+      id: newUuidV7(),
       amount: parseFloat(amountInput.value),
       dueDate: dueLocalNoon.toISOString(),
       document: docInput.value,

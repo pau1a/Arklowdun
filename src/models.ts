@@ -1,5 +1,5 @@
 export interface Bill {
-  id: number;
+  id: string;
   amount: number;
   dueDate: string; // ISO string
   document: string; // file path
@@ -7,7 +7,7 @@ export interface Bill {
 }
 
 export interface Policy {
-  id: number;
+  id: string;
   amount: number;
   dueDate: string; // ISO string
   document: string; // file path
@@ -15,7 +15,7 @@ export interface Policy {
 }
 
 export interface PropertyDocument {
-  id: number;
+  id: string;
   description: string;
   renewalDate: string; // ISO string
   document: string; // file path
@@ -30,7 +30,7 @@ export interface MaintenanceEntry {
 }
 
 export interface Vehicle {
-  id: number;
+  id: string;
   name: string;
   motDate: string; // ISO string
   serviceDate: string; // ISO string
@@ -47,14 +47,14 @@ export interface PetMedicalRecord {
 }
 
 export interface Pet {
-  id: number;
+  id: string;
   name: string;
   type: string;
   medical: PetMedicalRecord[];
 }
 
 export interface FamilyMember {
-  id: number;
+  id: string;
   name: string;
   birthday: string; // ISO string
   notes: string;
@@ -62,7 +62,7 @@ export interface FamilyMember {
 }
 
 export interface InventoryItem {
-  id: number;
+  id: string;
   name: string;
   purchaseDate: string; // ISO string
   warrantyExpiry: string; // ISO string
@@ -71,14 +71,14 @@ export interface InventoryItem {
 }
 
 export interface BudgetCategory {
-  id: number;
+  id: string;
   name: string;
   monthlyBudget: number;
 }
 
 export interface Expense {
-  id: number;
-  categoryId: number;
+  id: string;
+  categoryId: string;
   amount: number;
   date: string; // ISO string
   description: string;

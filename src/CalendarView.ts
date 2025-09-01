@@ -6,7 +6,7 @@ import {
 } from "./notification";
 
 export interface CalendarEvent {
-  id: number;
+  id: string;
   title: string;
   datetime: string; // ISO string
   reminder?: number; // timestamp in ms

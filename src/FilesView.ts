@@ -25,6 +25,7 @@ async function listDirectory(
     return;
   }
   for (const entry of entries) {
+    const path = (entry as any).path as string;
     const li = document.createElement("li");
     li.textContent = entry.name;
     const del = document.createElement("button");
@@ -32,7 +33,7 @@ async function listDirectory(
     del.addEventListener("click", async (e) => {
       e.stopPropagation();
       try {
-        await remove(entry.path, { recursive: entry.isDirectory === true });
+        await remove(path, { recursive: entry.isDirectory === true });
         await listDirectory(dir, listEl, previewEl, pathEl, setDir);
       } catch (err) {
         console.error("Failed to delete", err);
@@ -41,13 +42,13 @@ async function listDirectory(
     li.appendChild(del);
     li.addEventListener("click", async () => {
       if (entry.isDirectory) {
-        setDir(entry.path);
-        pathEl.textContent = entry.path;
-        await listDirectory(entry.path, listEl, previewEl, pathEl, setDir);
+        setDir(path);
+        pathEl.textContent = path;
+        await listDirectory(path, listEl, previewEl, pathEl, setDir);
       } else {
         previewEl.innerHTML = "";
         const ext = entry.name.split(".").pop()?.toLowerCase();
-        const url = convertFileSrc(entry.path);
+        const url = convertFileSrc(path);
         if (
           ext &&
           ["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg"].includes(ext)
