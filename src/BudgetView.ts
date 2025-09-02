@@ -53,6 +53,11 @@ async function loadData(): Promise<BudgetData> {
           c.household_id = hh;
           changed = true;
         }
+        if ("deletedAt" in c) {
+          c.deleted_at = c.deletedAt;
+          delete c.deletedAt;
+          changed = true;
+        }
         return c;
       })
       .filter((c: any) => c.deleted_at == null);
@@ -89,6 +94,11 @@ async function loadData(): Promise<BudgetData> {
         }
         if (!e.household_id) {
           e.household_id = hh;
+          changed = true;
+        }
+        if ("deletedAt" in e) {
+          e.deleted_at = e.deletedAt;
+          delete e.deletedAt;
           changed = true;
         }
         return { ...e, id, category_id: catId, date };

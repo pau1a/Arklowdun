@@ -78,7 +78,6 @@ export function PetDetailView(
       household_id: pet.household_id || (await defaultHouseholdId()),
       created_at: now,
       updated_at: now,
-      deleted_at: null,
     };
     pet.medical.push(record);
     pet.updated_at = now;

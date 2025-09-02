@@ -74,6 +74,11 @@ async function loadPolicies(): Promise<Policy[]> {
         i.household_id = hh;
         changed = true;
       }
+      if ("deletedAt" in i) {
+        i.deleted_at = i.deletedAt;
+        delete i.deletedAt;
+        changed = true;
+      }
       return i;
     });
     arr = arr.filter((i: any) => i.deleted_at == null);

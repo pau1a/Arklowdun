@@ -68,16 +68,18 @@ async function loadPets(): Promise<Pet[]> {
               m.household_id = hh;
               changed = true;
             }
-            if (m.deleted_at === undefined) {
-              m.deleted_at = null;
+            if ("deletedAt" in m) {
+              m.deleted_at = m.deletedAt;
+              delete m.deletedAt;
               changed = true;
             }
             return m;
           })
           .filter((m: any) => m.deleted_at == null);
       }
-      if (i.deleted_at === undefined) {
-        i.deleted_at = null;
+      if ("deletedAt" in i) {
+        i.deleted_at = i.deletedAt;
+        delete i.deletedAt;
         changed = true;
       }
       if (!i.created_at) {
