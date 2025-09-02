@@ -141,3 +141,22 @@ normalized to forward slashes, leading slashes removed, Windows drive prefixes
 stripped, and `.`/`..` segments collapsed to prevent path traversal. The SQL
 backfill only normalizes slashes and trims a leading `/`, so legacy rows may
 retain `.` or `..` segments until rewritten by the application.
+
+## JSON Import Tool
+
+The `src/tools/import-json.ts` script loads a legacy JSON export and writes the
+records into the SQLite database. Numeric identifiers are replaced with new
+UUIDv7 values, timestamp fields are coerced to milliseconds, and list tables
+receive sequential `position` values starting at zero. All inserts run inside a
+transaction and commit only if the entire import succeeds. A sentinel row is
+written to the `settings` table to prevent accidental re-runs.
+
+### Usage
+
+```bash
+node --loader ts-node/esm src/tools/import-json.ts /path/to/data.json --db "/absolute/path/to/app.sqlite"
+# Dry run without writing to the database
+node --loader ts-node/esm src/tools/import-json.ts /path/to/data.json --db "/absolute/path/to/app.sqlite" --dry-run
+# Force re-run even if a sentinel exists
+node --loader ts-node/esm src/tools/import-json.ts /path/to/data.json --db "/absolute/path/to/app.sqlite" --force
+```
