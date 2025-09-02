@@ -1,55 +1,77 @@
 export interface Bill {
   id: string;
   amount: number;
-  dueDate: number; // timestamp ms
+  due_date: number; // timestamp ms
   document: string; // file path
   reminder?: number; // timestamp ms
   household_id?: string;
+  created_at: number;
+  updated_at: number;
+  deleted_at?: number | null;
 }
 
 export interface Policy {
   id: string;
   amount: number;
-  dueDate: number; // timestamp ms
+  due_date: number; // timestamp ms
   document: string; // file path
   reminder?: number; // timestamp ms
   household_id?: string;
+  created_at: number;
+  updated_at: number;
+  deleted_at?: number | null;
 }
 
 export interface PropertyDocument {
   id: string;
   description: string;
-  renewalDate: number; // timestamp ms
+  renewal_date: number; // timestamp ms
   document: string; // file path
   reminder?: number; // timestamp ms
   household_id?: string;
+  created_at: number;
+  updated_at: number;
+  deleted_at?: number | null;
 }
 
 export interface MaintenanceEntry {
+  id: string;
+  vehicle_id: string;
   date: number; // timestamp ms
   type: string;
   cost: number;
   document: string; // file path
   household_id?: string;
+  created_at: number;
+  updated_at: number;
+  deleted_at?: number | null;
 }
 
 export interface Vehicle {
   id: string;
   name: string;
-  motDate: number; // timestamp ms
-  serviceDate: number; // timestamp ms
-  motReminder?: number; // timestamp ms
-  serviceReminder?: number; // timestamp ms
+  mot_date: number; // timestamp ms
+  service_date: number; // timestamp ms
+  mot_reminder?: number; // timestamp ms
+  service_reminder?: number; // timestamp ms
   maintenance: MaintenanceEntry[];
   household_id?: string;
+  created_at: number;
+  updated_at: number;
+  deleted_at?: number | null;
 }
 
 export interface PetMedicalRecord {
+  id: string;
+  pet_id: string;
   date: number; // timestamp ms
   description: string;
   document: string; // file path
   reminder?: number; // timestamp ms
   household_id?: string;
+  created_at: number;
+  updated_at: number;
+  deleted_at?: number | null;
 }
 
 export interface Pet {
@@ -58,6 +80,9 @@ export interface Pet {
   type: string;
   medical: PetMedicalRecord[];
   household_id?: string;
+  created_at: number;
+  updated_at: number;
+  deleted_at?: number | null;
 }
 
 export interface FamilyMember {
@@ -67,31 +92,54 @@ export interface FamilyMember {
   notes: string;
   documents: string[]; // file paths
   household_id?: string;
+  created_at: number;
+  updated_at: number;
+  deleted_at?: number | null;
 }
 
 export interface InventoryItem {
   id: string;
   name: string;
-  purchaseDate: number; // timestamp ms
-  warrantyExpiry: number; // timestamp ms
+  purchase_date: number; // timestamp ms
+  warranty_expiry: number; // timestamp ms
   document: string; // file path
   reminder?: number; // timestamp ms
   household_id?: string;
+  created_at: number;
+  updated_at: number;
+  deleted_at?: number | null;
 }
 
 export interface BudgetCategory {
   id: string;
   name: string;
-  monthlyBudget: number;
+  monthly_budget: number;
   household_id?: string;
+  created_at: number;
+  updated_at: number;
+  deleted_at?: number | null;
 }
 
 export interface Expense {
   id: string;
-  categoryId: string;
+  category_id: string;
   amount: number;
   date: number; // timestamp ms
   description: string;
   household_id?: string;
+  created_at: number;
+  updated_at: number;
+  deleted_at?: number | null;
+}
+
+export interface Event {
+  id: string;
+  household_id: string;
+  title: string;
+  datetime: number;
+  reminder?: number;
+  created_at: number;
+  updated_at: number;
+  deleted_at?: number | null;
 }
 

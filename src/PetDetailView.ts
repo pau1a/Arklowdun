@@ -1,7 +1,8 @@
 import { openPath } from "@tauri-apps/plugin-opener";
 import type { Pet, PetMedicalRecord } from "./models";
-import { toDate } from "./db/time";
+import { nowMs, toDate } from "./db/time";
 import { defaultHouseholdId } from "./db/household";
+import { newUuidV7 } from "./db/id";
 
 function renderRecords(listEl: HTMLUListElement, records: PetMedicalRecord[]) {
   listEl.innerHTML = "";
@@ -66,14 +67,21 @@ export function PetDetailView(
       const remDate = new Date(ry, (rm ?? 1) - 1, rd ?? 1, 12, 0, 0, 0);
       reminder = remDate.getTime();
     }
+    const now = nowMs();
     const record: PetMedicalRecord = {
+      id: newUuidV7(),
+      pet_id: pet.id,
       date: recordDate.getTime(),
       description: descInput.value,
       document: docInput?.value ?? "",
       reminder,
       household_id: pet.household_id || (await defaultHouseholdId()),
+      created_at: now,
+      updated_at: now,
+      deleted_at: null,
     };
     pet.medical.push(record);
+    pet.updated_at = now;
     onChange();
     renderRecords(listEl, pet.medical);
     form.reset();

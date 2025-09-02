@@ -26,18 +26,37 @@ async function loadJson<T>(file: string): Promise<T[]> {
     let changed = false;
     arr = arr.map((i: any) => {
       if (typeof i.id === "number") i.id = newUuidV7();
+      const rename: Record<string, string> = {
+        dueDate: "due_date",
+        renewalDate: "renewal_date",
+        warrantyExpiry: "warranty_expiry",
+        purchaseDate: "purchase_date",
+        motDate: "mot_date",
+        serviceDate: "service_date",
+        motReminder: "mot_reminder",
+        serviceReminder: "service_reminder",
+        categoryId: "category_id",
+        monthlyBudget: "monthly_budget",
+      };
+      for (const [oldK, newK] of Object.entries(rename)) {
+        if (oldK in i) {
+          i[newK] = i[oldK];
+          delete i[oldK];
+          changed = true;
+        }
+      }
       for (const k of [
-        "dueDate",
-        "renewalDate",
-        "warrantyExpiry",
-        "purchaseDate",
+        "due_date",
+        "renewal_date",
+        "warranty_expiry",
+        "purchase_date",
         "date",
-        "motDate",
-        "serviceDate",
+        "mot_date",
+        "service_date",
         "datetime",
         "reminder",
-        "motReminder",
-        "serviceReminder",
+        "mot_reminder",
+        "service_reminder",
         "birthday",
       ]) {
         if (k in i) {
@@ -48,12 +67,21 @@ async function loadJson<T>(file: string): Promise<T[]> {
           }
         }
       }
+      if (!i.created_at) {
+        i.created_at = nowMs();
+        changed = true;
+      }
+      if (!i.updated_at) {
+        i.updated_at = i.created_at;
+        changed = true;
+      }
       if (!i.household_id) {
         i.household_id = hh;
         changed = true;
       }
       return i as T;
     });
+    arr = arr.filter((i: any) => i.deleted_at == null);
     if (changed) {
       await writeTextFile(p, JSON.stringify(arr), { baseDir: BaseDirectory.AppLocalData });
     }
@@ -91,10 +119,10 @@ export async function DashboardView(container: HTMLElement) {
 
   const bills = await loadJson<Bill>("bills.json");
   const nextBill = bills
-    .filter((b) => b.dueDate >= now)
-    .sort((a, b) => a.dueDate - b.dueDate)[0];
+    .filter((b) => b.due_date >= now)
+    .sort((a, b) => a.due_date - b.due_date)[0];
   if (nextBill) {
-    const due = nextBill.dueDate;
+    const due = nextBill.due_date;
     items.push({
       date: due,
       text: `Bill ${money.format(nextBill.amount)} due ${toDate(due).toLocaleDateString()}`,
@@ -103,10 +131,10 @@ export async function DashboardView(container: HTMLElement) {
 
   const policies = await loadJson<Policy>("policies.json");
   const nextPolicy = policies
-    .filter((p) => p.dueDate >= now)
-    .sort((a, b) => a.dueDate - b.dueDate)[0];
+    .filter((p) => p.due_date >= now)
+    .sort((a, b) => a.due_date - b.due_date)[0];
   if (nextPolicy) {
-    const due = nextPolicy.dueDate;
+    const due = nextPolicy.due_date;
     items.push({
       date: due,
       text: `Policy ${money.format(nextPolicy.amount)} renews ${toDate(due).toLocaleDateString()}`,
@@ -116,10 +144,10 @@ export async function DashboardView(container: HTMLElement) {
   const vehicles = await loadJson<Vehicle>("vehicles.json");
   const vehicleDates: { date: number; text: string }[] = [];
   vehicles.forEach((v) => {
-    const mot = v.motDate;
+    const mot = v.mot_date;
     if (mot >= now)
       vehicleDates.push({ date: mot, text: `${v.name} MOT ${toDate(mot).toLocaleDateString()}` });
-    const service = v.serviceDate;
+    const service = v.service_date;
     if (service >= now)
       vehicleDates.push({ date: service, text: `${v.name} service ${toDate(service).toLocaleDateString()}` });
   });

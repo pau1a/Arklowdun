@@ -2,7 +2,7 @@ import { readTextFile, writeTextFile, mkdir, BaseDirectory } from "@tauri-apps/p
 import { join } from "@tauri-apps/api/path";
 import type { FamilyMember } from "./models";
 import { newUuidV7 } from "./db/id";
-import { toDate } from "./db/time";
+import { nowMs, toDate } from "./db/time";
 import { toMs } from "./db/normalize";
 import { defaultHouseholdId } from "./db/household";
 
@@ -28,12 +28,21 @@ async function loadMembers(): Promise<FamilyMember[]> {
           i.birthday = ms;
         }
       }
+      if (!i.created_at) {
+        i.created_at = nowMs();
+        changed = true;
+      }
+      if (!i.updated_at) {
+        i.updated_at = i.created_at;
+        changed = true;
+      }
       if (!i.household_id) {
         i.household_id = hh;
         changed = true;
       }
       return i;
     });
+    arr = arr.filter((i: any) => i.deleted_at == null);
     if (changed) await saveMembers(arr as FamilyMember[]);
     return arr as FamilyMember[];
   } catch (e) {
@@ -99,6 +108,7 @@ export async function FamilyView(container: HTMLElement) {
       if (!nameInput || !bdayInput || !listEl) return;
       const [y, m, d] = bdayInput.value.split("-").map(Number);
       const bday = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0);
+      const now = nowMs();
       const member: FamilyMember = {
         id: newUuidV7(),
         name: nameInput.value,
@@ -106,6 +116,8 @@ export async function FamilyView(container: HTMLElement) {
         notes: "",
         documents: [],
         household_id: await defaultHouseholdId(),
+        created_at: now,
+        updated_at: now,
       };
       members.push(member);
       saveMembers(members).then(() => {
@@ -169,11 +181,13 @@ export async function FamilyView(container: HTMLElement) {
         const dt = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0);
         member.birthday = dt.getTime();
       }
+      member.updated_at = nowMs();
       saveMembers(members).then(() => showList());
     });
 
     notesArea?.addEventListener("change", () => {
       member.notes = notesArea.value;
+      member.updated_at = nowMs();
       saveMembers(members);
     });
 
@@ -181,6 +195,7 @@ export async function FamilyView(container: HTMLElement) {
       const [y, m, d] = bdayInput.value.split("-").map(Number);
       const dt = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0);
       member.birthday = dt.getTime();
+      member.updated_at = nowMs();
       saveMembers(members);
     });
 
@@ -188,6 +203,7 @@ export async function FamilyView(container: HTMLElement) {
       if (!docInput || !docInput.value) return;
       member.documents.push(docInput.value);
       docInput.value = "";
+      member.updated_at = nowMs();
       saveMembers(members).then(renderDocs);
     });
 
@@ -196,6 +212,7 @@ export async function FamilyView(container: HTMLElement) {
       if (!btn) return;
       const idx = Number(btn.dataset.idx);
       member.documents.splice(idx, 1);
+      member.updated_at = nowMs();
       saveMembers(members).then(renderDocs);
     });
   }

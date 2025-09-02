@@ -45,7 +45,15 @@ async function loadPolicies(): Promise<Policy[]> {
         i.id = newUuidV7();
         changed = true;
       }
-      for (const k of ["dueDate", "reminder"]) {
+      if ("dueDate" in i) {
+        const ms = toMs(i.dueDate);
+        if (ms !== undefined) {
+          i.due_date = ms;
+          changed = true;
+        }
+        delete i.dueDate;
+      }
+      for (const k of ["due_date", "reminder"]) {
         if (k in i) {
           const ms = toMs(i[k]);
           if (ms !== undefined) {
@@ -54,12 +62,21 @@ async function loadPolicies(): Promise<Policy[]> {
           }
         }
       }
+      if (!i.created_at) {
+        i.created_at = nowMs();
+        changed = true;
+      }
+      if (!i.updated_at) {
+        i.updated_at = i.created_at;
+        changed = true;
+      }
       if (!i.household_id) {
         i.household_id = hh;
         changed = true;
       }
       return i;
     });
+    arr = arr.filter((i: any) => i.deleted_at == null);
     if (changed) await savePolicies(arr as Policy[]);
     return arr as Policy[];
   } catch (e) {
@@ -77,7 +94,7 @@ function renderPolicies(listEl: HTMLUListElement, policies: Policy[]) {
   listEl.innerHTML = "";
   policies.forEach((p) => {
     const li = document.createElement("li");
-    li.textContent = `${money.format(p.amount)} renews ${toDate(p.dueDate).toLocaleDateString()} `;
+    li.textContent = `${money.format(p.amount)} renews ${toDate(p.due_date).toLocaleDateString()} `;
     const btn = document.createElement("button");
     btn.textContent = "Open document";
     btn.addEventListener("click", () => openPath(p.document));
@@ -94,7 +111,7 @@ async function schedulePolicyReminders(policies: Policy[]) {
   if (!granted) return;
   const now = nowMs();
   policies.forEach((p) => {
-    const dueTs = p.dueDate;
+    const dueTs = p.due_date;
     if (!p.reminder) return;
     if (p.reminder > now) {
       scheduleAt(p.reminder, () => {
@@ -144,13 +161,16 @@ export async function InsuranceView(container: HTMLElement) {
     const dueLocalNoon = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0);
     const dueTs = dueLocalNoon.getTime();
     const reminder = dueTs - 24 * 60 * 60 * 1000; // 1 day before
+    const now = nowMs();
     const policy: Policy = {
       id: newUuidV7(),
       amount: parseFloat(amountInput.value),
-      dueDate: dueTs,
+      due_date: dueTs,
       document: docInput.value,
       reminder,
       household_id: await defaultHouseholdId(),
+      created_at: now,
+      updated_at: now,
     };
     policies.push(policy);
     savePolicies(policies).then(() => {

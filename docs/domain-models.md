@@ -1,20 +1,144 @@
 # Domain Models
 
-All domain records belong to a household. The `household` table stores each group's identity:
+This document enumerates the core entities persisted by the application.
+All identifiers are UUID strings stored as `TEXT`. Timestamps are epoch
+milliseconds stored as `INTEGER`. Soft deletions use a `deleted_at`
+timestamp which is `NULL` when the record is active.
 
-```sql
-CREATE TABLE household (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  created_at INTEGER,
-  updated_at INTEGER
-);
-```
+## household
+- `id` `TEXT` – primary key
+- `name` `TEXT`
+- `created_at` `INTEGER`
+- `updated_at` `INTEGER`
+- `deleted_at` `INTEGER?`
 
-Each domain table includes a `household_id` foreign key referencing `household(id)` and an index on `(household_id, updated_at)` to scope queries efficiently.
+## events
+- `id` `TEXT`
+- `household_id` `TEXT`
+- `title` `TEXT`
+- `datetime` `INTEGER`
+- `reminder` `INTEGER?`
+- `created_at` `INTEGER`
+- `updated_at` `INTEGER`
+- `deleted_at` `INTEGER?`
 
-Currently the application seeds a single default household, but the schema supports multiple households. Future work will expose UI and APIs for switching between households and sharing data across them.
+## bills
+- `id` `TEXT`
+- `amount` `INTEGER`
+- `due_date` `INTEGER`
+- `document` `TEXT`
+- `reminder` `INTEGER?`
+- `household_id` `TEXT`
+- `created_at` `INTEGER`
+- `updated_at` `INTEGER`
+- `deleted_at` `INTEGER?`
 
-Current tables include `events`, `bills`, `policies`, `property_documents`, `inventory_items`, `vehicles`, `vehicle_maintenance`,
-`pets`, `pet_medical`, `family_members`, `budget_categories`, and `expenses`. Date-related columns are stored as INTEGER milliseconds
-since the Unix epoch.
+## policies
+- `id` `TEXT`
+- `amount` `INTEGER`
+- `due_date` `INTEGER`
+- `document` `TEXT`
+- `reminder` `INTEGER?`
+- `household_id` `TEXT`
+- `created_at` `INTEGER`
+- `updated_at` `INTEGER`
+- `deleted_at` `INTEGER?`
+
+## property_documents
+- `id` `TEXT`
+- `description` `TEXT`
+- `renewal_date` `INTEGER`
+- `document` `TEXT`
+- `reminder` `INTEGER?`
+- `household_id` `TEXT`
+- `created_at` `INTEGER`
+- `updated_at` `INTEGER`
+- `deleted_at` `INTEGER?`
+
+## inventory_items
+- `id` `TEXT`
+- `name` `TEXT`
+- `purchase_date` `INTEGER`
+- `warranty_expiry` `INTEGER`
+- `document` `TEXT`
+- `reminder` `INTEGER?`
+- `household_id` `TEXT`
+- `created_at` `INTEGER`
+- `updated_at` `INTEGER`
+- `deleted_at` `INTEGER?`
+
+## vehicles
+- `id` `TEXT`
+- `name` `TEXT`
+- `mot_date` `INTEGER`
+- `service_date` `INTEGER`
+- `mot_reminder` `INTEGER?`
+- `service_reminder` `INTEGER?`
+- `household_id` `TEXT`
+- `created_at` `INTEGER`
+- `updated_at` `INTEGER`
+- `deleted_at` `INTEGER?`
+
+## vehicle_maintenance
+- `id` `TEXT`
+- `vehicle_id` `TEXT`
+- `date` `INTEGER`
+- `type` `TEXT`
+- `cost` `INTEGER`
+- `document` `TEXT`
+- `household_id` `TEXT`
+- `created_at` `INTEGER`
+- `updated_at` `INTEGER`
+- `deleted_at` `INTEGER?`
+
+## pets
+- `id` `TEXT`
+- `name` `TEXT`
+- `type` `TEXT`
+- `household_id` `TEXT`
+- `created_at` `INTEGER`
+- `updated_at` `INTEGER`
+- `deleted_at` `INTEGER?`
+
+## pet_medical
+- `id` `TEXT`
+- `pet_id` `TEXT`
+- `date` `INTEGER`
+- `description` `TEXT`
+- `document` `TEXT`
+- `reminder` `INTEGER?`
+- `household_id` `TEXT`
+- `created_at` `INTEGER`
+- `updated_at` `INTEGER`
+- `deleted_at` `INTEGER?`
+
+## family_members
+- `id` `TEXT`
+- `name` `TEXT`
+- `birthday` `INTEGER`
+- `notes` `TEXT`
+- `household_id` `TEXT`
+- `created_at` `INTEGER`
+- `updated_at` `INTEGER`
+- `deleted_at` `INTEGER?`
+
+## budget_categories
+- `id` `TEXT`
+- `name` `TEXT`
+- `monthly_budget` `INTEGER`
+- `household_id` `TEXT`
+- `created_at` `INTEGER`
+- `updated_at` `INTEGER`
+- `deleted_at` `INTEGER?`
+
+## expenses
+- `id` `TEXT`
+- `category_id` `TEXT`
+- `amount` `INTEGER`
+- `date` `INTEGER`
+- `description` `TEXT`
+- `household_id` `TEXT`
+- `created_at` `INTEGER`
+- `updated_at` `INTEGER`
+- `deleted_at` `INTEGER?`
+

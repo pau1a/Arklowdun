@@ -41,7 +41,15 @@ async function loadDocuments(): Promise<PropertyDocument[]> {
         i.id = newUuidV7();
         changed = true;
       }
-      for (const k of ["renewalDate", "reminder"]) {
+      if ("renewalDate" in i) {
+        const ms = toMs(i.renewalDate);
+        if (ms !== undefined) {
+          i.renewal_date = ms;
+          changed = true;
+        }
+        delete i.renewalDate;
+      }
+      for (const k of ["renewal_date", "reminder"]) {
         if (k in i) {
           const ms = toMs(i[k]);
           if (ms !== undefined) {
@@ -50,12 +58,21 @@ async function loadDocuments(): Promise<PropertyDocument[]> {
           }
         }
       }
+      if (!i.created_at) {
+        i.created_at = nowMs();
+        changed = true;
+      }
+      if (!i.updated_at) {
+        i.updated_at = i.created_at;
+        changed = true;
+      }
       if (!i.household_id) {
         i.household_id = hh;
         changed = true;
       }
       return i;
     });
+    arr = arr.filter((i: any) => i.deleted_at == null);
     if (changed) await saveDocuments(arr as PropertyDocument[]);
     return arr as PropertyDocument[];
   } catch (e) {
@@ -75,7 +92,7 @@ function renderDocuments(listEl: HTMLUListElement, docs: PropertyDocument[]) {
   listEl.innerHTML = "";
   docs.forEach((d) => {
     const li = document.createElement("li");
-    li.textContent = `${d.description} renews ${toDate(d.renewalDate).toLocaleDateString()} `;
+    li.textContent = `${d.description} renews ${toDate(d.renewal_date).toLocaleDateString()} `;
     const btn = document.createElement("button");
     btn.textContent = "Open document";
     btn.addEventListener("click", () => openPath(d.document));
@@ -92,7 +109,7 @@ async function scheduleDocReminders(docs: PropertyDocument[]) {
   if (!granted) return;
   const now = nowMs();
   docs.forEach((d) => {
-    const dueTs = d.renewalDate;
+    const dueTs = d.renewal_date;
     if (!d.reminder) return;
     if (d.reminder > now) {
       scheduleAt(d.reminder, () => {
@@ -163,13 +180,16 @@ export async function PropertyView(container: HTMLElement) {
     const dueLocalNoon = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0);
     const dueTs = dueLocalNoon.getTime();
     const reminder = dueTs - 24 * 60 * 60 * 1000; // 1 day before
+    const now = nowMs();
     const doc: PropertyDocument = {
       id: newUuidV7(),
       description: descInput.value,
-      renewalDate: dueTs,
+      renewal_date: dueTs,
       document: docInput.value,
       reminder,
       household_id: await defaultHouseholdId(),
+      created_at: now,
+      updated_at: now,
     };
     docs.push(doc);
     saveDocuments(docs).then(() => {

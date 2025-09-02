@@ -11,18 +11,20 @@ mod state;
 mod migrate;
 
 #[derive(Serialize, Deserialize, Clone)]
-struct Event {
+pub struct Event {
     #[serde(default)]
-    id: String,
+    pub id: String,
     #[serde(default)]
-    household_id: String,
-    title: String,
-    datetime: i64,
-    reminder: Option<i64>,
+    pub household_id: String,
+    pub title: String,
+    pub datetime: i64,
+    pub reminder: Option<i64>,
     #[serde(default)]
-    created_at: i64,
+    pub created_at: i64,
     #[serde(default)]
-    updated_at: i64,
+    pub updated_at: i64,
+    #[serde(default)]
+    pub deleted_at: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -79,6 +81,7 @@ fn read_events(app: &tauri::AppHandle, state: &tauri::State<state::AppState>) ->
                         reminder,
                         created_at: time::now_ms(),
                         updated_at: time::now_ms(),
+                        deleted_at: None,
                     });
                 }
                 RawEvent::OldStringId { id, title, datetime, reminder } => {
@@ -94,6 +97,7 @@ fn read_events(app: &tauri::AppHandle, state: &tauri::State<state::AppState>) ->
                         reminder,
                         created_at: time::now_ms(),
                         updated_at: time::now_ms(),
+                        deleted_at: None,
                     });
                 }
             }
@@ -118,7 +122,8 @@ fn write_events(app: &tauri::AppHandle, events: &Vec<Event>) -> Result<(), Strin
 
 #[tauri::command]
 fn get_events(app: tauri::AppHandle, state: tauri::State<state::AppState>) -> Result<Vec<Event>, String> {
-    Ok(read_events(&app, &state))
+    let events = read_events(&app, &state);
+    Ok(events.into_iter().filter(|e| e.deleted_at.is_none()).collect())
 }
 
 #[tauri::command]
@@ -128,6 +133,7 @@ fn add_event(app: tauri::AppHandle, state: tauri::State<state::AppState>, mut ev
     let now = time::now_ms();
     event.created_at = now;
     event.updated_at = now;
+    event.deleted_at = None;
     if event.household_id.is_empty() {
         event.household_id = state.default_household_id.clone();
     }
@@ -139,11 +145,12 @@ fn add_event(app: tauri::AppHandle, state: tauri::State<state::AppState>, mut ev
 #[tauri::command]
 fn update_event(app: tauri::AppHandle, state: tauri::State<state::AppState>, event: Event) -> Result<(), String> {
     let mut events = read_events(&app, &state);
-    if let Some(e) = events.iter_mut().find(|e| e.id == event.id) {
+    if let Some(e) = events.iter_mut().find(|e| e.id == event.id && e.deleted_at.is_none()) {
         let mut new_event = event;
         new_event.created_at = e.created_at;
         new_event.updated_at = time::now_ms();
         new_event.household_id = e.household_id.clone();
+        new_event.deleted_at = e.deleted_at;
         *e = new_event;
         write_events(&app, &events)
     } else {
@@ -154,12 +161,12 @@ fn update_event(app: tauri::AppHandle, state: tauri::State<state::AppState>, eve
 #[tauri::command]
 fn delete_event(app: tauri::AppHandle, state: tauri::State<state::AppState>, id: String) -> Result<(), String> {
     let mut events = read_events(&app, &state);
-    let len_before = events.len();
-    events.retain(|e| e.id != id);
-    if events.len() == len_before {
-        return Err("Event not found".into());
+    if let Some(e) = events.iter_mut().find(|e| e.id == id && e.deleted_at.is_none()) {
+        e.deleted_at = Some(time::now_ms());
+        write_events(&app, &events)
+    } else {
+        Err("Event not found".into())
     }
-    write_events(&app, &events)
 }
 
 #[tauri::command]
