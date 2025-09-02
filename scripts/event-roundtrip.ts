@@ -10,7 +10,6 @@ try {
     reminder: 2,
     created_at: 3,
     updated_at: 3,
-    deleted_at: null,
   };
 
   const input = JSON.stringify(example);

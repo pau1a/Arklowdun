@@ -7,7 +7,7 @@ export interface Bill {
   household_id?: string;
   created_at: number;
   updated_at: number;
-  deleted_at?: number | null;
+  deleted_at?: number;
 }
 
 export interface Policy {
@@ -19,7 +19,7 @@ export interface Policy {
   household_id?: string;
   created_at: number;
   updated_at: number;
-  deleted_at?: number | null;
+  deleted_at?: number;
 }
 
 export interface PropertyDocument {
@@ -31,7 +31,7 @@ export interface PropertyDocument {
   household_id?: string;
   created_at: number;
   updated_at: number;
-  deleted_at?: number | null;
+  deleted_at?: number;
 }
 
 export interface MaintenanceEntry {
@@ -44,7 +44,7 @@ export interface MaintenanceEntry {
   household_id?: string;
   created_at: number;
   updated_at: number;
-  deleted_at?: number | null;
+  deleted_at?: number;
 }
 
 export interface Vehicle {
@@ -58,7 +58,7 @@ export interface Vehicle {
   household_id?: string;
   created_at: number;
   updated_at: number;
-  deleted_at?: number | null;
+  deleted_at?: number;
 }
 
 export interface PetMedicalRecord {
@@ -71,7 +71,7 @@ export interface PetMedicalRecord {
   household_id?: string;
   created_at: number;
   updated_at: number;
-  deleted_at?: number | null;
+  deleted_at?: number;
 }
 
 export interface Pet {
@@ -82,7 +82,7 @@ export interface Pet {
   household_id?: string;
   created_at: number;
   updated_at: number;
-  deleted_at?: number | null;
+  deleted_at?: number;
 }
 
 export interface FamilyMember {
@@ -94,7 +94,7 @@ export interface FamilyMember {
   household_id?: string;
   created_at: number;
   updated_at: number;
-  deleted_at?: number | null;
+  deleted_at?: number;
 }
 
 export interface InventoryItem {
@@ -107,7 +107,7 @@ export interface InventoryItem {
   household_id?: string;
   created_at: number;
   updated_at: number;
-  deleted_at?: number | null;
+  deleted_at?: number;
 }
 
 export interface BudgetCategory {
@@ -117,7 +117,7 @@ export interface BudgetCategory {
   household_id?: string;
   created_at: number;
   updated_at: number;
-  deleted_at?: number | null;
+  deleted_at?: number;
 }
 
 export interface Expense {
@@ -129,7 +129,7 @@ export interface Expense {
   household_id?: string;
   created_at: number;
   updated_at: number;
-  deleted_at?: number | null;
+  deleted_at?: number;
 }
 
 export interface Event {
@@ -140,6 +140,6 @@ export interface Event {
   reminder?: number;
   created_at: number;
   updated_at: number;
-  deleted_at?: number | null;
+  deleted_at?: number;
 }
 

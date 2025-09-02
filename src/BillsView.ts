@@ -70,6 +70,11 @@ async function loadBills(): Promise<Bill[]> {
         i.updated_at = i.created_at;
         changed = true;
       }
+      if ("deletedAt" in i) {
+        i.deleted_at = i.deletedAt;
+        delete i.deletedAt;
+        changed = true;
+      }
       if (!i.household_id) {
         i.household_id = hh;
         changed = true;

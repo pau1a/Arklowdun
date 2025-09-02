@@ -25,7 +25,7 @@ async function loadJson<T>(file: string): Promise<T[]> {
     const hh = await defaultHouseholdId();
     let changed = false;
     arr = arr.map((i: any) => {
-      if (typeof i.id === "number") i.id = newUuidV7();
+      if (typeof i.id === "number") { i.id = newUuidV7(); changed = true; }
       const rename: Record<string, string> = {
         dueDate: "due_date",
         renewalDate: "renewal_date",
@@ -79,9 +79,14 @@ async function loadJson<T>(file: string): Promise<T[]> {
         i.household_id = hh;
         changed = true;
       }
+      if ("deletedAt" in i) {
+        (i as any).deleted_at = i.deletedAt;
+        delete i.deletedAt;
+        changed = true;
+      }
       return i as T;
     });
-    arr = arr.filter((i: any) => i.deleted_at == null);
+    arr = arr.filter((i: any) => (i as any).deleted_at == null);
     if (changed) {
       await writeTextFile(p, JSON.stringify(arr), { baseDir: BaseDirectory.AppLocalData });
     }
