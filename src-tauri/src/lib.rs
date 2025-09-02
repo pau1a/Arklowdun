@@ -8,7 +8,7 @@ use crate::state::AppState;
 
 mod id;
 mod time;
-mod household;
+mod household; // declare module; avoid `use` to prevent name collision
 mod state;
 mod migrate;
 mod repo;
