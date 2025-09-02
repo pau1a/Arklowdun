@@ -49,6 +49,17 @@ Soft deletion and restoration are exposed via Tauri commands:
 and toggle `deleted_at`. Deleting the current default household returns the
 replacement id so callers can refresh local state.
 
+## Ordering
+
+Some domain tables maintain a user-defined ordering using a `position INTEGER`
+column that defaults to `0`. Rows are unique per household and position via a
+partial `(household_id, position)` index that ignores soft-deleted rows.
+Repository helpers provide a `renumber_positions` routine which compacts
+positions starting from zero, and reordering helpers run inside database
+transactions to ensure consistency. To avoid unique-index conflicts during
+reorders, active rows are first shifted out of the way before applying new
+positions. Queries that return ordered data should sort by `position, created_at`.
+
 ## Generating IDs
 
 ```ts

@@ -79,6 +79,10 @@ async function loadJson<T>(file: string): Promise<T[]> {
         i.household_id = hh;
         changed = true;
       }
+      if (typeof i.position !== 'number') {
+        i.position = 0;
+        changed = true;
+      }
       if ("deletedAt" in i) {
         (i as any).deleted_at = i.deletedAt;
         delete i.deletedAt;
@@ -87,6 +91,7 @@ async function loadJson<T>(file: string): Promise<T[]> {
       return i as T;
     });
     arr = arr.filter((i: any) => (i as any).deleted_at == null);
+    arr.sort((a: any, b: any) => (a as any).position - (b as any).position || (a as any).created_at - (b as any).created_at);
     if (changed) {
       await writeTextFile(p, JSON.stringify(arr), { baseDir: BaseDirectory.AppLocalData });
     }

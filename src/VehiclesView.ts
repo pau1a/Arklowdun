@@ -140,9 +140,14 @@ async function loadVehicles(): Promise<Vehicle[]> {
         i.household_id = hh;
         changed = true;
       }
+      if (typeof i.position !== 'number') {
+        i.position = 0;
+        changed = true;
+      }
       return i;
     });
     arr = arr.filter((i: any) => i.deleted_at == null);
+    arr.sort((a: any, b: any) => a.position - b.position || a.created_at - b.created_at);
     if (changed) await saveVehicles(arr as Vehicle[]);
     return arr as Vehicle[];
   } catch (e) {
@@ -274,6 +279,7 @@ export async function VehiclesView(container: HTMLElement) {
         mot_reminder: motReminder,
         service_reminder: serviceReminder,
         maintenance: [],
+        position: vehicles.length,
         household_id: await defaultHouseholdId(),
         created_at: now,
         updated_at: now,

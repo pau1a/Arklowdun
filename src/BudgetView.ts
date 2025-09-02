@@ -53,6 +53,10 @@ async function loadData(): Promise<BudgetData> {
           c.household_id = hh;
           changed = true;
         }
+        if (typeof c.position !== 'number') {
+          c.position = 0;
+          changed = true;
+        }
         if ("deletedAt" in c) {
           c.deleted_at = c.deletedAt;
           delete c.deletedAt;
@@ -61,6 +65,7 @@ async function loadData(): Promise<BudgetData> {
         return c;
       })
       .filter((c: any) => c.deleted_at == null);
+    data.categories.sort((a: any, b: any) => a.position - b.position || a.created_at - b.created_at);
     data.expenses = data.expenses
       .map((e: any) => {
         let id = e.id;
@@ -232,6 +237,7 @@ export async function BudgetView(container: HTMLElement) {
       id: newUuidV7(),
       name: catName.value,
       monthly_budget: Number(catBudget.value),
+      position: data.categories.length,
       household_id: await defaultHouseholdId(),
       created_at: now,
       updated_at: now,

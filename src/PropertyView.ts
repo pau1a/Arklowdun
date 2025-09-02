@@ -70,6 +70,10 @@ async function loadDocuments(): Promise<PropertyDocument[]> {
         i.household_id = hh;
         changed = true;
       }
+      if (typeof i.position !== 'number') {
+        i.position = 0;
+        changed = true;
+      }
       if ("deletedAt" in i) {
         i.deleted_at = i.deletedAt;
         delete i.deletedAt;
@@ -78,6 +82,7 @@ async function loadDocuments(): Promise<PropertyDocument[]> {
       return i;
     });
     arr = arr.filter((i: any) => i.deleted_at == null);
+    arr.sort((a: any, b: any) => a.position - b.position || a.created_at - b.created_at);
     if (changed) await saveDocuments(arr as PropertyDocument[]);
     return arr as PropertyDocument[];
   } catch (e) {
@@ -192,6 +197,7 @@ export async function PropertyView(container: HTMLElement) {
       renewal_date: dueTs,
       document: docInput.value,
       reminder,
+      position: docs.length,
       household_id: await defaultHouseholdId(),
       created_at: now,
       updated_at: now,

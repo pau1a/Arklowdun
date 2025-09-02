@@ -79,9 +79,14 @@ async function loadBills(): Promise<Bill[]> {
         i.household_id = hh;
         changed = true;
       }
+      if (typeof i.position !== 'number') {
+        i.position = 0;
+        changed = true;
+      }
       return i;
     });
     arr = arr.filter((i: any) => i.deleted_at == null);
+    arr.sort((a: any, b: any) => a.position - b.position || a.created_at - b.created_at);
     if (changed) await saveBills(arr as Bill[]);
     return arr as Bill[];
   } catch (e) {
@@ -175,6 +180,7 @@ export async function BillsView(container: HTMLElement) {
       due_date: dueTs,
       document: docInput.value,
       reminder,
+      position: bills.length,
       household_id: await defaultHouseholdId(),
       created_at: now,
       updated_at: now,
