@@ -3,7 +3,7 @@ use sqlx::{
     Executor, Row, SqlitePool,
 };
 use std::{collections::HashSet, fs};
-use tauri::AppHandle;
+use tauri::AppHandle; // v2: no Manager needed here
 
 use crate::time::now_ms;
 
@@ -31,7 +31,7 @@ static MIGRATIONS: &[(&str, &str)] = &[
 ];
 
 pub async fn init_db(app: &AppHandle) -> anyhow::Result<SqlitePool> {
-    // Use the same base directory as tauri-plugin-sql (frontend) for a single shared DB.
+    // v2: Use AppHandle.path().app_data_dir() for the shared DB location.
     let dir = app.path().app_data_dir().expect("data dir");
     fs::create_dir_all(&dir)?;
     let db_path = dir.join("app.sqlite");
