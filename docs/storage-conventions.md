@@ -49,6 +49,30 @@ Soft deletion and restoration are exposed via Tauri commands:
 and toggle `deleted_at`. Deleting the current default household returns the
 replacement id so callers can refresh local state.
 
+### Listing Active Rows
+
+Repository helpers automatically filter out soft-deleted rows and apply standard ordering.
+
+```ts
+import { listActive, firstActive } from "../src/db/repo";
+
+// Household-scoped listing (recommended)
+const bills = await listActive("bills", { householdId });
+
+// Fetch the first active row
+const firstBill = await firstActive("bills", { householdId });
+```
+
+```rust
+use crate::repo;
+
+// Household-scoped and first row
+if let Some(row) = repo::first_active(&pool, "bills", Some(&household_id), None).await? {
+    let id: String = row.try_get("id")?;
+    // ...
+}
+```
+
 ## Ordering
 
 Some domain tables maintain a user-defined ordering using a `position INTEGER`

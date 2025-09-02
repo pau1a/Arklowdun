@@ -5,25 +5,20 @@ use crate::repo;
 use crate::time::now_ms;
 
 pub async fn default_household_id(pool: &SqlitePool) -> anyhow::Result<String> {
-    if let Some(row) = sqlx::query("SELECT id FROM household WHERE deleted_at IS NULL LIMIT 1")
-        .fetch_optional(pool)
-        .await?
-    {
+    if let Some(row) = repo::first_active(pool, "household", None, None).await? {
         let id: String = row.try_get("id")?;
         return Ok(id);
     }
 
     let id = new_uuid_v7();
     let now = now_ms();
-    sqlx::query(
-        "INSERT INTO household (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)",
-    )
-    .bind(&id)
-    .bind("Default")
-    .bind(now)
-    .bind(now)
-    .execute(pool)
-    .await?;
+    sqlx::query("INSERT INTO household (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)")
+        .bind(&id)
+        .bind("Default")
+        .bind(now)
+        .bind(now)
+        .execute(pool)
+        .await?;
     Ok(id)
 }
 

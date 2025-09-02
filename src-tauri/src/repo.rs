@@ -37,6 +37,67 @@ fn ensure_table(table: &str) -> anyhow::Result<()> {
     }
 }
 
+const ALLOWED_ORDERS: &[&str] = &["position, created_at, id", "created_at, id"];
+
+pub async fn list_active(
+    pool: &SqlitePool,
+    table: &str,
+    household_id: Option<&str>,
+    order_by: Option<&str>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> anyhow::Result<Vec<sqlx::sqlite::SqliteRow>> {
+    ensure_table(table)?;
+    let default_order = if ORDERED_TABLES.contains(&table) {
+        "position, created_at, id"
+    } else {
+        "created_at, id"
+    };
+    let order = order_by
+        .filter(|ob| ALLOWED_ORDERS.contains(ob))
+        .unwrap_or(default_order);
+
+    let scoped = table != "household" && household_id.is_some();
+    let mut sql = format!(
+        "SELECT * FROM {table} {} ORDER BY {order}",
+        if scoped {
+            "WHERE deleted_at IS NULL AND household_id = ?"
+        } else {
+            "WHERE deleted_at IS NULL"
+        }
+    );
+    if limit.is_some() {
+        sql.push_str(" LIMIT ?");
+    }
+    if offset.is_some() {
+        sql.push_str(" OFFSET ?");
+    }
+
+    let mut query = sqlx::query(&sql);
+    if scoped {
+        query = query.bind(household_id.unwrap());
+    }
+    if let Some(l) = limit {
+        query = query.bind(l);
+    }
+    if let Some(o) = offset {
+        query = query.bind(o);
+    }
+
+    let rows = query.fetch_all(pool).await?;
+    Ok(rows)
+}
+
+pub async fn first_active(
+    pool: &SqlitePool,
+    table: &str,
+    household_id: Option<&str>,
+    order_by: Option<&str>,
+) -> anyhow::Result<Option<sqlx::sqlite::SqliteRow>> {
+    let mut rows = list_active(pool, table, household_id, order_by, Some(1), None).await?;
+    Ok(rows.pop())
+}
+
 pub async fn set_deleted_at(
     pool: &SqlitePool,
     table: &str,
@@ -84,11 +145,7 @@ pub async fn clear_deleted_at(
     let now = now_ms();
     let res = if table == "household" {
         let sql = format!("UPDATE {table} SET deleted_at = NULL, updated_at = ? WHERE id = ?");
-        sqlx::query(&sql)
-            .bind(now)
-            .bind(id)
-            .execute(pool)
-            .await?
+        sqlx::query(&sql).bind(now).bind(id).execute(pool).await?
     } else {
         let sql = format!(
             "UPDATE {table} SET deleted_at = NULL, position = position + 1000000, updated_at = ? WHERE household_id = ? AND id = ?",
@@ -108,7 +165,6 @@ pub async fn clear_deleted_at(
     }
     Ok(())
 }
-
 
 pub async fn renumber_positions<'a, E>(
     exec: E,
@@ -179,4 +235,3 @@ pub async fn reorder_positions(
     tx.commit().await?;
     Ok(())
 }
-
