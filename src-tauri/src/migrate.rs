@@ -4,6 +4,7 @@ use sqlx::{
 };
 use std::{collections::HashSet, fs};
 use tauri::{AppHandle, Manager};
+use tauri_plugin_path::PathExt;
 
 use crate::time::now_ms;
 
