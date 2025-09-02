@@ -3,7 +3,7 @@ use sqlx::{
     Executor, Row, SqlitePool,
 };
 use std::{collections::HashSet, fs};
-use tauri::AppHandle; // v2: no Manager needed here
+use tauri::{AppHandle, Manager}; // Manager trait provides `.path()`
 
 use crate::time::now_ms;
 
