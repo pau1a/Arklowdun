@@ -28,9 +28,9 @@ pub async fn default_household_id(pool: &SqlitePool) -> anyhow::Result<String> {
 }
 
 pub async fn delete_household(pool: &SqlitePool, id: &str) -> anyhow::Result<()> {
-    repo::set_deleted_at(pool, "household", id).await
+    repo::set_deleted_at(pool, "household", id, id).await
 }
 
 pub async fn restore_household(pool: &SqlitePool, id: &str) -> anyhow::Result<()> {
-    repo::clear_deleted_at(pool, "household", id).await
+    repo::clear_deleted_at(pool, "household", id, id).await
 }

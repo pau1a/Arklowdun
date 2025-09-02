@@ -18,6 +18,17 @@ const DOMAIN_TABLES: &[&str] = &[
     "expenses",
 ];
 
+const ORDERED_TABLES: &[&str] = &[
+    "bills",
+    "policies",
+    "property_documents",
+    "inventory_items",
+    "vehicles",
+    "pets",
+    "family_members",
+    "budget_categories",
+];
+
 fn ensure_table(table: &str) -> anyhow::Result<()> {
     if DOMAIN_TABLES.contains(&table) {
         Ok(())
@@ -26,33 +37,74 @@ fn ensure_table(table: &str) -> anyhow::Result<()> {
     }
 }
 
-pub async fn set_deleted_at(pool: &SqlitePool, table: &str, id: &str) -> anyhow::Result<()> {
+pub async fn set_deleted_at(
+    pool: &SqlitePool,
+    table: &str,
+    household_id: &str,
+    id: &str,
+) -> anyhow::Result<()> {
     ensure_table(table)?;
-    let sql = format!("UPDATE {table} SET deleted_at = ?, updated_at = ? WHERE id = ?");
     let now = now_ms();
-    let res = sqlx::query(&sql)
-        .bind(now)
-        .bind(now)
-        .bind(id)
-        .execute(pool)
-        .await?;
+    let res = if table == "household" {
+        let sql = format!("UPDATE {table} SET deleted_at = ?, updated_at = ? WHERE id = ?");
+        sqlx::query(&sql)
+            .bind(now)
+            .bind(now)
+            .bind(id)
+            .execute(pool)
+            .await?
+    } else {
+        let sql = format!(
+            "UPDATE {table} SET deleted_at = ?, updated_at = ? WHERE household_id = ? AND id = ?",
+        );
+        sqlx::query(&sql)
+            .bind(now)
+            .bind(now)
+            .bind(household_id)
+            .bind(id)
+            .execute(pool)
+            .await?
+    };
     if res.rows_affected() == 0 {
         anyhow::bail!("id not found");
+    }
+    if table != "household" && ORDERED_TABLES.contains(&table) {
+        renumber_positions(pool, table, household_id).await?;
     }
     Ok(())
 }
 
-pub async fn clear_deleted_at(pool: &SqlitePool, table: &str, id: &str) -> anyhow::Result<()> {
+pub async fn clear_deleted_at(
+    pool: &SqlitePool,
+    table: &str,
+    household_id: &str,
+    id: &str,
+) -> anyhow::Result<()> {
     ensure_table(table)?;
-    let sql = format!("UPDATE {table} SET deleted_at = NULL, updated_at = ? WHERE id = ?");
     let now = now_ms();
-    let res = sqlx::query(&sql)
-        .bind(now)
-        .bind(id)
-        .execute(pool)
-        .await?;
+    let res = if table == "household" {
+        let sql = format!("UPDATE {table} SET deleted_at = NULL, updated_at = ? WHERE id = ?");
+        sqlx::query(&sql)
+            .bind(now)
+            .bind(id)
+            .execute(pool)
+            .await?
+    } else {
+        let sql = format!(
+            "UPDATE {table} SET deleted_at = NULL, position = position + 1000000, updated_at = ? WHERE household_id = ? AND id = ?",
+        );
+        sqlx::query(&sql)
+            .bind(now)
+            .bind(household_id)
+            .bind(id)
+            .execute(pool)
+            .await?
+    };
     if res.rows_affected() == 0 {
         anyhow::bail!("id not found");
+    }
+    if table != "household" && ORDERED_TABLES.contains(&table) {
+        renumber_positions(pool, table, household_id).await?;
     }
     Ok(())
 }
@@ -86,6 +138,7 @@ where
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn reorder_positions(
     pool: &SqlitePool,
     table: &str,

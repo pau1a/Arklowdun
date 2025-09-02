@@ -58,7 +58,8 @@ Repository helpers provide a `renumber_positions` routine which compacts
 positions starting from zero, and reordering helpers run inside database
 transactions to ensure consistency. To avoid unique-index conflicts during
 reorders, active rows are first shifted out of the way before applying new
-positions. Queries that return ordered data should sort by `position, created_at`.
+positions. Soft-delete helpers also invoke this compaction to keep active rows
+dense from zero. Queries that return ordered data should sort by `position, created_at`.
 
 ## Generating IDs
 
