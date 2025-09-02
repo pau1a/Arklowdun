@@ -93,3 +93,27 @@ CREATE TABLE example (
 ```
 
 Existing numeric identifiers are converted to new UUIDv7 values on import.
+
+## File Paths
+
+File references are stored as a `(root_key, relative_path)` pair. The
+`root_key` selects a platform directory using the Tauri path API and the
+`relative_path` is joined to it to produce an absolute path.
+
+Current root mappings:
+
+| root_key                                                                        | Base directory                         |
+| -------------------------------------------------------------------------------- | -------------------------------------- |
+| `appData`, `appConfig`, `appLocalData`, `appCache`                               | app-scoped dirs                        |
+| `home`, `desktop`, `document`, `download`, `picture`, `audio`, `video`, `public` | user dirs                              |
+| `cache`, `config`, `data`, `localData`                                           | user-scoped XDG / platform equivalents |
+| `resource`, `runtime`, `template`, `temp`, `font`                                | platform-specific                      |
+
+Root availability varies by operating system—some keys like `font`, `template`, or `runtime` may not resolve. Callers should handle `resolvePath` failure gracefully.
+
+When both `root_key` and `relative_path` are non-`NULL` (and the row is not
+soft-deleted), the pair must be unique per household. Relative paths are
+normalized to forward slashes, leading slashes removed, Windows drive prefixes
+stripped, and `.`/`..` segments collapsed to prevent path traversal. The SQL
+backfill only normalizes slashes and trims a leading `/`, so legacy rows may
+retain `.` or `..` segments until rewritten by the application.

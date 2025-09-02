@@ -1,4 +1,5 @@
 import { openPath } from "@tauri-apps/plugin-opener";
+import { resolvePath, sanitizeRelativePath } from "./files/path";
 import {
   readTextFile,
   writeTextFile,
@@ -114,6 +115,12 @@ async function loadVehicles(): Promise<Vehicle[]> {
               m.household_id = hh;
               changed = true;
             }
+            if ("document" in m) {
+              m.root_key = "appData";
+              m.relative_path = sanitizeRelativePath(m.document);
+              delete m.document;
+              changed = true;
+            }
             if ("deletedAt" in m) {
               m.deleted_at = m.deletedAt;
               delete m.deletedAt;
@@ -181,10 +188,16 @@ function renderMaintenance(listEl: HTMLUListElement, entries: MaintenanceEntry[]
   entries.forEach((m) => {
     const li = document.createElement("li");
     li.textContent = `${toDate(m.date).toLocaleDateString()} ${m.type} ${money.format(m.cost)} `;
-    if (m.document) {
+    if (m.relative_path) {
       const btn = document.createElement("button");
       btn.textContent = "Open document";
-      btn.addEventListener("click", () => openPath(m.document));
+      btn.addEventListener("click", async () => {
+        try {
+          await openPath(await resolvePath(m.root_key, m.relative_path));
+        } catch {
+          alert(`File location unavailable (root: ${m.root_key})`);
+        }
+      });
       li.appendChild(btn);
     }
     listEl.appendChild(li);
@@ -364,7 +377,8 @@ export async function VehiclesView(container: HTMLElement) {
         date: entryDate.getTime(),
         type: maintType.value,
         cost: parseFloat(maintCost.value),
-        document: maintDoc?.value ?? "",
+        root_key: "appData",
+        relative_path: sanitizeRelativePath(maintDoc?.value ?? ""),
         household_id: vehicle.household_id,
         created_at: now,
         updated_at: now,

@@ -2,7 +2,8 @@ export interface Bill {
   id: string;
   amount: number;
   due_date: number; // timestamp ms
-  document: string; // file path
+  root_key: string;
+  relative_path: string;
   reminder?: number; // timestamp ms
   household_id?: string;
   position: number;
@@ -15,7 +16,8 @@ export interface Policy {
   id: string;
   amount: number;
   due_date: number; // timestamp ms
-  document: string; // file path
+  root_key: string;
+  relative_path: string;
   reminder?: number; // timestamp ms
   household_id?: string;
   position: number;
@@ -28,7 +30,8 @@ export interface PropertyDocument {
   id: string;
   description: string;
   renewal_date: number; // timestamp ms
-  document: string; // file path
+  root_key: string;
+  relative_path: string;
   reminder?: number; // timestamp ms
   household_id?: string;
   position: number;
@@ -43,7 +46,8 @@ export interface MaintenanceEntry {
   date: number; // timestamp ms
   type: string;
   cost: number;
-  document: string; // file path
+  root_key: string;
+  relative_path: string;
   household_id?: string;
   created_at: number;
   updated_at: number;
@@ -70,7 +74,8 @@ export interface PetMedicalRecord {
   pet_id: string;
   date: number; // timestamp ms
   description: string;
-  document: string; // file path
+  root_key: string;
+  relative_path: string;
   reminder?: number; // timestamp ms
   household_id?: string;
   created_at: number;
@@ -95,7 +100,7 @@ export interface FamilyMember {
   name: string;
   birthday: number; // timestamp ms
   notes: string;
-  documents: string[]; // file paths
+  documents: { root_key: string; relative_path: string }[];
   household_id?: string;
   position: number;
   created_at: number;
@@ -108,7 +113,8 @@ export interface InventoryItem {
   name: string;
   purchase_date: number; // timestamp ms
   warranty_expiry: number; // timestamp ms
-  document: string; // file path
+  root_key: string;
+  relative_path: string;
   reminder?: number; // timestamp ms
   household_id?: string;
   position: number;

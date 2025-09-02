@@ -1,4 +1,5 @@
 import { openPath } from "@tauri-apps/plugin-opener";
+import { resolvePath, sanitizeRelativePath } from "./files/path";
 import {
   readTextFile,
   writeTextFile,
@@ -72,6 +73,12 @@ async function loadItems(): Promise<InventoryItem[]> {
         i.updated_at = i.created_at;
         changed = true;
       }
+      if ("document" in i) {
+        i.root_key = "appData";
+        i.relative_path = sanitizeRelativePath(i.document);
+        delete i.document;
+        changed = true;
+      }
       if (!i.household_id) {
         i.household_id = hh;
         changed = true;
@@ -111,7 +118,13 @@ function renderItems(listEl: HTMLUListElement, items: InventoryItem[]) {
     li.textContent = `${i.name} warranty expires ${toDate(i.warranty_expiry).toLocaleDateString()} `;
     const btn = document.createElement("button");
     btn.textContent = "Open document";
-    btn.addEventListener("click", () => openPath(i.document));
+    btn.addEventListener("click", async () => {
+      try {
+        await openPath(await resolvePath(i.root_key, i.relative_path));
+      } catch {
+        alert(`File location unavailable (root: ${i.root_key})`);
+      }
+    });
     li.appendChild(btn);
     listEl.appendChild(li);
   });
@@ -185,7 +198,8 @@ export async function InventoryView(container: HTMLElement) {
       name: nameInput.value,
       purchase_date: purchaseLocalNoon.getTime(),
       warranty_expiry: warrantyLocalNoon.getTime(),
-      document: docInput.value,
+      root_key: "appData",
+      relative_path: sanitizeRelativePath(docInput.value),
       reminder,
       position: items.length,
       household_id: await defaultHouseholdId(),
