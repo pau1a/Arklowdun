@@ -62,7 +62,8 @@ async function loadBills(): Promise<Bill[]> {
     });
     if (changed) await saveBills(arr as Bill[]);
     return arr as Bill[];
-  } catch {
+  } catch (e) {
+    console.error("loadBills failed:", e);
     return [];
   }
 }

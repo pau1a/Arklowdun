@@ -76,7 +76,8 @@ async function loadVehicles(): Promise<Vehicle[]> {
     });
     if (changed) await saveVehicles(arr as Vehicle[]);
     return arr as Vehicle[];
-  } catch {
+  } catch (e) {
+    console.error("loadVehicles failed:", e);
     return [];
   }
 }

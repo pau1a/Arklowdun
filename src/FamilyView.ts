@@ -36,7 +36,8 @@ async function loadMembers(): Promise<FamilyMember[]> {
     });
     if (changed) await saveMembers(arr as FamilyMember[]);
     return arr as FamilyMember[];
-  } catch {
+  } catch (e) {
+    console.error("loadMembers failed:", e);
     return [];
   }
 }
