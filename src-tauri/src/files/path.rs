@@ -1,5 +1,5 @@
 use std::path::{Component, Path, PathBuf};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 pub fn sanitize_relative_path(p: &str) -> PathBuf {
     let mut result = PathBuf::new();
