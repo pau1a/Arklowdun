@@ -1,4 +1,5 @@
 import { openPath } from "@tauri-apps/plugin-opener";
+import { resolvePath, sanitizeRelativePath } from "./files/path";
 import {
   readTextFile,
   writeTextFile,
@@ -70,6 +71,12 @@ async function loadPolicies(): Promise<Policy[]> {
         i.updated_at = i.created_at;
         changed = true;
       }
+      if ("document" in i) {
+        i.root_key = "appData";
+        i.relative_path = sanitizeRelativePath(i.document);
+        delete i.document;
+        changed = true;
+      }
       if (!i.household_id) {
         i.household_id = hh;
         changed = true;
@@ -107,7 +114,13 @@ function renderPolicies(listEl: HTMLUListElement, policies: Policy[]) {
     li.textContent = `${money.format(p.amount)} renews ${toDate(p.due_date).toLocaleDateString()} `;
     const btn = document.createElement("button");
     btn.textContent = "Open document";
-    btn.addEventListener("click", () => openPath(p.document));
+    btn.addEventListener("click", async () => {
+      try {
+        await openPath(await resolvePath(p.root_key, p.relative_path));
+      } catch {
+        alert(`File location unavailable (root: ${p.root_key})`);
+      }
+    });
     li.appendChild(btn);
     listEl.appendChild(li);
   });
@@ -176,7 +189,8 @@ export async function InsuranceView(container: HTMLElement) {
       id: newUuidV7(),
       amount: parseFloat(amountInput.value),
       due_date: dueTs,
-      document: docInput.value,
+      root_key: "appData",
+      relative_path: sanitizeRelativePath(docInput.value),
       reminder,
       position: policies.length,
       household_id: await defaultHouseholdId(),

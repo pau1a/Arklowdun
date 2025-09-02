@@ -1,4 +1,5 @@
 import { openPath } from "@tauri-apps/plugin-opener";
+import { resolvePath, sanitizeRelativePath } from "./files/path";
 import {
   readTextFile,
   writeTextFile,
@@ -70,6 +71,12 @@ async function loadBills(): Promise<Bill[]> {
         i.updated_at = i.created_at;
         changed = true;
       }
+      if ("document" in i) {
+        i.root_key = "appData";
+        i.relative_path = sanitizeRelativePath(i.document);
+        delete i.document;
+        changed = true;
+      }
       if ("deletedAt" in i) {
         i.deleted_at = i.deletedAt;
         delete i.deletedAt;
@@ -107,7 +114,13 @@ function renderBills(listEl: HTMLUListElement, bills: Bill[]) {
     li.textContent = `${money.format(b.amount)} due ${toDate(b.due_date).toLocaleDateString()} `;
     const btn = document.createElement("button");
     btn.textContent = "Open document";
-    btn.addEventListener("click", () => openPath(b.document));
+    btn.addEventListener("click", async () => {
+      try {
+        await openPath(await resolvePath(b.root_key, b.relative_path));
+      } catch {
+        alert(`File location unavailable (root: ${b.root_key})`);
+      }
+    });
     li.appendChild(btn);
     listEl.appendChild(li);
   });
@@ -178,7 +191,8 @@ export async function BillsView(container: HTMLElement) {
       id: newUuidV7(),
       amount: parseFloat(amountInput.value),
       due_date: dueTs,
-      document: docInput.value,
+      root_key: "appData",
+      relative_path: sanitizeRelativePath(docInput.value),
       reminder,
       position: bills.length,
       household_id: await defaultHouseholdId(),

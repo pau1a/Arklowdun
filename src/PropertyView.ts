@@ -1,5 +1,6 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
+import { resolvePath, sanitizeRelativePath } from "./files/path";
 import {
   readTextFile,
   writeTextFile,
@@ -66,6 +67,12 @@ async function loadDocuments(): Promise<PropertyDocument[]> {
         i.updated_at = i.created_at;
         changed = true;
       }
+      if ("document" in i) {
+        i.root_key = "appData";
+        i.relative_path = sanitizeRelativePath(i.document);
+        delete i.document;
+        changed = true;
+      }
       if (!i.household_id) {
         i.household_id = hh;
         changed = true;
@@ -105,7 +112,13 @@ function renderDocuments(listEl: HTMLUListElement, docs: PropertyDocument[]) {
     li.textContent = `${d.description} renews ${toDate(d.renewal_date).toLocaleDateString()} `;
     const btn = document.createElement("button");
     btn.textContent = "Open document";
-    btn.addEventListener("click", () => openPath(d.document));
+    btn.addEventListener("click", async () => {
+      try {
+        await openPath(await resolvePath(d.root_key, d.relative_path));
+      } catch {
+        alert(`File location unavailable (root: ${d.root_key})`);
+      }
+    });
     li.appendChild(btn);
     listEl.appendChild(li);
   });
@@ -195,7 +208,8 @@ export async function PropertyView(container: HTMLElement) {
       id: newUuidV7(),
       description: descInput.value,
       renewal_date: dueTs,
-      document: docInput.value,
+      root_key: "appData",
+      relative_path: sanitizeRelativePath(docInput.value),
       reminder,
       position: docs.length,
       household_id: await defaultHouseholdId(),

@@ -12,6 +12,7 @@ import { newUuidV7 } from "./db/id";
 import { nowMs } from "./db/time";
 import { toMs } from "./db/normalize";
 import { defaultHouseholdId } from "./db/household";
+import { sanitizeRelativePath } from "./files/path";
 
 const MAX_TIMEOUT = 2_147_483_647; // ~24.8 days
 function scheduleAt(ts: number, cb: () => void) {
@@ -50,6 +51,12 @@ async function loadPets(): Promise<Pet[]> {
             }
             if (!m.id) {
               m.id = newUuidV7();
+              changed = true;
+            }
+            if ("document" in m) {
+              m.root_key = "appData";
+              m.relative_path = sanitizeRelativePath(m.document);
+              delete m.document;
               changed = true;
             }
             if (!m.pet_id) {

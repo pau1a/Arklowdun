@@ -1,4 +1,5 @@
 import { openPath } from "@tauri-apps/plugin-opener";
+import { resolvePath, sanitizeRelativePath } from "./files/path";
 import type { Pet, PetMedicalRecord } from "./models";
 import { nowMs, toDate } from "./db/time";
 import { defaultHouseholdId } from "./db/household";
@@ -14,10 +15,16 @@ function renderRecords(listEl: HTMLUListElement, records: PetMedicalRecord[]) {
     }
     text += " ";
     li.textContent = text;
-    if (r.document) {
+    if (r.relative_path) {
       const btn = document.createElement("button");
       btn.textContent = "Open document";
-      btn.addEventListener("click", () => openPath(r.document));
+      btn.addEventListener("click", async () => {
+        try {
+          await openPath(await resolvePath(r.root_key, r.relative_path));
+        } catch {
+          alert(`File location unavailable (root: ${r.root_key})`);
+        }
+      });
       li.appendChild(btn);
     }
     listEl.appendChild(li);
@@ -73,7 +80,8 @@ export function PetDetailView(
       pet_id: pet.id,
       date: recordDate.getTime(),
       description: descInput.value,
-      document: docInput?.value ?? "",
+      root_key: "appData",
+      relative_path: sanitizeRelativePath(docInput?.value ?? ""),
       reminder,
       household_id: pet.household_id || (await defaultHouseholdId()),
       created_at: now,

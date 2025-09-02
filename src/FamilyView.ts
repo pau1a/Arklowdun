@@ -1,6 +1,7 @@
 import { readTextFile, writeTextFile, mkdir, BaseDirectory } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
 import type { FamilyMember } from "./models";
+import { sanitizeRelativePath } from "./files/path";
 import { newUuidV7 } from "./db/id";
 import { nowMs, toDate } from "./db/time";
 import { toMs } from "./db/normalize";
@@ -48,6 +49,15 @@ async function loadMembers(): Promise<FamilyMember[]> {
         i.deleted_at = i.deletedAt;
         delete i.deletedAt;
         changed = true;
+      }
+      if (Array.isArray(i.documents)) {
+        i.documents = i.documents.map((d: any) => {
+          if (typeof d === "string") {
+            changed = true;
+            return { root_key: "appData", relative_path: sanitizeRelativePath(d) };
+          }
+          return d;
+        });
       }
       return i;
     });
@@ -175,7 +185,7 @@ export async function FamilyView(container: HTMLElement) {
       docList.innerHTML = "";
       member.documents.forEach((d, idx) => {
         const li = document.createElement("li");
-        li.textContent = d + " ";
+        li.textContent = d.relative_path + " ";
         const rm = document.createElement("button");
         rm.textContent = "Remove";
         rm.dataset.idx = String(idx);
@@ -212,7 +222,10 @@ export async function FamilyView(container: HTMLElement) {
 
     docAddBtn?.addEventListener("click", () => {
       if (!docInput || !docInput.value) return;
-      member.documents.push(docInput.value);
+      member.documents.push({
+        root_key: "appData",
+        relative_path: sanitizeRelativePath(docInput.value),
+      });
       docInput.value = "";
       member.updated_at = nowMs();
       saveMembers(members).then(renderDocs);
