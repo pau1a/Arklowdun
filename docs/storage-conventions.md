@@ -46,7 +46,8 @@ Clients SHOULD omit `deleted_at` when not set; servers and SDKs omit it when
 
 Soft deletion and restoration are exposed via Tauri commands:
 `delete_household_cmd` and `restore_household_cmd`. Both update `updated_at`
-and toggle `deleted_at`.
+and toggle `deleted_at`. Deleting the current default household returns the
+replacement id so callers can refresh local state.
 
 ## Generating IDs
 
@@ -80,5 +81,3 @@ CREATE TABLE example (
 ```
 
 Existing numeric identifiers are converted to new UUIDv7 values on import.
-
-Merry Christmas

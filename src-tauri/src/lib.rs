@@ -1,6 +1,6 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use serde::{Deserialize, Serialize};
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, sync::{Arc, Mutex}};
 use tauri::{Manager, State};
 use tauri_plugin_sql;
 
@@ -58,7 +58,7 @@ fn events_path(app: &tauri::AppHandle) -> PathBuf {
 
 fn read_events(app: &tauri::AppHandle, state: &tauri::State<state::AppState>) -> Vec<Event> {
     let path = events_path(app);
-    let default_hh = state.default_household_id.clone();
+    let default_hh = state.default_household_id.lock().unwrap().clone();
     if let Ok(data) = fs::read_to_string(&path) {
         let raw: Vec<RawEvent> = serde_json::from_str(&data).unwrap_or_default();
         let mut converted = Vec::new();
@@ -138,7 +138,7 @@ fn add_event(app: tauri::AppHandle, state: tauri::State<state::AppState>, mut ev
     event.updated_at = now;
     event.deleted_at = None;
     if event.household_id.is_empty() {
-        event.household_id = state.default_household_id.clone();
+        event.household_id = state.default_household_id.lock().unwrap().clone();
     }
     events.push(event.clone());
     write_events(&app, &events)?;
@@ -174,14 +174,27 @@ fn delete_event(app: tauri::AppHandle, state: tauri::State<state::AppState>, id:
 
 #[tauri::command]
 fn get_default_household_id(state: tauri::State<state::AppState>) -> String {
-    state.default_household_id.clone()
+    state.default_household_id.lock().unwrap().clone()
 }
 
 #[tauri::command]
-async fn delete_household_cmd(state: State<'_, AppState>, id: String) -> Result<(), String> {
+async fn delete_household_cmd(state: State<'_, AppState>, id: String) -> Result<Option<String>, String> {
     household::delete_household(&state.pool, &id)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    let current = { state.default_household_id.lock().unwrap().clone() };
+    if current == id {
+        let new_id = household::default_household_id(&state.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+        {
+            let mut guard = state.default_household_id.lock().unwrap();
+            *guard = new_id.clone();
+        }
+        Ok(Some(new_id))
+    } else {
+        Ok(None)
+    }
 }
 
 #[tauri::command]
@@ -203,7 +216,7 @@ pub fn run() {
             let handle = app.handle();
             let pool = tauri::async_runtime::block_on(crate::migrate::init_db(&handle))?;
             let hh = tauri::async_runtime::block_on(crate::household::default_household_id(&pool))?;
-            app.manage(crate::state::AppState { pool: pool.clone(), default_household_id: hh });
+            app.manage(crate::state::AppState { pool: pool.clone(), default_household_id: Arc::new(Mutex::new(hh)) });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
