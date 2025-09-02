@@ -93,68 +93,11 @@ async function main(): Promise<void> {
       delete (data as any)[key];
     }
   }
-
-  const idMap = new Map<number, string>();
-
-  // First pass: map numeric ids
-  for (const rows of Object.values(data)) {
-    for (const row of rows) {
-      if (typeof row.id === "number") {
-        const uuid = newUuidV7();
-        idMap.set(row.id, uuid);
-        row.id = uuid;
-      }
-    }
-  }
-
-  const now = nowMs();
-
-  // Second pass: transform rows
-  for (const [table, rows] of Object.entries(data)) {
-    const byHH = new Map<string, any[]>();
-    for (const row of rows) {
-      for (const key of Object.keys(row)) {
-        if (key.endsWith("_id") && typeof row[key] === "number") {
-          const mapped = idMap.get(row[key]);
-          if (mapped) row[key] = mapped;
-        }
-        if (TIMESTAMP_FIELDS.has(key) && row[key] !== undefined) {
-          row[key] = toMs(row[key]) ?? null;
-        }
-      }
-
-      if (row.created_at == null) row.created_at = now;
-      if (row.updated_at == null) row.updated_at = row.created_at;
-
-      if (row.document != null) {
-        row.root_key = row.root_key ?? "appData";
-        row.relative_path =
-          row.relative_path ?? sanitizeRelativePath(String(row.document));
-        delete row.document;
-      }
-
-      row.deleted_at = row.deleted_at ?? null;
-
-      if (POSITION_TABLES.has(table)) {
-        const hh = row.household_id ?? "";
-        if (!byHH.has(hh)) byHH.set(hh, []);
-        byHH.get(hh)!.push(row);
-      }
-    }
-
-    if (POSITION_TABLES.has(table)) {
-      for (const group of byHH.values()) {
-        group.forEach((row, idx) => {
-          if (!Number.isFinite(row.position)) row.position = idx;
-        });
-      }
-    }
-  }
-
   const db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
   db.pragma("synchronous = NORMAL");
   db.pragma("foreign_keys = ON");
+  db.pragma("busy_timeout = 5000");
 
   db.exec(
     "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
@@ -168,20 +111,129 @@ async function main(): Promise<void> {
     return;
   }
 
+  const selectMap = db
+    .prepare("SELECT new_uuid FROM import_id_map WHERE entity = ? AND old_id = ?")
+    .pluck();
+  const insertMap = db.prepare(
+    "INSERT INTO import_id_map(entity, old_id, new_uuid) VALUES (?, ?, ?)",
+  );
+
   const summary: Record<string, number> = {};
+  let reusedIds = 0;
+  let newIds = 0;
 
   const txn = db.transaction(() => {
+    // During bulk import, defer FK validation to a single check at the end.
+    db.pragma("foreign_keys = OFF");
+    // Optional speed knob for very large imports. Safe because we're inside a
+    // single transaction and will restore to NORMAL before commit:
+    // db.pragma("synchronous = OFF");
+
+    const idMap = new Map<string, string>();
+
+    // First pass: map numeric ids using import_id_map
+    for (const [table, rows] of Object.entries(data)) {
+      for (const row of rows) {
+        if (typeof row.id === "number" || typeof row.id === "string") {
+          const key = String(row.id);
+          const existing = selectMap.get(table, key) as string | undefined;
+          let uuid: string;
+          if (existing) {
+            uuid = existing;
+            reusedIds++;
+          } else {
+            uuid = newUuidV7();
+            if (!dryRun) insertMap.run(table, key, uuid);
+            newIds++;
+          }
+          idMap.set(key, uuid);
+          row.id = uuid;
+        }
+      }
+    }
+
+    const now = nowMs();
+
+    // Second pass: transform rows
+    for (const [table, rows] of Object.entries(data)) {
+      const byHH = new Map<string, any[]>();
+      for (const row of rows) {
+        for (const key of Object.keys(row)) {
+          if (key.endsWith("_id") && row[key] != null) {
+            const mapped = idMap.get(String(row[key]));
+            if (mapped) row[key] = mapped;
+          }
+          if (TIMESTAMP_FIELDS.has(key) && row[key] !== undefined) {
+            row[key] = toMs(row[key]) ?? null;
+          }
+        }
+
+        if (row.created_at == null) row.created_at = now;
+        if (row.updated_at == null) row.updated_at = row.created_at;
+
+        if (row.document != null) {
+          row.root_key = row.root_key ?? "appData";
+          row.relative_path =
+            row.relative_path ?? sanitizeRelativePath(String(row.document));
+          delete row.document;
+        }
+
+        row.deleted_at = row.deleted_at ?? null;
+
+        if (POSITION_TABLES.has(table)) {
+          const hh = row.household_id ?? "";
+          if (!byHH.has(hh)) byHH.set(hh, []);
+          byHH.get(hh)!.push(row);
+        }
+      }
+
+      if (POSITION_TABLES.has(table)) {
+        for (const group of byHH.values()) {
+          group.forEach((row, idx) => {
+            if (!Number.isFinite(row.position)) row.position = idx;
+          });
+        }
+      }
+    }
+
     for (const [table, rows] of Object.entries(data)) {
       if (rows.length === 0) continue;
-      const cols = Array.from(new Set(rows.flatMap((r) => Object.keys(r))));
+      if (!DOMAIN_TABLES.has(table)) throw new Error(`Unexpected table: ${table}`);
+      const schemaCols = new Set(
+        db.prepare(`PRAGMA table_info(${table})`).all().map((r: any) => r.name),
+      );
+      const allCols = Array.from(new Set(rows.flatMap((r) => Object.keys(r))));
+      const cols = allCols.filter((c) => schemaCols.has(c));
+      const unknownCols = allCols.filter((c) => !schemaCols.has(c));
+      if (unknownCols.length) {
+        const rowsWithUnknown = rows.filter((r) =>
+          unknownCols.some((c) => c in r)
+        ).length;
+        console.warn(
+          `Dropping unknown columns for ${table} (${rowsWithUnknown} rows): ${unknownCols.join(",")}`,
+        );
+      }
       const placeholders = cols.map(() => "?").join(",");
       const stmt = db.prepare(
         `INSERT INTO ${table} (${cols.join(",")}) VALUES (${placeholders})`,
       );
       let count = 0;
       for (const row of rows) {
-        const params = cols.map((c) => row[c] ?? null);
-        if (!dryRun) stmt.run(params);
+        const params = cols.map((c) => {
+          const v = row[c];
+          return typeof v === "boolean" ? (v ? 1 : 0) : v ?? null;
+        });
+        if (!dryRun)
+          try {
+            stmt.run(params);
+          } catch (e) {
+            if (/UNIQUE constraint failed: .*\.id/.test(String(e))) {
+              throw new Error(
+                `Duplicate row ID for table ${table}; legacy data contains duplicates.`,
+              );
+            }
+            throw e;
+          }
         count++;
       }
       summary[table] = count;
@@ -191,6 +243,21 @@ async function main(): Promise<void> {
       db.prepare(
         "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
       ).run(SENTINEL_KEY, new Date().toISOString());
+    }
+
+    // Restore PRAGMAs and validate referential integrity before commit.
+    db.pragma("foreign_keys = ON");
+    if (dryRun) return;
+    // db.pragma("synchronous = NORMAL"); // restore if synchronous was set to OFF above
+    const fkIssues = db.prepare("PRAGMA foreign_key_check").all() as any[];
+    if (fkIssues.length > 0) {
+      const sample = fkIssues
+        .slice(0, 5)
+        .map((r: any) => `${r.table}.${r.rowid} -> ${r.parent}`)
+        .join(", ");
+      throw new Error(
+        `Import failed FK check: ${fkIssues.length} violations. Sample: ${sample}`,
+      );
     }
   });
 
@@ -207,6 +274,7 @@ async function main(): Promise<void> {
   for (const [table, count] of Object.entries(summary)) {
     console.log(`${table}: ${count}`);
   }
+  console.log(`mapped: reused ${reusedIds}, new ${newIds}`);
 }
 
 main().catch((err) => {
