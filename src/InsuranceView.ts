@@ -62,7 +62,8 @@ async function loadPolicies(): Promise<Policy[]> {
     });
     if (changed) await savePolicies(arr as Policy[]);
     return arr as Policy[];
-  } catch {
+  } catch (e) {
+    console.error("loadPolicies failed:", e);
     return [];
   }
 }

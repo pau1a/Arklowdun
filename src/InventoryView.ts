@@ -56,7 +56,8 @@ async function loadItems(): Promise<InventoryItem[]> {
     });
     if (changed) await saveItems(arr as InventoryItem[]);
     return arr as InventoryItem[];
-  } catch {
+  } catch (e) {
+    console.error("loadItems failed:", e);
     return [];
   }
 }

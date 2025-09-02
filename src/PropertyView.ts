@@ -58,7 +58,8 @@ async function loadDocuments(): Promise<PropertyDocument[]> {
     });
     if (changed) await saveDocuments(arr as PropertyDocument[]);
     return arr as PropertyDocument[];
-  } catch {
+  } catch (e) {
+    console.error("loadDocuments failed:", e);
     return [];
   }
 }

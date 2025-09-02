@@ -62,7 +62,8 @@ async function loadPets(): Promise<Pet[]> {
     });
     if (changed) await savePets(arr as Pet[]);
     return arr as Pet[];
-  } catch {
+  } catch (e) {
+    console.error("loadPets failed:", e);
     return [];
   }
 }

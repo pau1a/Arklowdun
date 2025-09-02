@@ -162,6 +162,11 @@ fn delete_event(app: tauri::AppHandle, state: tauri::State<state::AppState>, id:
     write_events(&app, &events)
 }
 
+#[tauri::command]
+fn get_default_household_id(state: tauri::State<state::AppState>) -> String {
+    state.default_household_id.clone()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -181,7 +186,8 @@ pub fn run() {
             get_events,
             add_event,
             update_event,
-            delete_event
+            delete_event,
+            get_default_household_id
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
