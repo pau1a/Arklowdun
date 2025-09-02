@@ -1,7 +1,7 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf, sync::{Arc, Mutex}};
-use tauri::{api::path, Manager, State};
+use tauri::{path, Manager, State};
 use tauri_plugin_sql;
 
 use crate::state::AppState;
