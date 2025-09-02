@@ -37,22 +37,56 @@ async function loadPets(): Promise<Pet[]> {
         changed = true;
       }
       if (Array.isArray(i.medical)) {
-        i.medical = i.medical.map((m: any) => {
-          for (const k of ["date", "reminder"]) {
-            if (k in m) {
-              const ms = toMs(m[k]);
-              if (ms !== undefined) {
-                if (ms !== m[k]) changed = true;
-                m[k] = ms;
+        i.medical = i.medical
+          .map((m: any) => {
+            for (const k of ["date", "reminder"]) {
+              if (k in m) {
+                const ms = toMs(m[k]);
+                if (ms !== undefined) {
+                  if (ms !== m[k]) changed = true;
+                  m[k] = ms;
+                }
               }
             }
-          }
-          if (!m.household_id) {
-            m.household_id = hh;
-            changed = true;
-          }
-          return m;
-        });
+            if (!m.id) {
+              m.id = newUuidV7();
+              changed = true;
+            }
+            if (!m.pet_id) {
+              m.pet_id = i.id;
+              changed = true;
+            }
+            if (!m.created_at) {
+              m.created_at = nowMs();
+              changed = true;
+            }
+            if (!m.updated_at) {
+              m.updated_at = m.created_at;
+              changed = true;
+            }
+            if (!m.household_id) {
+              m.household_id = hh;
+              changed = true;
+            }
+            if (m.deleted_at === undefined) {
+              m.deleted_at = null;
+              changed = true;
+            }
+            return m;
+          })
+          .filter((m: any) => m.deleted_at == null);
+      }
+      if (i.deleted_at === undefined) {
+        i.deleted_at = null;
+        changed = true;
+      }
+      if (!i.created_at) {
+        i.created_at = nowMs();
+        changed = true;
+      }
+      if (!i.updated_at) {
+        i.updated_at = i.created_at;
+        changed = true;
       }
       if (!i.household_id) {
         i.household_id = hh;
@@ -60,6 +94,7 @@ async function loadPets(): Promise<Pet[]> {
       }
       return i;
     });
+    arr = arr.filter((i: any) => i.deleted_at == null);
     if (changed) await savePets(arr as Pet[]);
     return arr as Pet[];
   } catch (e) {
@@ -140,12 +175,15 @@ export async function PetsView(container: HTMLElement) {
     form?.addEventListener("submit", async (e) => {
       e.preventDefault();
       if (!nameInput || !typeInput || !listEl) return;
+      const now = nowMs();
       const pet: Pet = {
         id: newUuidV7(),
         name: nameInput.value,
         type: typeInput.value,
         medical: [],
         household_id: await defaultHouseholdId(),
+        created_at: now,
+        updated_at: now,
       };
       pets.push(pet);
       savePets(pets).then(() => {

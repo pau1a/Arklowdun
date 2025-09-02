@@ -45,7 +45,39 @@ async function loadVehicles(): Promise<Vehicle[]> {
         i.id = newUuidV7();
         changed = true;
       }
-      for (const k of ["motDate", "serviceDate", "motReminder", "serviceReminder"]) {
+      if ("motDate" in i) {
+        const ms = toMs(i.motDate);
+        if (ms !== undefined) {
+          i.mot_date = ms;
+          changed = true;
+        }
+        delete i.motDate;
+      }
+      if ("serviceDate" in i) {
+        const ms = toMs(i.serviceDate);
+        if (ms !== undefined) {
+          i.service_date = ms;
+          changed = true;
+        }
+        delete i.serviceDate;
+      }
+      if ("motReminder" in i) {
+        const ms = toMs(i.motReminder);
+        if (ms !== undefined) {
+          i.mot_reminder = ms;
+          changed = true;
+        }
+        delete i.motReminder;
+      }
+      if ("serviceReminder" in i) {
+        const ms = toMs(i.serviceReminder);
+        if (ms !== undefined) {
+          i.service_reminder = ms;
+          changed = true;
+        }
+        delete i.serviceReminder;
+      }
+      for (const k of ["mot_date", "service_date", "mot_reminder", "service_reminder"]) {
         if (k in i) {
           const ms = toMs(i[k]);
           if (ms !== undefined) {
@@ -55,18 +87,52 @@ async function loadVehicles(): Promise<Vehicle[]> {
         }
       }
       if (Array.isArray(i.maintenance)) {
-        i.maintenance = i.maintenance.map((m: any) => {
-          const ms = toMs(m.date);
-          if (ms !== undefined) {
-            if (ms !== m.date) changed = true;
-            m.date = ms;
-          }
-          if (!m.household_id) {
-            m.household_id = hh;
-            changed = true;
-          }
-          return m;
-        });
+        i.maintenance = i.maintenance
+          .map((m: any) => {
+            const ms = toMs(m.date);
+            if (ms !== undefined) {
+              if (ms !== m.date) changed = true;
+              m.date = ms;
+            }
+            if (!m.id) {
+              m.id = newUuidV7();
+              changed = true;
+            }
+            if (!m.vehicle_id) {
+              m.vehicle_id = i.id;
+              changed = true;
+            }
+            if (!m.created_at) {
+              m.created_at = nowMs();
+              changed = true;
+            }
+            if (!m.updated_at) {
+              m.updated_at = m.created_at;
+              changed = true;
+            }
+            if (!m.household_id) {
+              m.household_id = hh;
+              changed = true;
+            }
+            if (m.deleted_at === undefined) {
+              m.deleted_at = null;
+              changed = true;
+            }
+            return m;
+          })
+          .filter((m: any) => m.deleted_at == null);
+      }
+      if (i.deleted_at === undefined) {
+        i.deleted_at = null;
+        changed = true;
+      }
+      if (!i.created_at) {
+        i.created_at = nowMs();
+        changed = true;
+      }
+      if (!i.updated_at) {
+        i.updated_at = i.created_at;
+        changed = true;
       }
       if (!i.household_id) {
         i.household_id = hh;
@@ -74,6 +140,7 @@ async function loadVehicles(): Promise<Vehicle[]> {
       }
       return i;
     });
+    arr = arr.filter((i: any) => i.deleted_at == null);
     if (changed) await saveVehicles(arr as Vehicle[]);
     return arr as Vehicle[];
   } catch (e) {
@@ -93,7 +160,7 @@ function renderVehicles(listEl: HTMLUListElement, vehicles: Vehicle[]) {
   listEl.innerHTML = "";
   vehicles.forEach((v) => {
     const li = document.createElement("li");
-    li.textContent = `${v.name} (MOT ${toDate(v.motDate).toLocaleDateString()}, Service ${toDate(v.serviceDate).toLocaleDateString()}) `;
+    li.textContent = `${v.name} (MOT ${toDate(v.mot_date).toLocaleDateString()}, Service ${toDate(v.service_date).toLocaleDateString()}) `;
     const btn = document.createElement("button");
     btn.textContent = "Open";
     btn.dataset.id = v.id;
@@ -125,10 +192,10 @@ async function scheduleVehicleReminders(vehicles: Vehicle[]) {
   if (!granted) return;
   const now = nowMs();
   vehicles.forEach((v) => {
-    const motTs = v.motDate;
-    if (v.motReminder) {
-      if (v.motReminder > now) {
-        scheduleAt(v.motReminder, () => {
+    const motTs = v.mot_date;
+    if (v.mot_reminder) {
+      if (v.mot_reminder > now) {
+        scheduleAt(v.mot_reminder, () => {
           sendNotification({
             title: "MOT Due",
             body: `${v.name} MOT on ${toDate(motTs).toLocaleDateString()}`,
@@ -141,10 +208,10 @@ async function scheduleVehicleReminders(vehicles: Vehicle[]) {
         });
       }
     }
-    const serviceTs = v.serviceDate;
-    if (v.serviceReminder) {
-      if (v.serviceReminder > now) {
-        scheduleAt(v.serviceReminder, () => {
+    const serviceTs = v.service_date;
+    if (v.service_reminder) {
+      if (v.service_reminder > now) {
+        scheduleAt(v.service_reminder, () => {
           sendNotification({
             title: "Service Due",
             body: `${v.name} service on ${toDate(serviceTs).toLocaleDateString()}`,
@@ -196,15 +263,18 @@ export async function VehiclesView(container: HTMLElement) {
       const [y2, m2, d2] = serviceInput.value.split("-").map(Number);
       const serviceDate = new Date(y2, (m2 ?? 1) - 1, d2 ?? 1, 12, 0, 0, 0);
       const serviceReminder = serviceDate.getTime() - 7 * 24 * 60 * 60 * 1000;
+      const now = nowMs();
       const vehicle: Vehicle = {
         id: newUuidV7(),
         name: nameInput.value,
-        motDate: motDate.getTime(),
-        serviceDate: serviceDate.getTime(),
-        motReminder,
-        serviceReminder,
+        mot_date: motDate.getTime(),
+        service_date: serviceDate.getTime(),
+        mot_reminder: motReminder,
+        service_reminder: serviceReminder,
         maintenance: [],
         household_id: await defaultHouseholdId(),
+        created_at: now,
+        updated_at: now,
       };
       vehicles.push(vehicle);
       saveVehicles(vehicles).then(() => {
@@ -228,9 +298,9 @@ export async function VehiclesView(container: HTMLElement) {
       <button id="back">Back</button>
       <h2>${vehicle.name}</h2>
       <form id="dates-form">
-        <label>MOT: <input id="mot-date" type="date" value="${toDate(vehicle.motDate).toISOString().slice(0, 10)}" required /></label>
-        <label>Service: <input id="service-date" type="date" value="${toDate(vehicle.serviceDate).toISOString().slice(0, 10)}" required /></label>
-        <button type="submit">Update Dates</button>
+        <label>MOT: <input id="mot-date" type="date" value="${toDate(vehicle.mot_date).toISOString().slice(0, 10)}" required /></label>
+        <label>Service: <input id="service-date" type="date" value="${toDate(vehicle.service_date).toISOString().slice(0, 10)}" required /></label>
+      <button type="submit">Update Dates</button>
       </form>
       <h3>Maintenance</h3>
       <ul id="maint-list"></ul>
@@ -264,12 +334,13 @@ export async function VehiclesView(container: HTMLElement) {
       if (!motDateInput || !serviceDateInput) return;
       const [y1, m1, d1] = motDateInput.value.split("-").map(Number);
       const motDate = new Date(y1, (m1 ?? 1) - 1, d1 ?? 1, 12, 0, 0, 0);
-      vehicle.motDate = motDate.getTime();
-      vehicle.motReminder = motDate.getTime() - 7 * 24 * 60 * 60 * 1000;
+      vehicle.mot_date = motDate.getTime();
+      vehicle.mot_reminder = motDate.getTime() - 7 * 24 * 60 * 60 * 1000;
       const [y2, m2, d2] = serviceDateInput.value.split("-").map(Number);
       const serviceDate = new Date(y2, (m2 ?? 1) - 1, d2 ?? 1, 12, 0, 0, 0);
-      vehicle.serviceDate = serviceDate.getTime();
-      vehicle.serviceReminder = serviceDate.getTime() - 7 * 24 * 60 * 60 * 1000;
+      vehicle.service_date = serviceDate.getTime();
+      vehicle.service_reminder = serviceDate.getTime() - 7 * 24 * 60 * 60 * 1000;
+      vehicle.updated_at = nowMs();
       saveVehicles(vehicles).then(() => scheduleVehicleReminders([vehicle]));
     });
 
@@ -278,13 +349,20 @@ export async function VehiclesView(container: HTMLElement) {
       if (!maintDate || !maintType || !maintCost || !maintList) return;
       const [y, m, d] = maintDate.value.split("-").map(Number);
       const entryDate = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0);
+      const now = nowMs();
       const entry: MaintenanceEntry = {
+        id: newUuidV7(),
+        vehicle_id: vehicle.id,
         date: entryDate.getTime(),
         type: maintType.value,
         cost: parseFloat(maintCost.value),
         document: maintDoc?.value ?? "",
         household_id: vehicle.household_id,
+        created_at: now,
+        updated_at: now,
+        deleted_at: null,
       };
+      vehicle.updated_at = now;
       vehicle.maintenance.push(entry);
       saveVehicles(vehicles).then(() => {
         renderMaintenance(maintList, vehicle.maintenance);

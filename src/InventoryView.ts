@@ -39,7 +39,23 @@ async function loadItems(): Promise<InventoryItem[]> {
         i.id = newUuidV7();
         changed = true;
       }
-      for (const k of ["purchaseDate", "warrantyExpiry", "reminder"]) {
+      if ("purchaseDate" in i) {
+        const ms = toMs(i.purchaseDate);
+        if (ms !== undefined) {
+          i.purchase_date = ms;
+          changed = true;
+        }
+        delete i.purchaseDate;
+      }
+      if ("warrantyExpiry" in i) {
+        const ms = toMs(i.warrantyExpiry);
+        if (ms !== undefined) {
+          i.warranty_expiry = ms;
+          changed = true;
+        }
+        delete i.warrantyExpiry;
+      }
+      for (const k of ["purchase_date", "warranty_expiry", "reminder"]) {
         if (k in i) {
           const ms = toMs(i[k]);
           if (ms !== undefined) {
@@ -48,12 +64,21 @@ async function loadItems(): Promise<InventoryItem[]> {
           }
         }
       }
+      if (!i.created_at) {
+        i.created_at = nowMs();
+        changed = true;
+      }
+      if (!i.updated_at) {
+        i.updated_at = i.created_at;
+        changed = true;
+      }
       if (!i.household_id) {
         i.household_id = hh;
         changed = true;
       }
       return i;
     });
+    arr = arr.filter((i: any) => i.deleted_at == null);
     if (changed) await saveItems(arr as InventoryItem[]);
     return arr as InventoryItem[];
   } catch (e) {
@@ -73,7 +98,7 @@ function renderItems(listEl: HTMLUListElement, items: InventoryItem[]) {
   listEl.innerHTML = "";
   items.forEach((i) => {
     const li = document.createElement("li");
-    li.textContent = `${i.name} warranty expires ${toDate(i.warrantyExpiry).toLocaleDateString()} `;
+    li.textContent = `${i.name} warranty expires ${toDate(i.warranty_expiry).toLocaleDateString()} `;
     const btn = document.createElement("button");
     btn.textContent = "Open document";
     btn.addEventListener("click", () => openPath(i.document));
@@ -90,7 +115,7 @@ async function scheduleWarrantyReminders(items: InventoryItem[]) {
   if (!granted) return;
   const now = nowMs();
   items.forEach((i) => {
-    const expTs = i.warrantyExpiry;
+    const expTs = i.warranty_expiry;
     if (!i.reminder) return;
     if (i.reminder > now) {
       scheduleAt(i.reminder, () => {
@@ -144,14 +169,17 @@ export async function InventoryView(container: HTMLElement) {
     const warrantyLocalNoon = new Date(wy, (wm ?? 1) - 1, wd ?? 1, 12, 0, 0, 0);
     const expTs = warrantyLocalNoon.getTime();
     const reminder = expTs - 24 * 60 * 60 * 1000;
+    const now = nowMs();
     const item: InventoryItem = {
       id: newUuidV7(),
       name: nameInput.value,
-      purchaseDate: purchaseLocalNoon.getTime(),
-      warrantyExpiry: warrantyLocalNoon.getTime(),
+      purchase_date: purchaseLocalNoon.getTime(),
+      warranty_expiry: warrantyLocalNoon.getTime(),
       document: docInput.value,
       reminder,
       household_id: await defaultHouseholdId(),
+      created_at: now,
+      updated_at: now,
     };
     items.push(item);
     saveItems(items).then(() => {

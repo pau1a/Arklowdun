@@ -28,39 +28,72 @@ async function loadData(): Promise<BudgetData> {
     let changed = false;
     const hh = await defaultHouseholdId();
     const idMap = new Map<number, string>();
-    data.categories = data.categories.map((c: any) => {
-      if (typeof c.id === "number") {
-        const id = newUuidV7();
-        idMap.set(c.id, id);
-        changed = true;
-        return { ...c, id };
-      }
-      if (!c.household_id) {
-        changed = true;
-        return { ...c, household_id: hh };
-      }
-      return c;
-    });
-    data.expenses = data.expenses.map((e: any) => {
-      let id = e.id;
-      if (typeof id === "number") {
-        id = newUuidV7();
-        changed = true;
-      }
-      let catId = e.categoryId;
-      if (typeof catId === "number") {
-        catId = idMap.get(catId) ?? String(catId);
-        changed = true;
-      }
-      let date = e.date;
-      const ms = toMs(date);
-      if (ms !== undefined) {
-        if (ms !== date) changed = true;
-        date = ms;
-      }
-      if (!e.household_id) changed = true;
-      return { ...e, id, categoryId: catId, date, household_id: e.household_id ?? hh };
-    });
+    data.categories = data.categories
+      .map((c: any) => {
+        if (typeof c.id === "number") {
+          const id = newUuidV7();
+          idMap.set(c.id, id);
+          changed = true;
+          c.id = id;
+        }
+        if ("monthlyBudget" in c) {
+          c.monthly_budget = c.monthlyBudget;
+          delete c.monthlyBudget;
+          changed = true;
+        }
+        if (!c.created_at) {
+          c.created_at = nowMs();
+          changed = true;
+        }
+        if (!c.updated_at) {
+          c.updated_at = c.created_at;
+          changed = true;
+        }
+        if (!c.household_id) {
+          c.household_id = hh;
+          changed = true;
+        }
+        return c;
+      })
+      .filter((c: any) => c.deleted_at == null);
+    data.expenses = data.expenses
+      .map((e: any) => {
+        let id = e.id;
+        if (typeof id === "number") {
+          id = newUuidV7();
+          changed = true;
+        }
+        if ("categoryId" in e) {
+          e.category_id = e.categoryId;
+          delete e.categoryId;
+          changed = true;
+        }
+        let catId = e.category_id;
+        if (typeof catId === "number") {
+          catId = idMap.get(catId) ?? String(catId);
+          changed = true;
+        }
+        let date = e.date;
+        const ms = toMs(date);
+        if (ms !== undefined) {
+          if (ms !== date) changed = true;
+          date = ms;
+        }
+        if (!e.created_at) {
+          e.created_at = nowMs();
+          changed = true;
+        }
+        if (!e.updated_at) {
+          e.updated_at = e.created_at;
+          changed = true;
+        }
+        if (!e.household_id) {
+          e.household_id = hh;
+          changed = true;
+        }
+        return { ...e, id, category_id: catId, date };
+      })
+      .filter((e: any) => e.deleted_at == null);
     if (changed) await saveData(data);
     return data as BudgetData;
   } catch {
@@ -95,14 +128,14 @@ function renderSummary(tbody: HTMLTableSectionElement, data: BudgetData) {
     const spent = data.expenses
       .filter((e) => {
         const d = toDate(e.date);
-        return e.categoryId === c.id && d.getMonth() === m && d.getFullYear() === y;
+        return e.category_id === c.id && d.getMonth() === m && d.getFullYear() === y;
       })
       .reduce((s, e) => s + e.amount, 0);
-    const remaining = c.monthlyBudget - spent;
+    const remaining = c.monthly_budget - spent;
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${c.name}</td>
-      <td>${money.format(c.monthlyBudget)}</td>
+      <td>${money.format(c.monthly_budget)}</td>
       <td>${money.format(spent)}</td>
       <td>${money.format(remaining)}</td>
     `;
@@ -119,7 +152,7 @@ function csvEscape(s: string) {
 async function exportCsv(data: BudgetData) {
   const lines = ["date,category,amount,description"];
   data.expenses.forEach((e) => {
-    const cat = data.categories.find((c) => c.id === e.categoryId);
+    const cat = data.categories.find((c) => c.id === e.category_id);
     const name = cat ? cat.name : "";
     lines.push(
       [toDate(e.date).toISOString(), name, String(e.amount), e.description ?? ""]
@@ -184,11 +217,14 @@ export async function BudgetView(container: HTMLElement) {
   catForm?.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!catName || !catBudget || !expCategory || !summaryBody) return;
+    const now = nowMs();
     const cat: BudgetCategory = {
       id: newUuidV7(),
       name: catName.value,
-      monthlyBudget: Number(catBudget.value),
+      monthly_budget: Number(catBudget.value),
       household_id: await defaultHouseholdId(),
+      created_at: now,
+      updated_at: now,
     };
     data.categories.push(cat);
     saveData(data).then(() => {
@@ -207,13 +243,16 @@ export async function BudgetView(container: HTMLElement) {
     }
     const [y, m, d] = expDate.value.split("-").map(Number);
     const dateLocalNoon = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0);
+    const nowExp = nowMs();
     const exp: Expense = {
       id: newUuidV7(),
-      categoryId: expCategory.value,
+      category_id: expCategory.value,
       amount: Number(expAmount.value),
       date: dateLocalNoon.getTime(),
       description: expDesc?.value || "",
       household_id: await defaultHouseholdId(),
+      created_at: nowExp,
+      updated_at: nowExp,
     };
     data.expenses.push(exp);
     saveData(data).then(() => {

@@ -45,7 +45,15 @@ async function loadBills(): Promise<Bill[]> {
         i.id = newUuidV7();
         changed = true;
       }
-      for (const k of ["dueDate", "reminder"]) {
+      if ("dueDate" in i) {
+        const ms = toMs(i.dueDate);
+        if (ms !== undefined) {
+          i.due_date = ms;
+          changed = true;
+        }
+        delete i.dueDate;
+      }
+      for (const k of ["due_date", "reminder"]) {
         if (k in i) {
           const ms = toMs(i[k]);
           if (ms !== undefined) {
@@ -54,12 +62,21 @@ async function loadBills(): Promise<Bill[]> {
           }
         }
       }
+      if (!i.created_at) {
+        i.created_at = nowMs();
+        changed = true;
+      }
+      if (!i.updated_at) {
+        i.updated_at = i.created_at;
+        changed = true;
+      }
       if (!i.household_id) {
         i.household_id = hh;
         changed = true;
       }
       return i;
     });
+    arr = arr.filter((i: any) => i.deleted_at == null);
     if (changed) await saveBills(arr as Bill[]);
     return arr as Bill[];
   } catch (e) {
@@ -77,7 +94,7 @@ function renderBills(listEl: HTMLUListElement, bills: Bill[]) {
   listEl.innerHTML = "";
   bills.forEach((b) => {
     const li = document.createElement("li");
-    li.textContent = `${money.format(b.amount)} due ${toDate(b.dueDate).toLocaleDateString()} `;
+    li.textContent = `${money.format(b.amount)} due ${toDate(b.due_date).toLocaleDateString()} `;
     const btn = document.createElement("button");
     btn.textContent = "Open document";
     btn.addEventListener("click", () => openPath(b.document));
@@ -94,7 +111,7 @@ async function scheduleBillReminders(bills: Bill[]) {
   if (!granted) return;
   const now = nowMs();
   bills.forEach((b) => {
-    const dueTs = b.dueDate;
+    const dueTs = b.due_date;
     if (!b.reminder) return;
     if (b.reminder > now) {
       scheduleAt(b.reminder, () => {
@@ -146,13 +163,16 @@ export async function BillsView(container: HTMLElement) {
     const dueLocalNoon = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0);
     const dueTs = dueLocalNoon.getTime();
     const reminder = dueTs - 24 * 60 * 60 * 1000; // 1 day before
+    const now = nowMs();
     const bill: Bill = {
       id: newUuidV7(),
       amount: parseFloat(amountInput.value),
-      dueDate: dueTs,
+      due_date: dueTs,
       document: docInput.value,
       reminder,
       household_id: await defaultHouseholdId(),
+      created_at: now,
+      updated_at: now,
     };
     bills.push(bill);
     saveBills(bills).then(() => {
