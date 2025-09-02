@@ -3,8 +3,7 @@ use sqlx::{
     Executor, Row, SqlitePool,
 };
 use std::{collections::HashSet, fs};
-use tauri::{AppHandle, Manager};
-use tauri::path::PathResolverExt; // adds `.path()` methods
+use tauri::AppHandle;
 
 use crate::time::now_ms;
 

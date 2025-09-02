@@ -2,7 +2,6 @@
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf, sync::{Arc, Mutex}};
 use tauri::{Manager, State};
-use tauri::path::PathResolverExt; // brings `.path()` into scope
 use tauri_plugin_sql;
 
 use crate::state::AppState;
