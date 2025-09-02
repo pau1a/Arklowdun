@@ -40,6 +40,10 @@ async function loadMembers(): Promise<FamilyMember[]> {
         i.household_id = hh;
         changed = true;
       }
+      if (typeof i.position !== 'number') {
+        i.position = 0;
+        changed = true;
+      }
       if ("deletedAt" in i) {
         i.deleted_at = i.deletedAt;
         delete i.deletedAt;
@@ -48,6 +52,7 @@ async function loadMembers(): Promise<FamilyMember[]> {
       return i;
     });
     arr = arr.filter((i: any) => i.deleted_at == null);
+    arr.sort((a: any, b: any) => a.position - b.position || a.created_at - b.created_at);
     if (changed) await saveMembers(arr as FamilyMember[]);
     return arr as FamilyMember[];
   } catch (e) {
@@ -120,6 +125,7 @@ export async function FamilyView(container: HTMLElement) {
         birthday: bday.getTime(),
         notes: "",
         documents: [],
+        position: members.length,
         household_id: await defaultHouseholdId(),
         created_at: now,
         updated_at: now,

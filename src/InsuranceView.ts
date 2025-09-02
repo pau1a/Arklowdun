@@ -74,6 +74,10 @@ async function loadPolicies(): Promise<Policy[]> {
         i.household_id = hh;
         changed = true;
       }
+      if (typeof i.position !== 'number') {
+        i.position = 0;
+        changed = true;
+      }
       if ("deletedAt" in i) {
         i.deleted_at = i.deletedAt;
         delete i.deletedAt;
@@ -82,6 +86,7 @@ async function loadPolicies(): Promise<Policy[]> {
       return i;
     });
     arr = arr.filter((i: any) => i.deleted_at == null);
+    arr.sort((a: any, b: any) => a.position - b.position || a.created_at - b.created_at);
     if (changed) await savePolicies(arr as Policy[]);
     return arr as Policy[];
   } catch (e) {
@@ -173,6 +178,7 @@ export async function InsuranceView(container: HTMLElement) {
       due_date: dueTs,
       document: docInput.value,
       reminder,
+      position: policies.length,
       household_id: await defaultHouseholdId(),
       created_at: now,
       updated_at: now,

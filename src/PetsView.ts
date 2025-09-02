@@ -94,9 +94,14 @@ async function loadPets(): Promise<Pet[]> {
         i.household_id = hh;
         changed = true;
       }
+      if (typeof i.position !== 'number') {
+        i.position = 0;
+        changed = true;
+      }
       return i;
     });
     arr = arr.filter((i: any) => i.deleted_at == null);
+    arr.sort((a: any, b: any) => a.position - b.position || a.created_at - b.created_at);
     if (changed) await savePets(arr as Pet[]);
     return arr as Pet[];
   } catch (e) {
@@ -183,6 +188,7 @@ export async function PetsView(container: HTMLElement) {
         name: nameInput.value,
         type: typeInput.value,
         medical: [],
+        position: pets.length,
         household_id: await defaultHouseholdId(),
         created_at: now,
         updated_at: now,

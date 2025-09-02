@@ -5,6 +5,7 @@ export interface Bill {
   document: string; // file path
   reminder?: number; // timestamp ms
   household_id?: string;
+  position: number;
   created_at: number;
   updated_at: number;
   deleted_at?: number;
@@ -17,6 +18,7 @@ export interface Policy {
   document: string; // file path
   reminder?: number; // timestamp ms
   household_id?: string;
+  position: number;
   created_at: number;
   updated_at: number;
   deleted_at?: number;
@@ -29,6 +31,7 @@ export interface PropertyDocument {
   document: string; // file path
   reminder?: number; // timestamp ms
   household_id?: string;
+  position: number;
   created_at: number;
   updated_at: number;
   deleted_at?: number;
@@ -56,6 +59,7 @@ export interface Vehicle {
   service_reminder?: number; // timestamp ms
   maintenance: MaintenanceEntry[];
   household_id?: string;
+  position: number;
   created_at: number;
   updated_at: number;
   deleted_at?: number;
@@ -80,6 +84,7 @@ export interface Pet {
   type: string;
   medical: PetMedicalRecord[];
   household_id?: string;
+  position: number;
   created_at: number;
   updated_at: number;
   deleted_at?: number;
@@ -92,6 +97,7 @@ export interface FamilyMember {
   notes: string;
   documents: string[]; // file paths
   household_id?: string;
+  position: number;
   created_at: number;
   updated_at: number;
   deleted_at?: number;
@@ -105,6 +111,7 @@ export interface InventoryItem {
   document: string; // file path
   reminder?: number; // timestamp ms
   household_id?: string;
+  position: number;
   created_at: number;
   updated_at: number;
   deleted_at?: number;
@@ -115,6 +122,7 @@ export interface BudgetCategory {
   name: string;
   monthly_budget: number;
   household_id?: string;
+  position: number;
   created_at: number;
   updated_at: number;
   deleted_at?: number;
