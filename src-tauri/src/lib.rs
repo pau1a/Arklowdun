@@ -1,8 +1,10 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
-use tauri::Manager;
+use tauri::{Manager, State};
 use tauri_plugin_sql;
+
+use crate::{household, state::AppState};
 
 mod id;
 mod time;
@@ -175,6 +177,20 @@ fn get_default_household_id(state: tauri::State<state::AppState>) -> String {
     state.default_household_id.clone()
 }
 
+#[tauri::command]
+async fn delete_household_cmd(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    household::delete_household(&state.pool, &id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn restore_household_cmd(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    household::restore_household(&state.pool, &id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -187,7 +203,7 @@ pub fn run() {
             let handle = app.handle();
             let pool = tauri::async_runtime::block_on(crate::migrate::init_db(&handle))?;
             let hh = tauri::async_runtime::block_on(crate::household::default_household_id(&pool))?;
-            app.manage(crate::state::AppState { default_household_id: hh });
+            app.manage(crate::state::AppState { pool: pool.clone(), default_household_id: hh });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -195,7 +211,9 @@ pub fn run() {
             add_event,
             update_event,
             delete_event,
-            get_default_household_id
+            get_default_household_id,
+            delete_household_cmd,
+            restore_household_cmd
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

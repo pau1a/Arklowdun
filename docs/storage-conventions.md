@@ -42,6 +42,12 @@ deleted_at: Option<i64>
 Clients SHOULD omit `deleted_at` when not set; servers and SDKs omit it when
 `NULL`/`None`.
 
+### Operations
+
+Soft deletion and restoration are exposed via Tauri commands:
+`delete_household_cmd` and `restore_household_cmd`. Both update `updated_at`
+and toggle `deleted_at`.
+
 ## Generating IDs
 
 ```ts
