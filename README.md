@@ -16,3 +16,9 @@ Current state: basic app shell with three tabs (Files, Calendar, Notes). The Fil
 - `npm run tauri` — run Tauri CLI (build/dev/bundle).
 
 Recommended IDE: VS Code with Tauri and rust-analyzer extensions.
+
+## Database integrity
+
+Schema constraint guidelines live in [docs/integrity-rules.md](docs/integrity-rules.md).
+The first migration to apply them will be
+`migrations/202509021200_add_integrity_constraints.sql`.
