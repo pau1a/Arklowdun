@@ -22,3 +22,7 @@ Open a single SQLite database at app scope using @tauri-apps/plugin-sql:
 Notes
 The sqlite:app.sqlite path resolves under the app’s data dir, e.g.:
 ~/Library/Application Support/com.paula.arklowdun/app.sqlite (macOS).
+
+Schema integrity conventions are documented in [integrity-rules.md](integrity-rules.md).
+The first migration to enforce them is
+`migrations/202509021200_add_integrity_constraints.sql`.
