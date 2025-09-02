@@ -4,7 +4,7 @@ use std::{fs, path::PathBuf, sync::{Arc, Mutex}};
 use tauri::{Manager, State};
 use tauri_plugin_sql;
 
-use crate::{household, state::AppState};
+use crate::state::AppState;
 
 mod id;
 mod time;
