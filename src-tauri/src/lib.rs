@@ -1,7 +1,8 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf, sync::{Arc, Mutex}};
-use tauri::{path, Manager, State};
+use tauri::{Manager, State};
+use tauri::path::PathResolverExt; // brings `.path()` into scope
 use tauri_plugin_sql;
 
 use crate::state::AppState;
@@ -50,7 +51,8 @@ enum RawEvent {
 }
 
 fn events_path(app: &tauri::AppHandle) -> PathBuf {
-    path::app_data_dir(app.config())
+    app.path()
+        .app_data_dir()
         .expect("app data dir")
         .join("events.json")
 }
