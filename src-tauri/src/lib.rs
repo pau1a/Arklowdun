@@ -12,7 +12,6 @@ mod household; // declare module; avoid `use` to prevent name collision
 mod state;
 mod migrate;
 mod repo;
-mod files;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Event {
