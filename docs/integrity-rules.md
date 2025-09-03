@@ -29,6 +29,10 @@ ALTER TABLE pets
 
 Use these for non-negative amounts, bounded dates, or limited sets of strings.
 
+## Foreign Keys
+
+All foreign keys must declare explicit ON DELETE and ON UPDATE actions. The default is ON DELETE CASCADE ON UPDATE CASCADE unless a migration comment documents a different choice.
+
 ## ON DELETE CASCADE
 
 Use `ON DELETE CASCADE` on foreign keys where child rows should disappear automatically when the parent is removed.
@@ -46,7 +50,7 @@ This prevents orphaned rows and keeps cleanup simple.
 The first migration to apply these rules will be:
 
 ```
-migrations/202509021200_add_integrity_constraints.sql
+migrations/202509021300_explicit_fk_actions.sql
 ```
 
 Future schema changes should conform to the guidance above.
