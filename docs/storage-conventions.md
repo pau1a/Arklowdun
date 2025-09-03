@@ -88,6 +88,8 @@ positions. Soft-delete helpers also invoke this compaction to keep active rows
 dense from zero. Queries that return ordered data should sort by `position, created_at`.
 Notes additionally sort by `z, position, created_at` so higher `z` values appear on top.
 
+Notes currently persist to local JSON (file-backed). A DB helper (`bring_note_to_front`) exists for the future SQLite migration; it's intentionally unused in runtime builds.
+
 ## Generating IDs
 
 ```ts

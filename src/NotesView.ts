@@ -1,3 +1,5 @@
+// TODO(backend-notes): when Notes move to SQLite, call the tauri `bring_note_to_front` command
+// instead of local z-bumping, and order by `z DESC, position, created_at` in repo helpers.
 import { readTextFile, writeTextFile, mkdir, BaseDirectory } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
 import { newUuidV7 } from "./db/id";

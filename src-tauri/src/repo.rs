@@ -260,6 +260,8 @@ pub(crate) async fn reorder_positions(
     Ok(())
 }
 
+// Kept for the future SQLite-backed Notes path; UI is file-based today.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) async fn bring_note_to_front(
     pool: &SqlitePool,
     household_id: &str,
