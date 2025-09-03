@@ -1,7 +1,7 @@
 use sqlx::{Row, SqlitePool};
 
 use crate::id::new_uuid_v7;
-use crate::repo::{self, admin};
+use crate::repo::admin;
 use crate::time::now_ms;
 
 pub async fn default_household_id(pool: &SqlitePool) -> anyhow::Result<String> {
@@ -20,12 +20,4 @@ pub async fn default_household_id(pool: &SqlitePool) -> anyhow::Result<String> {
         .execute(pool)
         .await?;
     Ok(id)
-}
-
-pub async fn delete_household(pool: &SqlitePool, id: &str) -> anyhow::Result<()> {
-    repo::set_deleted_at(pool, "household", id, id).await
-}
-
-pub async fn restore_household(pool: &SqlitePool, id: &str) -> anyhow::Result<()> {
-    repo::clear_deleted_at(pool, "household", id, id).await
 }
