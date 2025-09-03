@@ -12,6 +12,8 @@ const DOMAIN_TABLES = [
   "family_members",
   "budget_categories",
   "expenses",
+  "notes",
+  "shopping_items",
 ] as const;
 
 type DomainTable = (typeof DOMAIN_TABLES)[number];
@@ -30,6 +32,8 @@ const ORDER_MAP: Record<DomainTable, string> = {
   family_members: "position, created_at, id",
   budget_categories: "position, created_at, id",
   expenses: "created_at, id",
+  notes: "position, created_at, id",
+  shopping_items: "position, created_at, id",
 };
 
 const ALLOWED_ORDERS = new Set(Object.values(ORDER_MAP));

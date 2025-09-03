@@ -79,3 +79,12 @@ if let Some(row) = repo::first_active(&pool, "bills", &household_id, None).await
 
 To obtain a `householdId`, call the `get_default_household_id` command or
 surface a selection flow so the user can choose a household explicitly.
+
+## Notes & Shopping Soft Delete
+
+Notes and shopping items must use soft deletion. Rows are never removed;
+instead `deleted_at` is set to the current timestamp. Queries and UI must
+exclude rows where `deleted_at` is not `NULL`. The `notes_live` and
+`shopping_live` views expose only active rows. Use the repository helpers
+`set_deleted_at`, `clear_deleted_at`, and `renumber_positions` to handle
+delete and restore flows while keeping positions dense.

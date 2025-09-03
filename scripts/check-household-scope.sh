@@ -2,7 +2,7 @@
 set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 # Tables that must always be scoped by household_id
-pattern='events|bills|policies|property_documents|inventory_items|vehicles|vehicle_maintenance|pets|pet_medical|family_members|budget_categories|expenses'
+pattern='events|bills|policies|property_documents|inventory_items|vehicles|vehicle_maintenance|pets|pet_medical|family_members|budget_categories|expenses|notes|shopping_items'
 # Find files with SQL touching domain tables (excluding migrations)
 files=$(rg -i "(from|update|into)\s+(${pattern})" -l --glob '!migrations/*' || true)
 failed=0

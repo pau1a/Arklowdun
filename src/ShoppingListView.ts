@@ -5,6 +5,7 @@ interface ShoppingItem {
   id: string;
   text: string;
   completed: boolean;
+  deleted_at?: number;
 }
 
 const FILE = "shopping-list.json";
@@ -17,11 +18,17 @@ async function loadItems(): Promise<ShoppingItem[]> {
     const items = JSON.parse(content) as ShoppingItem[] | any[];
     let changed = false;
     const fixed = items.map((i) => {
-      if (typeof i.id === "number") {
+      let item: any = i;
+      if (typeof item.id === "number") {
+        item = { ...item, id: newUuidV7() };
         changed = true;
-        return { ...i, id: newUuidV7() };
       }
-      return i;
+      if ("deletedAt" in item) {
+        item.deleted_at = (item as any).deletedAt;
+        delete (item as any).deletedAt;
+        changed = true;
+      }
+      return item;
     });
     if (changed) await saveItems(fixed);
     return fixed as ShoppingItem[];
@@ -58,14 +65,15 @@ export async function ShoppingListView(container: HTMLElement) {
   const render = () => {
     if (!listEl) return;
     listEl.innerHTML = "";
-    if (items.length === 0) {
+    const liveItems = items.filter((i) => !i.deleted_at);
+    if (liveItems.length === 0) {
       const empty = document.createElement("li");
       empty.className = "list empty";
       empty.textContent = "No items";
       listEl.appendChild(empty);
       return;
     }
-    for (const item of items) {
+    for (const item of liveItems) {
       const li = document.createElement("li");
       const cb = document.createElement("input");
       cb.type = "checkbox";
@@ -81,7 +89,7 @@ export async function ShoppingListView(container: HTMLElement) {
       const del = document.createElement("button");
       del.textContent = "Delete";
       del.addEventListener("click", async () => {
-        items = items.filter((i) => i.id !== item.id);
+        item.deleted_at = Date.now();
         await saveItems(items);
         render();
       });
