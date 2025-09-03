@@ -6,6 +6,7 @@ import { newUuidV7 } from "./db/id";
 import { nowMs, toDate } from "./db/time";
 import { toMs } from "./db/normalize";
 import { defaultHouseholdId } from "./db/household";
+import { assertJsonWritable } from "./storage";
 
 // ----- storage -----
 const STORE_DIR = "Arklowdun";
@@ -71,6 +72,7 @@ async function loadMembers(): Promise<FamilyMember[]> {
   }
 }
 async function saveMembers(members: FamilyMember[]): Promise<void> {
+  assertJsonWritable("family_members");
   await mkdir(STORE_DIR, { baseDir: BaseDirectory.AppLocalData, recursive: true });
   const p = await join(STORE_DIR, FILE_NAME);
   await writeTextFile(p, JSON.stringify(members, null, 2), {

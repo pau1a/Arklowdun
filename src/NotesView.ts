@@ -3,6 +3,7 @@
 import { readTextFile, writeTextFile, mkdir, BaseDirectory } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
 import { newUuidV7 } from "./db/id";
+import { assertJsonWritable } from "./storage";
 
 interface Note {
   id: string;
@@ -48,6 +49,7 @@ async function loadNotes(): Promise<Note[]> {
 }
 
 async function saveNotes(notes: Note[]): Promise<void> {
+  assertJsonWritable("notes");
   await mkdir(STORE_DIR, { baseDir: BaseDirectory.AppLocalData, recursive: true });
   const p = await join(STORE_DIR, FILE_NAME);
   await writeTextFile(p, JSON.stringify(notes, null, 2), { baseDir: BaseDirectory.AppLocalData });

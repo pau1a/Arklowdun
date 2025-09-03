@@ -5,6 +5,7 @@ import { newUuidV7 } from "./db/id";
 import { nowMs, toDate } from "./db/time";
 import { defaultHouseholdId } from "./db/household";
 import { toMs } from "./db/normalize";
+import storage from "./storage";
 import type { Bill, Policy, Vehicle } from "./models";
 
 const STORE_DIR = "Arklowdun";
@@ -93,7 +94,10 @@ async function loadJson<T>(file: string): Promise<T[]> {
     arr = arr.filter((i: any) => (i as any).deleted_at == null);
     arr.sort((a: any, b: any) => (a as any).position - (b as any).position || (a as any).created_at - (b as any).created_at);
     if (changed) {
-      await writeTextFile(p, JSON.stringify(arr), { baseDir: BaseDirectory.AppLocalData });
+      const key = file.replace(/\.json$/, "") as keyof typeof storage;
+      if (!(key in storage) || storage[key] === "json") {
+        await writeTextFile(p, JSON.stringify(arr), { baseDir: BaseDirectory.AppLocalData });
+      }
     }
     return arr as T[];
   } catch {
