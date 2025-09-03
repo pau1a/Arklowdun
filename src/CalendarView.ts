@@ -5,26 +5,28 @@ import {
   sendNotification,
 } from "./notification";
 import { nowMs, toDate } from "./db/time";
+import { defaultHouseholdId } from "./db/household";
+import type { Event } from "./models";
 
-export interface CalendarEvent {
-  id: string;
-  title: string;
-  datetime: number; // timestamp in ms
-  reminder?: number; // timestamp in ms
-  household_id: string;
-  created_at: number;
-  updated_at: number;
+async function fetchEvents(): Promise<Event[]> {
+  const hh = await defaultHouseholdId();
+  return await invoke<Event[]>("events_list_range", {
+    householdId: hh,
+    start: 0,
+    end: Number.MAX_SAFE_INTEGER,
+  });
 }
 
-async function fetchEvents(): Promise<CalendarEvent[]> {
-  return await invoke<CalendarEvent[]>("get_events");
+async function saveEvent(
+  event: Omit<Event, "id" | "created_at" | "updated_at" | "household_id" | "deleted_at">,
+): Promise<Event> {
+  const hh = await defaultHouseholdId();
+  return await invoke<Event>("event_create", {
+    data: { ...event, household_id: hh },
+  });
 }
 
-async function saveEvent(event: Omit<CalendarEvent, "id" | "created_at" | "updated_at" | "household_id">): Promise<CalendarEvent> {
-  return await invoke<CalendarEvent>("add_event", { event });
-}
-
-function renderMonth(root: HTMLElement, events: CalendarEvent[]) {
+function renderMonth(root: HTMLElement, events: Event[]) {
   root.innerHTML = "";
   const now = toDate(nowMs());
   const year = now.getFullYear();
@@ -52,7 +54,7 @@ function renderMonth(root: HTMLElement, events: CalendarEvent[]) {
     cell.innerHTML = `<div class="date">${day}</div>`;
     const cellDate = new Date(year, month, day);
     const dayEvents = events.filter((e) => {
-      const a = toDate(e.datetime);
+      const a = toDate(e.starts_at);
       return (
         a.getFullYear() === cellDate.getFullYear() &&
         a.getMonth() === cellDate.getMonth() &&
@@ -71,7 +73,7 @@ function renderMonth(root: HTMLElement, events: CalendarEvent[]) {
   root.appendChild(table);
 }
 
-async function scheduleNotifications(events: CalendarEvent[]) {
+async function scheduleNotifications(events: Event[]) {
   let granted = await isPermissionGranted();
   if (!granted) {
     granted = (await requestPermission()) === "granted";
@@ -83,7 +85,7 @@ async function scheduleNotifications(events: CalendarEvent[]) {
       setTimeout(() => {
         sendNotification({
           title: ev.title,
-        body: toDate(ev.datetime).toLocaleString(),
+          body: toDate(ev.starts_at).toLocaleString(),
         });
       }, ev.reminder - now);
     }
@@ -97,7 +99,7 @@ export async function CalendarView(container: HTMLElement) {
     <div id="calendar"></div>
     <form id="event-form">
       <input id="event-title" type="text" placeholder="Title" required />
-      <input id="event-datetime" type="datetime-local" required />
+      <input id="event-start" type="datetime-local" required />
       <button type="submit">Add Event</button>
     </form>
   `;
@@ -107,7 +109,7 @@ export async function CalendarView(container: HTMLElement) {
   const calendarEl = section.querySelector<HTMLElement>("#calendar");
   const form = section.querySelector<HTMLFormElement>("#event-form");
   const titleInput = section.querySelector<HTMLInputElement>("#event-title");
-  const dateInput = section.querySelector<HTMLInputElement>("#event-datetime");
+  const dateInput = section.querySelector<HTMLInputElement>("#event-start");
 
   let events = await fetchEvents();
   if (calendarEl) renderMonth(calendarEl, events);
@@ -119,7 +121,7 @@ export async function CalendarView(container: HTMLElement) {
     const dt = new Date(dateInput.value);
     const ev = await saveEvent({
       title: titleInput.value,
-      datetime: dt.getTime(),
+      starts_at: dt.getTime(),
       reminder: dt.getTime(),
     });
     events.push(ev);

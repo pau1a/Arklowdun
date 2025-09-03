@@ -23,7 +23,7 @@ export const storage: StorageFlags = {
   inventory_items: "json",
   notes: "json",
   shopping_items: "json",
-  events: "json",
+  events: "sqlite",
 };
 
 export function assertJsonWritable(domain: keyof StorageFlags): void {

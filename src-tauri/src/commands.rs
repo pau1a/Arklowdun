@@ -236,3 +236,23 @@ pub async fn restore_command(
         .await
         .map_err(|e| DbErrorPayload { code: "Unknown".into(), message: e.to_string() })
 }
+
+pub async fn events_list_range_command(
+    pool: &SqlitePool,
+    household_id: &str,
+    start: i64,
+    end: i64,
+) -> Result<Vec<Value>, DbErrorPayload> {
+    let hh = repo::require_household(household_id)
+        .map_err(|e| DbErrorPayload { code: "Unknown".into(), message: e.to_string() })?;
+    let rows = sqlx::query(
+        "SELECT * FROM events WHERE household_id = ? AND deleted_at IS NULL AND starts_at >= ? AND starts_at < ? ORDER BY starts_at, id",
+    )
+    .bind(hh)
+    .bind(start)
+    .bind(end)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| DbErrorPayload { code: "Unknown".into(), message: e.to_string() })?;
+    Ok(rows.into_iter().map(row_to_value).collect())
+}

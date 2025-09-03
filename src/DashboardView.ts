@@ -15,7 +15,7 @@ const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "G
 interface DashEvent {
   id: string;
   title: string;
-  datetime: number; // timestamp ms
+  starts_at: number; // timestamp ms
 }
 
 async function loadJson<T>(file: string): Promise<T[]> {
@@ -54,7 +54,7 @@ async function loadJson<T>(file: string): Promise<T[]> {
         "date",
         "mot_date",
         "service_date",
-        "datetime",
+        "starts_at",
         "reminder",
         "mot_reminder",
         "service_reminder",
@@ -105,17 +105,13 @@ async function loadJson<T>(file: string): Promise<T[]> {
   }
 }
 
-// Try Tauri command first; fall back to reading common JSON filenames used by the Calendar view.
 async function loadEvents(): Promise<DashEvent[]> {
-  try {
-    const ev = await invoke<DashEvent[]>("get_events");
-    if (Array.isArray(ev)) return ev;
-  } catch {}
-  for (const f of ["calendar.json", "events.json"]) {
-    const fromFs = await loadJson<DashEvent>(f);
-    if (fromFs.length) return fromFs;
-  }
-  return [];
+  const hh = await defaultHouseholdId();
+  return await invoke<DashEvent[]>("events_list_range", {
+    householdId: hh,
+    start: 0,
+    end: Number.MAX_SAFE_INTEGER,
+  });
 }
 
 export async function DashboardView(container: HTMLElement) {
@@ -170,10 +166,10 @@ export async function DashboardView(container: HTMLElement) {
 
   const events = await loadEvents();
   const nextEvent = events
-    .filter((e) => e.datetime >= now)
-    .sort((a, b) => a.datetime - b.datetime)[0];
+    .filter((e) => e.starts_at >= now)
+    .sort((a, b) => a.starts_at - b.starts_at)[0];
   if (nextEvent) {
-    const dt = nextEvent.datetime;
+    const dt = nextEvent.starts_at;
     items.push({ date: dt, text: `${nextEvent.title} ${toDate(dt).toLocaleString()}` });
   }
 
