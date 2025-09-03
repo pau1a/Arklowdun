@@ -1,3 +1,5 @@
+// TODO(backend-notes): when Notes move to SQLite, call the tauri `bring_note_to_front` command
+// instead of local z-bumping, and order by `z DESC, position, created_at` in repo helpers.
 import { readTextFile, writeTextFile, mkdir, BaseDirectory } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
 import { newUuidV7 } from "./db/id";
@@ -8,6 +10,7 @@ interface Note {
   color: string;
   x: number;
   y: number;
+  z?: number;
   deleted_at?: number;
 }
 
@@ -29,6 +32,10 @@ async function loadNotes(): Promise<Note[]> {
       if ("deletedAt" in note) {
         note.deleted_at = (note as any).deletedAt;
         delete (note as any).deletedAt;
+        changed = true;
+      }
+      if (note.z === undefined) {
+        note.z = 0;
         changed = true;
       }
       return note;
@@ -77,57 +84,73 @@ export async function NotesView(container: HTMLElement) {
     canvas.innerHTML = "";
     notes
       .filter((n) => !n.deleted_at)
+      .sort((a, b) => (b.z || 0) - (a.z || 0))
       .forEach((note) => {
-      const el = document.createElement("div");
-      el.className = "note";
-      el.style.backgroundColor = note.color;
-      el.style.left = note.x + "px";
-      el.style.top = note.y + "px";
-      const textarea = document.createElement("textarea");
-      textarea.value = note.text;
-      textarea.addEventListener("input", () => {
-        note.text = textarea.value;
-        saveSoon();
-      });
-      el.appendChild(textarea);
-      const del = document.createElement("button");
-      del.className = "delete";
-      del.textContent = "\u00d7";
+        const el = document.createElement("div");
+        el.className = "note";
+        el.style.backgroundColor = note.color;
+        el.style.left = note.x + "px";
+        el.style.top = note.y + "px";
+        el.style.zIndex = String(note.z || 0);
+        const textarea = document.createElement("textarea");
+        textarea.value = note.text;
+        textarea.addEventListener("input", () => {
+          note.text = textarea.value;
+          saveSoon();
+        });
+        el.appendChild(textarea);
+        const del = document.createElement("button");
+        del.className = "delete";
+        del.textContent = "\u00d7";
         del.addEventListener("click", () => {
           note.deleted_at = Date.now();
           saveNotes(notes).then(render);
         });
-      el.appendChild(del);
+        el.appendChild(del);
 
-      el.addEventListener("pointerdown", (e) => {
-        if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLButtonElement) return;
-        e.preventDefault();
-        const startX = e.clientX;
-        const startY = e.clientY;
-        const origX = note.x;
-        const origY = note.y;
-        el.classList.add("dragging");
-        el.setPointerCapture(e.pointerId);
-        function onMove(ev: PointerEvent) {
-          const maxX = canvas.clientWidth - el.offsetWidth;
-          const maxY = canvas.clientHeight - el.offsetHeight;
-          note.x = Math.max(0, Math.min(maxX, origX + (ev.clientX - startX)));
-          note.y = Math.max(0, Math.min(maxY, origY + (ev.clientY - startY)));
-          el.style.left = note.x + "px";
-          el.style.top = note.y + "px";
-        }
-        function onUp() {
-          el.removeEventListener("pointermove", onMove);
-          el.removeEventListener("pointerup", onUp);
-          el.classList.remove("dragging");
+        const bring = document.createElement("button");
+        bring.className = "bring";
+        bring.textContent = "\u2191";
+        bring.addEventListener("click", () => {
+          const maxZ = Math.max(0, ...notes.filter((n) => !n.deleted_at).map((n) => n.z || 0));
+          note.z = maxZ + 1;
+          saveNotes(notes).then(render);
+        });
+        el.appendChild(bring);
+
+        el.addEventListener("pointerdown", (e) => {
+          if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLButtonElement) return;
+          e.preventDefault();
+          const startX = e.clientX;
+          const startY = e.clientY;
+          const origX = note.x;
+          const origY = note.y;
+          const maxZ = Math.max(0, ...notes.filter((n) => !n.deleted_at).map((n) => n.z || 0));
+          note.z = maxZ + 1;
+          el.style.zIndex = String(note.z);
           saveSoon();
-        }
-        el.addEventListener("pointermove", onMove);
-        el.addEventListener("pointerup", onUp);
-      });
+          el.classList.add("dragging");
+          el.setPointerCapture(e.pointerId);
+          function onMove(ev: PointerEvent) {
+            const maxX = canvas.clientWidth - el.offsetWidth;
+            const maxY = canvas.clientHeight - el.offsetHeight;
+            note.x = Math.max(0, Math.min(maxX, origX + (ev.clientX - startX)));
+            note.y = Math.max(0, Math.min(maxY, origY + (ev.clientY - startY)));
+            el.style.left = note.x + "px";
+            el.style.top = note.y + "px";
+          }
+          function onUp() {
+            el.removeEventListener("pointermove", onMove);
+            el.removeEventListener("pointerup", onUp);
+            el.classList.remove("dragging");
+            saveSoon();
+          }
+          el.addEventListener("pointermove", onMove);
+          el.addEventListener("pointerup", onUp);
+        });
 
-      canvas.appendChild(el);
-    });
+        canvas.appendChild(el);
+      });
   }
 
   render();
@@ -135,12 +158,14 @@ export async function NotesView(container: HTMLElement) {
   form?.addEventListener("submit", (e) => {
     e.preventDefault();
     if (!textInput || !colorInput) return;
+    const maxZ = Math.max(0, ...notes.filter((n) => !n.deleted_at).map((n) => n.z || 0));
     const note: Note = {
       id: newUuidV7(),
       text: textInput.value,
       color: colorInput.value,
       x: 10,
       y: 10,
+      z: maxZ + 1,
     };
     notes.push(note);
     saveNotes(notes).then(render);

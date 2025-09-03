@@ -44,6 +44,10 @@ static MIGRATIONS: &[(&str, &str)] = &[
         "202509021400_soft_delete_notes_shopping.sql",
         include_str!("../../migrations/202509021400_soft_delete_notes_shopping.sql"),
     ),
+    (
+        "202509021410_notes_z_index.sql",
+        include_str!("../../migrations/202509021410_notes_z_index.sql"),
+    ),
 ];
 
 pub async fn init_db(app: &AppHandle) -> anyhow::Result<SqlitePool> {
