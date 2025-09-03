@@ -201,8 +201,8 @@ where
     Ok(())
 }
 
-#[allow(dead_code)]
-pub async fn reorder_positions(
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) async fn reorder_positions(
     pool: &SqlitePool,
     table: &str,
     household_id: &str,
@@ -248,7 +248,8 @@ pub mod admin {
     use super::*;
     use sqlx::sqlite::SqliteRow;
 
-    pub async fn list_active_for_all_households(
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) async fn list_active_for_all_households(
         pool: &SqlitePool,
         table: &str,
         order_by: Option<&str>,
@@ -283,7 +284,7 @@ pub mod admin {
         Ok(rows)
     }
 
-    pub async fn first_active_for_all_households(
+    pub(crate) async fn first_active_for_all_households(
         pool: &SqlitePool,
         table: &str,
         order_by: Option<&str>,

@@ -5,8 +5,8 @@ pub fn now_ms() -> i64 {
 }
 
 // Keep for parity with TS docs; we don’t call it in Rust paths (yet).
-#[allow(dead_code)]
-pub fn to_date(ms: i64) -> DateTime<Utc> {
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn to_date(ms: i64) -> DateTime<Utc> {
     // from_timestamp_millis returns Option<DateTime<Utc>>
     DateTime::<Utc>::from_timestamp_millis(ms)
         .unwrap_or_else(|| DateTime::<Utc>::from_timestamp_millis(0).unwrap())
