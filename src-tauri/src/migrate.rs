@@ -32,6 +32,14 @@ static MIGRATIONS: &[(&str, &str)] = &[
         "202509021200_import_id_map.sql",
         include_str!("../../migrations/202509021200_import_id_map.sql"),
     ),
+    (
+        "202509021300_explicit_fk_actions.sql",
+        include_str!("../../migrations/202509021300_explicit_fk_actions.sql"),
+    ),
+    (
+        "202509021301_fk_integrity_check.sql",
+        include_str!("../../migrations/202509021301_fk_integrity_check.sql"),
+    ),
 ];
 
 pub async fn init_db(app: &AppHandle) -> anyhow::Result<SqlitePool> {
