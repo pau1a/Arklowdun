@@ -1,6 +1,7 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf, sync::{Arc, Mutex}};
+use ts_rs::TS;
 use tauri::{Manager, State};
 
 use crate::state::AppState;
@@ -12,20 +13,27 @@ mod state;
 mod migrate;
 mod repo;
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 pub struct Event {
     #[serde(default)]
     pub id: String,
     #[serde(default)]
     pub household_id: String,
     pub title: String,
+    #[ts(type = "number")]
     pub datetime: i64,
+    #[ts(optional, type = "number")]
     pub reminder: Option<i64>,
     #[serde(default)]
+    #[ts(type = "number")]
     pub created_at: i64,
     #[serde(default)]
+    #[ts(type = "number")]
     pub updated_at: i64,
-    #[serde(alias = "deletedAt", default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "legacy_deleted_at", serde(alias = "deletedAt"))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
     pub deleted_at: Option<i64>,
 }
 
@@ -229,4 +237,23 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(all(test, feature = "legacy_deleted_at"))]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn event_accepts_legacy_deleted_at() {
+        let payload = json!({
+            "id": "e1",
+            "household_id": "h1",
+            "title": "T",
+            "datetime": 1,
+            "deletedAt": 999
+        });
+        let ev: Event = serde_json::from_value(payload).unwrap();
+        assert_eq!(ev.deleted_at, Some(999));
+    }
 }
