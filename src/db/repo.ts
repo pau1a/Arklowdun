@@ -32,7 +32,7 @@ const ORDER_MAP: Record<DomainTable, string> = {
   family_members: "position, created_at, id",
   budget_categories: "position, created_at, id",
   expenses: "created_at, id",
-  notes: "position, created_at, id",
+  notes: "z DESC, position, created_at, id",
   shopping_items: "position, created_at, id",
 };
 

@@ -49,7 +49,11 @@ fn require_household(id: &str) -> anyhow::Result<&str> {
     }
 }
 
-const ALLOWED_ORDERS: &[&str] = &["position, created_at, id", "created_at, id"];
+const ALLOWED_ORDERS: &[&str] = &[
+    "z DESC, position, created_at, id",
+    "position, created_at, id",
+    "created_at, id",
+];
 
 // Intentionally kept for test coverage of household scoping.
 // Suppress dead_code in non-test builds.
@@ -64,7 +68,9 @@ pub(crate) async fn list_active(
 ) -> anyhow::Result<Vec<sqlx::sqlite::SqliteRow>> {
     ensure_table(table)?;
     let household_id = require_household(household_id)?;
-    let default_order = if ORDERED_TABLES.contains(&table) {
+    let default_order = if table == "notes" {
+        "z DESC, position, created_at, id"
+    } else if ORDERED_TABLES.contains(&table) {
         "position, created_at, id"
     } else {
         "created_at, id"
@@ -254,6 +260,33 @@ pub(crate) async fn reorder_positions(
     Ok(())
 }
 
+pub(crate) async fn bring_note_to_front(
+    pool: &SqlitePool,
+    household_id: &str,
+    id: &str,
+) -> anyhow::Result<()> {
+    let household_id = require_household(household_id)?;
+    let now = now_ms();
+    let res = sqlx::query(
+        r#"
+        UPDATE notes
+           SET z = (SELECT COALESCE(MAX(z), 0) + 1 FROM notes WHERE household_id = ? AND deleted_at IS NULL),
+               updated_at = ?
+         WHERE household_id = ? AND id = ? AND deleted_at IS NULL
+        "#,
+    )
+    .bind(household_id)
+    .bind(now)
+    .bind(household_id)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    if res.rows_affected() == 0 {
+        anyhow::bail!("id not found");
+    }
+    Ok(())
+}
+
 pub mod admin {
     use super::*;
     use sqlx::sqlite::SqliteRow;
@@ -267,7 +300,9 @@ pub mod admin {
         offset: Option<i64>,
     ) -> anyhow::Result<Vec<SqliteRow>> {
         ensure_table(table)?;
-        let default_order = if ORDERED_TABLES.contains(&table) {
+        let default_order = if table == "notes" {
+            "z DESC, position, created_at, id"
+        } else if ORDERED_TABLES.contains(&table) {
             "position, created_at, id"
         } else {
             "created_at, id"
@@ -395,7 +430,7 @@ mod tests {
     async fn setup_notes_db() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         sqlx::query(
-            "CREATE TABLE notes (id TEXT PRIMARY KEY, household_id TEXT NOT NULL, position INTEGER NOT NULL, deleted_at INTEGER, created_at INTEGER, updated_at INTEGER)",
+            "CREATE TABLE notes (id TEXT PRIMARY KEY, household_id TEXT NOT NULL, position INTEGER NOT NULL, z INTEGER NOT NULL DEFAULT 0, deleted_at INTEGER, created_at INTEGER, updated_at INTEGER)",
         )
         .execute(&pool)
         .await
@@ -430,5 +465,34 @@ mod tests {
         let second_pos: i64 = rows[1].try_get("position").unwrap();
         assert_eq!((first_id, first_pos), ("b".into(), 0));
         assert_eq!((second_id, second_pos), ("a".into(), 1));
+    }
+
+    #[tokio::test]
+    async fn bring_to_front_updates_z_and_ordering() {
+        let pool = setup_notes_db().await;
+        sqlx::query(
+            "INSERT INTO notes (id, household_id, position, z, created_at, updated_at) VALUES ('a','H',0,0,0,0), ('b','H',1,1,0,0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        bring_note_to_front(&pool, "H", "a").await.unwrap();
+
+        let rows = list_active(
+            &pool,
+            "notes",
+            "H",
+            Some("z DESC, position, created_at, id"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let first_id: String = rows[0].try_get("id").unwrap();
+        let first_z: i64 = rows[0].try_get("z").unwrap();
+        let second_z: i64 = rows[1].try_get("z").unwrap();
+        assert_eq!(first_id, "a");
+        assert!(first_z > second_z);
     }
 }

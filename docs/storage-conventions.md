@@ -86,6 +86,7 @@ transactions to ensure consistency. To avoid unique-index conflicts during
 reorders, active rows are first shifted out of the way before applying new
 positions. Soft-delete helpers also invoke this compaction to keep active rows
 dense from zero. Queries that return ordered data should sort by `position, created_at`.
+Notes additionally sort by `z, position, created_at` so higher `z` values appear on top.
 
 ## Generating IDs
 
