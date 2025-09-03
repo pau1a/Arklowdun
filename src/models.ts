@@ -146,14 +146,5 @@ export interface Expense {
   deleted_at?: number;
 }
 
-export interface Event {
-  id: string;
-  household_id: string;
-  title: string;
-  datetime: number;
-  reminder?: number;
-  created_at: number;
-  updated_at: number;
-  deleted_at?: number;
-}
+export type { Event } from "./bindings/Event";
 
