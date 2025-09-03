@@ -16,6 +16,8 @@ const DOMAIN_TABLES: &[&str] = &[
     "family_members",
     "budget_categories",
     "expenses",
+    "notes",
+    "shopping_items",
 ];
 
 const ORDERED_TABLES: &[&str] = &[
@@ -27,6 +29,8 @@ const ORDERED_TABLES: &[&str] = &[
     "pets",
     "family_members",
     "budget_categories",
+    "notes",
+    "shopping_items",
 ];
 
 fn ensure_table(table: &str) -> anyhow::Result<()> {
@@ -386,5 +390,45 @@ mod tests {
         let second_pos: i64 = rows[1].try_get("position").unwrap();
         assert_eq!(second_id, "a");
         assert_eq!(second_pos, 1);
+    }
+
+    async fn setup_notes_db() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query(
+            "CREATE TABLE notes (id TEXT PRIMARY KEY, household_id TEXT NOT NULL, position INTEGER NOT NULL, deleted_at INTEGER, created_at INTEGER, updated_at INTEGER)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn soft_delete_and_restore_notes() {
+        let pool = setup_notes_db().await;
+        sqlx::query("INSERT INTO notes (id, household_id, position, created_at, updated_at) VALUES ('a','H',0,0,0), ('b','H',1,0,0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        set_deleted_at(&pool, "notes", "H", "a").await.unwrap();
+        let rows = list_active(&pool, "notes", "H", None, None, None).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        let id: String = rows[0].try_get("id").unwrap();
+        let pos: i64 = rows[0].try_get("position").unwrap();
+        assert_eq!(id, "b");
+        assert_eq!(pos, 0); // renumbered
+
+        clear_deleted_at(&pool, "notes", "H", "a").await.unwrap();
+        let rows = list_active(&pool, "notes", "H", Some("position, created_at, id"), None, None)
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 2);
+        let first_id: String = rows[0].try_get("id").unwrap();
+        let first_pos: i64 = rows[0].try_get("position").unwrap();
+        let second_id: String = rows[1].try_get("id").unwrap();
+        let second_pos: i64 = rows[1].try_get("position").unwrap();
+        assert_eq!((first_id, first_pos), ("b".into(), 0));
+        assert_eq!((second_id, second_pos), ("a".into(), 1));
     }
 }

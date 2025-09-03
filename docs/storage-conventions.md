@@ -58,6 +58,8 @@ import { listActive, firstActive } from "../src/db/repo";
 
 // Household-scoped listing (required)
 const bills = await listActive("bills", householdId);
+const notes = await listActive("notes", householdId);
+const shopping = await listActive("shopping_items", householdId);
 
 // Fetch the first active row
 const firstBill = await firstActive("bills", householdId);

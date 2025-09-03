@@ -8,6 +8,7 @@ interface Note {
   color: string;
   x: number;
   y: number;
+  deleted_at?: number;
 }
 
 const STORE_DIR = "Arklowdun";
@@ -20,11 +21,17 @@ async function loadNotes(): Promise<Note[]> {
     const notes = JSON.parse(json) as Note[] | any[];
     let changed = false;
     const fixed = notes.map((n) => {
-      if (typeof n.id === "number") {
+      let note: any = n;
+      if (typeof note.id === "number") {
+        note = { ...note, id: newUuidV7() };
         changed = true;
-        return { ...n, id: newUuidV7() };
       }
-      return n;
+      if ("deletedAt" in note) {
+        note.deleted_at = (note as any).deletedAt;
+        delete (note as any).deletedAt;
+        changed = true;
+      }
+      return note;
     });
     if (changed) await saveNotes(fixed);
     return fixed as Note[];
@@ -68,7 +75,9 @@ export async function NotesView(container: HTMLElement) {
 
   function render() {
     canvas.innerHTML = "";
-    notes.forEach((note) => {
+    notes
+      .filter((n) => !n.deleted_at)
+      .forEach((note) => {
       const el = document.createElement("div");
       el.className = "note";
       el.style.backgroundColor = note.color;
@@ -84,10 +93,10 @@ export async function NotesView(container: HTMLElement) {
       const del = document.createElement("button");
       del.className = "delete";
       del.textContent = "\u00d7";
-      del.addEventListener("click", () => {
-        notes = notes.filter((n) => n.id !== note.id);
-        saveNotes(notes).then(render);
-      });
+        del.addEventListener("click", () => {
+          note.deleted_at = Date.now();
+          saveNotes(notes).then(render);
+        });
       el.appendChild(del);
 
       el.addEventListener("pointerdown", (e) => {
