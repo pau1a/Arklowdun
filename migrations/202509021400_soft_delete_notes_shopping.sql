@@ -1,25 +1,44 @@
 -- id: 202509021400_soft_delete_notes_shopping
--- checksum: 80bd1dce04aa54b8033c48c8d7e8f8aece8837d94862ddf673397a05883f8e28
+-- checksum: 486743cb517bef657b678958935bd0e658a71e4983657ae042695a8b44e8c413
 BEGIN;
 
--- notes
-ALTER TABLE notes ADD COLUMN deleted_at INTEGER;
-ALTER TABLE notes ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
+-- Ensure tables exist with the full, current schema.
+CREATE TABLE IF NOT EXISTS notes (
+  id           TEXT PRIMARY KEY,
+  household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  position     INTEGER NOT NULL DEFAULT 0,
+  created_at   INTEGER NOT NULL DEFAULT 0,
+  updated_at   INTEGER NOT NULL DEFAULT 0,
+  deleted_at   INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS shopping_items (
+  id           TEXT PRIMARY KEY,
+  household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  position     INTEGER NOT NULL DEFAULT 0,
+  created_at   INTEGER NOT NULL DEFAULT 0,
+  updated_at   INTEGER NOT NULL DEFAULT 0,
+  deleted_at   INTEGER
+);
+
+-- Live views expose only non-deleted rows
 CREATE VIEW IF NOT EXISTS notes_live AS
   SELECT * FROM notes WHERE deleted_at IS NULL;
+
+CREATE VIEW IF NOT EXISTS shopping_live AS
+  SELECT * FROM shopping_items WHERE deleted_at IS NULL;
+
+-- Scope + ordering indexes
 CREATE INDEX IF NOT EXISTS notes_scope_idx
   ON notes(household_id, deleted_at, position);
+
 CREATE UNIQUE INDEX IF NOT EXISTS notes_household_position_idx
   ON notes(household_id, position)
   WHERE deleted_at IS NULL;
 
--- shopping_items
-ALTER TABLE shopping_items ADD COLUMN deleted_at INTEGER;
-ALTER TABLE shopping_items ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
-CREATE VIEW IF NOT EXISTS shopping_live AS
-  SELECT * FROM shopping_items WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS shopping_scope_idx
   ON shopping_items(household_id, deleted_at, position);
+
 CREATE UNIQUE INDEX IF NOT EXISTS shopping_household_position_idx
   ON shopping_items(household_id, position)
   WHERE deleted_at IS NULL;
