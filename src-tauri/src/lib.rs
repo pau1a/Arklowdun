@@ -1,6 +1,7 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf, sync::{Arc, Mutex}};
+use ts_rs::TS;
 use tauri::{Manager, State};
 
 use crate::state::AppState;
@@ -12,20 +13,26 @@ mod state;
 mod migrate;
 mod repo;
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bindings/Event.ts")]
 pub struct Event {
     #[serde(default)]
     pub id: String,
     #[serde(default)]
     pub household_id: String,
     pub title: String,
+    #[ts(type = "number")]
     pub datetime: i64,
+    #[ts(type = "number | null")]
     pub reminder: Option<i64>,
     #[serde(default)]
+    #[ts(type = "number")]
     pub created_at: i64,
     #[serde(default)]
+    #[ts(type = "number")]
     pub updated_at: i64,
     #[serde(alias = "deletedAt", default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "number | null")]
     pub deleted_at: Option<i64>,
 }
 
