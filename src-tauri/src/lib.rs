@@ -31,7 +31,7 @@ pub struct Event {
     #[serde(default)]
     #[ts(type = "number")]
     pub updated_at: i64,
-    #[cfg_attr(feature = "legacy_deleted_at", serde(alias = "deletedAt"))]
+    #[serde(alias = "deletedAt")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "number")]
     pub deleted_at: Option<i64>,
