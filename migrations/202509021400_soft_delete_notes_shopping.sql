@@ -1,5 +1,6 @@
 -- id: 202509021400_soft_delete_notes_shopping
--- checksum: 93a4f1df38c4176b987d6c0803f74a3e0865695894cbd477b5550ca2373d3128
+-- checksum: 4992776ddfbe2526b45bf413af02d31cc4f457af8f5ad33f95a7c60aaa9d9f39
+
 BEGIN;
 
 -- Ensure tables exist with the full, current schema.
