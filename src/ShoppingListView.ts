@@ -1,5 +1,6 @@
 import { readTextFile, writeTextFile, BaseDirectory } from "@tauri-apps/plugin-fs";
 import { newUuidV7 } from "./db/id";
+import { assertJsonWritable } from "./storage";
 
 interface ShoppingItem {
   id: string;
@@ -38,6 +39,7 @@ async function loadItems(): Promise<ShoppingItem[]> {
 }
 
 async function saveItems(items: ShoppingItem[]): Promise<void> {
+  assertJsonWritable("shopping_items");
   await writeTextFile(FILE, JSON.stringify(items), {
     baseDir: BaseDirectory.AppLocalData,
   });

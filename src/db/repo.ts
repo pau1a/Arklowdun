@@ -16,9 +16,9 @@ const DOMAIN_TABLES = [
   "shopping_items",
 ] as const;
 
-type DomainTable = (typeof DOMAIN_TABLES)[number];
+export type DomainTable = (typeof DOMAIN_TABLES)[number];
 
-const ORDER_MAP: Record<DomainTable, string> = {
+export const ORDER_MAP: Record<DomainTable, string> = {
   household: "created_at, id",
   events: "created_at, id",
   bills: "position, created_at, id",

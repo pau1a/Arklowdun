@@ -13,6 +13,7 @@ import { nowMs } from "./db/time";
 import { toMs } from "./db/normalize";
 import { defaultHouseholdId } from "./db/household";
 import { sanitizeRelativePath } from "./files/path";
+import { assertJsonWritable } from "./storage";
 
 const MAX_TIMEOUT = 2_147_483_647; // ~24.8 days
 function scheduleAt(ts: number, cb: () => void) {
@@ -117,6 +118,7 @@ async function loadPets(): Promise<Pet[]> {
   }
 }
 async function savePets(pets: Pet[]): Promise<void> {
+  assertJsonWritable("pets");
   await mkdir(STORE_DIR, { baseDir: BaseDirectory.AppLocalData, recursive: true });
   const p = await join(STORE_DIR, FILE_NAME);
   await writeTextFile(p, JSON.stringify(pets, null, 2), {

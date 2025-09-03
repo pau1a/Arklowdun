@@ -17,6 +17,7 @@ import { newUuidV7 } from "./db/id";
 import { nowMs, toDate } from "./db/time";
 import { defaultHouseholdId } from "./db/household";
 import { toMs } from "./db/normalize";
+import { assertJsonWritable } from "./storage";
 
 const MAX_TIMEOUT = 2_147_483_647;
 function scheduleAt(ts: number, cb: () => void) {
@@ -104,6 +105,7 @@ async function loadItems(): Promise<InventoryItem[]> {
   }
 }
 async function saveItems(items: InventoryItem[]): Promise<void> {
+  assertJsonWritable("inventory_items");
   await mkdir(STORE_DIR, { baseDir: BaseDirectory.AppLocalData, recursive: true });
   const p = await join(STORE_DIR, FILE_NAME);
   await writeTextFile(p, JSON.stringify(items, null, 2), {

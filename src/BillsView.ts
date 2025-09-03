@@ -17,6 +17,7 @@ import { newUuidV7 } from "./db/id";
 import { nowMs, toDate } from "./db/time";
 import { defaultHouseholdId } from "./db/household";
 import { toMs } from "./db/normalize";
+import { assertJsonWritable } from "./storage";
 
 const money = new Intl.NumberFormat(undefined, {
   style: "currency",
@@ -102,6 +103,7 @@ async function loadBills(): Promise<Bill[]> {
   }
 }
 async function saveBills(bills: Bill[]): Promise<void> {
+  assertJsonWritable("bills");
   await mkdir(STORE_DIR, { baseDir: BaseDirectory.AppLocalData, recursive: true });
   const p = await join(STORE_DIR, FILE_NAME);
   await writeTextFile(p, JSON.stringify(bills, null, 2), { baseDir: BaseDirectory.AppLocalData });
