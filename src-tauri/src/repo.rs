@@ -304,7 +304,7 @@ pub mod admin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::SqlitePool;
+    use sqlx::{Row, SqlitePool};
 
     async fn setup_db() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
@@ -317,8 +317,9 @@ mod tests {
     #[tokio::test]
     async fn missing_household_id_errors() {
         let pool = setup_db().await;
-        let err = list_active(&pool, "events", "", None, None, None).await.unwrap_err();
-        assert!(err.to_string().contains("household_id"));
+        let res = list_active(&pool, "events", "", None, None, None).await;
+        assert!(res.is_err());
+        assert!(res.err().unwrap().to_string().contains("household_id"));
     }
 
     #[tokio::test]
@@ -333,10 +334,18 @@ mod tests {
         let id_a: String = rows_a[0].try_get("id").unwrap();
         assert_eq!(id_a, "a");
 
+        let first_a = first_active(&pool, "events", "A", None).await.unwrap().unwrap();
+        let first_id_a: String = first_a.try_get("id").unwrap();
+        assert_eq!(first_id_a, "a");
+
         let rows_b = list_active(&pool, "events", "B", None, None, None).await.unwrap();
         assert_eq!(rows_b.len(), 1);
         let id_b: String = rows_b[0].try_get("id").unwrap();
         assert_eq!(id_b, "b");
+
+        let first_b = first_active(&pool, "events", "B", None).await.unwrap().unwrap();
+        let first_id_b: String = first_b.try_get("id").unwrap();
+        assert_eq!(first_id_b, "b");
     }
 
     #[tokio::test]
@@ -348,5 +357,34 @@ mod tests {
             .unwrap();
         let rows = list_active(&pool, "events", "A", None, None, None).await.unwrap();
         assert_eq!(rows.len(), 1);
+    }
+
+    async fn setup_ordered_db() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query(
+            "CREATE TABLE bills (id TEXT PRIMARY KEY, household_id TEXT NOT NULL, position INTEGER NOT NULL, deleted_at INTEGER, created_at INTEGER, updated_at INTEGER)"
+        ).execute(&pool).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn reorder_positions_updates_rows() {
+        let pool = setup_ordered_db().await;
+        sqlx::query("INSERT INTO bills (id, household_id, position, created_at, updated_at) VALUES ('a','A',0,0,0), ('b','A',1,0,0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        reorder_positions(&pool, "bills", "A", &[("a".into(), 1), ("b".into(), 0)])
+            .await
+            .unwrap();
+        let rows = list_active(&pool, "bills", "A", Some("position, created_at, id"), None, None).await.unwrap();
+        let first_id: String = rows[0].try_get("id").unwrap();
+        let first_pos: i64 = rows[0].try_get("position").unwrap();
+        assert_eq!(first_id, "b");
+        assert_eq!(first_pos, 0);
+        let second_id: String = rows[1].try_get("id").unwrap();
+        let second_pos: i64 = rows[1].try_get("position").unwrap();
+        assert_eq!(second_id, "a");
+        assert_eq!(second_pos, 1);
     }
 }
