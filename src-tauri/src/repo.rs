@@ -126,7 +126,7 @@ pub(crate) async fn get_active(
 ) -> anyhow::Result<Option<sqlx::sqlite::SqliteRow>> {
     ensure_table(table)?;
     let sql;
-    let mut query;
+    let query;
     if table == "household" {
         sql = format!("SELECT * FROM {table} WHERE id = ? AND deleted_at IS NULL");
         query = sqlx::query(&sql).bind(id);

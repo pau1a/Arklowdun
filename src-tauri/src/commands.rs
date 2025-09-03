@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use sqlx::{sqlite::SqliteRow, Row, SqlitePool};
+use sqlx::{sqlite::SqliteRow, Row, SqlitePool, Column, ValueRef, TypeInfo};
 
 use crate::{id::new_uuid_v7, repo, time::now_ms};
 
@@ -68,7 +68,7 @@ async fn list(
     order_by: Option<&str>,
     limit: Option<i64>,
     offset: Option<i64>,
-) -> Result<Vec<Value>, sqlx::Error> {
+) -> anyhow::Result<Vec<Value>> {
     let rows = repo::list_active(pool, table, household_id, order_by, limit, offset).await?;
     Ok(rows.into_iter().map(row_to_value).collect())
 }
@@ -78,7 +78,7 @@ async fn get(
     table: &str,
     household_id: Option<&str>,
     id: &str,
-) -> Result<Option<Value>, sqlx::Error> {
+) -> anyhow::Result<Option<Value>> {
     let row = repo::get_active(pool, table, household_id, id).await?;
     Ok(row.map(row_to_value))
 }
@@ -95,7 +95,7 @@ async fn create(
         .unwrap_or_else(new_uuid_v7);
     data.insert("id".into(), Value::String(id.clone()));
     let now = now_ms();
-    data.entry("created_at".into()).or_insert(Value::from(now));
+    data.entry(String::from("created_at")).or_insert(Value::from(now));
     data.insert("updated_at".into(), Value::from(now));
 
     let cols: Vec<String> = data.keys().cloned().collect();
@@ -153,7 +153,7 @@ async fn update(
     Ok(())
 }
 
-fn bind_value<'q>(mut q: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>>, v: &Value) -> sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>> {
+fn bind_value<'q>(q: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>>, v: &Value) -> sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>> {
     match v {
         Value::Null => q.bind(Option::<i64>::None),
         Value::Number(n) => {
@@ -171,9 +171,6 @@ fn bind_value<'q>(mut q: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::Sqli
     }
 }
 
-pub use map_sqlx_error as map_error;
-pub use DbErrorPayload;
-
 pub async fn list_command(
     pool: &SqlitePool,
     table: &str,
@@ -184,7 +181,7 @@ pub async fn list_command(
 ) -> Result<Vec<Value>, DbErrorPayload> {
     list(pool, table, household_id, order_by, limit, offset)
         .await
-        .map_err(map_sqlx_error)
+        .map_err(|e| DbErrorPayload { code: "Unknown".into(), message: e.to_string() })
 }
 
 pub async fn get_command(
@@ -195,7 +192,7 @@ pub async fn get_command(
 ) -> Result<Option<Value>, DbErrorPayload> {
     get(pool, table, household_id, id)
         .await
-        .map_err(map_sqlx_error)
+        .map_err(|e| DbErrorPayload { code: "Unknown".into(), message: e.to_string() })
 }
 
 pub async fn create_command(
@@ -226,7 +223,7 @@ pub async fn delete_command(
 ) -> Result<(), DbErrorPayload> {
     repo::set_deleted_at(pool, table, household_id, id)
         .await
-        .map_err(map_sqlx_error)
+        .map_err(|e| DbErrorPayload { code: "Unknown".into(), message: e.to_string() })
 }
 
 pub async fn restore_command(
@@ -237,5 +234,5 @@ pub async fn restore_command(
 ) -> Result<(), DbErrorPayload> {
     repo::clear_deleted_at(pool, table, household_id, id)
         .await
-        .map_err(map_sqlx_error)
+        .map_err(|e| DbErrorPayload { code: "Unknown".into(), message: e.to_string() })
 }
