@@ -54,3 +54,28 @@ migrations/202509021300_explicit_fk_actions.sql
 ```
 
 Future schema changes should conform to the guidance above.
+
+## Household Scoping
+
+All data access must require a `householdId` and include a `household_id`
+filter in SQL. Use `requireHousehold()` at the entry to every repository
+helper to fail fast when the id is missing.
+
+```ts
+import { listActive, firstActive } from "../src/db/repo";
+
+const bills = await listActive("bills", householdId);
+const firstBill = await firstActive("bills", householdId);
+```
+
+```rust
+use crate::repo;
+
+if let Some(row) = repo::first_active(&pool, "bills", &household_id, None).await? {
+    let id: String = row.try_get("id")?;
+    // ...
+}
+```
+
+To obtain a `householdId`, call the `get_default_household_id` command or
+surface a selection flow so the user can choose a household explicitly.

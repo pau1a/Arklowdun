@@ -2,7 +2,6 @@
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf, sync::{Arc, Mutex}};
 use tauri::{Manager, State};
-use tauri_plugin_sql;
 
 use crate::state::AppState;
 
@@ -214,7 +213,7 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .setup(|app| {
             let handle = app.handle();
-            let pool = tauri::async_runtime::block_on(crate::migrate::init_db(&handle))?;
+            let pool = tauri::async_runtime::block_on(crate::migrate::init_db(handle))?;
             let hh = tauri::async_runtime::block_on(crate::household::default_household_id(&pool))?;
             app.manage(crate::state::AppState { pool: pool.clone(), default_household_id: Arc::new(Mutex::new(hh)) });
             Ok(())

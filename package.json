@@ -9,7 +9,10 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "migrate:checksum": "node --loader ts-node/esm scripts/migrate-checksum.ts",
-    "check:migrations": "bash scripts/check-migrations.sh"
+    "check:migrations": "bash scripts/check-migrations.sh",
+    "check:household": "bash scripts/check-household-scope.sh",
+    "test": "node --loader ts-node/esm --test tests/*.ts",
+    "lint:rs": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

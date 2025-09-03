@@ -37,17 +37,29 @@ fn ensure_table(table: &str) -> anyhow::Result<()> {
     }
 }
 
+fn require_household(id: &str) -> anyhow::Result<&str> {
+    if id.is_empty() {
+        Err(anyhow::anyhow!("household_id required"))
+    } else {
+        Ok(id)
+    }
+}
+
 const ALLOWED_ORDERS: &[&str] = &["position, created_at, id", "created_at, id"];
 
-pub async fn list_active(
+// Intentionally kept for test coverage of household scoping.
+// Suppress dead_code in non-test builds.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) async fn list_active(
     pool: &SqlitePool,
     table: &str,
-    household_id: Option<&str>,
+    household_id: &str,
     order_by: Option<&str>,
     limit: Option<i64>,
     offset: Option<i64>,
 ) -> anyhow::Result<Vec<sqlx::sqlite::SqliteRow>> {
     ensure_table(table)?;
+    let household_id = require_household(household_id)?;
     let default_order = if ORDERED_TABLES.contains(&table) {
         "position, created_at, id"
     } else {
@@ -57,15 +69,12 @@ pub async fn list_active(
         .filter(|ob| ALLOWED_ORDERS.contains(ob))
         .unwrap_or(default_order);
 
-    let scoped = table != "household" && household_id.is_some();
-    let mut sql = format!(
-        "SELECT * FROM {table} {} ORDER BY {order}",
-        if scoped {
-            "WHERE deleted_at IS NULL AND household_id = ?"
-        } else {
-            "WHERE deleted_at IS NULL"
-        }
-    );
+    let where_clause = if table == "household" {
+        "WHERE deleted_at IS NULL AND id = ?"
+    } else {
+        "WHERE deleted_at IS NULL AND household_id = ?"
+    };
+    let mut sql = format!("SELECT * FROM {table} {where_clause} ORDER BY {order}");
     if limit.is_some() {
         sql.push_str(" LIMIT ?");
     }
@@ -73,10 +82,7 @@ pub async fn list_active(
         sql.push_str(" OFFSET ?");
     }
 
-    let mut query = sqlx::query(&sql);
-    if scoped {
-        query = query.bind(household_id.unwrap());
-    }
+    let mut query = sqlx::query(&sql).bind(household_id);
     if let Some(l) = limit {
         query = query.bind(l);
     }
@@ -88,12 +94,16 @@ pub async fn list_active(
     Ok(rows)
 }
 
-pub async fn first_active(
+// Intentionally kept for test coverage of household scoping.
+// Suppress dead_code in non-test builds.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) async fn first_active(
     pool: &SqlitePool,
     table: &str,
-    household_id: Option<&str>,
+    household_id: &str,
     order_by: Option<&str>,
 ) -> anyhow::Result<Option<sqlx::sqlite::SqliteRow>> {
+    let household_id = require_household(household_id)?;
     let mut rows = list_active(pool, table, household_id, order_by, Some(1), None).await?;
     Ok(rows.pop())
 }
@@ -105,6 +115,7 @@ pub async fn set_deleted_at(
     id: &str,
 ) -> anyhow::Result<()> {
     ensure_table(table)?;
+    let household_id = require_household(household_id)?;
     let now = now_ms();
     let res = if table == "household" {
         let sql = format!("UPDATE {table} SET deleted_at = ?, updated_at = ? WHERE id = ?");
@@ -142,6 +153,7 @@ pub async fn clear_deleted_at(
     id: &str,
 ) -> anyhow::Result<()> {
     ensure_table(table)?;
+    let household_id = require_household(household_id)?;
     let now = now_ms();
     let res = if table == "household" {
         let sql = format!("UPDATE {table} SET deleted_at = NULL, updated_at = ? WHERE id = ?");
@@ -175,6 +187,7 @@ where
     E: Executor<'a, Database = sqlx::Sqlite>,
 {
     ensure_table(table)?;
+    let household_id = require_household(household_id)?;
     let sql = format!(
         r#"
         WITH ordered AS (
@@ -194,14 +207,15 @@ where
     Ok(())
 }
 
-#[allow(dead_code)]
-pub async fn reorder_positions(
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) async fn reorder_positions(
     pool: &SqlitePool,
     table: &str,
     household_id: &str,
     updates: &[(String, i64)],
 ) -> anyhow::Result<()> {
     ensure_table(table)?;
+    let household_id = require_household(household_id)?;
     let mut tx = pool.begin().await?;
     let now = now_ms();
 
@@ -234,4 +248,143 @@ pub async fn reorder_positions(
     renumber_positions(&mut *tx, table, household_id).await?;
     tx.commit().await?;
     Ok(())
+}
+
+pub mod admin {
+    use super::*;
+    use sqlx::sqlite::SqliteRow;
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) async fn list_active_for_all_households(
+        pool: &SqlitePool,
+        table: &str,
+        order_by: Option<&str>,
+        limit: Option<i64>,
+        offset: Option<i64>,
+    ) -> anyhow::Result<Vec<SqliteRow>> {
+        ensure_table(table)?;
+        let default_order = if ORDERED_TABLES.contains(&table) {
+            "position, created_at, id"
+        } else {
+            "created_at, id"
+        };
+        let order = order_by
+            .filter(|ob| ALLOWED_ORDERS.contains(ob))
+            .unwrap_or(default_order);
+        let mut sql =
+            format!("SELECT * FROM {table} WHERE deleted_at IS NULL ORDER BY {order}");
+        if limit.is_some() {
+            sql.push_str(" LIMIT ?");
+        }
+        if offset.is_some() {
+            sql.push_str(" OFFSET ?");
+        }
+        let mut query = sqlx::query(&sql);
+        if let Some(l) = limit {
+            query = query.bind(l);
+        }
+        if let Some(o) = offset {
+            query = query.bind(o);
+        }
+        let rows = query.fetch_all(pool).await?;
+        Ok(rows)
+    }
+
+    pub(crate) async fn first_active_for_all_households(
+        pool: &SqlitePool,
+        table: &str,
+        order_by: Option<&str>,
+    ) -> anyhow::Result<Option<SqliteRow>> {
+        let mut rows =
+            list_active_for_all_households(pool, table, order_by, Some(1), None).await?;
+        Ok(rows.pop())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::{Row, SqlitePool};
+
+    async fn setup_db() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query(
+            "CREATE TABLE events (id TEXT PRIMARY KEY, household_id TEXT NOT NULL, deleted_at INTEGER, created_at INTEGER, updated_at INTEGER)"
+        ).execute(&pool).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn missing_household_id_errors() {
+        let pool = setup_db().await;
+        let res = list_active(&pool, "events", "", None, None, None).await;
+        assert!(res.is_err());
+        assert!(res.err().unwrap().to_string().contains("household_id"));
+    }
+
+    #[tokio::test]
+    async fn cross_household_isolation() {
+        let pool = setup_db().await;
+        sqlx::query("INSERT INTO events (id, household_id, created_at, updated_at) VALUES ('a', 'A', 0, 0), ('b', 'B', 0, 0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let rows_a = list_active(&pool, "events", "A", None, None, None).await.unwrap();
+        assert_eq!(rows_a.len(), 1);
+        let id_a: String = rows_a[0].try_get("id").unwrap();
+        assert_eq!(id_a, "a");
+
+        let first_a = first_active(&pool, "events", "A", None).await.unwrap().unwrap();
+        let first_id_a: String = first_a.try_get("id").unwrap();
+        assert_eq!(first_id_a, "a");
+
+        let rows_b = list_active(&pool, "events", "B", None, None, None).await.unwrap();
+        assert_eq!(rows_b.len(), 1);
+        let id_b: String = rows_b[0].try_get("id").unwrap();
+        assert_eq!(id_b, "b");
+
+        let first_b = first_active(&pool, "events", "B", None).await.unwrap().unwrap();
+        let first_id_b: String = first_b.try_get("id").unwrap();
+        assert_eq!(first_id_b, "b");
+    }
+
+    #[tokio::test]
+    async fn smoke_with_valid_household() {
+        let pool = setup_db().await;
+        sqlx::query("INSERT INTO events (id, household_id, created_at, updated_at) VALUES ('a', 'A', 0, 0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let rows = list_active(&pool, "events", "A", None, None, None).await.unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    async fn setup_ordered_db() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query(
+            "CREATE TABLE bills (id TEXT PRIMARY KEY, household_id TEXT NOT NULL, position INTEGER NOT NULL, deleted_at INTEGER, created_at INTEGER, updated_at INTEGER)"
+        ).execute(&pool).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn reorder_positions_updates_rows() {
+        let pool = setup_ordered_db().await;
+        sqlx::query("INSERT INTO bills (id, household_id, position, created_at, updated_at) VALUES ('a','A',0,0,0), ('b','A',1,0,0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        reorder_positions(&pool, "bills", "A", &[("a".into(), 1), ("b".into(), 0)])
+            .await
+            .unwrap();
+        let rows = list_active(&pool, "bills", "A", Some("position, created_at, id"), None, None).await.unwrap();
+        let first_id: String = rows[0].try_get("id").unwrap();
+        let first_pos: i64 = rows[0].try_get("position").unwrap();
+        assert_eq!(first_id, "b");
+        assert_eq!(first_pos, 0);
+        let second_id: String = rows[1].try_get("id").unwrap();
+        let second_pos: i64 = rows[1].try_get("position").unwrap();
+        assert_eq!(second_id, "a");
+        assert_eq!(second_pos, 1);
+    }
 }
