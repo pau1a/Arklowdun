@@ -41,7 +41,6 @@ function ensureTable(table: string): void {
 }
 
 export interface ListOptions {
-  householdId?: string;
   orderBy?: string; // must match one of ALLOWED_ORDERS
   limit?: number;
   offset?: number;
@@ -49,36 +48,40 @@ export interface ListOptions {
 
 import type Database from "@tauri-apps/plugin-sql";
 import { openDb } from "./open";
+import { requireHousehold } from "./household";
 
 export async function listActive<T = any>(
   table: DomainTable,
+  householdId: string,
   opts: ListOptions = {},
 ): Promise<T[]> {
   ensureTable(table);
+  const hh = requireHousehold(householdId);
   const db: Database = await openDb();
   const order =
     opts.orderBy && ALLOWED_ORDERS.has(opts.orderBy)
       ? opts.orderBy
       : ORDER_MAP[table];
 
-  const scoped = table !== "household" && opts.householdId;
-  const where = scoped
-    ? `WHERE deleted_at IS NULL AND household_id = ?`
-    : `WHERE deleted_at IS NULL`;
+  const where =
+    table === "household"
+      ? `WHERE deleted_at IS NULL AND id = ?`
+      : `WHERE deleted_at IS NULL AND household_id = ?`;
 
   const lim = Number.isFinite(opts.limit) ? ` LIMIT ${opts.limit}` : "";
   const off = Number.isFinite(opts.offset) ? ` OFFSET ${opts.offset}` : "";
 
   const sql = `SELECT * FROM ${table} ${where} ORDER BY ${order}${lim}${off}`;
-  const params = scoped ? [opts.householdId] : [];
-  return db.select<T[]>(sql, params);
+  return db.select<T[]>(sql, [hh]);
 }
 
 export async function firstActive<T = any>(
   table: DomainTable,
+  householdId: string,
   opts: Omit<ListOptions, "limit" | "offset"> = {},
 ) {
-  const rows = await listActive<T>(table, { ...opts, limit: 1 });
+  const hh = requireHousehold(householdId);
+  const rows = await listActive<T>(table, hh, { ...opts, limit: 1 });
   return rows[0];
 }
 

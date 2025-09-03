@@ -1,11 +1,11 @@
 use sqlx::{Row, SqlitePool};
 
 use crate::id::new_uuid_v7;
-use crate::repo;
+use crate::repo::{self, admin};
 use crate::time::now_ms;
 
 pub async fn default_household_id(pool: &SqlitePool) -> anyhow::Result<String> {
-    if let Some(row) = repo::first_active(pool, "household", None, None).await? {
+    if let Some(row) = admin::first_active_for_all_households(pool, "household", None).await? {
         let id: String = row.try_get("id")?;
         return Ok(id);
     }

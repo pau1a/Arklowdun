@@ -8,3 +8,8 @@ export async function defaultHouseholdId(): Promise<string> {
     return "default";
   }
 }
+
+export function requireHousehold(householdId: string): string {
+  if (!householdId) throw new Error("householdId required");
+  return householdId;
+}

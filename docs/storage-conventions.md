@@ -56,18 +56,18 @@ Repository helpers automatically filter out soft-deleted rows and apply standard
 ```ts
 import { listActive, firstActive } from "../src/db/repo";
 
-// Household-scoped listing (recommended)
-const bills = await listActive("bills", { householdId });
+// Household-scoped listing (required)
+const bills = await listActive("bills", householdId);
 
 // Fetch the first active row
-const firstBill = await firstActive("bills", { householdId });
+const firstBill = await firstActive("bills", householdId);
 ```
 
 ```rust
 use crate::repo;
 
 // Household-scoped and first row
-if let Some(row) = repo::first_active(&pool, "bills", Some(&household_id), None).await? {
+if let Some(row) = repo::first_active(&pool, "bills", &household_id, None).await? {
     let id: String = row.try_get("id")?;
     // ...
 }
