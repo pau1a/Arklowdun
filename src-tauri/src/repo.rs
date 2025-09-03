@@ -47,7 +47,10 @@ fn require_household(id: &str) -> anyhow::Result<&str> {
 
 const ALLOWED_ORDERS: &[&str] = &["position, created_at, id", "created_at, id"];
 
-pub async fn list_active(
+// Intentionally kept for test coverage of household scoping.
+// Suppress dead_code in non-test builds.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) async fn list_active(
     pool: &SqlitePool,
     table: &str,
     household_id: &str,
@@ -91,7 +94,10 @@ pub async fn list_active(
     Ok(rows)
 }
 
-pub async fn first_active(
+// Intentionally kept for test coverage of household scoping.
+// Suppress dead_code in non-test builds.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) async fn first_active(
     pool: &SqlitePool,
     table: &str,
     household_id: &str,
