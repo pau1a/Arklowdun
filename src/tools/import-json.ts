@@ -111,13 +111,6 @@ async function main(): Promise<void> {
     return;
   }
 
-  const selectMap = db
-    .prepare("SELECT new_uuid FROM import_id_map WHERE entity = ? AND old_id = ?")
-    .pluck();
-  const insertMap = db.prepare(
-    "INSERT INTO import_id_map(entity, old_id, new_uuid) VALUES (?, ?, ?)",
-  );
-
   const summary: Record<string, number> = {};
   let reusedIds = 0;
   let newIds = 0;
@@ -128,6 +121,15 @@ async function main(): Promise<void> {
     // Optional speed knob for very large imports. Safe because we're inside a
     // single transaction and will restore to NORMAL before commit:
     // db.pragma("synchronous = OFF");
+
+    const selectMap = db
+      .prepare(
+        "SELECT new_uuid FROM import_id_map WHERE entity = ? AND old_id = ?",
+      )
+      .pluck();
+    const insertMap = db.prepare(
+      "INSERT INTO import_id_map(entity, old_id, new_uuid) VALUES (?, ?, ?)",
+    );
 
     const idMap = new Map<string, string>();
 
@@ -247,17 +249,18 @@ async function main(): Promise<void> {
 
     // Restore PRAGMAs and validate referential integrity before commit.
     db.pragma("foreign_keys = ON");
-    if (dryRun) return;
-    // db.pragma("synchronous = NORMAL"); // restore if synchronous was set to OFF above
-    const fkIssues = db.prepare("PRAGMA foreign_key_check").all() as any[];
-    if (fkIssues.length > 0) {
-      const sample = fkIssues
-        .slice(0, 5)
-        .map((r: any) => `${r.table}.${r.rowid} -> ${r.parent}`)
-        .join(", ");
-      throw new Error(
-        `Import failed FK check: ${fkIssues.length} violations. Sample: ${sample}`,
-      );
+    if (!dryRun) {
+      // db.pragma("synchronous = NORMAL"); // restore if synchronous was set to OFF above
+      const fkIssues = db.prepare("PRAGMA foreign_key_check").all() as any[];
+      if (fkIssues.length) {
+        const sample = fkIssues
+          .slice(0, 5)
+          .map((r: any) => `${r.table}.${r.rowid}->${r.parent}`)
+          .join(", ");
+        throw new Error(
+          `Import failed FK check: ${fkIssues.length} violations. Sample: ${sample}`,
+        );
+      }
     }
   });
 

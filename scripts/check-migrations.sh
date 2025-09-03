@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+repo_root="$(git rev-parse --show-toplevel)"
+
+on_disk="$(git -C "$repo_root" ls-files migrations/*.sql | xargs -n1 basename | sort | grep -v '^202509011559_initial.sql$')"
+
+in_code="$(
+  grep -o "include_str!(\"[^\"]*migrations/[^\"]*\.sql\")" "$repo_root/src-tauri/src/migrate.rs" \
+  | sed -E 's/.*migrations\/([^\"]+\.sql).*/\1/' \
+  | sort -u
+)"
+
+diff_out="$(diff <(echo "$on_disk") <(echo "$in_code") || true)"
+if [[ -n "$diff_out" ]]; then
+  echo "ERROR: Migrations on disk differ from migrations registered in code:" >&2
+  echo "$diff_out" >&2
+  exit 1
+fi
