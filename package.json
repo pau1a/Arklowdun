@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "migrate:checksum": "node --loader ts-node/esm scripts/migrate-checksum.ts",
+    "migrate:batch1": "node --loader ts-node/esm src/tools/migrate-batch1.ts",
     "check:migrations": "bash scripts/check-migrations.sh",
     "check:household": "bash scripts/check-household-scope.sh",
     "test": "node --loader ts-node/esm --test tests/*.ts",

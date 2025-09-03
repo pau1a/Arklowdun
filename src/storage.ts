@@ -14,9 +14,9 @@ export interface StorageFlags {
 }
 
 export const storage: StorageFlags = {
-  bills: "json",
-  policies: "json",
-  property_documents: "json",
+  bills: "sqlite",
+  policies: "sqlite",
+  property_documents: "sqlite",
   vehicles: "json",
   pets: "json",
   family_members: "json",

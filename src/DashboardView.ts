@@ -6,7 +6,8 @@ import { nowMs, toDate } from "./db/time";
 import { defaultHouseholdId } from "./db/household";
 import { toMs } from "./db/normalize";
 import storage from "./storage";
-import type { Bill, Policy, Vehicle } from "./models";
+import { billsRepo, policiesRepo } from "./repos";
+import type { Vehicle } from "./models";
 
 const STORE_DIR = "Arklowdun";
 const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "GBP" });
@@ -126,8 +127,9 @@ export async function DashboardView(container: HTMLElement) {
   const listEl = section.querySelector<HTMLUListElement>("#dash-list");
   const items: { date: number; text: string }[] = [];
   const now = nowMs();
+  const hh = await defaultHouseholdId();
 
-  const bills = await loadJson<Bill>("bills.json");
+  const bills = await billsRepo.list({ householdId: hh });
   const nextBill = bills
     .filter((b) => b.due_date >= now)
     .sort((a, b) => a.due_date - b.due_date)[0];
@@ -135,11 +137,11 @@ export async function DashboardView(container: HTMLElement) {
     const due = nextBill.due_date;
     items.push({
       date: due,
-      text: `Bill ${money.format(nextBill.amount)} due ${toDate(due).toLocaleDateString()}`,
+      text: `Bill ${money.format(nextBill.amount / 100)} due ${toDate(due).toLocaleDateString()}`,
     });
   }
 
-  const policies = await loadJson<Policy>("policies.json");
+  const policies = await policiesRepo.list({ householdId: hh });
   const nextPolicy = policies
     .filter((p) => p.due_date >= now)
     .sort((a, b) => a.due_date - b.due_date)[0];
@@ -147,7 +149,7 @@ export async function DashboardView(container: HTMLElement) {
     const due = nextPolicy.due_date;
     items.push({
       date: due,
-      text: `Policy ${money.format(nextPolicy.amount)} renews ${toDate(due).toLocaleDateString()}`,
+      text: `Policy ${money.format(nextPolicy.amount / 100)} renews ${toDate(due).toLocaleDateString()}`,
     });
   }
 

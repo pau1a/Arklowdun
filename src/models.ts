@@ -1,6 +1,6 @@
 export interface Bill {
   id: string;
-  amount: number;
+  amount: number; // minor currency units
   due_date: number; // timestamp ms
   root_key: string;
   relative_path: string;
@@ -14,7 +14,7 @@ export interface Bill {
 
 export interface Policy {
   id: string;
-  amount: number;
+  amount: number; // minor currency units
   due_date: number; // timestamp ms
   root_key: string;
   relative_path: string;
