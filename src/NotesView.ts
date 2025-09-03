@@ -84,7 +84,7 @@ export async function NotesView(container: HTMLElement) {
     canvas.innerHTML = "";
     notes
       .filter((n) => !n.deleted_at)
-      .sort((a, b) => (a.z || 0) - (b.z || 0))
+      .sort((a, b) => (b.z || 0) - (a.z || 0))
       .forEach((note) => {
         const el = document.createElement("div");
         el.className = "note";
