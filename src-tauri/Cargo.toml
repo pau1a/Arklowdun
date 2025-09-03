@@ -35,6 +35,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
 anyhow = "1"
 ts-rs = { version = "10", features = ["no-serde-warnings"] }
+paste = "1.0"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

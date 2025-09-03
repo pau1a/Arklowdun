@@ -2,7 +2,7 @@ use sqlx::{Executor, SqlitePool};
 
 use crate::time::now_ms;
 
-const DOMAIN_TABLES: &[&str] = &[
+pub(crate) const DOMAIN_TABLES: &[&str] = &[
     "household",
     "events",
     "bills",
@@ -33,7 +33,7 @@ const ORDERED_TABLES: &[&str] = &[
     "shopping_items",
 ];
 
-fn ensure_table(table: &str) -> anyhow::Result<()> {
+pub(crate) fn ensure_table(table: &str) -> anyhow::Result<()> {
     if DOMAIN_TABLES.contains(&table) {
         Ok(())
     } else {
@@ -41,7 +41,7 @@ fn ensure_table(table: &str) -> anyhow::Result<()> {
     }
 }
 
-fn require_household(id: &str) -> anyhow::Result<&str> {
+pub(crate) fn require_household(id: &str) -> anyhow::Result<&str> {
     if id.is_empty() {
         Err(anyhow::anyhow!("household_id required"))
     } else {
@@ -116,6 +116,29 @@ pub(crate) async fn first_active(
     let household_id = require_household(household_id)?;
     let mut rows = list_active(pool, table, household_id, order_by, Some(1), None).await?;
     Ok(rows.pop())
+}
+
+pub(crate) async fn get_active(
+    pool: &SqlitePool,
+    table: &str,
+    household_id: Option<&str>,
+    id: &str,
+) -> anyhow::Result<Option<sqlx::sqlite::SqliteRow>> {
+    ensure_table(table)?;
+    let sql;
+    let mut query;
+    if table == "household" {
+        sql = format!("SELECT * FROM {table} WHERE id = ? AND deleted_at IS NULL");
+        query = sqlx::query(&sql).bind(id);
+    } else {
+        let hh = require_household(household_id.unwrap_or(""))?;
+        sql = format!(
+            "SELECT * FROM {table} WHERE household_id = ? AND id = ? AND deleted_at IS NULL",
+        );
+        query = sqlx::query(&sql).bind(hh).bind(id);
+    }
+    let row = query.fetch_optional(pool).await?;
+    Ok(row)
 }
 
 pub async fn set_deleted_at(

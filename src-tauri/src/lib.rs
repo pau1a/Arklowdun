@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf, sync::{Arc, Mutex}};
 use ts_rs::TS;
 use tauri::{Manager, State};
+use paste::paste;
 
 use crate::state::AppState;
 
@@ -12,6 +13,125 @@ mod household; // declare module; avoid `use` to prevent name collision
 mod state;
 mod migrate;
 mod repo;
+mod commands;
+
+use commands::DbErrorPayload;
+
+macro_rules! gen_domain_cmds {
+    ( $( $table:ident ),+ $(,)? ) => {
+        paste! {
+            $(
+                #[tauri::command]
+                async fn [<$table _list>](
+                    state: State<'_, AppState>,
+                    household_id: String,
+                    order_by: Option<String>,
+                    limit: Option<i64>,
+                    offset: Option<i64>,
+                ) -> Result<Vec<serde_json::Value>, DbErrorPayload> {
+                    commands::list_command(
+                        &state.pool,
+                        stringify!($table),
+                        &household_id,
+                        order_by.as_deref(),
+                        limit,
+                        offset,
+                    ).await
+                }
+
+                #[tauri::command]
+                async fn [<$table _get>](
+                    state: State<'_, AppState>,
+                    household_id: Option<String>,
+                    id: String,
+                ) -> Result<Option<serde_json::Value>, DbErrorPayload> {
+                    let hh = household_id.as_deref();
+                    commands::get_command(
+                        &state.pool,
+                        stringify!($table),
+                        hh,
+                        &id,
+                    ).await
+                }
+
+                #[tauri::command]
+                async fn [<$table _create>](
+                    state: State<'_, AppState>,
+                    data: serde_json::Map<String, serde_json::Value>,
+                ) -> Result<serde_json::Value, DbErrorPayload> {
+                    commands::create_command(
+                        &state.pool,
+                        stringify!($table),
+                        data,
+                    ).await
+                }
+
+                #[tauri::command]
+                async fn [<$table _update>](
+                    state: State<'_, AppState>,
+                    id: String,
+                    data: serde_json::Map<String, serde_json::Value>,
+                    household_id: Option<String>,
+                ) -> Result<(), DbErrorPayload> {
+                    let hh = household_id.as_deref();
+                    commands::update_command(
+                        &state.pool,
+                        stringify!($table),
+                        &id,
+                        data,
+                        hh,
+                    ).await
+                }
+
+                #[tauri::command]
+                async fn [<$table _delete>](
+                    state: State<'_, AppState>,
+                    household_id: String,
+                    id: String,
+                ) -> Result<(), DbErrorPayload> {
+                    commands::delete_command(
+                        &state.pool,
+                        stringify!($table),
+                        &household_id,
+                        &id,
+                    ).await
+                }
+
+                #[tauri::command]
+                async fn [<$table _restore>](
+                    state: State<'_, AppState>,
+                    household_id: String,
+                    id: String,
+                ) -> Result<(), DbErrorPayload> {
+                    commands::restore_command(
+                        &state.pool,
+                        stringify!($table),
+                        &household_id,
+                        &id,
+                    ).await
+                }
+            )+
+        }
+    };
+}
+
+gen_domain_cmds!(
+    household,
+    events,
+    bills,
+    policies,
+    property_documents,
+    inventory_items,
+    vehicles,
+    vehicle_maintenance,
+    pets,
+    pet_medical,
+    family_members,
+    budget_categories,
+    expenses,
+    notes,
+    shopping_items,
+);
 
 #[derive(Serialize, Deserialize, Clone, TS)]
 #[ts(export, export_to = "../../src/bindings/")]
@@ -184,33 +304,6 @@ fn get_default_household_id(state: tauri::State<state::AppState>) -> String {
     state.default_household_id.lock().unwrap().clone()
 }
 
-#[tauri::command]
-async fn delete_household_cmd(state: State<'_, AppState>, id: String) -> Result<Option<String>, String> {
-    household::delete_household(&state.pool, &id)
-        .await
-        .map_err(|e| e.to_string())?;
-    let current = { state.default_household_id.lock().unwrap().clone() };
-    if current == id {
-        let new_id = household::default_household_id(&state.pool)
-            .await
-            .map_err(|e| e.to_string())?;
-        {
-            let mut guard = state.default_household_id.lock().unwrap();
-            *guard = new_id.clone();
-        }
-        Ok(Some(new_id))
-    } else {
-        Ok(None)
-    }
-}
-
-#[tauri::command]
-async fn restore_household_cmd(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    household::restore_household(&state.pool, &id)
-        .await
-        .map_err(|e| e.to_string())
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -232,8 +325,96 @@ pub fn run() {
             update_event,
             delete_event,
             get_default_household_id,
-            delete_household_cmd,
-            restore_household_cmd
+            household_list,
+            household_get,
+            household_create,
+            household_update,
+            household_delete,
+            household_restore,
+            events_list,
+            events_get,
+            events_create,
+            events_update,
+            events_delete,
+            events_restore,
+            bills_list,
+            bills_get,
+            bills_create,
+            bills_update,
+            bills_delete,
+            bills_restore,
+            policies_list,
+            policies_get,
+            policies_create,
+            policies_update,
+            policies_delete,
+            policies_restore,
+            property_documents_list,
+            property_documents_get,
+            property_documents_create,
+            property_documents_update,
+            property_documents_delete,
+            property_documents_restore,
+            inventory_items_list,
+            inventory_items_get,
+            inventory_items_create,
+            inventory_items_update,
+            inventory_items_delete,
+            inventory_items_restore,
+            vehicles_list,
+            vehicles_get,
+            vehicles_create,
+            vehicles_update,
+            vehicles_delete,
+            vehicles_restore,
+            vehicle_maintenance_list,
+            vehicle_maintenance_get,
+            vehicle_maintenance_create,
+            vehicle_maintenance_update,
+            vehicle_maintenance_delete,
+            vehicle_maintenance_restore,
+            pets_list,
+            pets_get,
+            pets_create,
+            pets_update,
+            pets_delete,
+            pets_restore,
+            pet_medical_list,
+            pet_medical_get,
+            pet_medical_create,
+            pet_medical_update,
+            pet_medical_delete,
+            pet_medical_restore,
+            family_members_list,
+            family_members_get,
+            family_members_create,
+            family_members_update,
+            family_members_delete,
+            family_members_restore,
+            budget_categories_list,
+            budget_categories_get,
+            budget_categories_create,
+            budget_categories_update,
+            budget_categories_delete,
+            budget_categories_restore,
+            expenses_list,
+            expenses_get,
+            expenses_create,
+            expenses_update,
+            expenses_delete,
+            expenses_restore,
+            notes_list,
+            notes_get,
+            notes_create,
+            notes_update,
+            notes_delete,
+            notes_restore,
+            shopping_items_list,
+            shopping_items_get,
+            shopping_items_create,
+            shopping_items_update,
+            shopping_items_delete,
+            shopping_items_restore
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
