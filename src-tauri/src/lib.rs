@@ -31,7 +31,9 @@ pub struct Event {
     #[serde(default)]
     #[ts(type = "number")]
     pub updated_at: i64,
-    #[serde(alias = "deletedAt", default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "legacy_deleted_at", serde(alias = "deletedAt"))]
+    #[cfg_attr(feature = "legacy_deleted_at", ts(skip))]
+    #[serde(default)]
     #[ts(optional, type = "number")]
     pub deleted_at: Option<i64>,
 }
@@ -236,4 +238,23 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(all(test, feature = "legacy_deleted_at"))]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn event_accepts_legacy_deleted_at() {
+        let payload = json!({
+            "id": "e1",
+            "household_id": "h1",
+            "title": "T",
+            "datetime": 1,
+            "deletedAt": 999
+        });
+        let ev: Event = serde_json::from_value(payload).unwrap();
+        assert_eq!(ev.deleted_at, Some(999));
+    }
 }
