@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "migrate:checksum": "node --loader ts-node/esm scripts/migrate-checksum.ts"
+    "migrate:checksum": "node --loader ts-node/esm scripts/migrate-checksum.ts",
+    "check:migrations": "bash scripts/check-migrations.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

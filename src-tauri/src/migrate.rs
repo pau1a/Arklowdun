@@ -28,6 +28,10 @@ static MIGRATIONS: &[(&str, &str)] = &[
         "202509021100_add_file_paths.sql",
         include_str!("../../migrations/202509021100_add_file_paths.sql"),
     ),
+    (
+        "202509021200_import_id_map.sql",
+        include_str!("../../migrations/202509021200_import_id_map.sql"),
+    ),
 ];
 
 pub async fn init_db(app: &AppHandle) -> anyhow::Result<SqlitePool> {
