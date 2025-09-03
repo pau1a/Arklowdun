@@ -10,7 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             id: "rust-id".into(),
             household_id: "rust-household".into(),
             title: "from rust".into(),
-            datetime: 0,
+            starts_at: 0,
             reminder: None,
             created_at: 0,
             updated_at: 0,

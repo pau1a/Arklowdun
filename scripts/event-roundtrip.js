@@ -4,7 +4,7 @@ try {
         id: 'ts-id',
         household_id: 'ts-household',
         title: 'from ts',
-        datetime: 1,
+        starts_at: 1,
         reminder: 2,
         created_at: 3,
         updated_at: 3,

@@ -16,7 +16,7 @@ timestamp which is `NULL` when the record is active.
 - `id` `TEXT`
 - `household_id` `TEXT`
 - `title` `TEXT`
-- `datetime` `INTEGER`
+- `starts_at` `INTEGER`
 - `reminder` `INTEGER?`
 - `created_at` `INTEGER`
 - `updated_at` `INTEGER`
