@@ -17,6 +17,16 @@ type Note = {
   deleted_at?: number | null;
 };
 
+const NOTE_PALETTE: Record<string, { base: string; text: string }> = {
+  "#FFFF88": { base: "#FFF4B8", text: "#2b2b2b" },
+  "#FFF4B8": { base: "#FFF4B8", text: "#2b2b2b" },
+  "#CFF7E3": { base: "#CFF7E3", text: "#1f2937" },
+  "#DDEBFF": { base: "#DDEBFF", text: "#0f172a" },
+  "#FFD9D3": { base: "#FFD9D3", text: "#1f2937" },
+  "#EADCF9": { base: "#EADCF9", text: "#1f2937" },
+  "#F6EBDC": { base: "#F6EBDC", text: "#1f2937" },
+};
+
 async function openDb() {
   // Uses the same DB the rest of the app uses (tauri config maps this to your app.sqlite)
   // Do NOT put an absolute path here.
@@ -132,7 +142,7 @@ export async function NotesView(container: HTMLElement) {
     <h2>Notes</h2>
     <form id="note-form">
       <input id="note-text" type="text" placeholder="Note" required />
-      <input id="note-color" type="color" value="#ffff88" />
+      <input id="note-color" type="color" value="#FFF4B8" />
       <button type="submit">Add</button>
     </form>
     <div id="notes-canvas" class="notes-canvas"></div>
@@ -164,7 +174,11 @@ export async function NotesView(container: HTMLElement) {
       .forEach((note) => {
         const el = document.createElement("div");
         el.className = "note";
-        el.style.backgroundColor = note.color;
+        const palette = NOTE_PALETTE[note.color.toUpperCase()];
+        const baseColor = palette?.base ?? note.color;
+        const textColor = palette?.text ?? "#1f2937";
+        el.style.setProperty("--note-color", baseColor);
+        el.style.setProperty("--note-text-color", textColor);
         el.style.left = note.x + "px";
         el.style.top = note.y + "px";
         el.style.zIndex = String(note.z ?? 0);
@@ -262,7 +276,7 @@ export async function NotesView(container: HTMLElement) {
       notes.push(created);
       render();
       form.reset();
-      colorInput.value = "#ffff88";
+      colorInput.value = "#FFF4B8";
     } catch (err: any) {
       alert(`Failed to add note:\n${err?.message ?? String(err)}`);
     }
