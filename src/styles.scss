@@ -354,3 +354,128 @@ textarea:focus-visible {
   background: transparent;
   cursor: pointer;
 }
+
+/* Files view */
+.files {
+  max-width: 1024px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.files__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.files__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.breadcrumb {
+  display: flex;
+  gap: var(--space-1);
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  flex-wrap: nowrap;
+}
+
+.breadcrumb__segment {
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-base);
+}
+
+.breadcrumb__segment.current {
+  font-weight: 600;
+  background-color: var(--color-border);
+  color: var(--color-text);
+}
+
+.breadcrumb__segment:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.files__panel {
+  overflow-x: auto;
+}
+
+.files__table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.files__table th,
+.files__table td {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  white-space: nowrap;
+}
+
+.files__table th:last-child,
+.files__actions-cell {
+  text-align: right;
+}
+
+.files__table tbody tr:nth-child(even) {
+  background-color: var(--color-border);
+}
+
+.files__table tbody tr:hover {
+  background-color: rgba(211, 84, 0, 0.15);
+}
+
+.files__table tbody tr:focus-within {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+  background-color: rgba(211, 84, 0, 0.1);
+}
+
+.files__icon {
+  margin-right: var(--space-2);
+}
+
+.files__name {
+  display: inline-block;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.files__action {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.files__action:hover {
+  color: var(--color-danger);
+}
+
+.files__action:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.files__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  color: var(--color-text-muted);
+}
+
+.btn--ghost {
+  background-color: transparent;
+  border: 1px dashed var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.btn--ghost:hover {
+  background-color: var(--color-border);
+}
