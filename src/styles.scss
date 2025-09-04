@@ -18,6 +18,7 @@ body {
 body {
   display: grid;
   grid-template-columns: minmax(160px, max-content) 1fr;
+  grid-template-rows: 1fr auto;
   margin: 0;
   overflow: hidden; // switch to 'auto' if you need full-page scroll
 }
@@ -324,6 +325,57 @@ textarea:focus-visible {
   .sidebar {
     padding-inline: var(--space-2);
   }
+}
+
+footer {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-1);
+  block-size: 44px;
+  background-color: var(--color-panel);
+  border-block-start: 1px solid var(--color-border);
+  box-shadow: var(--shadow-base);
+  z-index: 1;
+}
+
+.footer__icons {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--space-2);
+}
+
+.footer__icons a,
+.footer__icons button {
+  inline-size: 32px;
+  block-size: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-base);
+  color: var(--color-text);
+  cursor: pointer;
+  padding: 0;
+}
+
+.footer__icons a:hover,
+.footer__icons button:hover {
+  background-color: var(--color-border);
+}
+
+.footer__icons a:focus-visible,
+.footer__icons button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.footer__icons a:active,
+.footer__icons button:active {
+  background-color: rgba(211, 84, 0, 0.15);
 }
 
 .list.empty, .calendar-empty {
