@@ -1,35 +1,9 @@
-@use "sass:color";
-
-$color-burgundy: #f05411;
-$color-green: #34783d;
-$color-burgundy_pastel: color.adjust($color-burgundy, $lightness: 50%);
-$color-green_pastel: color.adjust($color-green, $lightness: 50%);
-$color-green_shade_hi: #5ab867; // 20% lighter than $color-green
-$color-green_shade_lo: #153119; // 20% darker than $color-green
-$color-white: #ffffff;
-
 .logo.vite:hover {
-  filter: drop-shadow(0 0 2em $color-burgundy);
+  filter: drop-shadow(0 0 2em var(--color-accent));
 }
 
 .logo.typescript:hover {
-  filter: drop-shadow(0 0 2em $color-green);
-}
-
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
-
-  color: $color-green;
-  background-color: $color-white;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
+  filter: drop-shadow(0 0 2em var(--color-success));
 }
 /* 1) Make the document able to match the viewport */
 html,
@@ -66,11 +40,11 @@ main {
 .container {
   flex: 1;
   margin: 0;
-  padding: 2rem 1rem 4rem;
+  padding: var(--space-4) var(--space-3) var(--space-5);
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  background-color: $color-green_pastel;
+  gap: var(--space-3);
+  background-color: var(--color-panel);
 }
 
 .logo {
@@ -81,7 +55,7 @@ main {
 }
 
 .logo.tauri:hover {
-  filter: drop-shadow(0 0 2em $color-burgundy);
+  filter: drop-shadow(0 0 2em var(--color-accent));
 }
 
 .row {
@@ -91,12 +65,12 @@ main {
 
 a {
   font-weight: 500;
-  color: $color-burgundy;
+  color: var(--color-accent);
   text-decoration: inherit;
 }
 
 a:hover {
-  color: $color-green;
+  color: var(--color-text);
 }
 
 h1 {
@@ -106,16 +80,16 @@ h1 {
 
 input,
 button {
-  border-radius: 8px;
-  border: 1px solid transparent;
+  border-radius: var(--radius-base);
+  border: 1px solid var(--color-border);
   padding: 0.6em 1.2em;
   font-size: 1em;
   font-weight: 500;
   font-family: inherit;
-  color: $color-green;
-  background-color: $color-white;
+  color: var(--color-text);
+  background-color: var(--color-panel);
   transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-base);
 }
 
 button {
@@ -123,12 +97,12 @@ button {
 }
 
 button:hover {
-  border-color: $color-burgundy;
+  border-color: var(--color-accent);
 }
 button:active {
-  border-color: $color-burgundy;
-  background-color: $color-green;
-  color: $color-white;
+  border-color: var(--color-accent);
+  background-color: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
 input,
@@ -143,13 +117,13 @@ button {
 /* App shell */
 .sidebar {
   width: 200px;
-  padding: 1rem;
+  padding: var(--space-4);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.5rem;
-  background-color: $color-white;
-  color: $color-burgundy;
+  gap: var(--space-2);
+  background-color: var(--color-panel);
+  color: var(--color-text);
 }
 .tagline {
   opacity: 0.8;
@@ -158,12 +132,37 @@ button {
 .nav {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  margin-top: 1rem;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
   flex: 1;
 }
+
+.nav a {
+  display: block;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-base);
+  color: var(--color-text);
+}
+
+.nav a:hover,
+.nav a:focus-visible {
+  background-color: var(--color-border);
+}
+
+.nav a:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
 .nav a.active {
-  color: $color-green;
+  font-weight: 700;
+  background-color: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+.nav a.active:hover,
+.nav a.active:focus-visible {
+  background-color: var(--color-accent);
 }
 
 #nav-settings {
@@ -172,30 +171,9 @@ button {
 
 .list.empty, .calendar-empty {
   opacity: 0.7;
-  padding: 1rem;
-  border: 1px dashed $color-green;
-  border-radius: 8px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: $color-white;
-    background-color: $color-green;
-  }
-
-  a:hover {
-    color: $color-burgundy;
-  }
-
-  input,
-  button {
-    color: $color-green;
-    background-color: $color-white;
-  }
-  button:active {
-    background-color: $color-burgundy;
-    color: $color-white;
-  }
+  padding: var(--space-4);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-base);
 }
 
 .notes-canvas {
