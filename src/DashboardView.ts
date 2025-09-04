@@ -69,14 +69,27 @@ async function loadJson<T>(file: string): Promise<T[]> {
 
 export async function DashboardView(container: HTMLElement) {
   const section = document.createElement("section");
+  section.className = "dashboard";
   section.innerHTML = `
-    <h2>Dashboard</h2>
-    <ul id="dash-list"></ul>
+    <header class="dashboard__header">
+      <div>
+        <h2>Dashboard</h2>
+        <p class="kicker">What needs your attention</p>
+      </div>
+      <div class="dashboard__actions">
+        <button class="btn">+ Event</button>
+        <button class="btn">+ Note</button>
+      </div>
+    </header>
+    <div class="card">
+      <h3>Attention</h3>
+      <div class="list" id="dash-list"></div>
+    </div>
   `;
   container.innerHTML = "";
   container.appendChild(section);
 
-  const listEl = section.querySelector<HTMLUListElement>("#dash-list");
+  const listEl = section.querySelector<HTMLDivElement>("#dash-list");
   const items: { date: number; text: string }[] = [];
   const now = nowMs();
   const hh = await defaultHouseholdId();
@@ -126,9 +139,15 @@ export async function DashboardView(container: HTMLElement) {
     if (listEl) listEl.textContent = "No upcoming items";
   } else {
     for (const i of items) {
-      const li = document.createElement("li");
-      li.textContent = i.text;
-      listEl?.appendChild(li);
+      const row = document.createElement("div");
+      row.className = "item";
+      const title = document.createElement("span");
+      title.textContent = i.text;
+      const badge = document.createElement("span");
+      badge.className = "badge badge--muted";
+      badge.textContent = "Item";
+      row.append(title, badge);
+      listEl?.appendChild(row);
     }
   }
 }
