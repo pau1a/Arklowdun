@@ -320,20 +320,61 @@ textarea:focus-visible {
 .notes-canvas {
   position: relative;
   min-height: 300px;
+  padding: 24px;
+  background-color: #f7f8fb;
+  background-image: radial-gradient(rgba(0, 0, 0, 0.1) 1px, transparent 1px);
+  background-size: 10px 10px;
+  box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.05);
 }
 
 .note {
   position: absolute;
-  padding: 0.5rem;
-  border-radius: 4px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  padding: 12px;
+  padding-top: 24px;
+  border-radius: 10px;
+  box-shadow: var(--shadow-base);
   cursor: grab;
   user-select: none;
   touch-action: none;
+  background-color: color-mix(in srgb, var(--note-color, #FFF4B8) 85%, white);
+  color: var(--note-text-color, #1f2937);
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+
+.note::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 10px;
+  background-color: var(--note-color, #FFF4B8);
+  border-top-left-radius: 10px;
+  border-top-right-radius: 10px;
+}
+
+.note::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 8px;
+  width: 16px;
+  height: 4px;
+  background-image: radial-gradient(currentColor 1px, transparent 1px);
+  background-size: 4px 4px;
+  opacity: 0.3;
+  pointer-events: none;
 }
 
 .note.dragging {
   cursor: grabbing;
+  transform: scale(1.02);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+.note:focus-within {
+  outline: 2px solid rgba(211, 84, 0, 0.7);
+  outline-offset: 2px;
 }
 
 .note textarea {
@@ -343,16 +384,45 @@ textarea:focus-visible {
   width: 100px;
   height: 100px;
   font: inherit;
+  font-size: 14px;
+  line-height: 1.4;
   outline: none;
+  color: inherit;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
 }
 
-.note button.delete {
+.note button.delete,
+.note button.bring {
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: 4px;
   border: none;
   background: transparent;
   cursor: pointer;
+  color: inherit;
+}
+
+.note button.delete {
+  right: 4px;
+}
+
+.note button.bring {
+  right: 24px;
+}
+
+.note--sm {
+  min-width: 160px;
+  min-height: 120px;
+}
+
+.note--md {
+  min-width: 220px;
+  min-height: 160px;
+}
+
+.note--lg {
+  min-width: 300px;
+  min-height: 220px;
 }
 
 /* Files view */
