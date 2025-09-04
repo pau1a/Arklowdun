@@ -17,6 +17,7 @@ import { InventoryView } from "./InventoryView";
 import { BudgetView } from "./BudgetView";
 import { NotesView } from "./NotesView";
 import { DashboardView } from "./DashboardView";
+import { LegacyView } from "./LegacyView";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { defaultHouseholdId } from "./db/household";
 const appWindow = getCurrentWindow();
@@ -38,7 +39,8 @@ type View =
   | "inventory"
   | "budget"
   | "notes"
-  | "settings";
+  | "settings"
+  | "legacy";
 
 const viewEl = () => document.querySelector<HTMLElement>("#view");
 const linkDashboard = () =>
@@ -74,6 +76,8 @@ const linkNotes = () =>
   document.querySelector<HTMLAnchorElement>("#nav-notes");
 const linkSettings = () =>
   document.querySelector<HTMLAnchorElement>("#nav-settings");
+const linkLegacy = () =>
+  document.querySelector<HTMLAnchorElement>("#nav-legacy");
 
 // --- HEIGHT-ONLY floor: ensure full sidebar is visible ---
 // Width is not constrained here.
@@ -187,6 +191,7 @@ function setActive(tab: View) {
     budget: linkBudget(),
     notes: linkNotes(),
     settings: linkSettings(),
+    legacy: linkLegacy(),
   };
   (Object.keys(tabs) as View[]).forEach((name) => {
     const el = tabs[name];
@@ -264,8 +269,39 @@ function navigate(to: View) {
     SettingsView(el);
     return;
   }
+  if (to === "legacy") {
+    LegacyView(el);
+    setupLegacyLinks();
+    return;
+  }
   const title = to.charAt(0).toUpperCase() + to.slice(1);
   renderBlank(title);
+}
+
+function setupLegacyLinks() {
+  const pairs: [() => HTMLAnchorElement | null, View][] = [
+    [linkPrimary, "primary"],
+    [linkSecondary, "secondary"],
+    [linkTertiary, "tertiary"],
+    [linkBills, "bills"],
+    [linkInsurance, "insurance"],
+    [linkProperty, "property"],
+    [linkVehicles, "vehicles"],
+    [linkPets, "pets"],
+    [linkFamily, "family"],
+    [linkInventory, "inventory"],
+    [linkBudget, "budget"],
+    [linkShopping, "shopping"],
+  ];
+  for (const [getter, view] of pairs) {
+    const el = getter();
+    if (el) {
+      el.onclick = (e) => {
+        e.preventDefault();
+        navigate(view);
+      };
+    }
+  }
 }
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -275,18 +311,6 @@ window.addEventListener("DOMContentLoaded", () => {
     e.preventDefault();
     navigate("dashboard");
   });
-  linkPrimary()?.addEventListener("click", (e) => {
-    e.preventDefault();
-    navigate("primary");
-  });
-  linkSecondary()?.addEventListener("click", (e) => {
-    e.preventDefault();
-    navigate("secondary");
-  });
-  linkTertiary()?.addEventListener("click", (e) => {
-    e.preventDefault();
-    navigate("tertiary");
-  });
   linkCalendar()?.addEventListener("click", (e) => {
     e.preventDefault();
     navigate("calendar");
@@ -295,42 +319,6 @@ window.addEventListener("DOMContentLoaded", () => {
     e.preventDefault();
     navigate("files");
   });
-  linkShopping()?.addEventListener("click", (e) => {
-    e.preventDefault();
-    navigate("shopping");
-  });
-  linkBills()?.addEventListener("click", (e) => {
-    e.preventDefault();
-    navigate("bills");
-  });
-  linkInsurance()?.addEventListener("click", (e) => {
-    e.preventDefault();
-    navigate("insurance");
-  });
-  linkProperty()?.addEventListener("click", (e) => {
-    e.preventDefault();
-    navigate("property");
-  });
-  linkVehicles()?.addEventListener("click", (e) => {
-    e.preventDefault();
-    navigate("vehicles");
-  });
-  linkPets()?.addEventListener("click", (e) => {
-    e.preventDefault();
-    navigate("pets");
-  });
-  linkFamily()?.addEventListener("click", (e) => {
-    e.preventDefault();
-    navigate("family");
-  });
-  linkInventory()?.addEventListener("click", (e) => {
-    e.preventDefault();
-    navigate("inventory");
-  });
-  linkBudget()?.addEventListener("click", (e) => {
-    e.preventDefault();
-    navigate("budget");
-  });
   linkNotes()?.addEventListener("click", (e) => {
     e.preventDefault();
     navigate("notes");
@@ -338,6 +326,10 @@ window.addEventListener("DOMContentLoaded", () => {
   linkSettings()?.addEventListener("click", (e) => {
     e.preventDefault();
     navigate("settings");
+  });
+  linkLegacy()?.addEventListener("click", (e) => {
+    e.preventDefault();
+    navigate("legacy");
   });
   navigate("dashboard");
   requestAnimationFrame(() => {
