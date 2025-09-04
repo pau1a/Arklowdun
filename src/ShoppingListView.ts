@@ -1,49 +1,7 @@
-import { readTextFile, writeTextFile, BaseDirectory } from "@tauri-apps/plugin-fs";
-import { newUuidV7 } from "./db/id";
-import { assertJsonWritable } from "./storage";
-
-interface ShoppingItem {
-  id: string;
-  text: string;
-  completed: boolean;
-  deleted_at?: number;
-}
-
-const FILE = "shopping-list.json";
-
-async function loadItems(): Promise<ShoppingItem[]> {
-  try {
-    const content = await readTextFile(FILE, {
-      baseDir: BaseDirectory.AppLocalData,
-    });
-    const items = JSON.parse(content) as ShoppingItem[] | any[];
-    let changed = false;
-    const fixed = items.map((i) => {
-      let item: any = i;
-      if (typeof item.id === "number") {
-        item = { ...item, id: newUuidV7() };
-        changed = true;
-      }
-      if ("deletedAt" in item) {
-        item.deleted_at = (item as any).deletedAt;
-        delete (item as any).deletedAt;
-        changed = true;
-      }
-      return item;
-    });
-    if (changed) await saveItems(fixed);
-    return fixed as ShoppingItem[];
-  } catch {
-    return [];
-  }
-}
-
-async function saveItems(items: ShoppingItem[]): Promise<void> {
-  assertJsonWritable("shopping_items");
-  await writeTextFile(FILE, JSON.stringify(items), {
-    baseDir: BaseDirectory.AppLocalData,
-  });
-}
+// src/ShoppingListView.ts
+import { defaultHouseholdId } from "./db/household";
+import { shoppingRepo } from "./repos";
+import type { ShoppingItem } from "./models";
 
 export async function ShoppingListView(container: HTMLElement) {
   const section = document.createElement("section");
@@ -58,62 +16,83 @@ export async function ShoppingListView(container: HTMLElement) {
   container.innerHTML = "";
   container.appendChild(section);
 
-  const form = section.querySelector<HTMLFormElement>("#item-form");
-  const input = section.querySelector<HTMLInputElement>("#item-input");
-  const listEl = section.querySelector<HTMLUListElement>("#items");
+  const form = section.querySelector<HTMLFormElement>("#item-form")!;
+  const input = section.querySelector<HTMLInputElement>("#item-input")!;
+  const listEl = section.querySelector<HTMLUListElement>("#items")!;
 
-  let items = await loadItems();
+  const hh = await defaultHouseholdId();
+  let items: ShoppingItem[] = await shoppingRepo.list({
+    householdId: hh,
+    orderBy: "position, created_at, id",
+  });
 
-  const render = () => {
-    if (!listEl) return;
+  function render() {
     listEl.innerHTML = "";
-    const liveItems = items.filter((i) => !i.deleted_at);
-    if (liveItems.length === 0) {
+    const live = items.filter((i) => !i.deleted_at);
+    if (live.length === 0) {
       const empty = document.createElement("li");
       empty.className = "list empty";
       empty.textContent = "No items";
       listEl.appendChild(empty);
       return;
     }
-    for (const item of liveItems) {
+    for (const item of live) {
       const li = document.createElement("li");
+
       const cb = document.createElement("input");
       cb.type = "checkbox";
-      cb.checked = item.completed;
+      cb.checked = !!item.completed;
       cb.addEventListener("change", async () => {
-        item.completed = cb.checked;
-        await saveItems(items);
-        render();
+        try {
+          item.completed = cb.checked;
+          await shoppingRepo.update(hh, item.id, { completed: item.completed } as Partial<ShoppingItem>);
+          render();
+        } catch {
+          alert("Failed to update item.");
+          cb.checked = !cb.checked;
+        }
       });
+
       const span = document.createElement("span");
       span.textContent = item.text;
       if (item.completed) span.style.textDecoration = "line-through";
+
       const del = document.createElement("button");
       del.textContent = "Delete";
       del.addEventListener("click", async () => {
-        item.deleted_at = Date.now();
-        await saveItems(items);
-        render();
+        try {
+          await shoppingRepo.delete(hh, item.id);
+          items = items.filter((i) => i.id !== item.id);
+          render();
+        } catch {
+          alert("Failed to delete item.");
+        }
       });
+
       li.appendChild(cb);
       li.appendChild(span);
       li.appendChild(del);
       listEl.appendChild(li);
     }
-  };
+  }
 
   render();
 
-  form?.addEventListener("submit", async (e) => {
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    if (!input) return;
     const text = input.value.trim();
     if (!text) return;
-    const id = newUuidV7();
-    items.push({ id, text, completed: false });
-    await saveItems(items);
-    input.value = "";
-    render();
+    try {
+      const created = await shoppingRepo.create(hh, {
+        text,
+        completed: false,
+        position: items.length,
+      } as Partial<ShoppingItem>);
+      items.push(created);
+      input.value = "";
+      render();
+    } catch {
+      alert("Failed to add item.");
+    }
   });
 }
-
