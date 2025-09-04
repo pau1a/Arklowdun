@@ -2,6 +2,7 @@
 
 // Ensure SCSS is compiled by Vite:
 import "./debug";
+import "./theme.scss";
 import "./styles.scss";
 import { CalendarView } from "./CalendarView";
 import { FilesView } from "./FilesView";
