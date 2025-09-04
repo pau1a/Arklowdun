@@ -4,6 +4,8 @@ Arklowdun is a desktop app for home management, centered around a filestore and 
 
 Current state: basic app shell with three tabs (Files, Calendar, Notes). The Files view uses Tauri's dialog and filesystem plugins to browse and manage the local file system, the Calendar stores events on disk, and the Notes view lets you create draggable colored notes that persist to disk. Functionality will be implemented iteratively.
 
+See the [Arklowdun Master Plan](docs/master-plan.md) for the high-level strategic issues that guide development.
+
 ## Roadmap (initial)
 
 - Files: choose a base folder and list files; create folders/files; quick search; favorite locations.
