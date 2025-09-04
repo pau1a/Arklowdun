@@ -1,58 +1,129 @@
-// TODO(backend-notes): when Notes move to SQLite, call the tauri `bring_note_to_front` command
-// instead of local z-bumping, and order by `z DESC, position, created_at` in repo helpers.
-import { readTextFile, writeTextFile, mkdir, BaseDirectory } from "@tauri-apps/plugin-fs";
-import { join } from "@tauri-apps/api/path";
+// src/NotesView.ts
+import Database from "@tauri-apps/plugin-sql";
 import { newUuidV7 } from "./db/id";
-import { assertJsonWritable } from "./storage";
+import { defaultHouseholdId } from "./db/household";
 
-interface Note {
+type Note = {
   id: string;
   text: string;
   color: string;
   x: number;
   y: number;
   z?: number;
-  deleted_at?: number;
+  position: number;
+  household_id?: string;
+  created_at?: number;
+  updated_at?: number;
+  deleted_at?: number | null;
+};
+
+async function openDb() {
+  // Uses the same DB the rest of the app uses (tauri config maps this to your app.sqlite)
+  // Do NOT put an absolute path here.
+  return await Database.load("sqlite:app.sqlite");
 }
 
-const STORE_DIR = "Arklowdun";
-const FILE_NAME = "notes.json";
-
-async function loadNotes(): Promise<Note[]> {
-  try {
-    const p = await join(STORE_DIR, FILE_NAME);
-    const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
-    const notes = JSON.parse(json) as Note[] | any[];
-    let changed = false;
-    const fixed = notes.map((n) => {
-      let note: any = n;
-      if (typeof note.id === "number") {
-        note = { ...note, id: newUuidV7() };
-        changed = true;
-      }
-      if ("deletedAt" in note) {
-        note.deleted_at = (note as any).deletedAt;
-        delete (note as any).deletedAt;
-        changed = true;
-      }
-      if (note.z === undefined) {
-        note.z = 0;
-        changed = true;
-      }
-      return note;
-    });
-    if (changed) await saveNotes(fixed);
-    return fixed as Note[];
-  } catch {
-    return [];
-  }
+async function loadNotes(householdId: string): Promise<Note[]> {
+  const db = await openDb();
+  const rows = await db.select<Note[]>(
+    `SELECT id, text, color, x, y, z, position, household_id, created_at, updated_at, deleted_at
+       FROM notes
+      WHERE household_id = ? AND deleted_at IS NULL
+      ORDER BY COALESCE(z,0) DESC, position, created_at, id`,
+    [householdId]
+  );
+  return rows ?? [];
 }
 
-async function saveNotes(notes: Note[]): Promise<void> {
-  assertJsonWritable("notes");
-  await mkdir(STORE_DIR, { baseDir: BaseDirectory.AppLocalData, recursive: true });
-  const p = await join(STORE_DIR, FILE_NAME);
-  await writeTextFile(p, JSON.stringify(notes, null, 2), { baseDir: BaseDirectory.AppLocalData });
+async function insertNote(
+  householdId: string,
+  draft: Omit<Note, "id" | "position">
+): Promise<Note> {
+  const db = await openDb();
+
+  // Compute next free position and z in SQL to avoid unique collisions
+  const nextPosRow = await db.select<{ next_pos: number }[]>(
+    `SELECT COALESCE(MAX(position), -1) + 1 AS next_pos
+       FROM notes
+      WHERE household_id = ? AND deleted_at IS NULL`,
+    [householdId]
+  );
+  const nextPos = nextPosRow[0]?.next_pos ?? 0;
+
+  const nextZRow = await db.select<{ maxz: number }[]>(
+    `SELECT COALESCE(MAX(z), 0) AS maxz
+       FROM notes
+      WHERE household_id = ? AND deleted_at IS NULL`,
+    [householdId]
+  );
+  const z = (nextZRow[0]?.maxz ?? 0) + 1;
+
+  const id = newUuidV7();
+  const now = Date.now();
+
+  await db.execute(
+    `INSERT INTO notes
+       (id, household_id, position, created_at, updated_at, deleted_at,
+        z, text, color, x, y)
+     VALUES
+       (?,  ?,            ?,        ?,          ?,          NULL,
+        ?, ?,    ?,     ?, ?)`,
+    [
+      id,
+      householdId,
+      nextPos,
+      now,
+      now,
+      z,
+      draft.text,
+      draft.color,
+      draft.x,
+      draft.y,
+    ]
+  );
+
+  return {
+    id,
+    text: draft.text,
+    color: draft.color,
+    x: draft.x,
+    y: draft.y,
+    z,
+    position: nextPos,
+    household_id: householdId,
+    created_at: now,
+    updated_at: now,
+    deleted_at: null,
+  };
+}
+
+async function updateNote(
+  householdId: string,
+  id: string,
+  patch: Partial<Note>
+): Promise<void> {
+  const db = await openDb();
+  const now = Date.now();
+
+  const sets: string[] = [];
+  const args: any[] = [];
+
+  if (patch.text !== undefined) { sets.push("text = ?"); args.push(patch.text); }
+  if (patch.color !== undefined) { sets.push("color = ?"); args.push(patch.color); }
+  if (patch.x !== undefined) { sets.push("x = ?"); args.push(patch.x); }
+  if (patch.y !== undefined) { sets.push("y = ?"); args.push(patch.y); }
+  if (patch.z !== undefined) { sets.push("z = ?"); args.push(patch.z); }
+  if (patch.deleted_at !== undefined) { sets.push("deleted_at = ?"); args.push(patch.deleted_at); }
+
+  sets.push("updated_at = ?");
+  args.push(now);
+
+  args.push(householdId, id);
+
+  await db.execute(
+    `UPDATE notes SET ${sets.join(", ")} WHERE household_id = ? AND id = ?`,
+    args
+  );
 }
 
 export async function NotesView(container: HTMLElement) {
@@ -69,54 +140,72 @@ export async function NotesView(container: HTMLElement) {
   container.innerHTML = "";
   container.appendChild(section);
 
-  const form = section.querySelector<HTMLFormElement>("#note-form");
-  const textInput = section.querySelector<HTMLInputElement>("#note-text");
-  const colorInput = section.querySelector<HTMLInputElement>("#note-color");
+  const form = section.querySelector<HTMLFormElement>("#note-form")!;
+  const textInput = section.querySelector<HTMLInputElement>("#note-text")!;
+  const colorInput = section.querySelector<HTMLInputElement>("#note-color")!;
   const canvas = section.querySelector<HTMLDivElement>("#notes-canvas")!;
 
-  let notes: Note[] = await loadNotes();
+  const householdId = await defaultHouseholdId();
+  let notes: Note[] = await loadNotes(householdId);
 
-  let saveTimer: number | undefined;
-  const saveSoon = () => {
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = window.setTimeout(() => saveNotes(notes), 250);
-  };
+  const saveSoon = (() => {
+    let t: number | undefined;
+    return (fn: () => void) => {
+      if (t) clearTimeout(t);
+      t = window.setTimeout(fn, 200);
+    };
+  })();
 
   function render() {
     canvas.innerHTML = "";
     notes
       .filter((n) => !n.deleted_at)
-      .sort((a, b) => (b.z || 0) - (a.z || 0))
+      .sort((a, b) => (b.z ?? 0) - (a.z ?? 0) || a.position - b.position || (a.created_at ?? 0) - (b.created_at ?? 0))
       .forEach((note) => {
         const el = document.createElement("div");
         el.className = "note";
         el.style.backgroundColor = note.color;
         el.style.left = note.x + "px";
         el.style.top = note.y + "px";
-        el.style.zIndex = String(note.z || 0);
+        el.style.zIndex = String(note.z ?? 0);
+
         const textarea = document.createElement("textarea");
         textarea.value = note.text;
         textarea.addEventListener("input", () => {
           note.text = textarea.value;
-          saveSoon();
+          saveSoon(async () => {
+            try { await updateNote(householdId, note.id, { text: note.text }); } catch {}
+          });
         });
         el.appendChild(textarea);
+
         const del = document.createElement("button");
         del.className = "delete";
         del.textContent = "\u00d7";
-        del.addEventListener("click", () => {
+        del.addEventListener("click", async () => {
           note.deleted_at = Date.now();
-          saveNotes(notes).then(render);
+          try {
+            await updateNote(householdId, note.id, { deleted_at: note.deleted_at });
+            notes = notes.filter((n) => n.id !== note.id);
+            render();
+          } catch (err: any) {
+            alert(`Failed to delete note:\n${err?.message ?? String(err)}`);
+          }
         });
         el.appendChild(del);
 
         const bring = document.createElement("button");
         bring.className = "bring";
         bring.textContent = "\u2191";
-        bring.addEventListener("click", () => {
-          const maxZ = Math.max(0, ...notes.filter((n) => !n.deleted_at).map((n) => n.z || 0));
+        bring.addEventListener("click", async () => {
+          const maxZ = Math.max(0, ...notes.filter((n) => !n.deleted_at).map((n) => n.z ?? 0));
           note.z = maxZ + 1;
-          saveNotes(notes).then(render);
+          try {
+            await updateNote(householdId, note.id, { z: note.z });
+            render();
+          } catch (err: any) {
+            alert(`Failed to bring note to front:\n${err?.message ?? String(err)}`);
+          }
         });
         el.appendChild(bring);
 
@@ -127,10 +216,12 @@ export async function NotesView(container: HTMLElement) {
           const startY = e.clientY;
           const origX = note.x;
           const origY = note.y;
-          const maxZ = Math.max(0, ...notes.filter((n) => !n.deleted_at).map((n) => n.z || 0));
+          const maxZ = Math.max(0, ...notes.filter((n) => !n.deleted_at).map((n) => n.z ?? 0));
           note.z = maxZ + 1;
           el.style.zIndex = String(note.z);
-          saveSoon();
+          saveSoon(async () => {
+            try { await updateNote(householdId, note.id, { z: note.z }); } catch {}
+          });
           el.classList.add("dragging");
           el.setPointerCapture(e.pointerId);
           function onMove(ev: PointerEvent) {
@@ -141,11 +232,11 @@ export async function NotesView(container: HTMLElement) {
             el.style.left = note.x + "px";
             el.style.top = note.y + "px";
           }
-          function onUp() {
+          async function onUp() {
             el.removeEventListener("pointermove", onMove);
             el.removeEventListener("pointerup", onUp);
             el.classList.remove("dragging");
-            saveSoon();
+            try { await updateNote(householdId, note.id, { x: note.x, y: note.y }); } catch {}
           }
           el.addEventListener("pointermove", onMove);
           el.addEventListener("pointerup", onUp);
@@ -157,21 +248,23 @@ export async function NotesView(container: HTMLElement) {
 
   render();
 
-  form?.addEventListener("submit", (e) => {
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    if (!textInput || !colorInput) return;
-    const maxZ = Math.max(0, ...notes.filter((n) => !n.deleted_at).map((n) => n.z || 0));
-    const note: Note = {
-      id: newUuidV7(),
-      text: textInput.value,
-      color: colorInput.value,
-      x: 10,
-      y: 10,
-      z: maxZ + 1,
-    };
-    notes.push(note);
-    saveNotes(notes).then(render);
-    form.reset();
-    colorInput.value = "#ffff88";
+    try {
+      const created = await insertNote(householdId, {
+        text: textInput.value,
+        color: colorInput.value,
+        x: 10,
+        y: 10,
+        z: 0,          // will be overridden by SQL-computed z inside insertNote
+        position: 0,   // not used (kept to satisfy the type in Omit<>)
+      } as any);
+      notes.push(created);
+      render();
+      form.reset();
+      colorInput.value = "#ffff88";
+    } catch (err: any) {
+      alert(`Failed to add note:\n${err?.message ?? String(err)}`);
+    }
   });
 }

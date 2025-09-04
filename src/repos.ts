@@ -1,4 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
+//import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./debug";
+
 import type {
   Bill,
   Policy,

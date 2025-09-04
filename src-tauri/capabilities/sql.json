@@ -1,8 +1,13 @@
 {
   "identifier": "sql",
   "description": "Allow opening and executing SQL queries.",
+  "windows": ["main"],
   "permissions": [
     "sql:default",
-    "sql:allow-execute"
+    "sql:allow-execute",
+    {
+      "identifier": "sql:allow-load",
+      "assets": ["sqlite:app.sqlite"]
+    }
   ]
 }

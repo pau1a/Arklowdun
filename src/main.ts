@@ -1,6 +1,7 @@
 // Simple tabbed UI scaffold for Arklowdun
 
 // Ensure SCSS is compiled by Vite:
+import "./debug";
 import "./styles.scss";
 import { CalendarView } from "./CalendarView";
 import { FilesView } from "./FilesView";
