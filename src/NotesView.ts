@@ -128,25 +128,46 @@ async function updateNote(
 
 export async function NotesView(container: HTMLElement) {
   const section = document.createElement("section");
+  section.className = "notes";
   section.innerHTML = `
-    <h2>Notes</h2>
-    <form id="note-form">
-      <input id="note-text" type="text" placeholder="Note" required />
-      <input id="note-color" type="color" value="#ffff88" />
-      <button type="submit">Add</button>
-    </form>
-    <div id="notes-canvas" class="notes-canvas"></div>
+    <header class="notes__header">
+      <div>
+        <h2>Notes</h2>
+        <p id="notes-subhead" class="kicker">Your notes at a glance</p>
+      </div>
+      <div class="notes__actions">
+        <div class="notes__search">
+          <span class="notes__search-icon">\u{1F50D}</span>
+          <input id="note-search" type="search" placeholder="Search notes" />
+        </div>
+        <button id="new-note" class="btn btn--accent">New Note</button>
+      </div>
+    </header>
+    <div class="notes__layout">
+      <div id="notes-list" class="card notes__list"></div>
+      <div id="notes-editor" class="card notes__editor" hidden>
+        <input id="note-title" class="notes__title" type="text" placeholder="Title" />
+        <textarea id="note-body" class="notes__body" placeholder="Write your note..."></textarea>
+        <div class="notes__editor-actions">
+          <button id="delete-note" class="btn">Delete</button>
+        </div>
+      </div>
+    </div>
   `;
   container.innerHTML = "";
   container.appendChild(section);
 
-  const form = section.querySelector<HTMLFormElement>("#note-form")!;
-  const textInput = section.querySelector<HTMLInputElement>("#note-text")!;
-  const colorInput = section.querySelector<HTMLInputElement>("#note-color")!;
-  const canvas = section.querySelector<HTMLDivElement>("#notes-canvas")!;
+  const listEl = section.querySelector<HTMLDivElement>("#notes-list")!;
+  const editorEl = section.querySelector<HTMLDivElement>("#notes-editor")!;
+  const titleInput = section.querySelector<HTMLInputElement>("#note-title")!;
+  const bodyInput = section.querySelector<HTMLTextAreaElement>("#note-body")!;
+  const deleteBtn = section.querySelector<HTMLButtonElement>("#delete-note")!;
+  const newBtn = section.querySelector<HTMLButtonElement>("#new-note")!;
+  const subhead = section.querySelector<HTMLElement>("#notes-subhead")!;
 
   const householdId = await defaultHouseholdId();
   let notes: Note[] = await loadNotes(householdId);
+  let selected: Note | null = null;
 
   const saveSoon = (() => {
     let t: number | undefined;
@@ -156,115 +177,122 @@ export async function NotesView(container: HTMLElement) {
     };
   })();
 
-  function render() {
-    canvas.innerHTML = "";
-    notes
-      .filter((n) => !n.deleted_at)
-      .sort((a, b) => (b.z ?? 0) - (a.z ?? 0) || a.position - b.position || (a.created_at ?? 0) - (b.created_at ?? 0))
-      .forEach((note) => {
-        const el = document.createElement("div");
-        el.className = "note";
-        el.style.backgroundColor = note.color;
-        el.style.left = note.x + "px";
-        el.style.top = note.y + "px";
-        el.style.zIndex = String(note.z ?? 0);
-
-        const textarea = document.createElement("textarea");
-        textarea.value = note.text;
-        textarea.addEventListener("input", () => {
-          note.text = textarea.value;
-          saveSoon(async () => {
-            try { await updateNote(householdId, note.id, { text: note.text }); } catch {}
-          });
-        });
-        el.appendChild(textarea);
-
-        const del = document.createElement("button");
-        del.className = "delete";
-        del.textContent = "\u00d7";
-        del.addEventListener("click", async () => {
-          note.deleted_at = Date.now();
-          try {
-            await updateNote(householdId, note.id, { deleted_at: note.deleted_at });
-            notes = notes.filter((n) => n.id !== note.id);
-            render();
-          } catch (err: any) {
-            alert(`Failed to delete note:\n${err?.message ?? String(err)}`);
-          }
-        });
-        el.appendChild(del);
-
-        const bring = document.createElement("button");
-        bring.className = "bring";
-        bring.textContent = "\u2191";
-        bring.addEventListener("click", async () => {
-          const maxZ = Math.max(0, ...notes.filter((n) => !n.deleted_at).map((n) => n.z ?? 0));
-          note.z = maxZ + 1;
-          try {
-            await updateNote(householdId, note.id, { z: note.z });
-            render();
-          } catch (err: any) {
-            alert(`Failed to bring note to front:\n${err?.message ?? String(err)}`);
-          }
-        });
-        el.appendChild(bring);
-
-        el.addEventListener("pointerdown", (e) => {
-          if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLButtonElement) return;
-          e.preventDefault();
-          const startX = e.clientX;
-          const startY = e.clientY;
-          const origX = note.x;
-          const origY = note.y;
-          const maxZ = Math.max(0, ...notes.filter((n) => !n.deleted_at).map((n) => n.z ?? 0));
-          note.z = maxZ + 1;
-          el.style.zIndex = String(note.z);
-          saveSoon(async () => {
-            try { await updateNote(householdId, note.id, { z: note.z }); } catch {}
-          });
-          el.classList.add("dragging");
-          el.setPointerCapture(e.pointerId);
-          function onMove(ev: PointerEvent) {
-            const maxX = canvas.clientWidth - el.offsetWidth;
-            const maxY = canvas.clientHeight - el.offsetHeight;
-            note.x = Math.max(0, Math.min(maxX, origX + (ev.clientX - startX)));
-            note.y = Math.max(0, Math.min(maxY, origY + (ev.clientY - startY)));
-            el.style.left = note.x + "px";
-            el.style.top = note.y + "px";
-          }
-          async function onUp() {
-            el.removeEventListener("pointermove", onMove);
-            el.removeEventListener("pointerup", onUp);
-            el.classList.remove("dragging");
-            try { await updateNote(householdId, note.id, { x: note.x, y: note.y }); } catch {}
-          }
-          el.addEventListener("pointermove", onMove);
-          el.addEventListener("pointerup", onUp);
-        });
-
-        canvas.appendChild(el);
-      });
+  function updateSubhead() {
+    subhead.textContent = `Your notes at a glance${
+      notes.length ? " • " + notes.length + " notes" : ""
+    }`;
   }
 
-  render();
+  function renderList() {
+    listEl.innerHTML = "";
+    const activeNotes = notes.filter((n) => !n.deleted_at);
+    if (activeNotes.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "notes__empty";
+      empty.innerHTML = `<p>No notes yet</p><button class="btn btn--ghost">New Note</button>`;
+      empty
+        .querySelector("button")
+        ?.addEventListener("click", () => newBtn.click());
+      listEl.appendChild(empty);
+      editorEl.hidden = true;
+      updateSubhead();
+      return;
+    }
+    activeNotes
+      .sort(
+        (a, b) =>
+          (b.updated_at ?? 0) - (a.updated_at ?? 0) ||
+          (a.created_at ?? 0) - (b.created_at ?? 0)
+      )
+      .forEach((note) => {
+        const row = document.createElement("div");
+        row.className = "notes__row";
+        row.tabIndex = 0;
+        row.dataset.id = note.id;
+        const main = document.createElement("div");
+        main.className = "notes__row-main";
+        const titleEl = document.createElement("div");
+        titleEl.className = "notes__row-title";
+        const previewEl = document.createElement("div");
+        previewEl.className = "notes__row-preview";
+        const [first, ...rest] = (note.text || "").split("\n");
+        titleEl.textContent = first || "Untitled";
+        previewEl.textContent = rest.join(" ").split("\n")[0];
+        main.append(titleEl, previewEl);
+        const time = document.createElement("time");
+        time.className = "notes__row-time";
+        const ts = note.updated_at || note.created_at;
+        time.textContent = ts ? new Date(ts).toLocaleDateString() : "";
+        row.append(main, time);
+        row.addEventListener("click", () => selectNote(note));
+        row.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") selectNote(note);
+        });
+        listEl.appendChild(row);
+      });
+    updateSubhead();
+  }
 
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
+  function selectNote(note: Note) {
+    selected = note;
+    listEl
+      .querySelectorAll<HTMLElement>(".notes__row")
+      .forEach((el) => {
+        el.classList.toggle("active", el.dataset.id === note.id);
+      });
+    editorEl.hidden = false;
+    const [first, ...rest] = (note.text || "").split("\n");
+    titleInput.value = first || "";
+    bodyInput.value = rest.join("\n");
+    titleInput.focus();
+  }
+
+  function save() {
+    if (!selected) return;
+    selected.text = [titleInput.value, bodyInput.value]
+      .filter(Boolean)
+      .join("\n");
+    selected.updated_at = Date.now();
+    updateNote(householdId, selected.id, { text: selected.text }).catch(() => {});
+    renderList();
+  }
+
+  titleInput.addEventListener("input", () => saveSoon(save));
+  bodyInput.addEventListener("input", () => saveSoon(save));
+
+  deleteBtn.addEventListener("click", async () => {
+    if (!selected) return;
+    selected.deleted_at = Date.now();
+    try {
+      await updateNote(householdId, selected.id, {
+        deleted_at: selected.deleted_at,
+      });
+      notes = notes.filter((n) => n.id !== selected!.id);
+      selected = null;
+      renderList();
+      editorEl.hidden = true;
+    } catch (err: any) {
+      alert(`Failed to delete note:\n${err?.message ?? String(err)}`);
+    }
+  });
+
+  newBtn.addEventListener("click", async () => {
     try {
       const created = await insertNote(householdId, {
-        text: textInput.value,
-        color: colorInput.value,
-        x: 10,
-        y: 10,
-        z: 0,          // will be overridden by SQL-computed z inside insertNote
-        position: 0,   // not used (kept to satisfy the type in Omit<>)
+        text: "",
+        color: "#ffff88",
+        x: 0,
+        y: 0,
+        z: 0,
+        position: 0,
       } as any);
-      notes.push(created);
-      render();
-      form.reset();
-      colorInput.value = "#ffff88";
+      notes = [created, ...notes];
+      renderList();
+      selectNote(created);
     } catch (err: any) {
       alert(`Failed to add note:\n${err?.message ?? String(err)}`);
     }
   });
+
+  renderList();
 }
