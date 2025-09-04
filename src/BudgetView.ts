@@ -1,127 +1,21 @@
-import { readTextFile, writeTextFile, mkdir, BaseDirectory } from "@tauri-apps/plugin-fs";
-import { join } from "@tauri-apps/api/path";
+// src/BudgetView.ts
 import type { BudgetCategory, Expense } from "./models";
-import { newUuidV7 } from "./db/id";
-import { nowMs, toDate } from "./db/time";
-import { toMs } from "./db/normalize";
 import { defaultHouseholdId } from "./db/household";
-
-interface BudgetData {
-  categories: BudgetCategory[];
-  expenses: Expense[];
-}
-
-const STORE_DIR = "Arklowdun";
-const FILE_NAME = "budget.json";
-const CSV_FILE = "expenses.csv";
+import { toDate, nowMs } from "./db/time";
+import { budgetCategoriesRepo, expensesRepo } from "./repos";
 
 const money = new Intl.NumberFormat(undefined, {
   style: "currency",
   currency: "GBP",
 });
 
-async function loadData(): Promise<BudgetData> {
-  try {
-    const p = await join(STORE_DIR, FILE_NAME);
-    const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
-    const data = JSON.parse(json) as BudgetData | any;
-    let changed = false;
-    const hh = await defaultHouseholdId();
-    const idMap = new Map<number, string>();
-    data.categories = data.categories
-      .map((c: any) => {
-        if (typeof c.id === "number") {
-          const id = newUuidV7();
-          idMap.set(c.id, id);
-          changed = true;
-          c.id = id;
-        }
-        if ("monthlyBudget" in c) {
-          c.monthly_budget = c.monthlyBudget;
-          delete c.monthlyBudget;
-          changed = true;
-        }
-        if (!c.created_at) {
-          c.created_at = nowMs();
-          changed = true;
-        }
-        if (!c.updated_at) {
-          c.updated_at = c.created_at;
-          changed = true;
-        }
-        if (!c.household_id) {
-          c.household_id = hh;
-          changed = true;
-        }
-        if (typeof c.position !== 'number') {
-          c.position = 0;
-          changed = true;
-        }
-        if ("deletedAt" in c) {
-          c.deleted_at = c.deletedAt;
-          delete c.deletedAt;
-          changed = true;
-        }
-        return c;
-      })
-      .filter((c: any) => c.deleted_at == null);
-    data.categories.sort((a: any, b: any) => a.position - b.position || a.created_at - b.created_at);
-    data.expenses = data.expenses
-      .map((e: any) => {
-        let id = e.id;
-        if (typeof id === "number") {
-          id = newUuidV7();
-          changed = true;
-        }
-        if ("categoryId" in e) {
-          e.category_id = e.categoryId;
-          delete e.categoryId;
-          changed = true;
-        }
-        let catId = e.category_id;
-        if (typeof catId === "number") {
-          catId = idMap.get(catId) ?? String(catId);
-          changed = true;
-        }
-        let date = e.date;
-        const ms = toMs(date);
-        if (ms !== undefined) {
-          if (ms !== date) changed = true;
-          date = ms;
-        }
-        if (!e.created_at) {
-          e.created_at = nowMs();
-          changed = true;
-        }
-        if (!e.updated_at) {
-          e.updated_at = e.created_at;
-          changed = true;
-        }
-        if (!e.household_id) {
-          e.household_id = hh;
-          changed = true;
-        }
-        if ("deletedAt" in e) {
-          e.deleted_at = e.deletedAt;
-          delete e.deletedAt;
-          changed = true;
-        }
-        return { ...e, id, category_id: catId, date };
-      })
-      .filter((e: any) => e.deleted_at == null);
-    if (changed) await saveData(data);
-    return data as BudgetData;
-  } catch {
-    return { categories: [], expenses: [] };
-  }
-}
-
-async function saveData(data: BudgetData): Promise<void> {
-  await mkdir(STORE_DIR, { baseDir: BaseDirectory.AppLocalData, recursive: true });
-  const p = await join(STORE_DIR, FILE_NAME);
-  await writeTextFile(p, JSON.stringify(data, null, 2), {
-    baseDir: BaseDirectory.AppLocalData,
-  });
+// Load everything we need
+async function loadAll(householdId: string) {
+  const [categories, expenses] = await Promise.all([
+    budgetCategoriesRepo.list({ householdId, orderBy: "position, created_at, id" }),
+    expensesRepo.list({ householdId, orderBy: "date DESC, created_at DESC, id" }),
+  ]);
+  return { categories, expenses };
 }
 
 function updateCategoryOptions(sel: HTMLSelectElement, cats: BudgetCategory[]) {
@@ -134,23 +28,30 @@ function updateCategoryOptions(sel: HTMLSelectElement, cats: BudgetCategory[]) {
   });
 }
 
-function renderSummary(tbody: HTMLTableSectionElement, data: BudgetData) {
+function csvEscape(s: string) {
+  const t = String(s ?? "");
+  return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+}
+
+function renderSummary(tbody: HTMLTableSectionElement, cats: BudgetCategory[], exps: Expense[]) {
   const now = toDate(nowMs());
   const m = now.getMonth();
   const y = now.getFullYear();
+
   tbody.innerHTML = "";
-  data.categories.forEach((c) => {
-    const spent = data.expenses
+  cats.forEach((c) => {
+    const spent = exps
       .filter((e) => {
         const d = toDate(e.date);
         return e.category_id === c.id && d.getMonth() === m && d.getFullYear() === y;
       })
       .reduce((s, e) => s + e.amount, 0);
-    const remaining = c.monthly_budget - spent;
+
+    const remaining = (c.monthly_budget ?? 0) - spent;
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${c.name}</td>
-      <td>${money.format(c.monthly_budget)}</td>
+      <td>${money.format(c.monthly_budget ?? 0)}</td>
       <td>${money.format(spent)}</td>
       <td>${money.format(remaining)}</td>
     `;
@@ -158,40 +59,18 @@ function renderSummary(tbody: HTMLTableSectionElement, data: BudgetData) {
   });
 }
 
-function csvEscape(s: string) {
-  const t = String(s ?? "");
-  if (/[",\n]/.test(t)) return `"${t.replace(/"/g, '""')}"`;
-  return t;
-}
-
-async function exportCsv(data: BudgetData) {
-  const lines = ["date,category,amount,description"];
-  data.expenses.forEach((e) => {
-    const cat = data.categories.find((c) => c.id === e.category_id);
-    const name = cat ? cat.name : "";
-    lines.push(
-      [toDate(e.date).toISOString(), name, String(e.amount), e.description ?? ""]
-        .map(csvEscape)
-        .join(",")
-    );
-  });
-  await mkdir(STORE_DIR, { baseDir: BaseDirectory.AppLocalData, recursive: true });
-  const p = await join(STORE_DIR, CSV_FILE);
-  await writeTextFile(p, lines.join("\n"), {
-    baseDir: BaseDirectory.AppLocalData,
-  });
-}
-
 export async function BudgetView(container: HTMLElement) {
   const section = document.createElement("section");
   section.innerHTML = `
     <h2>Budget</h2>
+
     <form id="category-form">
       <h3>Add Category</h3>
       <input id="cat-name" type="text" placeholder="Category" required />
       <input id="cat-budget" type="number" step="0.01" placeholder="Monthly budget" required />
       <button type="submit">Add Category</button>
     </form>
+
     <form id="expense-form">
       <h3>Add Expense</h3>
       <select id="exp-category" required></select>
@@ -200,6 +79,7 @@ export async function BudgetView(container: HTMLElement) {
       <input id="exp-desc" type="text" placeholder="Description" />
       <button type="submit">Add Expense</button>
     </form>
+
     <h3>Monthly Summary</h3>
     <table id="budget-table">
       <thead>
@@ -207,78 +87,106 @@ export async function BudgetView(container: HTMLElement) {
       </thead>
       <tbody></tbody>
     </table>
-    <button id="export-csv">Export CSV</button>
+
+    <button id="export-csv" type="button">Export CSV (download)</button>
   `;
   container.innerHTML = "";
   container.appendChild(section);
 
-  const catForm = section.querySelector<HTMLFormElement>("#category-form");
-  const catName = section.querySelector<HTMLInputElement>("#cat-name");
-  const catBudget = section.querySelector<HTMLInputElement>("#cat-budget");
+  const householdId = await defaultHouseholdId();
 
-  const expForm = section.querySelector<HTMLFormElement>("#expense-form");
-  const expCategory = section.querySelector<HTMLSelectElement>("#exp-category");
-  const expAmount = section.querySelector<HTMLInputElement>("#exp-amount");
-  const expDate = section.querySelector<HTMLInputElement>("#exp-date");
-  const expDesc = section.querySelector<HTMLInputElement>("#exp-desc");
+  const catForm = section.querySelector<HTMLFormElement>("#category-form")!;
+  const catName = section.querySelector<HTMLInputElement>("#cat-name")!;
+  const catBudget = section.querySelector<HTMLInputElement>("#cat-budget")!;
 
-  const summaryBody = section.querySelector<HTMLTableSectionElement>("#budget-table tbody");
-  const exportBtn = section.querySelector<HTMLButtonElement>("#export-csv");
+  const expForm = section.querySelector<HTMLFormElement>("#expense-form")!;
+  const expCategory = section.querySelector<HTMLSelectElement>("#exp-category")!;
+  const expAmount = section.querySelector<HTMLInputElement>("#exp-amount")!;
+  const expDate = section.querySelector<HTMLInputElement>("#exp-date")!;
+  const expDesc = section.querySelector<HTMLInputElement>("#exp-desc")!;
 
-  const data = await loadData();
-  if (expCategory) updateCategoryOptions(expCategory, data.categories);
-  if (summaryBody) renderSummary(summaryBody, data);
+  const summaryBody = section.querySelector<HTMLTableSectionElement>("#budget-table tbody")!;
+  const exportBtn = section.querySelector<HTMLButtonElement>("#export-csv")!;
 
-  catForm?.addEventListener("submit", async (e) => {
+  let categories: BudgetCategory[] = [];
+  let expenses: Expense[] = [];
+
+  async function reloadAndRender() {
+    const data = await loadAll(householdId);
+    categories = data.categories;
+    expenses = data.expenses;
+    updateCategoryOptions(expCategory, categories);
+    renderSummary(summaryBody, categories, expenses);
+  }
+
+  await reloadAndRender();
+
+  // Add Category
+  catForm.addEventListener("submit", async (e) => {
     e.preventDefault();
-    if (!catName || !catBudget || !expCategory || !summaryBody) return;
-    const now = nowMs();
-    const cat: BudgetCategory = {
-      id: newUuidV7(),
-      name: catName.value,
-      monthly_budget: Number(catBudget.value),
-      position: data.categories.length,
-      household_id: await defaultHouseholdId(),
-      created_at: now,
-      updated_at: now,
-    };
-    data.categories.push(cat);
-    saveData(data).then(() => {
-      updateCategoryOptions(expCategory, data.categories);
-      renderSummary(summaryBody, data);
-      catForm.reset();
-    });
+    const name = catName.value.trim();
+    const monthly = Number(catBudget.value);
+    if (!name) return;
+
+    await budgetCategoriesRepo.create(householdId, {
+      name,
+      monthly_budget: monthly,
+      position: categories.length,
+    } as Partial<BudgetCategory>);
+
+    catForm.reset();
+    await reloadAndRender();
   });
 
-  expForm?.addEventListener("submit", async (e) => {
+  // Add Expense
+  expForm.addEventListener("submit", async (e) => {
     e.preventDefault();
-    if (!expCategory || !expAmount || !expDate || !summaryBody) return;
     if (!expCategory.value) {
       alert("Please add a category first.");
       return;
     }
+    const amt = Number(expAmount.value);
     const [y, m, d] = expDate.value.split("-").map(Number);
-    const dateLocalNoon = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0);
-    const nowExp = nowMs();
-    const exp: Expense = {
-      id: newUuidV7(),
+    const dateLocalNoon = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0).getTime();
+
+    await expensesRepo.create(householdId, {
       category_id: expCategory.value,
-      amount: Number(expAmount.value),
-      date: dateLocalNoon.getTime(),
+      amount: amt,
+      date: dateLocalNoon,
       description: expDesc?.value || "",
-      household_id: await defaultHouseholdId(),
-      created_at: nowExp,
-      updated_at: nowExp,
-    };
-    data.expenses.push(exp);
-    saveData(data).then(() => {
-      renderSummary(summaryBody, data);
-      expForm.reset();
-    });
+    } as Partial<Expense>);
+
+    expForm.reset();
+    await reloadAndRender();
   });
 
-  exportBtn?.addEventListener("click", () => {
-    exportCsv(data);
+  // Export CSV (downloads directly from current lists)
+  exportBtn.addEventListener("click", async () => {
+    // Make sure we have fresh data
+    await reloadAndRender();
+
+    const lines = ["date,category,amount,description"];
+    expenses
+      .slice() // already newest first by query, order doesn’t matter for CSV
+      .reverse() // oldest first when exported
+      .forEach((e) => {
+        const cat = categories.find((c) => c.id === e.category_id);
+        const name = cat ? cat.name : "";
+        lines.push(
+          [toDate(e.date).toISOString(), name, String(e.amount), e.description ?? ""]
+            .map(csvEscape)
+            .join(",")
+        );
+      });
+
+    // Build a Blob and trigger a download
+    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const yyyyMm = new Date().toISOString().slice(0, 7);
+    a.download = `expenses-${yyyyMm}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   });
 }
-

@@ -1,84 +1,8 @@
-import { readTextFile, writeTextFile, mkdir, BaseDirectory } from "@tauri-apps/plugin-fs";
-import { join } from "@tauri-apps/api/path";
+// src/FamilyView.ts
 import type { FamilyMember } from "./models";
-import { sanitizeRelativePath } from "./files/path";
-import { newUuidV7 } from "./db/id";
-import { nowMs, toDate } from "./db/time";
-import { toMs } from "./db/normalize";
+import { familyRepo } from "./repos";
 import { defaultHouseholdId } from "./db/household";
-import { assertJsonWritable } from "./storage";
-
-// ----- storage -----
-const STORE_DIR = "Arklowdun";
-const FILE_NAME = "family.json";
-async function loadMembers(): Promise<FamilyMember[]> {
-  try {
-    const p = await join(STORE_DIR, FILE_NAME);
-    const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
-    let arr = JSON.parse(json) as any[];
-    let changed = false;
-    const hh = await defaultHouseholdId();
-    arr = arr.map((i: any) => {
-      if (typeof i.id === "number") {
-        i.id = newUuidV7();
-        changed = true;
-      }
-      if ("birthday" in i) {
-        const ms = toMs(i.birthday);
-        if (ms !== undefined) {
-          if (ms !== i.birthday) changed = true;
-          i.birthday = ms;
-        }
-      }
-      if (!i.created_at) {
-        i.created_at = nowMs();
-        changed = true;
-      }
-      if (!i.updated_at) {
-        i.updated_at = i.created_at;
-        changed = true;
-      }
-      if (!i.household_id) {
-        i.household_id = hh;
-        changed = true;
-      }
-      if (typeof i.position !== 'number') {
-        i.position = 0;
-        changed = true;
-      }
-      if ("deletedAt" in i) {
-        i.deleted_at = i.deletedAt;
-        delete i.deletedAt;
-        changed = true;
-      }
-      if (Array.isArray(i.documents)) {
-        i.documents = i.documents.map((d: any) => {
-          if (typeof d === "string") {
-            changed = true;
-            return { root_key: "appData", relative_path: sanitizeRelativePath(d) };
-          }
-          return d;
-        });
-      }
-      return i;
-    });
-    arr = arr.filter((i: any) => i.deleted_at == null);
-    arr.sort((a: any, b: any) => a.position - b.position || a.created_at - b.created_at);
-    if (changed) await saveMembers(arr as FamilyMember[]);
-    return arr as FamilyMember[];
-  } catch (e) {
-    console.error("loadMembers failed:", e);
-    return [];
-  }
-}
-async function saveMembers(members: FamilyMember[]): Promise<void> {
-  assertJsonWritable("family_members");
-  await mkdir(STORE_DIR, { baseDir: BaseDirectory.AppLocalData, recursive: true });
-  const p = await join(STORE_DIR, FILE_NAME);
-  await writeTextFile(p, JSON.stringify(members, null, 2), {
-    baseDir: BaseDirectory.AppLocalData,
-  });
-}
+import { nowMs, toDate } from "./db/time";
 
 function renderMembers(listEl: HTMLUListElement, members: FamilyMember[]) {
   listEl.innerHTML = "";
@@ -98,15 +22,21 @@ export async function FamilyView(container: HTMLElement) {
   container.innerHTML = "";
   container.appendChild(section);
 
-  let members: FamilyMember[] = await loadMembers();
-  let migrated = false;
-  members.forEach((m) => {
-    if (typeof m.id === "number") {
-      m.id = newUuidV7();
-      migrated = true;
-    }
-  });
-  if (migrated) await saveMembers(members);
+  const householdId = await defaultHouseholdId();
+
+  async function load(): Promise<FamilyMember[]> {
+    // Order: position then created_at so it’s stable
+    return await familyRepo.list({
+      householdId,
+      orderBy: "position, created_at, id",
+    });
+  }
+
+  let members: FamilyMember[] = await load();
+
+  async function refresh() {
+    members = await load();
+  }
 
   function showList() {
     section.innerHTML = `
@@ -118,6 +48,7 @@ export async function FamilyView(container: HTMLElement) {
         <button type="submit">Add Member</button>
       </form>
     `;
+
     const listEl = section.querySelector<HTMLUListElement>("#family-list");
     const form = section.querySelector<HTMLFormElement>("#family-form");
     const nameInput = section.querySelector<HTMLInputElement>("#family-name");
@@ -128,24 +59,21 @@ export async function FamilyView(container: HTMLElement) {
     form?.addEventListener("submit", async (e) => {
       e.preventDefault();
       if (!nameInput || !bdayInput || !listEl) return;
+
+      // Parse YYYY-MM-DD at local noon to avoid TZ shifts
       const [y, m, d] = bdayInput.value.split("-").map(Number);
-      const bday = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0);
-      const now = nowMs();
-      const member: FamilyMember = {
-        id: newUuidV7(),
+      const bdayLocalNoon = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0);
+
+      // Create via repo; backend fills id/created_at/updated_at
+      await familyRepo.create(householdId, {
         name: nameInput.value,
-        birthday: bday.getTime(),
+        birthday: bdayLocalNoon.getTime(),
         notes: "",
-        documents: [],
         position: members.length,
-        household_id: await defaultHouseholdId(),
-        created_at: now,
-        updated_at: now,
-      };
-      members.push(member);
-      saveMembers(members).then(() => {
-        renderMembers(listEl, members);
-      });
+      } as Partial<FamilyMember>);
+
+      await refresh();
+      if (listEl) renderMembers(listEl, members);
       form.reset();
     });
 
@@ -162,84 +90,59 @@ export async function FamilyView(container: HTMLElement) {
     section.innerHTML = `
       <h2>${member.name}</h2>
       <button id="family-back">Back</button>
-      <div>
-        <label>Birthday: <input id="profile-bday" type="date" value="${member.birthday ? toDate(member.birthday).toISOString().slice(0,10) : ""}" /></label>
+      <div style="margin-top:.5rem;">
+        <label>Birthday:
+          <input id="profile-bday" type="date"
+                 value="${member.birthday ? toDate(member.birthday).toISOString().slice(0,10) : ""}" />
+        </label>
       </div>
-      <div>
-        <textarea id="profile-notes" placeholder="Notes">${member.notes ?? ""}</textarea>
-      </div>
-      <div>
-        <h3>Documents</h3>
-        <ul id="doc-list"></ul>
-        <input id="doc-input" type="text" placeholder="Document path" />
-        <button id="doc-add">Add Document</button>
+      <div style="margin-top:.5rem;">
+        <textarea id="profile-notes" placeholder="Notes" rows="6" style="width:100%">${member.notes ?? ""}</textarea>
       </div>
     `;
+
     const backBtn = section.querySelector<HTMLButtonElement>("#family-back");
     const bdayInput = section.querySelector<HTMLInputElement>("#profile-bday");
     const notesArea = section.querySelector<HTMLTextAreaElement>("#profile-notes");
-    const docList = section.querySelector<HTMLUListElement>("#doc-list");
-    const docInput = section.querySelector<HTMLInputElement>("#doc-input");
-    const docAddBtn = section.querySelector<HTMLButtonElement>("#doc-add");
 
-    function renderDocs() {
-      if (!docList) return;
-      docList.innerHTML = "";
-      member.documents.forEach((d, idx) => {
-        const li = document.createElement("li");
-        li.textContent = d.relative_path + " ";
-        const rm = document.createElement("button");
-        rm.textContent = "Remove";
-        rm.dataset.idx = String(idx);
-        li.appendChild(rm);
-        docList.appendChild(li);
-      });
-    }
-    renderDocs();
-
-    backBtn?.addEventListener("click", () => {
-      if (notesArea) member.notes = notesArea.value;
+    backBtn?.addEventListener("click", async () => {
+      // Persist any pending changes before returning
+      const patch: Partial<FamilyMember> = {};
+      if (notesArea) patch.notes = notesArea.value;
       if (bdayInput && bdayInput.value) {
         const [y, m, d] = bdayInput.value.split("-").map(Number);
-        const dt = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0);
-        member.birthday = dt.getTime();
+        patch.birthday = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0).getTime();
       }
-      member.updated_at = nowMs();
-      saveMembers(members).then(() => showList());
+      patch.updated_at = nowMs();
+
+      try {
+        await familyRepo.update(householdId, member.id, patch);
+      } catch {
+        // soft-fail; UI still navigates back
+      }
+
+      await refresh();
+      showList();
     });
 
-    notesArea?.addEventListener("change", () => {
-      member.notes = notesArea.value;
-      member.updated_at = nowMs();
-      saveMembers(members);
+    notesArea?.addEventListener("input", async () => {
+      try {
+        await familyRepo.update(householdId, member.id, {
+          notes: notesArea.value,
+          updated_at: nowMs(),
+        } as Partial<FamilyMember>);
+      } catch {}
     });
 
-    bdayInput?.addEventListener("change", () => {
+    bdayInput?.addEventListener("change", async () => {
       const [y, m, d] = bdayInput.value.split("-").map(Number);
-      const dt = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0);
-      member.birthday = dt.getTime();
-      member.updated_at = nowMs();
-      saveMembers(members);
-    });
-
-    docAddBtn?.addEventListener("click", () => {
-      if (!docInput || !docInput.value) return;
-      member.documents.push({
-        root_key: "appData",
-        relative_path: sanitizeRelativePath(docInput.value),
-      });
-      docInput.value = "";
-      member.updated_at = nowMs();
-      saveMembers(members).then(renderDocs);
-    });
-
-    docList?.addEventListener("click", (e) => {
-      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-idx]");
-      if (!btn) return;
-      const idx = Number(btn.dataset.idx);
-      member.documents.splice(idx, 1);
-      member.updated_at = nowMs();
-      saveMembers(members).then(renderDocs);
+      const dt = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0).getTime();
+      try {
+        await familyRepo.update(householdId, member.id, {
+          birthday: dt,
+          updated_at: nowMs(),
+        } as Partial<FamilyMember>);
+      } catch {}
     });
   }
 

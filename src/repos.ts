@@ -13,6 +13,8 @@ import type {
   Note,
   ShoppingItem,
   Event,
+  BudgetCategory,
+  Expense   
 } from "./models";
 
 type ListOpts = {
@@ -66,6 +68,8 @@ export const familyRepo        = domainRepo<FamilyMember>("family_members", "pos
 export const inventoryRepo     = domainRepo<InventoryItem>("inventory_items", "position, created_at, id");
 export const notesRepo         = domainRepo<Note>("notes", "position, created_at, id");
 export const shoppingRepo      = domainRepo<ShoppingItem>("shopping_items", "position, created_at, id");
+export const budgetCategoriesRepo = domainRepo<BudgetCategory>("budget_categories", "position, created_at, id");
+export const expensesRepo         = domainRepo<Expense>("expenses", "date DESC, created_at DESC, id");
 
 // Events usually sort by start time rather than position
 export const eventsRepo        = domainRepo<Event>("events", "starts_at, created_at, id");
