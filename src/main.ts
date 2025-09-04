@@ -332,6 +332,18 @@ window.addEventListener("DOMContentLoaded", () => {
     e.preventDefault();
     navigate("legacy");
   });
+  document
+    .querySelector<HTMLAnchorElement>("#footer-settings")
+    ?.addEventListener("click", (e) => {
+      e.preventDefault();
+      navigate("settings");
+    });
+  document
+    .querySelector<HTMLAnchorElement>("#footer-legacy")
+    ?.addEventListener("click", (e) => {
+      e.preventDefault();
+      navigate("legacy");
+    });
   navigate("dashboard");
   requestAnimationFrame(() => {
     console.log("Runtime window label:", appWindow.label);
