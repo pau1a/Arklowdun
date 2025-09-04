@@ -1,19 +1,9 @@
-import {
-  readTextFile,
-  writeTextFile,
-  mkdir,
-  BaseDirectory,
-} from "@tauri-apps/plugin-fs";
-import { join } from "@tauri-apps/api/path";
 import { isPermissionGranted, requestPermission, sendNotification } from "./notification";
 import type { Pet } from "./models";
 import { PetDetailView } from "./PetDetailView";
-import { newUuidV7 } from "./db/id";
 import { nowMs } from "./db/time";
-import { toMs } from "./db/normalize";
 import { defaultHouseholdId } from "./db/household";
-import { sanitizeRelativePath } from "./files/path";
-import { assertJsonWritable } from "./storage";
+import { petsRepo } from "./repos";
 
 const MAX_TIMEOUT = 2_147_483_647; // ~24.8 days
 function scheduleAt(ts: number, cb: () => void) {
@@ -21,109 +11,6 @@ function scheduleAt(ts: number, cb: () => void) {
   if (delay <= 0) return void cb();
   const chunk = Math.min(delay, MAX_TIMEOUT);
   setTimeout(() => scheduleAt(ts, cb), chunk);
-}
-
-// ----- storage -----
-const STORE_DIR = "Arklowdun";
-const FILE_NAME = "pets.json";
-async function loadPets(): Promise<Pet[]> {
-  try {
-    const p = await join(STORE_DIR, FILE_NAME);
-    const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
-    let arr = JSON.parse(json) as any[];
-    let changed = false;
-    const hh = await defaultHouseholdId();
-    arr = arr.map((i: any) => {
-      if (typeof i.id === "number") {
-        i.id = newUuidV7();
-        changed = true;
-      }
-      if (Array.isArray(i.medical)) {
-        i.medical = i.medical
-          .map((m: any) => {
-            for (const k of ["date", "reminder"]) {
-              if (k in m) {
-                const ms = toMs(m[k]);
-                if (ms !== undefined) {
-                  if (ms !== m[k]) changed = true;
-                  m[k] = ms;
-                }
-              }
-            }
-            if (!m.id) {
-              m.id = newUuidV7();
-              changed = true;
-            }
-            if ("document" in m) {
-              m.root_key = "appData";
-              m.relative_path = sanitizeRelativePath(m.document);
-              delete m.document;
-              changed = true;
-            }
-            if (!m.pet_id) {
-              m.pet_id = i.id;
-              changed = true;
-            }
-            if (!m.created_at) {
-              m.created_at = nowMs();
-              changed = true;
-            }
-            if (!m.updated_at) {
-              m.updated_at = m.created_at;
-              changed = true;
-            }
-            if (!m.household_id) {
-              m.household_id = hh;
-              changed = true;
-            }
-            if ("deletedAt" in m) {
-              m.deleted_at = m.deletedAt;
-              delete m.deletedAt;
-              changed = true;
-            }
-            return m;
-          })
-          .filter((m: any) => m.deleted_at == null);
-      }
-      if ("deletedAt" in i) {
-        i.deleted_at = i.deletedAt;
-        delete i.deletedAt;
-        changed = true;
-      }
-      if (!i.created_at) {
-        i.created_at = nowMs();
-        changed = true;
-      }
-      if (!i.updated_at) {
-        i.updated_at = i.created_at;
-        changed = true;
-      }
-      if (!i.household_id) {
-        i.household_id = hh;
-        changed = true;
-      }
-      if (typeof i.position !== 'number') {
-        i.position = 0;
-        changed = true;
-      }
-      return i;
-    });
-    arr = arr.filter((i: any) => i.deleted_at == null);
-    arr.sort((a: any, b: any) => a.position - b.position || a.created_at - b.created_at);
-    if (changed) await savePets(arr as Pet[]);
-    return arr as Pet[];
-  } catch (e) {
-    console.error("loadPets failed:", e);
-    return [];
-  }
-}
-async function savePets(pets: Pet[]): Promise<void> {
-  assertJsonWritable("pets");
-  await mkdir(STORE_DIR, { baseDir: BaseDirectory.AppLocalData, recursive: true });
-  const p = await join(STORE_DIR, FILE_NAME);
-  await writeTextFile(p, JSON.stringify(pets, null, 2), {
-    baseDir: BaseDirectory.AppLocalData,
-  });
 }
 
 function renderPets(listEl: HTMLUListElement, pets: Pet[]) {
@@ -145,9 +32,10 @@ async function schedulePetReminders(pets: Pet[]) {
     granted = (await requestPermission()) === "granted";
   }
   if (!granted) return;
+
   const now = nowMs();
   pets.forEach((p) => {
-    p.medical.forEach((r) => {
+    (p.medical ?? []).forEach((r) => {
       if (!r.reminder) return;
       if (r.reminder > now) {
         scheduleAt(r.reminder, () => {
@@ -168,8 +56,21 @@ export async function PetsView(container: HTMLElement) {
   container.innerHTML = "";
   container.appendChild(section);
 
+  const hh = await defaultHouseholdId();
+
+  async function loadPets(): Promise<Pet[]> {
+    // Ordered to match other views (position, created_at, id)
+    return await petsRepo.list({ householdId: hh, orderBy: "position, created_at, id" });
+  }
+
   let pets: Pet[] = await loadPets();
   await schedulePetReminders(pets);
+
+  async function refresh(listEl?: HTMLUListElement) {
+    pets = await loadPets();
+    if (listEl) renderPets(listEl, pets);
+    await schedulePetReminders(pets);
+  }
 
   function showList() {
     section.innerHTML = `
@@ -191,21 +92,16 @@ export async function PetsView(container: HTMLElement) {
     form?.addEventListener("submit", async (e) => {
       e.preventDefault();
       if (!nameInput || !typeInput || !listEl) return;
-      const now = nowMs();
-      const pet: Pet = {
-        id: newUuidV7(),
+
+      const created = await petsRepo.create(hh, {
         name: nameInput.value,
         type: typeInput.value,
-        medical: [],
         position: pets.length,
-        household_id: await defaultHouseholdId(),
-        created_at: now,
-        updated_at: now,
-      };
-      pets.push(pet);
-      savePets(pets).then(() => {
-        renderPets(listEl, pets);
-      });
+      } as Partial<Pet>);
+
+      pets.push(created);
+      renderPets(listEl, pets);
+      await schedulePetReminders([created]);
       form.reset();
     });
 
@@ -214,19 +110,23 @@ export async function PetsView(container: HTMLElement) {
       if (!btn) return;
       const id = btn.dataset.id!;
       const pet = pets.find((p) => p.id === id);
-      if (pet) {
-        PetDetailView(
-          section,
-          pet,
-          () => {
-            savePets(pets).then(() => schedulePetReminders([pet]));
-          },
-          showList
-        );
-      }
+      if (!pet) return;
+
+      // Persist callback: update basic fields if PetDetailView modified them,
+      // then refresh the list and reminders.
+      const persist = async () => {
+        // defensively update name/type/position if changed
+        await petsRepo.update(hh, pet.id, {
+          name: pet.name,
+          type: pet.type,
+          position: pet.position,
+        } as Partial<Pet>);
+        await refresh();
+      };
+
+      PetDetailView(section, pet, persist, showList);
     });
   }
 
   showList();
 }
-
