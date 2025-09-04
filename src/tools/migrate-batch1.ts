@@ -2,6 +2,8 @@ import fs from "fs";
 import path from "path";
 import crypto from "node:crypto";
 import Database from "better-sqlite3";
+import type * as BetterSqlite3 from "better-sqlite3";
+type DB = BetterSqlite3.Database;
 import { newUuidV7 } from "../db/id.ts";
 import { toMs } from "../db/normalize.ts";
 import { sanitizeRelativePath } from "../files/path.ts";
@@ -106,18 +108,18 @@ function toAmount(v: any): number {
   return Number.isFinite(n) ? Math.round(n * 100) : 0;
 }
 
-function resolveHousehold(db: Database, requested: string): string {
+function resolveHousehold(db: DB, requested: string): string {
   if (requested !== "default") return requested;
   const row = db
     .prepare(
       "SELECT id FROM household WHERE deleted_at IS NULL ORDER BY created_at, id LIMIT 1"
     )
-    .get();
-  if (!row?.id) throw new Error("No household found in DB");
+    .get() as { id?: string } | undefined;
+  if (!row || !row.id) throw new Error("No household found in DB");
   return row.id as string;
 }
 
-function migrateBills(db: Database, dir: string, hh: string, dryRun: boolean) {
+function migrateBills(db: DB, dir: string, hh: string, dryRun: boolean) {
   const file = path.join(dir, "bills.json");
   const rows = readJson(file);
   if (!rows.length) return 0;
@@ -141,7 +143,7 @@ function migrateBills(db: Database, dir: string, hh: string, dryRun: boolean) {
   return count;
 }
 
-function migratePolicies(db: Database, dir: string, hh: string, dryRun: boolean) {
+function migratePolicies(db: DB, dir: string, hh: string, dryRun: boolean) {
   const file = path.join(dir, "policies.json");
   const rows = readJson(file);
   if (!rows.length) return 0;
@@ -165,7 +167,7 @@ function migratePolicies(db: Database, dir: string, hh: string, dryRun: boolean)
   return count;
 }
 
-function migratePropertyDocs(db: Database, dir: string, hh: string, dryRun: boolean) {
+function migratePropertyDocs(db: DB, dir: string, hh: string, dryRun: boolean) {
   const file = path.join(dir, "property_documents.json");
   const rows = readJson(file);
   if (!rows.length) return 0;

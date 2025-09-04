@@ -17,12 +17,12 @@ export const storage: StorageFlags = {
   bills: "sqlite",
   policies: "sqlite",
   property_documents: "sqlite",
-  vehicles: "json",
-  pets: "json",
-  family_members: "json",
-  inventory_items: "json",
-  notes: "json",
-  shopping_items: "json",
+  vehicles: "sqlite",
+  pets: "sqlite",
+  family_members: "sqlite",
+  inventory_items: "sqlite",
+  notes: "sqlite",
+  shopping_items: "sqlite",
   events: "sqlite",
 };
 
