@@ -1,23 +1,14 @@
 import { openPath } from "@tauri-apps/plugin-opener";
 import { resolvePath, sanitizeRelativePath } from "./files/path";
 import {
-  readTextFile,
-  writeTextFile,
-  mkdir,
-  BaseDirectory,
-} from "@tauri-apps/plugin-fs";
-import { join } from "@tauri-apps/api/path";
-import {
   isPermissionGranted,
   requestPermission,
   sendNotification,
 } from "./notification";
 import type { Bill } from "./models";
-import { newUuidV7 } from "./db/id";
 import { nowMs, toDate } from "./db/time";
 import { defaultHouseholdId } from "./db/household";
-import { toMs } from "./db/normalize";
-import { assertJsonWritable } from "./storage";
+import { billsRepo } from "./repos";
 
 const money = new Intl.NumberFormat(undefined, {
   style: "currency",
@@ -32,88 +23,11 @@ function scheduleAt(ts: number, cb: () => void) {
   setTimeout(() => scheduleAt(ts, cb), chunk);
 }
 
-// ----- storage -----
-const STORE_DIR = "Arklowdun";
-const FILE_NAME = "bills.json";
-async function loadBills(): Promise<Bill[]> {
-  try {
-    const p = await join(STORE_DIR, FILE_NAME);
-    const json = await readTextFile(p, { baseDir: BaseDirectory.AppLocalData });
-    let arr = JSON.parse(json) as any[];
-    let changed = false;
-    const hh = await defaultHouseholdId();
-    arr = arr.map((i: any) => {
-      if (typeof i.id === "number") {
-        i.id = newUuidV7();
-        changed = true;
-      }
-      if ("dueDate" in i) {
-        const ms = toMs(i.dueDate);
-        if (ms !== undefined) {
-          i.due_date = ms;
-          changed = true;
-        }
-        delete i.dueDate;
-      }
-      for (const k of ["due_date", "reminder"]) {
-        if (k in i) {
-          const ms = toMs(i[k]);
-          if (ms !== undefined) {
-            if (ms !== i[k]) changed = true;
-            i[k] = ms;
-          }
-        }
-      }
-      if (!i.created_at) {
-        i.created_at = nowMs();
-        changed = true;
-      }
-      if (!i.updated_at) {
-        i.updated_at = i.created_at;
-        changed = true;
-      }
-      if ("document" in i) {
-        i.root_key = "appData";
-        i.relative_path = sanitizeRelativePath(i.document);
-        delete i.document;
-        changed = true;
-      }
-      if ("deletedAt" in i) {
-        i.deleted_at = i.deletedAt;
-        delete i.deletedAt;
-        changed = true;
-      }
-      if (!i.household_id) {
-        i.household_id = hh;
-        changed = true;
-      }
-      if (typeof i.position !== 'number') {
-        i.position = 0;
-        changed = true;
-      }
-      return i;
-    });
-    arr = arr.filter((i: any) => i.deleted_at == null);
-    arr.sort((a: any, b: any) => a.position - b.position || a.created_at - b.created_at);
-    if (changed) await saveBills(arr as Bill[]);
-    return arr as Bill[];
-  } catch (e) {
-    console.error("loadBills failed:", e);
-    return [];
-  }
-}
-async function saveBills(bills: Bill[]): Promise<void> {
-  assertJsonWritable("bills");
-  await mkdir(STORE_DIR, { baseDir: BaseDirectory.AppLocalData, recursive: true });
-  const p = await join(STORE_DIR, FILE_NAME);
-  await writeTextFile(p, JSON.stringify(bills, null, 2), { baseDir: BaseDirectory.AppLocalData });
-}
-
 function renderBills(listEl: HTMLUListElement, bills: Bill[]) {
   listEl.innerHTML = "";
   bills.forEach((b) => {
     const li = document.createElement("li");
-    li.textContent = `${money.format(b.amount)} due ${toDate(b.due_date).toLocaleDateString()} `;
+    li.textContent = `${money.format(b.amount / 100)} due ${toDate(b.due_date).toLocaleDateString()} `;
     const btn = document.createElement("button");
     btn.textContent = "Open document";
     btn.addEventListener("click", async () => {
@@ -142,14 +56,14 @@ async function scheduleBillReminders(bills: Bill[]) {
       scheduleAt(b.reminder, () => {
         sendNotification({
           title: "Bill Due",
-          body: `${money.format(b.amount)} due on ${toDate(dueTs).toLocaleDateString()}`,
+          body: `${money.format(b.amount / 100)} due on ${toDate(dueTs).toLocaleDateString()}`,
         });
       });
     } else if (now < dueTs) {
       // catch-up if the app was closed at reminder time
       sendNotification({
         title: "Bill Due",
-        body: `${money.format(b.amount)} due on ${toDate(dueTs).toLocaleDateString()}`,
+        body: `${money.format(b.amount / 100)} due on ${toDate(dueTs).toLocaleDateString()}`,
       });
     }
   });
@@ -176,7 +90,8 @@ export async function BillsView(container: HTMLElement) {
   const dueInput = section.querySelector<HTMLInputElement>("#bill-due");
   const docInput = section.querySelector<HTMLInputElement>("#bill-doc");
 
-  let bills: Bill[] = await loadBills();
+  const hh = await defaultHouseholdId();
+  let bills: Bill[] = await billsRepo.list({ householdId: hh });
   if (listEl) renderBills(listEl, bills);
   await scheduleBillReminders(bills);
 
@@ -188,24 +103,17 @@ export async function BillsView(container: HTMLElement) {
     const dueLocalNoon = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0);
     const dueTs = dueLocalNoon.getTime();
     const reminder = dueTs - 24 * 60 * 60 * 1000; // 1 day before
-    const now = nowMs();
-    const bill: Bill = {
-      id: newUuidV7(),
-      amount: parseFloat(amountInput.value),
+    const bill = await billsRepo.create(hh, {
+      amount: Math.round(parseFloat(amountInput.value) * 100),
       due_date: dueTs,
       root_key: "appData",
       relative_path: sanitizeRelativePath(docInput.value),
       reminder,
       position: bills.length,
-      household_id: await defaultHouseholdId(),
-      created_at: now,
-      updated_at: now,
-    };
-    bills.push(bill);
-    saveBills(bills).then(() => {
-      if (listEl) renderBills(listEl, bills);
-      scheduleBillReminders([bill]);
     });
+    bills.push(bill);
+    if (listEl) renderBills(listEl, bills);
+    scheduleBillReminders([bill]);
     form.reset();
   });
 }

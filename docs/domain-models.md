@@ -24,9 +24,10 @@ timestamp which is `NULL` when the record is active.
 
 ## bills
 - `id` `TEXT`
-- `amount` `INTEGER`
+- `amount` `INTEGER` – minor currency units
 - `due_date` `INTEGER`
-- `document` `TEXT`
+- `root_key` `TEXT`
+- `relative_path` `TEXT`
 - `reminder` `INTEGER?`
 - `household_id` `TEXT`
 - `created_at` `INTEGER`
@@ -35,9 +36,10 @@ timestamp which is `NULL` when the record is active.
 
 ## policies
 - `id` `TEXT`
-- `amount` `INTEGER`
+- `amount` `INTEGER` – minor currency units
 - `due_date` `INTEGER`
-- `document` `TEXT`
+- `root_key` `TEXT`
+- `relative_path` `TEXT`
 - `reminder` `INTEGER?`
 - `household_id` `TEXT`
 - `created_at` `INTEGER`
@@ -48,7 +50,8 @@ timestamp which is `NULL` when the record is active.
 - `id` `TEXT`
 - `description` `TEXT`
 - `renewal_date` `INTEGER`
-- `document` `TEXT`
+- `root_key` `TEXT`
+- `relative_path` `TEXT`
 - `reminder` `INTEGER?`
 - `household_id` `TEXT`
 - `created_at` `INTEGER`

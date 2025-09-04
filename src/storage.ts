@@ -14,15 +14,15 @@ export interface StorageFlags {
 }
 
 export const storage: StorageFlags = {
-  bills: "json",
-  policies: "json",
-  property_documents: "json",
-  vehicles: "json",
-  pets: "json",
-  family_members: "json",
-  inventory_items: "json",
-  notes: "json",
-  shopping_items: "json",
+  bills: "sqlite",
+  policies: "sqlite",
+  property_documents: "sqlite",
+  vehicles: "sqlite",
+  pets: "sqlite",
+  family_members: "sqlite",
+  inventory_items: "sqlite",
+  notes: "sqlite",
+  shopping_items: "sqlite",
   events: "sqlite",
 };
 
