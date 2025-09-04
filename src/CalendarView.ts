@@ -34,7 +34,16 @@ function renderMonth(root: HTMLElement, events: Event[]) {
   const firstDay = new Date(year, month, 1).getDay();
   const lastDate = new Date(year, month + 1, 0).getDate();
 
+  const monthLabel = document.createElement("div");
+  monthLabel.className = "calendar__month-label";
+  monthLabel.textContent = now.toLocaleString(undefined, {
+    month: "long",
+    year: "numeric",
+  });
+  root.appendChild(monthLabel);
+
   const table = document.createElement("table");
+  table.className = "calendar__table";
   const headerRow = document.createElement("tr");
   ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].forEach((d) => {
     const th = document.createElement("th");
@@ -51,8 +60,20 @@ function renderMonth(root: HTMLElement, events: Event[]) {
       row = document.createElement("tr");
     }
     const cell = document.createElement("td");
-    cell.innerHTML = `<div class="date">${day}</div>`;
+    cell.tabIndex = 0;
     const cellDate = new Date(year, month, day);
+    const dateDiv = document.createElement("div");
+    dateDiv.className = "calendar__date";
+    dateDiv.textContent = String(day);
+    const today = new Date();
+    if (
+      cellDate.getFullYear() === today.getFullYear() &&
+      cellDate.getMonth() === today.getMonth() &&
+      cellDate.getDate() === today.getDate()
+    ) {
+      dateDiv.classList.add("calendar__date--today");
+    }
+    cell.appendChild(dateDiv);
     const dayEvents = events.filter((e) => {
       const a = toDate(e.starts_at);
       return (
@@ -63,7 +84,7 @@ function renderMonth(root: HTMLElement, events: Event[]) {
     });
     dayEvents.forEach((ev) => {
       const div = document.createElement("div");
-      div.className = "event";
+      div.className = "calendar__event";
       div.textContent = ev.title;
       cell.appendChild(div);
     });
@@ -94,10 +115,18 @@ async function scheduleNotifications(events: Event[]) {
 
 export async function CalendarView(container: HTMLElement) {
   const section = document.createElement("section");
+  section.className = "calendar";
   section.innerHTML = `
-    <h2>Calendar</h2>
-    <div id="calendar"></div>
-    <form id="event-form">
+    <header class="calendar__header">
+      <div>
+        <h2>Calendar</h2>
+        <p class="kicker">All times local</p>
+      </div>
+    </header>
+    <div class="card calendar__panel">
+      <div id="calendar"></div>
+    </div>
+    <form id="event-form" class="calendar__form">
       <input id="event-title" type="text" placeholder="Title" required />
       <input id="event-start" type="datetime-local" required />
       <button type="submit">Add Event</button>
