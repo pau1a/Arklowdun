@@ -484,25 +484,56 @@ textarea:focus-visible {
 footer {
   grid-column: 1 / -1;
   display: flex;
-  justify-content: flex-start;
+  justify-content: space-between;
   align-items: center;
-  gap: var(--space-2);
-  padding: 0 var(--space-1);
+  padding: 0 var(--space-3);
   block-size: 44px;
   background-color: var(--color-panel);
-  border-block-start: 1px solid var(--color-border);
-  box-shadow: var(--shadow-base);
-  z-index: 1;
+  border-block-start: 1px solid var(--color-sidebar-rule);
 }
 
-.footer__icons {
+footer a {
+  color: inherit;
+}
+
+footer a.footer__settings {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  block-size: 32px;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  line-height: 1;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.footer__settings i {
+  color: currentColor;
+}
+
+.footer__settings:hover,
+.footer__settings:focus-visible,
+.footer__settings.is-current {
+  background-color: var(--color-accent-soft);
+  color: var(--color-accent);
+  outline: none;
+}
+
+.footer__settings:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.footer__utilities {
   display: flex;
-  flex-wrap: nowrap;
   gap: var(--space-2);
 }
 
-.footer__icons a,
-.footer__icons button {
+.footer__utilities a,
+.footer__utilities button {
   inline-size: 44px;
   block-size: 44px;
   display: inline-flex;
@@ -513,28 +544,22 @@ footer {
   border-radius: var(--radius-base);
   color: var(--color-text);
   cursor: pointer;
-  padding: 0;
-  transition: color 0.15s, background-color 0.15s, filter 0.15s;
+  transition: background-color 0.15s, color 0.15s, filter 0.15s;
 }
 
-.footer__icons a:hover,
-.footer__icons button:hover {
+.footer__utilities a:hover,
+.footer__utilities button:hover {
   background-color: var(--color-border);
 }
 
-.footer__icons a:focus-visible,
-.footer__icons button:focus-visible {
+.footer__utilities a:focus-visible,
+.footer__utilities button:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
-.footer__icons a:active,
-.footer__icons button:active {
-  background-color: rgba(211, 84, 0, 0.15);
-}
-
-.footer__icons i {
-  font-size: 18px;
+.footer__utilities i {
+  color: currentColor;
 }
 
 .list.empty, .calendar-empty {
