@@ -365,6 +365,7 @@ textarea:focus-visible {
   height: 24px;
 }
 
+/* Rhythm */
 .nav {
   display: flex;
   flex-direction: column;
@@ -372,12 +373,14 @@ textarea:focus-visible {
   margin-top: var(--space-2);
 }
 
+/* Divider under the hub tile */
 .sidebar__divider {
   block-size: 1px;
   background: var(--color-border);
   margin: var(--space-3) 0 var(--space-1);
 }
 
+/* HUB TILE: Manage */
 .manage-link {
   display: flex;
   align-items: center;
@@ -386,30 +389,18 @@ textarea:focus-visible {
   border-radius: var(--radius-base);
   background: var(--color-panel);
   border: 1px solid var(--color-border);
-  font-weight: 700;
   color: var(--color-text);
+  font-weight: 700;
   text-decoration: none;
-  transition: background-color 0.15s, border-color 0.15s, transform 0.12s,
-    box-shadow 0.12s;
-  position: relative;
-}
-
-.manage-link::before {
-  content: "";
-  position: absolute;
-  left: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  inline-size: 4px;
-  block-size: 60%;
-  border-radius: 999px;
-  background: var(--color-accent);
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s,
+    transform 0.12s, box-shadow 0.12s;
 }
 
 .manage-link .nav__icon {
   font-size: 1.125rem;
 }
 
+/* Hover/focus */
 .manage-link:hover {
   background: var(--color-accent-soft);
   border-color: var(--color-accent);
@@ -422,6 +413,13 @@ textarea:focus-visible {
   outline-offset: 2px;
 }
 
+.manage-link.is-current {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+/* Keep regular nav visually “secondary” to the hub */
 .sidebar .nav a {
   display: flex;
   align-items: center;

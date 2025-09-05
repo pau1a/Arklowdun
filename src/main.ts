@@ -190,7 +190,6 @@ function setActive(tab: View) {
     budget: linkBudget(),
     notes: linkNotes(),
     settings: null,
-    manage: linkManage(),
   };
   (Object.keys(tabs) as View[]).forEach((name) => {
     const el = tabs[name];
@@ -204,6 +203,13 @@ function setActive(tab: View) {
       icon.classList.toggle("fa-regular", !active);
     }
   });
+  const manageEl = document.querySelector<HTMLAnchorElement>("#nav-manage");
+  if (manageEl) {
+    const isCurrent = tab === "manage";
+    manageEl.classList.toggle("is-current", isCurrent);
+    if (isCurrent) manageEl.setAttribute("aria-current", "page");
+    else manageEl.removeAttribute("aria-current");
+  }
 }
 
 function renderBlank(title: string) {
