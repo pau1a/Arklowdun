@@ -271,22 +271,17 @@ textarea:focus-visible {
 /* Dashboard grid — responsive, no-overlap */
 .dashboard {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); /* self-healing tracks */
-  gap: var(--space-4);                                         /* both axes */
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--space-4);
   max-width: 1280px;
   margin: 0 auto;
-  padding-inline: var(--space-4);
   align-items: start;
+  padding-inline: var(--space-4);
 }
 
 /* Ensure grid children can shrink within their tracks */
 .dashboard > * {
   min-width: 0;
-}
-
-/* Give extra breathing room on very wide viewports */
-@media (min-width: 1400px) {
-  .dashboard { gap: var(--space-5); }
 }
 
 /* Settings layout */
