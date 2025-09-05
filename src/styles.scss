@@ -486,38 +486,40 @@ footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0 var(--space-1);
+  padding: 0 var(--space-3);
   block-size: 44px;
   background-color: var(--color-panel);
-  border-block-start: 1px solid var(--color-border);
-  box-shadow: var(--shadow-base);
-  z-index: 1;
+  border-block-start: 1px solid var(--color-sidebar-rule);
 }
 
-.footer__settings {
+footer a {
+  color: inherit;
+}
+
+footer a.footer__settings {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
-  padding: 0 var(--space-2);
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
   block-size: 32px;
   color: var(--color-text-muted);
   text-decoration: none;
-  border: 1px solid transparent;
   border-radius: var(--radius-pill);
-  transition: color 0.15s, background-color 0.15s, border-color 0.15s;
+  font-weight: 600;
+  line-height: 1;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
 }
 
 .footer__settings i {
-  font-size: 18px;
   color: currentColor;
 }
 
 .footer__settings:hover,
 .footer__settings:focus-visible,
-.footer__settings:active {
-  color: var(--color-accent);
+.footer__settings.is-current {
   background-color: var(--color-accent-soft);
-  border-color: var(--color-accent);
+  color: var(--color-accent);
+  outline: none;
 }
 
 .footer__settings:focus-visible {
@@ -527,14 +529,13 @@ footer {
 
 .footer__utilities {
   display: flex;
-  flex-wrap: nowrap;
   gap: var(--space-2);
 }
 
 .footer__utilities a,
 .footer__utilities button {
-  inline-size: 32px;
-  block-size: 32px;
+  inline-size: 44px;
+  block-size: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -543,8 +544,7 @@ footer {
   border-radius: var(--radius-base);
   color: var(--color-text);
   cursor: pointer;
-  padding: 0;
-  transition: color 0.15s, background-color 0.15s, filter 0.15s;
+  transition: background-color 0.15s, color 0.15s, filter 0.15s;
 }
 
 .footer__utilities a:hover,
@@ -558,13 +558,7 @@ footer {
   outline-offset: 2px;
 }
 
-.footer__utilities a:active,
-.footer__utilities button:active {
-  background-color: rgba(211, 84, 0, 0.15);
-}
-
 .footer__utilities i {
-  font-size: 18px;
   color: currentColor;
 }
 
