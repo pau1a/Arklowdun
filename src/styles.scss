@@ -275,7 +275,7 @@ textarea:focus-visible {
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-4); /* Brand ↔ Hub ↔ Nav spacing */
 }
 
 .settings__back {
@@ -346,7 +346,7 @@ textarea:focus-visible {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: var(--space-4);
+  gap: var(--space-4); /* Brand ↔ Hub ↔ Nav spacing */
 }
 
 .sidebar h1 {

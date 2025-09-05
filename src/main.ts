@@ -203,7 +203,7 @@ function setActive(tab: View) {
       icon.classList.toggle("fa-regular", !active);
     }
   });
-  const manageEl = document.querySelector<HTMLAnchorElement>("#nav-manage");
+  const manageEl = linkManage();
   if (manageEl) {
     const isCurrent = tab === "manage";
     manageEl.classList.toggle("is-current", isCurrent);
