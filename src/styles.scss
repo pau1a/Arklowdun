@@ -1,3 +1,5 @@
+@use "./styles/manage";
+
 /* ========================================================================== */
 /* GLOBAL RESET & ROOT LAYOUT                                                 */
 /* ========================================================================== */
@@ -358,77 +360,6 @@ textarea:focus-visible {
   }
   .dashboard .card {
     grid-column: 1 / -1; /* full width */
-  }
-}
-
-/* ========================================================================== */
-/* MANAGE PAGE LAYOUT — BULLETPROOF (NO :has)                                 */
-/* ========================================================================== */
-
-/* Add this class to the section in ManageView.ts: section.className = "manage-page" */
-.manage-page {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: var(--space-4);
-  max-width: 1280px;
-  margin: 0 auto;
-  padding-inline: var(--space-4);
-  align-items: start;
-}
-
-.manage-page > h2 {
-  grid-column: 1 / -1;
-}
-
-/* Tile grid */
-.manage-page > nav.manage {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-3);
-}
-
-.manage-page .manage a {
-  display: block;
-  padding: var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-base);
-  background: var(--color-panel);
-  color: var(--color-text);
-  text-decoration: none;
-  font-weight: 600;
-  transition: background-color 0.15s, border-color 0.15s, color 0.15s, transform 0.1s, box-shadow 0.12s;
-}
-
-.manage-page .manage a:hover,
-.manage-page .manage a:focus-visible {
-  background: var(--color-accent-soft);
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-  outline: none;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 10px rgba(0,0,0,0.06);
-}
-
-@media (max-width: 1100px) {
-  .manage-page > nav.manage {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 900px) {
-  .manage-page {
-    padding-inline: var(--space-3);
-  }
-  .manage-page > nav.manage {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-3);
-  }
-}
-
-@media (max-width: 640px) {
-  .manage-page > nav.manage {
-    grid-template-columns: 1fr;
   }
 }
 
