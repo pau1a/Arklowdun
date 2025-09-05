@@ -378,6 +378,7 @@ textarea:focus-visible {
   block-size: 1px;
   background: var(--color-border);
   margin: var(--space-3) 0 var(--space-1);
+  align-self: stretch;
 }
 
 /* HUB TILE: Manage */
@@ -404,11 +405,15 @@ textarea:focus-visible {
 .manage-link:hover {
   background: var(--color-accent-soft);
   border-color: var(--color-accent);
+  color: var(--color-accent);
   transform: translateX(1px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
 }
 
 .manage-link:focus-visible {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
@@ -416,7 +421,7 @@ textarea:focus-visible {
 .manage-link.is-current {
   background: var(--color-accent-soft);
   border-color: var(--color-accent);
-  color: var(--color-text);
+  color: var(--color-accent);
 }
 
 /* Keep regular nav visually “secondary” to the hub */
