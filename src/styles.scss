@@ -268,18 +268,18 @@ textarea:focus-visible {
   color: var(--color-text);
 }
 
-/* Dashboard grid — responsive, no-overlap */
+/* Dashboard layout — unified 12-col grid */
 .dashboard {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: var(--space-4);
   max-width: 1280px;
   margin: 0 auto;
-  align-items: start;
   padding-inline: var(--space-4);
+  align-items: start;
 }
 
-/* Ensure grid children can shrink within their tracks */
+/* Let all grid children shrink when needed */
 .dashboard > * {
   min-width: 0;
 }
@@ -326,23 +326,58 @@ textarea:focus-visible {
   color: var(--color-text-muted);
 }
 
-/* Header should own the full row */
+/* Header spans all 12 columns and uses the same 12-col subgrid layout */
 .dashboard__header {
-  grid-column: 1 / -1;
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
+  grid-column: 1 / span 12;
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  align-items: start;
+  column-gap: var(--space-4);
 }
 
-.dashboard__header > div {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+/* Title block sits on the left 8 columns (adjust if needed) */
+.dashboard__header > :first-child {
+  grid-column: 1 / span 8;
+  min-width: 0;
 }
 
+/* Actions sit on the right 4 columns and align to the end */
 .dashboard__actions {
+  grid-column: 9 / span 4;
+  justify-self: end;
   display: flex;
   gap: var(--space-2);
+  flex-wrap: wrap;          /* prevents overflow on tighter widths */
+}
+
+/* Two-up cards on wide screens */
+.dashboard .card {
+  grid-column: span 6;
+  min-width: 0;
+}
+
+/* Prevent long labels from blowing out the header on tight widths */
+.dashboard__actions .btn {
+  white-space: nowrap;
+}
+
+/* Collapse to single column below 900px (tweak breakpoint if desired) */
+@media (max-width: 900px) {
+  .dashboard {
+    padding-inline: var(--space-3);
+  }
+  .dashboard__header {
+    grid-template-columns: 1fr auto;  /* simpler layout at mobile */
+  }
+  .dashboard__header > :first-child {
+    grid-column: 1 / span 1;
+  }
+  .dashboard__actions {
+    grid-column: 2 / span 1;
+  }
+  .dashboard .card {
+    grid-column: 1 / -1;  /* full width */
+  }
 }
 
 /* App shell */
