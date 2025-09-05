@@ -1,3 +1,7 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
 .logo.vite:hover {
   filter: drop-shadow(0 0 2em var(--color-accent));
 }
@@ -264,51 +268,25 @@ textarea:focus-visible {
   color: var(--color-text);
 }
 
-/* Dashboard grid — robust two-column */
+/* Dashboard grid — responsive, no-overlap */
 .dashboard {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);  /* tracks shrink safely */
-  column-gap: var(--space-5);          /* a bit more than var(--space-4) */
-  row-gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); /* self-healing tracks */
+  gap: var(--space-4);                                         /* both axes */
   max-width: 1280px;
   margin: 0 auto;
-  align-items: start;                   /* cards hug the top of their tracks */
+  padding-inline: var(--space-4);
+  align-items: start;
 }
 
-/* Belt-and-braces: ensure grid children can shrink */
+/* Ensure grid children can shrink within their tracks */
 .dashboard > * {
-  min-width: 0;                         /* header + cards */
-}
-.dashboard > .card {
-  min-width: 0;                         /* explicit for cards */
+  min-width: 0;
 }
 
-/* Breakpoints tuned for single column comfort */
-@media (max-width: 1100px) {
-  .dashboard {
-    max-width: none;                 /* remove artificial cap */
-    padding-inline: var(--space-3);  /* 16px-ish sides */
-  }
-}
-
-@media (max-width: 900px) {
-  .dashboard {
-    grid-template-columns: 1fr;      /* single column */
-    max-width: none;                 /* full width of container */
-    padding-inline: var(--space-2);  /* ~10px sides; tighter gutters */
-    row-gap: var(--space-3);
-  }
-
-  /* Make the container feel "edge-to-edge" on small screens */
-  .theme-v1 .container {
-    border-left: 0;
-    border-right: 0;
-    border-radius: 0;
-    box-shadow: none;                /* optional: keeps it flat and roomy */
-  }
-
-  /* Header spans full width already; ensure no extra inset */
-  .dashboard__header { margin-inline: 0; }
+/* Give extra breathing room on very wide viewports */
+@media (min-width: 1400px) {
+  .dashboard { gap: var(--space-5); }
 }
 
 /* Settings layout */
