@@ -1,6 +1,4 @@
 // Simple tabbed UI scaffold for Arklowdun
-
-// Ensure SCSS is compiled by Vite:
 // Bundle Font Awesome locally (no remote kit, no CORS, works offline)
 import "@fortawesome/fontawesome-free/css/all.min.css";
 import "./debug";
