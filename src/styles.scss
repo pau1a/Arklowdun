@@ -365,6 +365,11 @@ textarea:focus-visible {
   height: 24px;
 }
 
+/* Sidebar anchor defaults override global theme */
+.sidebar a {
+  color: var(--color-text);
+}
+
 /* Rhythm */
 .nav {
   display: flex;
@@ -382,7 +387,7 @@ textarea:focus-visible {
 }
 
 /* HUB TILE: Manage */
-.manage-link {
+.sidebar a.manage-link {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -390,7 +395,7 @@ textarea:focus-visible {
   border-radius: var(--radius-base);
   background: var(--color-panel);
   border: 1px solid var(--color-sidebar-rule);
-  color: var(--color-text); /* neutral by default */
+  color: var(--color-text);
   font-weight: 700;
   text-decoration: none;
   transition: background-color 0.15s, border-color 0.15s, color 0.15s,
@@ -398,26 +403,26 @@ textarea:focus-visible {
   align-self: stretch;
 }
 
-.manage-link .nav__icon {
+.sidebar a.manage-link .nav__icon {
   font-size: 1.125rem;
-  color: currentColor; /* icon follows text */
+  color: currentColor;
 }
 
 /* Hover/current state: premium accent */
-.manage-link:hover,
-.manage-link:focus-visible,
-.manage-link.is-current {
+.sidebar a.manage-link:hover,
+.sidebar a.manage-link:focus-visible,
+.sidebar a.manage-link.is-current {
   background: var(--color-accent-soft);
   border-color: var(--color-accent);
   color: var(--color-accent);
 }
 
-.manage-link:hover {
+.sidebar a.manage-link:hover {
   transform: translateX(1px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
 }
 
-.manage-link:focus-visible {
+.sidebar a.manage-link:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
