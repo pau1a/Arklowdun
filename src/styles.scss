@@ -365,6 +365,7 @@ textarea:focus-visible {
   height: 24px;
 }
 
+/* Rhythm */
 .nav {
   display: flex;
   flex-direction: column;
@@ -372,25 +373,54 @@ textarea:focus-visible {
   margin-top: var(--space-2);
 }
 
-.nav__separator {
-  align-self: stretch;
-  height: 1px;
-  background-color: var(--color-sidebar-border);
-  margin: var(--space-2) 0;
+/* Divider under the hub tile */
+.sidebar__divider {
+  block-size: 1px;
+  background: var(--color-border);
+  margin: var(--space-3) 0 var(--space-1);
 }
 
-.nav__manage {
-  font-size: 0.875rem;
-  padding: var(--space-1) var(--space-2);
+/* HUB TILE: Manage */
+.manage-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-base);
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-weight: 700;
+  text-decoration: none;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s,
+    transform 0.12s, box-shadow 0.12s;
 }
 
-.nav__manage .nav__icon {
-  width: 0.875rem;
-  height: 0.875rem;
-  font-size: 0.875rem;
+.manage-link .nav__icon {
+  font-size: 1.125rem;
 }
 
-.sidebar a {
+/* Hover/focus */
+.manage-link:hover {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  transform: translateX(1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+.manage-link:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.manage-link.is-current {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+/* Keep regular nav visually “secondary” to the hub */
+.sidebar .nav a {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -399,6 +429,7 @@ textarea:focus-visible {
   color: var(--color-text);
   white-space: nowrap;
   transition: background-color 0.15s, color 0.15s;
+  font-weight: 600;
 }
 
 .nav__icon {
@@ -408,31 +439,30 @@ textarea:focus-visible {
   transition: color 0.15s, filter 0.15s;
 }
 
-.sidebar a:hover,
-.sidebar a:focus-visible {
+.sidebar .nav a:hover,
+.sidebar .nav a:focus-visible {
   background-color: var(--color-accent-soft);
-  font-weight: 600;
 }
 
-.sidebar a:focus-visible {
+.sidebar .nav a:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
-.sidebar a.active {
+.sidebar .nav a.active {
   font-weight: 700;
   background-color: var(--color-accent-soft);
   color: var(--color-accent);
 }
 
-.sidebar a.active:hover,
-.sidebar a.active:focus-visible {
+.sidebar .nav a.active:hover,
+.sidebar .nav a.active:focus-visible {
   background-color: var(--color-accent-soft);
 }
 
-.sidebar a:hover .nav__icon,
-.sidebar a:focus-visible .nav__icon,
-.sidebar a.active .nav__icon {
+.sidebar .nav a:hover .nav__icon,
+.sidebar .nav a:focus-visible .nav__icon,
+.sidebar .nav a.active .nav__icon {
   color: var(--color-accent);
   filter: drop-shadow(0 0 2px var(--color-accent));
 }
