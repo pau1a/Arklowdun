@@ -111,6 +111,10 @@ export async function DashboardView(container: HTMLElement) {
         <h3><i class="card__icon fa-solid fa-triangle-exclamation" aria-hidden="true"></i>Attention</h3>
         <div class="list" id="dash-list" role="list"></div>
       </div>
+      <div class="card">
+        <h3><i class="card__icon fa-regular fa-clock" aria-hidden="true"></i>Upcoming</h3>
+        <p>Coming soon</p>
+      </div>
     `;
   container.innerHTML = "";
   container.appendChild(section);
