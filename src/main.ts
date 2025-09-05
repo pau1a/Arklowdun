@@ -50,7 +50,7 @@ const linkPrimary = () =>
   document.querySelector<HTMLAnchorElement>("#nav-primary");
 const linkSecondary = () =>
   document.querySelector<HTMLAnchorElement>("#nav-secondary");
-const linkTertiary = () =>
+const linkTasks = () =>
   document.querySelector<HTMLAnchorElement>("#nav-tertiary");
 const linkCalendar = () =>
   document.querySelector<HTMLAnchorElement>("#nav-calendar");
@@ -77,6 +77,7 @@ const linkNotes = () =>
   document.querySelector<HTMLAnchorElement>("#nav-notes");
 const linkManage = () =>
   document.querySelector<HTMLAnchorElement>("#nav-manage");
+
 
 // --- HEIGHT-ONLY floor: ensure full sidebar is visible ---
 // Width is not constrained here.
@@ -174,9 +175,10 @@ function setupDynamicMinSize() {
 function setActive(tab: View) {
   const tabs: Record<View, HTMLAnchorElement | null> = {
     dashboard: linkDashboard(),
+    manage: linkManage(),
     primary: linkPrimary(),
     secondary: linkSecondary(),
-    tertiary: linkTertiary(),
+    tertiary: linkTasks(),
     calendar: linkCalendar(),
     files: linkFiles(),
     shopping: linkShopping(),
@@ -292,7 +294,7 @@ function setupManageLinks() {
   const pairs: [() => HTMLAnchorElement | null, View][] = [
     [linkPrimary, "primary"],
     [linkSecondary, "secondary"],
-    [linkTertiary, "tertiary"],
+    [linkTasks, "tertiary"],
     [linkBills, "bills"],
     [linkInsurance, "insurance"],
     [linkProperty, "property"],
