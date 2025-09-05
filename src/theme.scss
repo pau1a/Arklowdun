@@ -1,3 +1,34 @@
+/* Inter — variable font, offline-safe */
+@font-face {
+  font-family: "Inter";
+  src: url("/src/assets/fonts/inter/Inter-VariableFont_slnt,wght.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-stretch: 75% 125%;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("/src/assets/fonts/inter/Inter-Italic-VariableFont_slnt,wght.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-stretch: 75% 125%;
+  font-style: italic;
+  font-display: swap;
+}
+
+:root {
+  --font-sans: "Inter", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+}
+
+html, body {
+  font-family: var(--font-sans);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Headings: subtle premium feel */
+h1, h2, h3 { letter-spacing: -0.01em; }
+
 /* Theme tokens and base styles scoped to theme-v1 */
 .theme-v1 {
   /* Colors */
@@ -15,7 +46,7 @@
   --color-sidebar-border: #d2dae3;
 
   /* Typography */
-  --font-family-base: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-family-base: var(--font-sans);
   --font-size-base: 16px;
 
   /* Spacing */
