@@ -12,30 +12,14 @@ import type { Vehicle, Event } from "./models";
 const STORE_DIR = "Arklowdun";
 const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "GBP" });
 
-function classifyStatus(dueMs: number, now = Date.now()): "overdue" | "today" | "soon" {
+function statusFor(dueMs: number, now: number): "soon" | "today" | "overdue" {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(start.getDate() + 1);
-
-  if (dueMs < start.getTime()) return "overdue";
-  if (dueMs < end.getTime()) return "today";
-  if (dueMs - now <= 7 * 86400000) return "soon";
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+  if (dueMs < now) return "overdue";
+  if (dueMs >= start.getTime() && dueMs <= end.getTime()) return "today";
   return "soon";
-}
-
-function renderRow(text: string, due: number) {
-  const status = classifyStatus(due);
-  const title = status === "today" ? "Due today" : status[0].toUpperCase() + status.slice(1);
-
-  return `
-    <div class="item" role="listitem">
-      <div class="item__left">
-        <span class="status-dot status-dot--${status}" title="${title}" aria-label="${title}"></span>
-        <span>${text}</span>
-      </div>
-      <a class="pill pill--ghost" href="#" aria-label="View item">View</a>
-    </div>`;
 }
 
 async function loadJson<T>(file: string): Promise<T[]> {
@@ -167,7 +151,25 @@ export async function DashboardView(container: HTMLElement) {
   items.sort((a, b) => a.date - b.date);
   if (!items.length) {
     if (listEl) listEl.textContent = "No upcoming items";
-  } else if (listEl) {
-    listEl.innerHTML = items.map((i) => renderRow(i.text, i.date)).join("");
+  } else {
+    items.forEach(({ date, text }) => {
+      const li = document.createElement("div");
+      li.className = "item";
+
+      const when = statusFor(date, now);
+      const left = document.createElement("div");
+      left.className = "item__left";
+      left.innerHTML = `
+        <span class="status-dot status--${when}" aria-hidden="true"></span>
+        <span>${text}</span>
+      `;
+
+      const right = document.createElement("div");
+      right.className = "item__right";
+      right.innerHTML = `<a href="#" class="pill pill--view">View</a>`;
+
+      li.append(left, right);
+      listEl?.appendChild(li);
+    });
   }
 }
