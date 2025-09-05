@@ -390,7 +390,7 @@ textarea:focus-visible {
   border-radius: var(--radius-base);
   background: var(--color-panel);
   border: 1px solid var(--color-sidebar-rule);
-  color: var(--color-text);
+  color: var(--color-text); /* neutral by default */
   font-weight: 700;
   text-decoration: none;
   transition: background-color 0.15s, border-color 0.15s, color 0.15s,
@@ -400,7 +400,7 @@ textarea:focus-visible {
 
 .manage-link .nav__icon {
   font-size: 1.125rem;
-  color: currentColor;
+  color: currentColor; /* icon follows text */
 }
 
 /* Hover/current state: premium accent */
