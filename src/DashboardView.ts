@@ -82,7 +82,7 @@ export async function DashboardView(container: HTMLElement) {
         </div>
       </header>
       <div class="card">
-        <h3><i class="card__icon fa-solid fa-triangle-exclamation"></i>Attention</h3>
+        <h3><i class="card__icon fa-solid fa-triangle-exclamation" aria-hidden="true"></i>Attention</h3>
         <div class="list" id="dash-list"></div>
       </div>
     `;
