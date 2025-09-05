@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "arklowdun",
+  "productName": "Arklowdun",
   "version": "0.1.0",
   "identifier": "com.paula.arklowdun",
   "build": {
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "arklowdun",
+        "title": "Arklowdun - Home Management",
         "width": 800,
         "height": 600,
         "backgroundColor": "#ffffffff"
