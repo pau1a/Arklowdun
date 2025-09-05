@@ -161,6 +161,7 @@ textarea:focus-visible {
 .card__icon {
   width: 1rem;
   height: 1rem;
+  font-size: 1rem;
 }
 
 .kicker {
@@ -373,12 +374,14 @@ textarea:focus-visible {
   border-radius: var(--radius-pill);
   color: var(--color-text);
   white-space: nowrap;
-  transition: background-color 0.2s;
+  transition: background-color 0.15s, color 0.15s;
 }
 
 .nav__icon {
   width: 1rem;
   height: 1rem;
+  font-size: 1rem;
+  transition: color 0.15s, filter 0.15s;
 }
 
 .sidebar a:hover,
@@ -403,6 +406,13 @@ textarea:focus-visible {
   background-color: var(--color-accent-soft);
 }
 
+.sidebar a:hover .nav__icon,
+.sidebar a:focus-visible .nav__icon,
+.sidebar a.active .nav__icon {
+  color: var(--color-accent);
+  filter: drop-shadow(0 0 2px var(--color-accent));
+}
+
 @media (max-width: 1100px) {
   .sidebar {
     padding-inline: var(--space-3);
@@ -412,7 +422,7 @@ textarea:focus-visible {
 footer {
   grid-column: 1 / -1;
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
   align-items: center;
   gap: var(--space-2);
   padding: 0 var(--space-1);
@@ -442,6 +452,7 @@ footer {
   color: var(--color-text);
   cursor: pointer;
   padding: 0;
+  transition: color 0.15s, background-color 0.15s, filter 0.15s;
 }
 
 .footer__icons a:hover,
@@ -458,6 +469,16 @@ footer {
 .footer__icons a:active,
 .footer__icons button:active {
   background-color: rgba(211, 84, 0, 0.15);
+}
+
+.footer__icons i {
+  font-size: 1rem;
+}
+
+.footer__icons a:hover i,
+.footer__icons button:hover i {
+  color: var(--color-accent);
+  filter: drop-shadow(0 0 2px var(--color-accent));
 }
 
 .list.empty, .calendar-empty {

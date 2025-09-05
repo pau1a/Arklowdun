@@ -1,8 +1,8 @@
-export function LegacyView(container: HTMLElement) {
+export function ManageView(container: HTMLElement) {
   const section = document.createElement("section");
   section.innerHTML = `
-    <h2>Legacy</h2>
-    <nav class="legacy">
+    <h2>Manage</h2>
+    <nav class="manage">
       <a id="nav-primary" href="#">Primary</a>
       <a id="nav-secondary" href="#">Secondary</a>
       <a id="nav-tertiary" href="#">Tertiary</a>

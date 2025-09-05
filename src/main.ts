@@ -18,7 +18,7 @@ import { InventoryView } from "./InventoryView";
 import { BudgetView } from "./BudgetView";
 import { NotesView } from "./NotesView";
 import { DashboardView } from "./DashboardView";
-import { LegacyView } from "./LegacyView";
+import { ManageView } from "./ManageView";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { defaultHouseholdId } from "./db/household";
 const appWindow = getCurrentWindow();
@@ -41,7 +41,7 @@ type View =
   | "budget"
   | "notes"
   | "settings"
-  | "legacy";
+  | "manage";
 
 const viewEl = () => document.querySelector<HTMLElement>("#view");
 const linkDashboard = () =>
@@ -75,10 +75,8 @@ const linkBudget = () =>
   document.querySelector<HTMLAnchorElement>("#nav-budget");
 const linkNotes = () =>
   document.querySelector<HTMLAnchorElement>("#nav-notes");
-const linkSettings = () =>
-  document.querySelector<HTMLAnchorElement>("#nav-settings");
-const linkLegacy = () =>
-  document.querySelector<HTMLAnchorElement>("#nav-legacy");
+const linkManage = () =>
+  document.querySelector<HTMLAnchorElement>("#nav-manage");
 
 // --- HEIGHT-ONLY floor: ensure full sidebar is visible ---
 // Width is not constrained here.
@@ -191,8 +189,8 @@ function setActive(tab: View) {
     inventory: linkInventory(),
     budget: linkBudget(),
     notes: linkNotes(),
-    settings: linkSettings(),
-    legacy: linkLegacy(),
+    settings: null,
+    manage: linkManage(),
   };
   (Object.keys(tabs) as View[]).forEach((name) => {
     const el = tabs[name];
@@ -200,6 +198,11 @@ function setActive(tab: View) {
     el?.classList.toggle("active", active);
     if (active) el?.setAttribute("aria-current", "page");
     else el?.removeAttribute("aria-current");
+    const icon = el?.querySelector<HTMLElement>(".nav__icon");
+    if (icon && !icon.dataset.fixed) {
+      icon.classList.toggle("fa-solid", active);
+      icon.classList.toggle("fa-regular", !active);
+    }
   });
 }
 
@@ -270,16 +273,16 @@ function navigate(to: View) {
     SettingsView(el);
     return;
   }
-  if (to === "legacy") {
-    LegacyView(el);
-    setupLegacyLinks();
+  if (to === "manage") {
+    ManageView(el);
+    setupManageLinks();
     return;
   }
   const title = to.charAt(0).toUpperCase() + to.slice(1);
   renderBlank(title);
 }
 
-function setupLegacyLinks() {
+function setupManageLinks() {
   const pairs: [() => HTMLAnchorElement | null, View][] = [
     [linkPrimary, "primary"],
     [linkSecondary, "secondary"],
@@ -324,25 +327,15 @@ window.addEventListener("DOMContentLoaded", () => {
     e.preventDefault();
     navigate("notes");
   });
-  linkSettings()?.addEventListener("click", (e) => {
+  linkManage()?.addEventListener("click", (e) => {
     e.preventDefault();
-    navigate("settings");
-  });
-  linkLegacy()?.addEventListener("click", (e) => {
-    e.preventDefault();
-    navigate("legacy");
+    navigate("manage");
   });
   document
     .querySelector<HTMLAnchorElement>("#footer-settings")
     ?.addEventListener("click", (e) => {
       e.preventDefault();
       navigate("settings");
-    });
-  document
-    .querySelector<HTMLAnchorElement>("#footer-legacy")
-    ?.addEventListener("click", (e) => {
-      e.preventDefault();
-      navigate("legacy");
     });
   navigate("dashboard");
   requestAnimationFrame(() => {
