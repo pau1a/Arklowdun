@@ -1,8 +1,12 @@
+// src/ManageView.ts
+
 export function ManageView(container: HTMLElement) {
   const section = document.createElement("section");
+  section.className = "manage-page";
+
   section.innerHTML = `
     <h2>Manage</h2>
-    <nav class="manage">
+    <nav class="manage" aria-label="Manage categories">
       <a id="nav-primary" href="#">Primary</a>
       <a id="nav-secondary" href="#">Secondary</a>
       <a id="nav-tertiary" href="#">Tertiary</a>
@@ -17,6 +21,7 @@ export function ManageView(container: HTMLElement) {
       <a id="nav-shopping" href="#">Shopping List</a>
     </nav>
   `;
+
   container.innerHTML = "";
   container.appendChild(section);
 }

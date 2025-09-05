@@ -1,0 +1,94 @@
+diff --git a/src/styles.scss b/src/styles.scss
+--- a/src/styles.scss
++++ b/src/styles.scss
+@@ -999,3 +999,87 @@
+ .calendar__form input {
+   flex: 1;
+ }
++
++/* =========================
++   Manage view (responsive)
++   ========================= */
++
++/* Container rhythm (works whether Manage section sits in .container or not) */
++section:has(> nav.manage) {
++  display: flex;
++  flex-direction: column;
++  gap: var(--space-4);
++  max-width: 1100px;
++  margin: 0 auto;
++}
++
++/* Grid: auto-fill tiles; wraps cleanly from 1 → 2 → 3+ columns */
++nav.manage {
++  --manage-tile-min: 260px; /* tweak to taste */
++  display: grid;
++  grid-template-columns: repeat(auto-fill, minmax(var(--manage-tile-min), 1fr));
++  gap: var(--space-3);
++  align-items: stretch;
++  margin-top: var(--space-1);
++}
++
++/* Tiles (anchors) */
++nav.manage a {
++  display: flex;
++  align-items: flex-start;
++  justify-content: space-between;
++  gap: var(--space-3);
++  min-height: 88px;
++  padding: var(--space-3);
++  border-radius: var(--radius-lg);
++  background: var(--color-panel);
++  border: 1px solid var(--color-sidebar-border);
++  color: var(--color-text);
++  text-decoration: none;
++  box-shadow: var(--shadow-base);
++  transition: background-color .15s, border-color .15s, color .15s, transform .12s, box-shadow .12s;
++}
++
++/* Left stack (icon + text) – works even if you didn’t add inner wrappers */
++nav.manage a > .tile-left,
++nav.manage a > .left,
++nav.manage a > div:first-child {
++  display: flex;
++  gap: var(--space-2);
++  align-items: flex-start;
++  min-width: 0;
++}
++
++/* Icon in the left stack (Font Awesome or inline SVG) */
++nav.manage a i,
++nav.manage a svg {
++  font-size: 1.125rem;
++  width: 1.125rem;
++  height: 1.125rem;
++  color: currentColor;
++  flex: 0 0 auto;
++  margin-top: 2px;
++}
++
++/* Text stack */
++nav.manage a .title,
++nav.manage a strong {
++  display: block;
++  font-weight: 700;
++  line-height: 1.25;
++}
++nav.manage a .meta,
++nav.manage a small,
++nav.manage a span {
++  display: block;
++  color: var(--color-text-muted);
++  line-height: 1.25;
++}
++
++/* Hover / focus */
++nav.manage a:hover,
++nav.manage a:focus-visible {
++  background: var(--color-accent-soft);
++  border-color: var(--color-accent);
++  outline: none;
++  transform: translateY(-1px);
++  box-shadow: 0 4px 12px rgba(0,0,0,.06);
++  color: var(--color-accent);
++}
