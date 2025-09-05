@@ -45,6 +45,10 @@ h1, h2, h3 { letter-spacing: -0.01em; }
   --color-sidebar-bg: #e9edf2;
   --color-sidebar-border: #d2dae3;
 
+  /* New: rule/separator colors (light theme defaults) */
+  --color-rule: #d9e1ec; /* general subtle rule */
+  --color-sidebar-rule: var(--color-rule);
+
   /* Typography */
   --font-family-base: var(--font-sans);
   --font-size-base: 16px;
@@ -67,6 +71,24 @@ h1, h2, h3 { letter-spacing: -0.01em; }
   font-family: var(--font-family-base);
   font-size: var(--font-size-base);
 }
+
+@supports (color: color-mix(in srgb, black, white)) {
+  .theme-v1 {
+    /* 88% sidebar bg + 12% text color = crisp, unobtrusive hairline */
+    --color-sidebar-rule: color-mix(
+      in srgb,
+      var(--color-sidebar-bg) 88%,
+      var(--color-text)
+    );
+  }
+}
+
+/* (Optional, future) Dark theme override
+.theme-v1[data-theme="dark"] {
+  --color-rule: #2a2f38;
+  --color-sidebar-rule: var(--color-rule);
+}
+*/
 
 .theme-v1 a {
   color: var(--color-accent);

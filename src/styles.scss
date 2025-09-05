@@ -376,7 +376,7 @@ textarea:focus-visible {
 /* Divider under the hub tile */
 .sidebar__divider {
   block-size: 1px;
-  background: var(--color-border);
+  background: var(--color-sidebar-rule);
   margin: var(--space-3) 0 var(--space-1);
   align-self: stretch;
 }
@@ -389,39 +389,37 @@ textarea:focus-visible {
   padding: 10px 12px;
   border-radius: var(--radius-base);
   background: var(--color-panel);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-sidebar-rule);
   color: var(--color-text);
   font-weight: 700;
   text-decoration: none;
   transition: background-color 0.15s, border-color 0.15s, color 0.15s,
     transform 0.12s, box-shadow 0.12s;
+  align-self: stretch;
 }
 
 .manage-link .nav__icon {
   font-size: 1.125rem;
+  color: currentColor;
 }
 
-/* Hover/focus */
-.manage-link:hover {
+/* Hover/current state: premium accent */
+.manage-link:hover,
+.manage-link:focus-visible,
+.manage-link.is-current {
   background: var(--color-accent-soft);
   border-color: var(--color-accent);
   color: var(--color-accent);
+}
+
+.manage-link:hover {
   transform: translateX(1px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
 }
 
 .manage-link:focus-visible {
-  background: var(--color-accent-soft);
-  border-color: var(--color-accent);
-  color: var(--color-accent);
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
-}
-
-.manage-link.is-current {
-  background: var(--color-accent-soft);
-  border-color: var(--color-accent);
-  color: var(--color-accent);
 }
 
 /* Keep regular nav visually “secondary” to the hub */
