@@ -12,6 +12,32 @@ import type { Vehicle, Event } from "./models";
 const STORE_DIR = "Arklowdun";
 const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "GBP" });
 
+function classifyStatus(dueMs: number, now = Date.now()): "overdue" | "today" | "soon" {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 1);
+
+  if (dueMs < start.getTime()) return "overdue";
+  if (dueMs < end.getTime()) return "today";
+  if (dueMs - now <= 7 * 86400000) return "soon";
+  return "soon";
+}
+
+function renderRow(text: string, due: number) {
+  const status = classifyStatus(due);
+  const title = status === "today" ? "Due today" : status[0].toUpperCase() + status.slice(1);
+
+  return `
+    <div class="item" role="listitem">
+      <div class="item__left">
+        <span class="status-dot status-dot--${status}" title="${title}" aria-label="${title}"></span>
+        <span>${text}</span>
+      </div>
+      <a class="pill pill--ghost" href="#" aria-label="View item">View</a>
+    </div>`;
+}
+
 async function loadJson<T>(file: string): Promise<T[]> {
   try {
     const p = await join(STORE_DIR, file);
@@ -83,7 +109,7 @@ export async function DashboardView(container: HTMLElement) {
       </header>
       <div class="card">
         <h3><i class="card__icon fa-solid fa-triangle-exclamation" aria-hidden="true"></i>Attention</h3>
-        <div class="list" id="dash-list"></div>
+        <div class="list" id="dash-list" role="list"></div>
       </div>
     `;
   container.innerHTML = "";
@@ -137,17 +163,7 @@ export async function DashboardView(container: HTMLElement) {
   items.sort((a, b) => a.date - b.date);
   if (!items.length) {
     if (listEl) listEl.textContent = "No upcoming items";
-  } else {
-    for (const i of items) {
-      const row = document.createElement("div");
-      row.className = "item";
-      const title = document.createElement("span");
-      title.textContent = i.text;
-      const badge = document.createElement("span");
-      badge.className = "badge badge--muted";
-      badge.textContent = "Item";
-      row.append(title, badge);
-      listEl?.appendChild(row);
-    }
+  } else if (listEl) {
+    listEl.innerHTML = items.map((i) => renderRow(i.text, i.date)).join("");
   }
 }
