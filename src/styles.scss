@@ -355,15 +355,28 @@ textarea:focus-visible {
   height: 24px;
 }
 
-.tagline {
-  opacity: 0.8;
-  margin: 0;
-}
-
 .nav {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+.nav__separator {
+  align-self: stretch;
+  height: 1px;
+  background-color: var(--color-sidebar-border);
+  margin: var(--space-2) 0;
+}
+
+.nav__manage {
+  font-size: 0.875rem;
+  padding: var(--space-1) var(--space-2);
+}
+
+.nav__manage .nav__icon {
+  width: 0.875rem;
+  height: 0.875rem;
+  font-size: 0.875rem;
 }
 
 .sidebar a {
