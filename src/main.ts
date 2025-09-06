@@ -27,7 +27,7 @@ type View =
   | "dashboard"
   | "primary"
   | "secondary"
-  | "tertiary"
+  | "tasks"
   | "calendar"
   | "files"
   | "shopping"
@@ -51,7 +51,7 @@ const linkPrimary = () =>
 const linkSecondary = () =>
   document.querySelector<HTMLAnchorElement>("#nav-secondary");
 const linkTasks = () =>
-  document.querySelector<HTMLAnchorElement>("#nav-tertiary");
+  document.querySelector<HTMLAnchorElement>("#nav-tasks");
 const linkCalendar = () =>
   document.querySelector<HTMLAnchorElement>("#nav-calendar");
 const linkFiles = () =>
@@ -178,7 +178,7 @@ function setActive(tab: View) {
     manage: linkManage(),
     primary: linkPrimary(),
     secondary: linkSecondary(),
-    tertiary: linkTasks(),
+    tasks: linkTasks(),
     calendar: linkCalendar(),
     files: linkFiles(),
     shopping: linkShopping(),
@@ -294,7 +294,7 @@ function setupManageLinks() {
   const pairs: [() => HTMLAnchorElement | null, View][] = [
     [linkPrimary, "primary"],
     [linkSecondary, "secondary"],
-    [linkTasks, "tertiary"],
+    [linkTasks, "tasks"],
     [linkBills, "bills"],
     [linkInsurance, "insurance"],
     [linkProperty, "property"],
