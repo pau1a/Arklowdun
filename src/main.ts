@@ -104,7 +104,10 @@ function routeFromHashOrDefault(): View {
     "settings",
     "manage",
   ];
-  return valid.includes(fragment as View) ? (fragment as View) : "dashboard";
+  if (valid.includes(fragment as View)) return fragment as View;
+
+  location.replace("#dashboard");
+  return "dashboard";
 }
 
 
