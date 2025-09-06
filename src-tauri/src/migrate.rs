@@ -56,7 +56,7 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     .await?;
 
     let rows = sqlx::query("SELECT version FROM schema_migrations")
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await?;
     let applied: HashSet<String> = rows
         .into_iter()

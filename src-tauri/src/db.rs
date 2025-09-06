@@ -2,11 +2,13 @@ use anyhow::Result;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Pool, Sqlite};
 use std::str::FromStr;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 pub async fn open_sqlite_pool(app: &AppHandle) -> Result<Pool<Sqlite>> {
-    let app_dir =
-        tauri::api::path::app_data_dir(&app.config()).unwrap_or_else(|| std::env::temp_dir());
+    let app_dir = app
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| std::env::temp_dir());
     std::fs::create_dir_all(&app_dir).map_err(|e| {
         tracing::error!(
             target = "arklowdun",
@@ -31,10 +33,10 @@ pub async fn open_sqlite_pool(app: &AppHandle) -> Result<Pool<Sqlite>> {
         .after_connect(|conn, _| {
             Box::pin(async move {
                 sqlx::query("PRAGMA busy_timeout = 5000;")
-                    .execute(conn)
+                    .execute(&mut *conn)
                     .await?;
                 sqlx::query("PRAGMA wal_autocheckpoint = 1000;")
-                    .execute(conn)
+                    .execute(&mut *conn)
                     .await?;
                 Ok::<_, sqlx::Error>(())
             })
