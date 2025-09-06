@@ -315,37 +315,10 @@ function navigate(to: View) {
   }
   if (to === "manage") {
     ManageView(el);
-    setupManageLinks();
     return;
   }
   const title = to.charAt(0).toUpperCase() + to.slice(1);
   renderBlank(title);
-}
-
-function setupManageLinks() {
-  const pairs: [() => HTMLAnchorElement | null, View][] = [
-    [linkPrimary, "primary"],
-    [linkSecondary, "secondary"],
-    [linkTasks, "tasks"],
-    [linkBills, "bills"],
-    [linkInsurance, "insurance"],
-    [linkProperty, "property"],
-    [linkVehicles, "vehicles"],
-    [linkPets, "pets"],
-    [linkFamily, "family"],
-    [linkInventory, "inventory"],
-    [linkBudget, "budget"],
-    [linkShopping, "shopping"],
-  ];
-  for (const [getter, view] of pairs) {
-    const el = getter();
-    if (el) {
-      el.onclick = (e) => {
-        e.preventDefault();
-        navigate(view);
-      };
-    }
-  }
 }
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -379,6 +352,9 @@ window.addEventListener("DOMContentLoaded", () => {
     });
   // Load the route from the URL fragment or fall back to the dashboard view.
   navigate(routeFromHashOrDefault());
+  window.addEventListener("hashchange", () =>
+    navigate(routeFromHashOrDefault())
+  );
   requestAnimationFrame(() => {
     console.log("Runtime window label:", appWindow.label);
     setupDynamicMinSize();
