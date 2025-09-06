@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sqlx::{sqlite::SqliteRow, Row, SqlitePool, Column, ValueRef, TypeInfo};
 
-use crate::{id::new_uuid_v7, repo, time::now_ms};
+use crate::{id::new_uuid_v7, repo, time::now_ms, Event};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DbErrorPayload {
@@ -242,11 +242,18 @@ pub async fn events_list_range_command(
     household_id: &str,
     start: i64,
     end: i64,
-) -> Result<Vec<Value>, DbErrorPayload> {
+) -> Result<Vec<Event>, DbErrorPayload> {
     let hh = repo::require_household(household_id)
         .map_err(|e| DbErrorPayload { code: "Unknown".into(), message: e.to_string() })?;
-    let rows = sqlx::query(
-        "SELECT * FROM events WHERE household_id = ? AND deleted_at IS NULL AND starts_at >= ? AND starts_at < ? ORDER BY starts_at, id",
+    let rows = sqlx::query_as::<_, Event>(
+        r#"
+        SELECT id, household_id, title, start_at, end_at, created_at, updated_at, deleted_at
+        FROM events
+        WHERE household_id = ? AND deleted_at IS NULL
+          AND end_at   >= ?
+          AND start_at <= ?
+        ORDER BY start_at, id
+        "#,
     )
     .bind(hh)
     .bind(start)
@@ -254,5 +261,5 @@ pub async fn events_list_range_command(
     .fetch_all(pool)
     .await
     .map_err(|e| DbErrorPayload { code: "Unknown".into(), message: e.to_string() })?;
-    Ok(rows.into_iter().map(row_to_value).collect())
+    Ok(rows)
 }

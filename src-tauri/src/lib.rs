@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use tauri::{Manager, State};
 use ts_rs::TS;
+use sqlx::Row;
 
 use crate::state::AppState;
 
@@ -148,7 +149,7 @@ gen_domain_cmds!(
     shopping_items,
 );
 
-#[derive(Serialize, Deserialize, Clone, TS)]
+#[derive(Serialize, Deserialize, Clone, TS, sqlx::FromRow)]
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct Event {
     #[serde(default)]
@@ -157,7 +158,9 @@ pub struct Event {
     pub household_id: String,
     pub title: String,
     #[ts(type = "number")]
-    pub starts_at: i64,
+    pub start_at: i64,
+    #[ts(type = "number")]
+    pub end_at: i64,
     #[ts(optional, type = "number")]
     pub reminder: Option<i64>,
     #[serde(default)]
@@ -178,7 +181,7 @@ async fn events_list_range(
     household_id: String,
     start: i64,
     end: i64,
-) -> Result<Vec<serde_json::Value>, DbErrorPayload> {
+) -> Result<Vec<Event>, DbErrorPayload> {
     commands::events_list_range_command(&state.pool, &household_id, start, end).await
 }
 
@@ -235,6 +238,17 @@ pub fn run() {
             let handle = app.handle();
             let pool = tauri::async_runtime::block_on(crate::db::open_sqlite_pool(&handle))?;
             tauri::async_runtime::block_on(crate::migrate::apply_migrations(&pool))?;
+            tauri::async_runtime::block_on(async {
+                if let Ok(cols) = sqlx::query("PRAGMA table_info(events);").fetch_all(&pool).await {
+                    let names: Vec<String> = cols
+                        .into_iter()
+                        .filter_map(|r| r.try_get::<String, _>("name").ok())
+                        .collect();
+                    let has_start = names.iter().any(|n| n == "start_at");
+                    let has_end = names.iter().any(|n| n == "end_at");
+                    tracing::info!(target="arklowdun", event="events_table_columns", has_start_at=%has_start, has_end_at=%has_end);
+                }
+            });
             let hh = tauri::async_runtime::block_on(crate::household::default_household_id(&pool))?;
             app.manage(crate::state::AppState {
                 pool: pool.clone(),
@@ -349,7 +363,8 @@ mod tests {
             "id": "e1",
             "household_id": "h1",
             "title": "T",
-            "starts_at": 1,
+            "start_at": 1,
+            "end_at": 2,
             "deletedAt": 999
         });
         let ev: Event = serde_json::from_value(payload).unwrap();

@@ -75,7 +75,7 @@ function renderMonth(root: HTMLElement, events: Event[]) {
     }
     cell.appendChild(dateDiv);
     const dayEvents = events.filter((e) => {
-      const a = toDate(e.starts_at);
+      const a = toDate(e.start_at);
       return (
         a.getFullYear() === cellDate.getFullYear() &&
         a.getMonth() === cellDate.getMonth() &&
@@ -106,7 +106,7 @@ async function scheduleNotifications(events: Event[]) {
       setTimeout(() => {
         sendNotification({
           title: ev.title,
-          body: toDate(ev.starts_at).toLocaleString(),
+      body: toDate(ev.start_at).toLocaleString(),
         });
       }, ev.reminder - now);
     }
@@ -150,7 +150,8 @@ export async function CalendarView(container: HTMLElement) {
     const dt = new Date(dateInput.value);
     const ev = await saveEvent({
       title: titleInput.value,
-      starts_at: dt.getTime(),
+      start_at: dt.getTime(),
+      end_at: dt.getTime(),
       reminder: dt.getTime(),
     });
     events.push(ev);

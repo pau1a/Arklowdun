@@ -44,6 +44,10 @@ static MIGRATIONS: &[(&str, &str)] = &[
         "202509021410_notes_z_index.sql",
         include_str!("../../migrations/202509021410_notes_z_index.sql"),
     ),
+    (
+        "202509061700_events_time_columns.sql",
+        include_str!("../../migrations/202509061700_events_time_columns.sql"),
+    ),
 ];
 
 pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
