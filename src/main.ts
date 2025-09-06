@@ -78,6 +78,35 @@ const linkNotes = () =>
 const linkManage = () =>
   document.querySelector<HTMLAnchorElement>("#nav-manage");
 
+/**
+ * Determine the initial view based on the current location fragment.
+ * Falls back to "dashboard" when the hash is missing or unrecognized.
+ */
+function routeFromHashOrDefault(): View {
+  const fragment = window.location.hash.replace(/^#/, "");
+  const valid: View[] = [
+    "dashboard",
+    "primary",
+    "secondary",
+    "tasks",
+    "calendar",
+    "files",
+    "shopping",
+    "bills",
+    "insurance",
+    "property",
+    "vehicles",
+    "pets",
+    "family",
+    "inventory",
+    "budget",
+    "notes",
+    "settings",
+    "manage",
+  ];
+  return valid.includes(fragment as View) ? (fragment as View) : "dashboard";
+}
+
 
 // --- HEIGHT-ONLY floor: ensure full sidebar is visible ---
 // Width is not constrained here.
@@ -345,7 +374,8 @@ window.addEventListener("DOMContentLoaded", () => {
       e.preventDefault();
       navigate("settings");
     });
-  navigate("dashboard");
+  // Load the route from the URL fragment or fall back to the dashboard view.
+  navigate(routeFromHashOrDefault());
   requestAnimationFrame(() => {
     console.log("Runtime window label:", appWindow.label);
     setupDynamicMinSize();
