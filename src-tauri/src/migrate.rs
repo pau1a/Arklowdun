@@ -82,10 +82,7 @@ static MIGRATIONS: &[(&str, &str)] = &[
         "202509021410_notes_z_index.sql",
         include_str!("../../migrations/202509021410_notes_z_index.sql"),
     ),
-    (
-        "202509061700_events_time_columns.sql",
-        include_str!("../../migrations/202509061700_events_time_columns.sql"),
-    ),
+    // removed: legacy events backfill is handled in code now
 ];
 
 pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
@@ -105,6 +102,21 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .execute(pool)
     .await?;
+
+    // -------- Backfill start_at/end_at from legacy columns if they exist --------
+    if column_exists(pool, "events", "starts_at").await? {
+        tracing::info!(target = "arklowdun", event = "backfill_events_start_at");
+        sqlx::query("UPDATE events SET start_at = starts_at WHERE start_at IS NULL")
+            .execute(pool)
+            .await?;
+    }
+    if column_exists(pool, "events", "ends_at").await? {
+        tracing::info!(target = "arklowdun", event = "backfill_events_end_at");
+        sqlx::query("UPDATE events SET end_at = ends_at WHERE end_at IS NULL")
+            .execute(pool)
+            .await?;
+    }
+    // ---------------------------------------------------------------------------
 
     let rows = sqlx::query("SELECT version FROM schema_migrations")
         .fetch_all(pool)
