@@ -1,21 +1,37 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+use paste::paste;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
-use ts_rs::TS;
 use tauri::{Manager, State};
-use paste::paste;
+use ts_rs::TS;
 
 use crate::state::AppState;
 
-mod id;
-mod time;
+mod commands;
+mod db;
 mod household; // declare module; avoid `use` to prevent name collision
-mod state;
+mod id;
 mod migrate;
 mod repo;
-mod commands;
+mod state;
+mod time;
 
 use commands::DbErrorPayload;
+use tracing_subscriber::{prelude::*, EnvFilter};
+
+pub fn init_logging() {
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .json()
+        .with_target(true)
+        .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339());
+
+    let filter = EnvFilter::new("arklowdun=info,sqlx=warn");
+
+    let _ = tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt_layer)
+        .try_init();
+}
 
 macro_rules! gen_domain_cmds {
     ( $( $table:ident ),+ $(,)? ) => {
@@ -217,9 +233,13 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .setup(|app| {
             let handle = app.handle();
-            let pool = tauri::async_runtime::block_on(crate::migrate::init_db(handle))?;
+            let pool = tauri::async_runtime::block_on(crate::db::open_sqlite_pool(&handle))?;
+            tauri::async_runtime::block_on(crate::migrate::apply_migrations(&pool))?;
             let hh = tauri::async_runtime::block_on(crate::household::default_household_id(&pool))?;
-            app.manage(crate::state::AppState { pool: pool.clone(), default_household_id: Arc::new(Mutex::new(hh)) });
+            app.manage(crate::state::AppState {
+                pool: pool.clone(),
+                default_household_id: Arc::new(Mutex::new(hh)),
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

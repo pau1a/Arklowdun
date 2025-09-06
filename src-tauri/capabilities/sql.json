@@ -7,7 +7,7 @@
     "sql:allow-execute",
     {
       "identifier": "sql:allow-load",
-      "assets": ["sqlite:app.sqlite"]
+      "assets": ["sqlite:arklowdun.sqlite3"]
     }
   ]
 }

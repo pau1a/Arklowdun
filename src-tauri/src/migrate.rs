@@ -1,9 +1,5 @@
-use sqlx::{
-    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
-    Executor, Row, SqlitePool,
-};
-use std::{collections::HashSet, fs};
-use tauri::{AppHandle, Manager};
+use sqlx::{Executor, Row, SqlitePool};
+use std::collections::HashSet;
 
 use crate::time::now_ms;
 
@@ -50,31 +46,14 @@ static MIGRATIONS: &[(&str, &str)] = &[
     ),
 ];
 
-pub async fn init_db(app: &AppHandle) -> anyhow::Result<SqlitePool> {
-    // Use the same base directory as tauri-plugin-sql (frontend) for a single shared DB.
-    let dir = app.path().app_data_dir().expect("data dir");
-    fs::create_dir_all(&dir)?;
-    let db_path = dir.join("app.sqlite");
-
-    // Build options from a filesystem path to avoid URL encoding issues.
-    let opts = SqliteConnectOptions::new()
-        .filename(&db_path)
-        .create_if_missing(true)
-        .journal_mode(SqliteJournalMode::Wal)
-        .foreign_keys(true);
-    let pool = SqlitePoolOptions::new().connect_with(opts).await?;
-
-    // Reassert pragmas just in case.
-    pool.execute("PRAGMA journal_mode=WAL").await?;
-    pool.execute("PRAGMA foreign_keys=ON").await?;
-    pool
-        .execute(
-            "CREATE TABLE IF NOT EXISTS schema_migrations (
+pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
+    pool.execute(
+        "CREATE TABLE IF NOT EXISTS schema_migrations (
                version TEXT PRIMARY KEY,
                applied_at INTEGER NOT NULL
              )",
-        )
-        .await?;
+    )
+    .await?;
 
     let rows = sqlx::query("SELECT version FROM schema_migrations")
         .fetch_all(&pool)
@@ -113,16 +92,14 @@ pub async fn init_db(app: &AppHandle) -> anyhow::Result<SqlitePool> {
             sqlx::query(s).execute(&mut *tx).await?;
         }
 
-        sqlx::query(
-            "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
-        )
-        .bind(*filename)
-        .bind(now_ms())
-        .execute(&mut *tx)
-        .await?;
+        sqlx::query("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)")
+            .bind(*filename)
+            .bind(now_ms())
+            .execute(&mut *tx)
+            .await?;
 
         tx.commit().await?;
     }
 
-    Ok(pool)
+    Ok(())
 }
