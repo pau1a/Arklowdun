@@ -9,7 +9,7 @@ export function ManageView(container: HTMLElement) {
     <nav class="manage" aria-label="Manage categories">
       <a id="nav-primary" href="#">Primary</a>
       <a id="nav-secondary" href="#">Secondary</a>
-      <a id="nav-tertiary" href="#">Tertiary</a>
+      <a id="nav-tasks" href="#">Tasks</a>
       <a id="nav-bills" href="#">Bills</a>
       <a id="nav-insurance" href="#">Insurance</a>
       <a id="nav-property" href="#">Property</a>
