@@ -2,6 +2,44 @@ use sqlx::{Executor, Row, SqlitePool};
 use std::collections::HashSet;
 
 use crate::time::now_ms;
+use tracing::{error, info};
+
+async fn column_exists(pool: &SqlitePool, table: &str, column: &str) -> sqlx::Result<bool> {
+    let (count,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?",
+    )
+    .bind(table)
+    .bind(column)
+    .fetch_one(pool)
+    .await?;
+    Ok(count > 0)
+}
+
+async fn ensure_column(
+    pool: &SqlitePool,
+    table: &str,
+    column: &str,
+    col_def_sql: &str,
+) -> sqlx::Result<()> {
+    if column_exists(pool, table, column).await? {
+        info!(target = "arklowdun", event = "migration_skip_column", table = %table, column = %column);
+        return Ok(());
+    }
+    let sql = format!("ALTER TABLE {table} ADD COLUMN {col_def_sql}");
+    info!(target = "arklowdun", event = "migration_add_column", table = %table, column = %column, sql = %sql);
+    sqlx::query(&sql).execute(pool).await?;
+    Ok(())
+}
+
+fn preview(sql: &str) -> String {
+    let one_line = sql.replace('\n', " ").replace('\t', " ");
+    let trimmed = one_line.trim();
+    if trimmed.len() > 160 {
+        format!("{}…", &trimmed[..160])
+    } else {
+        trimmed.to_string()
+    }
+}
 
 static MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -52,11 +90,20 @@ static MIGRATIONS: &[(&str, &str)] = &[
 
 pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     pool.execute(
-        "CREATE TABLE IF NOT EXISTS schema_migrations (
-               version TEXT PRIMARY KEY,
-               applied_at INTEGER NOT NULL
-             )",
+        "CREATE TABLE IF NOT EXISTS schema_migrations (\
+           version   TEXT PRIMARY KEY,\
+           applied_at INTEGER NOT NULL\
+         )",
     )
+    .await?;
+
+    // Guarded schema compatibility shims (idempotent)
+    ensure_column(pool, "events", "start_at", "start_at INTEGER").await?;
+    ensure_column(pool, "events", "end_at", "end_at   INTEGER").await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_events_household_start_end ON events(household_id, start_at, end_at)",
+    )
+    .execute(pool)
     .await?;
 
     let rows = sqlx::query("SELECT version FROM schema_migrations")
@@ -69,10 +116,10 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
 
     for (filename, raw_sql) in MIGRATIONS {
         if applied.contains(*filename) {
+            info!(target = "arklowdun", event = "migration_skip_file", file = %filename);
             continue;
         }
 
-        // Remove comment lines and blanks before splitting statements.
         let cleaned = raw_sql
             .lines()
             .filter(|line| {
@@ -82,7 +129,6 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             .collect::<Vec<_>>()
             .join("\n");
 
-        // Execute each file within a transaction and ignore file-level BEGIN/COMMIT.
         let mut tx = pool.begin().await?;
         for stmt in cleaned.split(';') {
             let s = stmt.trim();
@@ -93,7 +139,11 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             if upper == "BEGIN" || upper == "COMMIT" {
                 continue;
             }
-            sqlx::query(s).execute(&mut *tx).await?;
+            info!(target = "arklowdun", event = "migration_stmt", file = %filename, sql = %preview(s));
+            if let Err(e) = sqlx::query(s).execute(&mut *tx).await {
+                error!(target = "arklowdun", event = "migration_stmt_error", file = %filename, sql = %preview(s), error = %e);
+                return Err(e.into());
+            }
         }
 
         sqlx::query("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)")
@@ -103,7 +153,9 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             .await?;
 
         tx.commit().await?;
+        info!(target = "arklowdun", event = "migration_file_applied", file = %filename);
     }
 
     Ok(())
 }
+

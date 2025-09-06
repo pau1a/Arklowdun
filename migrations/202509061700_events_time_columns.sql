@@ -1,11 +1,7 @@
 -- Canonicalise event time columns to start_at / end_at.
--- This migration is idempotent on modern SQLite (supports IF NOT EXISTS).
 
 BEGIN;
 
--- Ensure columns exist (no-op if already there).
-ALTER TABLE events ADD COLUMN IF NOT EXISTS start_at INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE events ADD COLUMN IF NOT EXISTS end_at   INTEGER NOT NULL DEFAULT 0;
 
 -- Optional: backfill from legacy names if they exist.
 -- These UPDATEs will fail if the legacy columns don't exist, so we gate with a pragma check.
@@ -32,8 +28,5 @@ WITH has_legacy AS (
 UPDATE events
 SET end_at = (SELECT CASE WHEN EXISTS (SELECT 1 FROM has_legacy) THEN ends_at ELSE end_at END);
 
--- Create a helpful composite index for range queries (idempotent).
-CREATE INDEX IF NOT EXISTS idx_events_household_time
-ON events (household_id, start_at, end_at);
 
 COMMIT;
