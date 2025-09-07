@@ -1,5 +1,6 @@
 use sqlx::{Executor, Row, SqlitePool};
 use std::collections::HashSet;
+use regex::Regex;
 
 use crate::time::now_ms;
 use tracing::{error, info};
@@ -87,15 +88,16 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .await?;
 
-    let rows = sqlx::query("SELECT version FROM schema_migrations")
-        .fetch_all(pool)
-        .await?;
-    let applied: HashSet<String> = rows
-        .into_iter()
-        .filter_map(|r| r.try_get("version").ok())
-        .collect();
+  let rows = sqlx::query("SELECT version FROM schema_migrations")
+      .fetch_all(pool)
+      .await?;
+  let applied: HashSet<String> = rows
+      .into_iter()
+      .filter_map(|r| r.try_get("version").ok())
+      .collect();
+  let add_col_re = Regex::new(r"(?i)^ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(\w+)").unwrap();
 
-    for (filename, raw_sql) in MIGRATIONS {
+  for (filename, raw_sql) in MIGRATIONS {
         if applied.contains(*filename) {
             info!(target = "arklowdun", event = "migration_skip_file", file = %filename);
             continue;
@@ -111,31 +113,45 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             .join("\n");
 
         let mut tx = pool.begin().await?;
-        for stmt in cleaned.split(';') {
-            let s = stmt.trim();
-            if s.is_empty() {
-                continue;
-            }
-            let upper = s.to_ascii_uppercase();
-            if upper == "BEGIN" || upper == "COMMIT" {
-                continue;
-            }
-            if upper.starts_with("ALTER TABLE EVENTS RENAME COLUMN STARTS_AT TO START_AT") {
-                let exists: Option<i64> = sqlx::query_scalar(
-                    "SELECT 1 FROM pragma_table_info('events') WHERE name = 'starts_at'",
-                )
-                .fetch_optional(&mut *tx)
-                .await?;
-                if exists.is_none() {
-                    info!(target = "arklowdun", event = "migration_stmt_skip", file = %filename, sql = %preview(s));
-                    continue;
-                }
-            }
-            info!(target = "arklowdun", event = "migration_stmt", file = %filename, sql = %preview(s));
-            if let Err(e) = sqlx::query(s).execute(&mut *tx).await {
-                error!(target = "arklowdun", event = "migration_stmt_error", file = %filename, sql = %preview(s), error = %e);
-                return Err(e.into());
-            }
+          for stmt in cleaned.split(';') {
+              let s = stmt.trim();
+              if s.is_empty() {
+                  continue;
+              }
+              let upper = s.to_ascii_uppercase();
+              if upper == "BEGIN" || upper == "COMMIT" {
+                  continue;
+              }
+              if upper.starts_with("ALTER TABLE EVENTS RENAME COLUMN STARTS_AT TO START_AT") {
+                  let exists: Option<i64> = sqlx::query_scalar(
+                      "SELECT 1 FROM pragma_table_info('events') WHERE name = 'starts_at'",
+                  )
+                  .fetch_optional(&mut *tx)
+                  .await?;
+                  if exists.is_none() {
+                      info!(target = "arklowdun", event = "migration_stmt_skip", file = %filename, sql = %preview(s));
+                      continue;
+                  }
+              }
+              if let Some(caps) = add_col_re.captures(s) {
+                  let table = caps.get(1).unwrap().as_str();
+                  let col = caps.get(2).unwrap().as_str();
+                  let exists: Option<i64> = sqlx::query_scalar(&format!(
+                      "SELECT 1 FROM pragma_table_info('{}') WHERE name='{}'",
+                      table, col
+                  ))
+                  .fetch_optional(&mut *tx)
+                  .await?;
+                  if exists.is_some() {
+                      info!(target = "arklowdun", event = "migration_stmt_skip", file = %filename, sql = %preview(s));
+                      continue;
+                  }
+              }
+              info!(target = "arklowdun", event = "migration_stmt", file = %filename, sql = %preview(s));
+              if let Err(e) = sqlx::query(s).execute(&mut *tx).await {
+                  error!(target = "arklowdun", event = "migration_stmt_error", file = %filename, sql = %preview(s), error = %e);
+                  return Err(e.into());
+              }
         }
 
         sqlx::query("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)")
@@ -149,32 +165,28 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     }
 
     // Backfill next_* from legacy columns if present
-    if sqlx::query_scalar::<_, i64>(
-        "SELECT 1 FROM pragma_table_info('vehicles') WHERE name='mot_date'",
-    )
-    .fetch_optional(pool)
-    .await?
-    .is_some()
-    {
-        sqlx::query(
-            "UPDATE vehicles SET next_mot_due = mot_date WHERE next_mot_due IS NULL AND mot_date IS NOT NULL",
-        )
-        .execute(pool)
-        .await?;
-    }
-    if sqlx::query_scalar::<_, i64>(
-        "SELECT 1 FROM pragma_table_info('vehicles') WHERE name='service_date'",
-    )
-    .fetch_optional(pool)
-    .await?
-    .is_some()
-    {
-        sqlx::query(
-            "UPDATE vehicles SET next_service_due = service_date WHERE next_service_due IS NULL AND service_date IS NOT NULL",
-        )
-        .execute(pool)
-        .await?;
-    }
+      if sqlx::query_scalar::<_, i64>(
+          "SELECT 1 FROM pragma_table_info('vehicles') WHERE name='mot_date'",
+      )
+      .fetch_optional(pool)
+      .await?
+      .is_some()
+      {
+          let sql = "UPDATE vehicles SET next_mot_due = mot_date WHERE next_mot_due IS NULL AND mot_date IS NOT NULL";
+          info!(target = "arklowdun", event = "migration_stmt", sql = %preview(sql));
+          sqlx::query(sql).execute(pool).await?;
+      }
+      if sqlx::query_scalar::<_, i64>(
+          "SELECT 1 FROM pragma_table_info('vehicles') WHERE name='service_date'",
+      )
+      .fetch_optional(pool)
+      .await?
+      .is_some()
+      {
+          let sql = "UPDATE vehicles SET next_service_due = service_date WHERE next_service_due IS NULL AND service_date IS NOT NULL";
+          info!(target = "arklowdun", event = "migration_stmt", sql = %preview(sql));
+          sqlx::query(sql).execute(pool).await?;
+      }
 
     // Guarded schema compatibility shims (idempotent)
     sqlx::query(
