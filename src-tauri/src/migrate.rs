@@ -4,35 +4,8 @@ use std::collections::HashSet;
 use crate::time::now_ms;
 use tracing::{error, info};
 
-async fn column_exists(pool: &SqlitePool, table: &str, column: &str) -> sqlx::Result<bool> {
-    let (count,): (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?",
-    )
-    .bind(table)
-    .bind(column)
-    .fetch_one(pool)
-    .await?;
-    Ok(count > 0)
-}
-
-async fn ensure_column(
-    pool: &SqlitePool,
-    table: &str,
-    column: &str,
-    col_def_sql: &str,
-) -> sqlx::Result<()> {
-    if column_exists(pool, table, column).await? {
-        info!(target = "arklowdun", event = "migration_skip_column", table = %table, column = %column);
-        return Ok(());
-    }
-    let sql = format!("ALTER TABLE {table} ADD COLUMN {col_def_sql}");
-    info!(target = "arklowdun", event = "migration_add_column", table = %table, column = %column, sql = %sql);
-    sqlx::query(&sql).execute(pool).await?;
-    Ok(())
-}
-
 fn preview(sql: &str) -> String {
-    let one_line = sql.replace('\n', " ").replace('\t', " ");
+    let one_line = sql.replace(['\n', '\t'], " ");
     let trimmed = one_line.trim();
     if trimmed.len() > 160 {
         format!("{}…", &trimmed[..160])
@@ -82,6 +55,22 @@ static MIGRATIONS: &[(&str, &str)] = &[
         "202509021410_notes_z_index.sql",
         include_str!("../../migrations/202509021410_notes_z_index.sql"),
     ),
+    (
+        "202509021500_events_start_idx.sql",
+        include_str!("../../migrations/202509021500_events_start_idx.sql"),
+    ),
+    (
+        "202509031550_household_add_tz.sql",
+        include_str!("../../migrations/202509031550_household_add_tz.sql"),
+    ),
+    (
+        "202509031600_events_add_tz_and_utc.sql",
+        include_str!("../../migrations/202509031600_events_add_tz_and_utc.sql"),
+    ),
+    (
+        "202509031700_events_start_at_utc_index.sql",
+        include_str!("../../migrations/202509031700_events_start_at_utc_index.sql"),
+    ),
     // removed: legacy events backfill is handled in code now
 ];
 
@@ -93,30 +82,6 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
          )",
     )
     .await?;
-
-    // Guarded schema compatibility shims (idempotent)
-    ensure_column(pool, "events", "start_at", "start_at INTEGER").await?;
-    ensure_column(pool, "events", "end_at", "end_at   INTEGER").await?;
-    sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_events_household_start_end ON events(household_id, start_at, end_at)",
-    )
-    .execute(pool)
-    .await?;
-
-    // -------- Backfill start_at/end_at from legacy columns if they exist --------
-    if column_exists(pool, "events", "starts_at").await? {
-        tracing::info!(target = "arklowdun", event = "backfill_events_start_at");
-        sqlx::query("UPDATE events SET start_at = starts_at WHERE start_at IS NULL")
-            .execute(pool)
-            .await?;
-    }
-    if column_exists(pool, "events", "ends_at").await? {
-        tracing::info!(target = "arklowdun", event = "backfill_events_end_at");
-        sqlx::query("UPDATE events SET end_at = ends_at WHERE end_at IS NULL")
-            .execute(pool)
-            .await?;
-    }
-    // ---------------------------------------------------------------------------
 
     let rows = sqlx::query("SELECT version FROM schema_migrations")
         .fetch_all(pool)
@@ -151,6 +116,17 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             if upper == "BEGIN" || upper == "COMMIT" {
                 continue;
             }
+            if upper.starts_with("ALTER TABLE EVENTS RENAME COLUMN STARTS_AT TO START_AT") {
+                let exists: Option<i64> = sqlx::query_scalar(
+                    "SELECT 1 FROM pragma_table_info('events') WHERE name = 'starts_at'",
+                )
+                .fetch_optional(&mut *tx)
+                .await?;
+                if exists.is_none() {
+                    info!(target = "arklowdun", event = "migration_stmt_skip", file = %filename, sql = %preview(s));
+                    continue;
+                }
+            }
             info!(target = "arklowdun", event = "migration_stmt", file = %filename, sql = %preview(s));
             if let Err(e) = sqlx::query(s).execute(&mut *tx).await {
                 error!(target = "arklowdun", event = "migration_stmt_error", file = %filename, sql = %preview(s), error = %e);
@@ -167,6 +143,13 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
         tx.commit().await?;
         info!(target = "arklowdun", event = "migration_file_applied", file = %filename);
     }
+
+    // Guarded schema compatibility shims (idempotent)
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_events_household_start_end ON events(household_id, start_at, end_at)",
+    )
+    .execute(pool)
+    .await?;
 
     Ok(())
 }

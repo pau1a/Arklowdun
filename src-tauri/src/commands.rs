@@ -247,12 +247,12 @@ pub async fn events_list_range_command(
         .map_err(|e| DbErrorPayload { code: "Unknown".into(), message: e.to_string() })?;
     let rows = sqlx::query_as::<_, Event>(
         r#"
-        SELECT id, household_id, title, start_at, end_at, reminder, created_at, updated_at, deleted_at
+        SELECT id, household_id, title, start_at, end_at, tz, start_at_utc, end_at_utc, reminder, created_at, updated_at, deleted_at
         FROM events
         WHERE household_id = ? AND deleted_at IS NULL
-          AND end_at   >= ?
-          AND start_at <= ?
-        ORDER BY start_at, id
+          AND COALESCE(end_at_utc, end_at, start_at) >= ?
+          AND COALESCE(start_at_utc, start_at) <= ?
+        ORDER BY COALESCE(start_at_utc, start_at), id
         "#,
     )
     .bind(hh)

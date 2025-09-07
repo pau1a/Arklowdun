@@ -45,6 +45,8 @@ const TIMESTAMP_FIELDS = new Set([
   "service_reminder",
   "start_at",
   "end_at",
+  "start_at_utc",
+  "end_at_utc",
   "reminder",
   "date",
   "birthday",

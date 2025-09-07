@@ -4,7 +4,7 @@ import {
   requestPermission,
   sendNotification,
 } from "./notification";
-import { nowMs, toDate } from "./db/time";
+import { nowMs } from "./db/time";
 import { defaultHouseholdId } from "./db/household";
 import type { Event } from "./models";
 
@@ -28,7 +28,7 @@ async function saveEvent(
 
 function renderMonth(root: HTMLElement, events: Event[]) {
   root.innerHTML = "";
-  const now = toDate(nowMs());
+  const now = new Date(nowMs());
   const year = now.getFullYear();
   const month = now.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
@@ -75,11 +75,13 @@ function renderMonth(root: HTMLElement, events: Event[]) {
     }
     cell.appendChild(dateDiv);
     const dayEvents = events.filter((e) => {
-      const a = toDate(e.start_at);
+      const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: e.tz || Intl.DateTimeFormat().resolvedOptions().timeZone });
+      const parts = fmt.format(new Date(e.start_at_utc ?? e.start_at));
+      const [y, m, d] = parts.split("-").map(Number);
       return (
-        a.getFullYear() === cellDate.getFullYear() &&
-        a.getMonth() === cellDate.getMonth() &&
-        a.getDate() === cellDate.getDate()
+        y === cellDate.getFullYear() &&
+        m - 1 === cellDate.getMonth() &&
+        d === cellDate.getDate()
       );
     });
     dayEvents.forEach((ev) => {
@@ -106,7 +108,14 @@ async function scheduleNotifications(events: Event[]) {
       setTimeout(() => {
         sendNotification({
           title: ev.title,
-      body: toDate(ev.start_at).toLocaleString(),
+      body: new Intl.DateTimeFormat(undefined, {
+        timeZone: ev.tz || Intl.DateTimeFormat().resolvedOptions().timeZone,
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(new Date(ev.start_at_utc ?? ev.start_at)),
         });
       }, ev.reminder - now);
     }
@@ -148,11 +157,16 @@ export async function CalendarView(container: HTMLElement) {
     e.preventDefault();
     if (!titleInput || !dateInput) return;
     const dt = new Date(dateInput.value);
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const ms = dt.getTime();
     const ev = await saveEvent({
       title: titleInput.value,
-      start_at: dt.getTime(),
-      end_at: dt.getTime(),
-      reminder: dt.getTime(),
+      start_at: ms,
+      end_at: ms,
+      start_at_utc: ms,
+      end_at_utc: ms,
+      tz,
+      reminder: ms,
     });
     events.push(ev);
     if (calendarEl) renderMonth(calendarEl, events);
