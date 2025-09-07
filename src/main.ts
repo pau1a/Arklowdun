@@ -4,6 +4,7 @@ import "@fortawesome/fontawesome-free/css/all.min.css";
 import "./debug";
 import "./theme.scss";
 import "./styles.scss";
+import "./ui/errors";
 import { CalendarView } from "./CalendarView";
 import { FilesView } from "./FilesView";
 import { ShoppingListView } from "./ShoppingListView";

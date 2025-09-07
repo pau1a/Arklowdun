@@ -199,8 +199,7 @@ async fn vehicles_list(
     household_id: String,
 ) -> Result<Vec<Vehicle>, DbErrorPayload> {
     sqlx::query_as::<_, Vehicle>(
-        "SELECT id, household_id, name, make, model, reg, vin, next_mot_due, next_service_due, created_at, updated_at, deleted_at, position \
-         FROM vehicles WHERE household_id = ? AND deleted_at IS NULL ORDER BY position, created_at, id",
+        "SELECT id, household_id, name, make, model, reg, vin,\n         COALESCE(next_mot_due, mot_date)         AS next_mot_due,\n         COALESCE(next_service_due, service_date) AS next_service_due,\n         created_at, updated_at, deleted_at, position\n    FROM vehicles\n   WHERE household_id = ? AND deleted_at IS NULL\n   ORDER BY position, created_at, id",
     )
     .bind(household_id)
     .fetch_all(&state.pool)

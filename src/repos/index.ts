@@ -3,7 +3,6 @@ import type {
   Bill,
   Policy,
   PropertyDocument,
-  Vehicle,
   Pet,
   FamilyMember,
   InventoryItem,
@@ -19,7 +18,6 @@ export const propertyDocumentsRepo = createCrudRepo<
   NewRow<PropertyDocument>,
   PatchRow<PropertyDocument>
 >("property_documents");
-export const vehiclesRepo = createCrudRepo<Vehicle, NewRow<Vehicle>, PatchRow<Vehicle>>("vehicles");
 export const petsRepo = createCrudRepo<Pet, NewRow<Pet>, PatchRow<Pet>>("pets");
 export const familyMembersRepo = createCrudRepo<
   FamilyMember,
