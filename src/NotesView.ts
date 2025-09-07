@@ -1,5 +1,5 @@
 // src/NotesView.ts
-import Database from "@tauri-apps/plugin-sql";
+import { openDb } from "./db/open";
 import { newUuidV7 } from "./db/id";
 import { defaultHouseholdId } from "./db/household";
 
@@ -26,12 +26,6 @@ const NOTE_PALETTE: Record<string, { base: string; text: string }> = {
   "#EADCF9": { base: "#EADCF9", text: "#1f2937" },
   "#F6EBDC": { base: "#F6EBDC", text: "#1f2937" },
 };
-
-async function openDb() {
-  // Uses the same DB the rest of the app uses (tauri config maps this to your app.sqlite)
-  // Do NOT put an absolute path here.
-  return await Database.load("sqlite:app.sqlite");
-}
 
 async function loadNotes(householdId: string): Promise<Note[]> {
   const db = await openDb();

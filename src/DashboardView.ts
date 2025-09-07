@@ -48,7 +48,7 @@ async function loadJson<T>(file: string): Promise<T[]> {
       }
       for (const k of [
         "due_date","renewal_date","warranty_expiry","purchase_date","date",
-        "mot_date","service_date","starts_at","reminder","mot_reminder",
+        "mot_date","service_date","start_at","end_at","reminder","mot_reminder",
         "service_reminder","birthday",
       ]) {
         if (k in i) {
@@ -143,8 +143,8 @@ export async function DashboardView(container: HTMLElement) {
   // Events (via eventsApi)
   {
     const events: Event[] = await eventsApi.listRange(hh, now, Number.MAX_SAFE_INTEGER);
-    const next = events.sort((a,b) => a.starts_at - b.starts_at)[0];
-    if (next) items.push({ date: next.starts_at, text: `${next.title} ${toDate(next.starts_at).toLocaleString()}` });
+    const next = events.sort((a,b) => a.start_at - b.start_at)[0];
+    if (next) items.push({ date: next.start_at, text: `${next.title} ${toDate(next.start_at).toLocaleString()}` });
   }
 
   // Render
