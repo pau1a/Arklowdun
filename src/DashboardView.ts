@@ -48,7 +48,7 @@ async function loadJson<T>(file: string): Promise<T[]> {
       }
       for (const k of [
         "due_date","renewal_date","warranty_expiry","purchase_date","date",
-        "mot_date","service_date","start_at","end_at","reminder","mot_reminder",
+        "mot_date","service_date","start_at","end_at","start_at_utc","end_at_utc","reminder","mot_reminder",
         "service_reminder","birthday",
       ]) {
         if (k in i) {
@@ -143,8 +143,18 @@ export async function DashboardView(container: HTMLElement) {
   // Events (via eventsApi)
   {
     const events: Event[] = await eventsApi.listRange(hh, now, Number.MAX_SAFE_INTEGER);
-    const next = events.sort((a,b) => a.start_at - b.start_at)[0];
-    if (next) items.push({ date: next.start_at, text: `${next.title} ${toDate(next.start_at).toLocaleString()}` });
+    const next = events.sort((a,b) => (a.start_at_utc ?? a.start_at) - (b.start_at_utc ?? b.start_at))[0];
+    if (next) {
+      const formatted = new Intl.DateTimeFormat(undefined, {
+        timeZone: next.tz || Intl.DateTimeFormat().resolvedOptions().timeZone,
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(new Date(next.start_at_utc ?? next.start_at));
+      items.push({ date: next.start_at_utc ?? next.start_at, text: `${next.title} ${formatted}` });
+    }
   }
 
   // Render

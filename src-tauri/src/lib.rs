@@ -16,8 +16,10 @@ mod migrate;
 mod repo;
 mod state;
 mod time;
+mod events_tz_backfill;
 
 use commands::DbErrorPayload;
+use events_tz_backfill::events_backfill_timezone;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
 pub fn init_logging() {
@@ -159,8 +161,18 @@ pub struct Event {
     pub title: String,
     #[ts(type = "number")]
     pub start_at: i64,
-    #[ts(type = "number")]
-    pub end_at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub end_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tz: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub start_at_utc: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub end_at_utc: Option<i64>,
     #[ts(optional, type = "number")]
     pub reminder: Option<i64>,
     #[serde(default)]
@@ -236,6 +248,7 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .setup(|app| {
             let handle = app.handle();
+            #[allow(clippy::needless_borrow)]
             let pool = tauri::async_runtime::block_on(crate::db::open_sqlite_pool(&handle))?;
             tauri::async_runtime::block_on(crate::migrate::apply_migrations(&pool))?;
             tauri::async_runtime::block_on(async {
@@ -257,6 +270,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            events_backfill_timezone,
             events_list_range,
             event_create,
             event_update,

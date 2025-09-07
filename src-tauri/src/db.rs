@@ -87,7 +87,7 @@ async fn log_effective_pragmas(pool: &Pool<Sqlite>) {
         busy_timeout_ms = %busy.0
     );
 
-    if jm.0.to_ascii_lowercase() != "wal" {
+    if !jm.0.eq_ignore_ascii_case("wal") {
         warn!(
             target = "arklowdun",
             event = "db_open_warning",
