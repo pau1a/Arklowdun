@@ -72,12 +72,17 @@ timestamp which is `NULL` when the record is active.
 
 ## vehicles
 - `id` `TEXT`
+- `household_id` `TEXT`
 - `name` `TEXT`
-- `mot_date` `INTEGER`
-- `service_date` `INTEGER`
+- `make` `TEXT?`
+- `model` `TEXT?`
+- `reg` `TEXT?`
+- `vin` `TEXT?`
+- `next_mot_due` `INTEGER?`
+- `next_service_due` `INTEGER?`
 - `mot_reminder` `INTEGER?`
 - `service_reminder` `INTEGER?`
-- `household_id` `TEXT`
+- `position` `INTEGER`
 - `created_at` `INTEGER`
 - `updated_at` `INTEGER`
 - `deleted_at` `INTEGER?`

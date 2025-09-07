@@ -140,7 +140,6 @@ gen_domain_cmds!(
     policies,
     property_documents,
     inventory_items,
-    vehicles,
     vehicle_maintenance,
     pets,
     pet_medical,
@@ -150,6 +149,65 @@ gen_domain_cmds!(
     notes,
     shopping_items,
 );
+
+#[derive(Serialize, Deserialize, Clone, TS, sqlx::FromRow)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct Vehicle {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub household_id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub make: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub vin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub next_mot_due: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub next_service_due: Option<i64>,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub created_at: i64,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub updated_at: i64,
+    #[serde(alias = "deletedAt")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub deleted_at: Option<i64>,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub position: i64,
+}
+
+#[tauri::command]
+async fn vehicles_list(
+    state: State<'_, AppState>,
+    household_id: String,
+) -> Result<Vec<Vehicle>, DbErrorPayload> {
+    sqlx::query_as::<_, Vehicle>(
+        "SELECT id, household_id, name, make, model, reg, vin, next_mot_due, next_service_due, created_at, updated_at, deleted_at, position \
+         FROM vehicles WHERE household_id = ? AND deleted_at IS NULL ORDER BY position, created_at, id",
+    )
+    .bind(household_id)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|e| DbErrorPayload {
+        code: "Unknown".into(),
+        message: e.to_string(),
+    })
+}
 
 #[derive(Serialize, Deserialize, Clone, TS, sqlx::FromRow)]
 #[ts(export, export_to = "../../src/bindings/")]
@@ -308,11 +366,6 @@ pub fn run() {
             inventory_items_delete,
             inventory_items_restore,
             vehicles_list,
-            vehicles_get,
-            vehicles_create,
-            vehicles_update,
-            vehicles_delete,
-            vehicles_restore,
             vehicle_maintenance_list,
             vehicle_maintenance_get,
             vehicle_maintenance_create,

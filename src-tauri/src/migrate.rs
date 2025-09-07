@@ -71,6 +71,10 @@ static MIGRATIONS: &[(&str, &str)] = &[
         "202509031700_events_start_at_utc_index.sql",
         include_str!("../../migrations/202509031700_events_start_at_utc_index.sql"),
     ),
+    (
+        "202509041200_vehicles_rework.sql",
+        include_str!("../../migrations/202509041200_vehicles_rework.sql"),
+    ),
     // removed: legacy events backfill is handled in code now
 ];
 
@@ -144,6 +148,34 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
         info!(target = "arklowdun", event = "migration_file_applied", file = %filename);
     }
 
+    // Backfill next_* from legacy columns if present
+    if sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM pragma_table_info('vehicles') WHERE name='mot_date'",
+    )
+    .fetch_optional(pool)
+    .await?
+    .is_some()
+    {
+        sqlx::query(
+            "UPDATE vehicles SET next_mot_due = mot_date WHERE next_mot_due IS NULL AND mot_date IS NOT NULL",
+        )
+        .execute(pool)
+        .await?;
+    }
+    if sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM pragma_table_info('vehicles') WHERE name='service_date'",
+    )
+    .fetch_optional(pool)
+    .await?
+    .is_some()
+    {
+        sqlx::query(
+            "UPDATE vehicles SET next_service_due = service_date WHERE next_service_due IS NULL AND service_date IS NOT NULL",
+        )
+        .execute(pool)
+        .await?;
+    }
+
     // Guarded schema compatibility shims (idempotent)
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_events_household_start_end ON events(household_id, start_at, end_at)",
@@ -153,4 +185,3 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
 
     Ok(())
 }
-

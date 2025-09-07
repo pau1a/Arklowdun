@@ -92,12 +92,12 @@ Prevent cross-zone time drift by storing explicit timezone (`tz`, IANA) and UTC 
 
 ## PR-02 — Vehicles: JSON → SQLite
 
-**Objective**  
+**Objective**
 Eliminate `vehicles.json` from `DashboardView.ts`; serve from DB via typed repo.
 
 **Schema / Migration**
-- [ ] Add columns (if missing): `make TEXT`, `model TEXT`, `reg TEXT`
-- [ ] Index already present: `(household_id, updated_at)`
+- [ ] Add columns (if missing): `make TEXT`, `model TEXT`, `reg TEXT`, `vin TEXT`, `next_mot_due INTEGER`, `next_service_due INTEGER`
+- [ ] Create index `idx_vehicles_household_updated` on `(household_id, updated_at)`
 
 **Backend**
 - [ ] Tauri command: `list_vehicles(household_id)` returns typed rows
@@ -114,7 +114,8 @@ Eliminate `vehicles.json` from `DashboardView.ts`; serve from DB via typed repo.
 - [ ] Dashboard renders vehicles from DB
 
 **Notes**
-- Add `make/model/reg` now to avoid near-term schema churn.
+- Add `make/model/reg/vin` now to avoid near-term schema churn.
+- JSON path `vehicles.json` retired.
 
 ---
 
