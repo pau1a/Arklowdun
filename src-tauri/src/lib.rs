@@ -140,6 +140,7 @@ gen_domain_cmds!(
     policies,
     property_documents,
     inventory_items,
+    // vehicles is handled below (typed list + explicit CRUD wrappers)
     vehicle_maintenance,
     pets,
     pet_medical,
@@ -191,6 +192,7 @@ pub struct Vehicle {
     pub position: i64,
 }
 
+// Typed list for Dashboard (rich fields)
 #[tauri::command]
 async fn vehicles_list(
     state: State<'_, AppState>,
@@ -207,6 +209,52 @@ async fn vehicles_list(
         code: "Unknown".into(),
         message: e.to_string(),
     })
+}
+
+// Generic CRUD wrappers so legacy UI continues to work
+#[tauri::command]
+async fn vehicles_get(
+    state: State<'_, AppState>,
+    household_id: Option<String>,
+    id: String,
+) -> Result<Option<serde_json::Value>, DbErrorPayload> {
+    commands::get_command(&state.pool, "vehicles", household_id.as_deref(), &id).await
+}
+
+#[tauri::command]
+async fn vehicles_create(
+    state: State<'_, AppState>,
+    data: serde_json::Map<String, serde_json::Value>,
+) -> Result<serde_json::Value, DbErrorPayload> {
+    commands::create_command(&state.pool, "vehicles", data).await
+}
+
+#[tauri::command]
+async fn vehicles_update(
+    state: State<'_, AppState>,
+    id: String,
+    data: serde_json::Map<String, serde_json::Value>,
+    household_id: Option<String>,
+) -> Result<(), DbErrorPayload> {
+    commands::update_command(&state.pool, "vehicles", &id, data, household_id.as_deref()).await
+}
+
+#[tauri::command]
+async fn vehicles_delete(
+    state: State<'_, AppState>,
+    household_id: String,
+    id: String,
+) -> Result<(), DbErrorPayload> {
+    commands::delete_command(&state.pool, "vehicles", &household_id, &id).await
+}
+
+#[tauri::command]
+async fn vehicles_restore(
+    state: State<'_, AppState>,
+    household_id: String,
+    id: String,
+) -> Result<(), DbErrorPayload> {
+    commands::restore_command(&state.pool, "vehicles", &household_id, &id).await
 }
 
 #[derive(Serialize, Deserialize, Clone, TS, sqlx::FromRow)]
@@ -365,7 +413,14 @@ pub fn run() {
             inventory_items_update,
             inventory_items_delete,
             inventory_items_restore,
-            vehicles_list,
+            // Vehicles
+            vehicles_list,      // typed list for Dashboard
+            vehicles_get,       // generic CRUD for Manage UI
+            vehicles_create,
+            vehicles_update,
+            vehicles_delete,
+            vehicles_restore,
+            // Vehicle maintenance (generic)
             vehicle_maintenance_list,
             vehicle_maintenance_get,
             vehicle_maintenance_create,
