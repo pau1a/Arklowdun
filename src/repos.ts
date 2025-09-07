@@ -78,7 +78,6 @@ function domainRepo<T extends object>(table: string, defaultOrderBy: string) {
 export const billsRepo            = domainRepo<Bill>("bills", "position, created_at, id");
 export const policiesRepo         = domainRepo<Policy>("policies", "position, created_at, id");
 export const propertyDocsRepo     = domainRepo<PropertyDocument>("property_documents", "position, created_at, id");
-export const vehiclesRepo         = domainRepo<Vehicle>("vehicles", "position, created_at, id");
 export const petsRepo             = domainRepo<Pet>("pets", "position, created_at, id");
 export const petMedicalRepo       = domainRepo<PetMedicalRecord>("pet_medical", "date DESC, created_at DESC, id");
 export const familyRepo           = domainRepo<FamilyMember>("family_members", "position, created_at, id");

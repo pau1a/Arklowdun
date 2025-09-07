@@ -140,7 +140,7 @@ gen_domain_cmds!(
     policies,
     property_documents,
     inventory_items,
-    vehicles,
+    // vehicles is handled below (typed list + explicit CRUD wrappers)
     vehicle_maintenance,
     pets,
     pet_medical,
@@ -150,6 +150,111 @@ gen_domain_cmds!(
     notes,
     shopping_items,
 );
+
+#[derive(Serialize, Deserialize, Clone, TS, sqlx::FromRow)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct Vehicle {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub household_id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub make: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub vin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub next_mot_due: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub next_service_due: Option<i64>,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub created_at: i64,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub updated_at: i64,
+    #[serde(alias = "deletedAt")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub deleted_at: Option<i64>,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub position: i64,
+}
+
+// Typed list for Dashboard (rich fields)
+#[tauri::command]
+async fn vehicles_list(
+    state: State<'_, AppState>,
+    household_id: String,
+) -> Result<Vec<Vehicle>, DbErrorPayload> {
+    sqlx::query_as::<_, Vehicle>(
+        "SELECT id, household_id, name, make, model, reg, vin,\n         COALESCE(next_mot_due, mot_date)         AS next_mot_due,\n         COALESCE(next_service_due, service_date) AS next_service_due,\n         created_at, updated_at, deleted_at, position\n    FROM vehicles\n   WHERE household_id = ? AND deleted_at IS NULL\n   ORDER BY position, created_at, id",
+    )
+    .bind(household_id)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|e| DbErrorPayload {
+        code: "Unknown".into(),
+        message: e.to_string(),
+    })
+}
+
+// Generic CRUD wrappers so legacy UI continues to work
+#[tauri::command]
+async fn vehicles_get(
+    state: State<'_, AppState>,
+    household_id: Option<String>,
+    id: String,
+) -> Result<Option<serde_json::Value>, DbErrorPayload> {
+    commands::get_command(&state.pool, "vehicles", household_id.as_deref(), &id).await
+}
+
+#[tauri::command]
+async fn vehicles_create(
+    state: State<'_, AppState>,
+    data: serde_json::Map<String, serde_json::Value>,
+) -> Result<serde_json::Value, DbErrorPayload> {
+    commands::create_command(&state.pool, "vehicles", data).await
+}
+
+#[tauri::command]
+async fn vehicles_update(
+    state: State<'_, AppState>,
+    id: String,
+    data: serde_json::Map<String, serde_json::Value>,
+    household_id: Option<String>,
+) -> Result<(), DbErrorPayload> {
+    commands::update_command(&state.pool, "vehicles", &id, data, household_id.as_deref()).await
+}
+
+#[tauri::command]
+async fn vehicles_delete(
+    state: State<'_, AppState>,
+    household_id: String,
+    id: String,
+) -> Result<(), DbErrorPayload> {
+    commands::delete_command(&state.pool, "vehicles", &household_id, &id).await
+}
+
+#[tauri::command]
+async fn vehicles_restore(
+    state: State<'_, AppState>,
+    household_id: String,
+    id: String,
+) -> Result<(), DbErrorPayload> {
+    commands::restore_command(&state.pool, "vehicles", &household_id, &id).await
+}
 
 #[derive(Serialize, Deserialize, Clone, TS, sqlx::FromRow)]
 #[ts(export, export_to = "../../src/bindings/")]
@@ -307,12 +412,14 @@ pub fn run() {
             inventory_items_update,
             inventory_items_delete,
             inventory_items_restore,
-            vehicles_list,
-            vehicles_get,
+            // Vehicles
+            vehicles_list,      // typed list for Dashboard
+            vehicles_get,       // generic CRUD for Manage UI
             vehicles_create,
             vehicles_update,
             vehicles_delete,
             vehicles_restore,
+            // Vehicle maintenance (generic)
             vehicle_maintenance_list,
             vehicle_maintenance_get,
             vehicle_maintenance_create,
