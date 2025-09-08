@@ -18,6 +18,7 @@ mod repo;
 mod state;
 mod time;
 mod importer;
+mod attachments;
 
 use commands::{DbErrorPayload, map_db_error};
 use events_tz_backfill::events_backfill_timezone;
@@ -403,6 +404,30 @@ async fn import_run_legacy(
         .map_err(map_db_error)
 }
 
+#[tauri::command]
+async fn attachment_open(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+    table: String,
+    id: String,
+) -> Result<(), crate::commands::DbErrorPayload> {
+    let (root_key, rel) = attachments::load_attachment_columns(&state.pool, &table, &id).await?;
+    let path = attachments::resolve_attachment_path(&app, &root_key, &rel)?;
+    attachments::open_with_os(&path)
+}
+
+#[tauri::command]
+async fn attachment_reveal(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+    table: String,
+    id: String,
+) -> Result<(), crate::commands::DbErrorPayload> {
+    let (root_key, rel) = attachments::load_attachment_columns(&state.pool, &table, &id).await?;
+    let path = attachments::resolve_attachment_path(&app, &root_key, &rel)?;
+    attachments::reveal_with_os(&path)
+}
+
 macro_rules! app_commands {
     ($($extra:ident),* $(,)?) => {
         tauri::generate_handler![
@@ -498,6 +523,8 @@ macro_rules! app_commands {
             shopping_items_update,
             shopping_items_delete,
             shopping_items_restore,
+            attachment_open,
+            attachment_reveal,
             $($extra),*
         ]
     };

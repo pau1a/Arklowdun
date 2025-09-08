@@ -1,14 +1,13 @@
 // src/PropertyView.ts
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { openPath } from "@tauri-apps/plugin-opener";
-import { resolvePath, sanitizeRelativePath } from "./files/path";
+import { sanitizeRelativePath } from "./files/path";
 import { isPermissionGranted, requestPermission, sendNotification } from "./notification";
 import type { PropertyDocument } from "./models";
 import { propertyDocsRepo } from "./repos";
 import { defaultHouseholdId } from "./db/household";
 import { nowMs, toDate } from "./db/time";
-import { showError } from "./ui/errors";
 import { STR } from "./ui/strings";
+import { openAttachment, revealAttachment, revealLabel } from "./ui/attachments";
 
 const MAX_TIMEOUT = 2_147_483_647; // ~24.8 days
 function scheduleAt(ts: number, cb: () => void) {
@@ -41,16 +40,19 @@ async function renderDocs(listEl: HTMLUListElement, docs: PropertyDocument[]) {
     const li = document.createElement("li");
     li.textContent = `${d.description} — renews ${toDate(d.renewal_date).toLocaleDateString()} `;
     if (d.relative_path) {
-      const btn = document.createElement("button");
-      btn.textContent = "Open document";
-      btn.addEventListener("click", async () => {
-        try {
-          await openPath(await resolvePath(d.root_key, d.relative_path));
-        } catch {
-          showError(`File location unavailable (root: ${d.root_key})`);
-        }
-      });
-      li.appendChild(btn);
+      const openBtn = document.createElement("button");
+      openBtn.textContent = "Open";
+      openBtn.addEventListener("click", () =>
+        openAttachment("property_documents", String(d.id)),
+      );
+      li.appendChild(openBtn);
+
+      const revealBtn = document.createElement("button");
+      revealBtn.textContent = revealLabel();
+      revealBtn.addEventListener("click", () =>
+        revealAttachment("property_documents", String(d.id), d.root_key, d.relative_path!),
+      );
+      li.appendChild(revealBtn);
     }
     listEl.appendChild(li);
   });
