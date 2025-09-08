@@ -2,6 +2,7 @@
 import { openDb } from "./db/open";
 import { newUuidV7 } from "./db/id";
 import { defaultHouseholdId } from "./db/household";
+import { showError } from "./ui/errors";
 
 type Note = {
   id: string;
@@ -197,7 +198,7 @@ export async function NotesView(container: HTMLElement) {
             notes = notes.filter((n) => n.id !== note.id);
             render();
           } catch (err: any) {
-            alert(`Failed to delete note:\n${err?.message ?? String(err)}`);
+            showError(err);
           }
         });
         el.appendChild(del);
@@ -212,7 +213,7 @@ export async function NotesView(container: HTMLElement) {
             await updateNote(householdId, note.id, { z: note.z });
             render();
           } catch (err: any) {
-            alert(`Failed to bring note to front:\n${err?.message ?? String(err)}`);
+            showError(err);
           }
         });
         el.appendChild(bring);
@@ -272,7 +273,7 @@ export async function NotesView(container: HTMLElement) {
       form.reset();
       colorInput.value = "#FFF4B8";
     } catch (err: any) {
-      alert(`Failed to add note:\n${err?.message ?? String(err)}`);
+      showError(err);
     }
   });
 }

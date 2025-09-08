@@ -9,6 +9,7 @@ import type { Bill } from "./models";
 import { nowMs, toDate } from "./db/time";
 import { defaultHouseholdId } from "./db/household";
 import { billsRepo } from "./repos";
+import { showError } from "./ui/errors";
 
 const money = new Intl.NumberFormat(undefined, {
   style: "currency",
@@ -34,7 +35,7 @@ function renderBills(listEl: HTMLUListElement, bills: Bill[]) {
       try {
         await openPath(await resolvePath(b.root_key, b.relative_path));
       } catch {
-        alert(`File location unavailable (root: ${b.root_key})`);
+        showError(`File location unavailable (root: ${b.root_key})`);
       }
     });
     li.appendChild(btn);

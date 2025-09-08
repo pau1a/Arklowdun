@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "./db/call";
 import {
   isPermissionGranted,
   requestPermission,
@@ -10,7 +10,7 @@ import type { Event } from "./models";
 
 async function fetchEvents(): Promise<Event[]> {
   const hh = await defaultHouseholdId();
-  return await invoke<Event[]>("events_list_range", {
+  return await call<Event[]>("events_list_range", {
     householdId: hh,
     start: 0,
     end: Number.MAX_SAFE_INTEGER,
@@ -21,7 +21,7 @@ async function saveEvent(
   event: Omit<Event, "id" | "created_at" | "updated_at" | "household_id" | "deleted_at">,
 ): Promise<Event> {
   const hh = await defaultHouseholdId();
-  return await invoke<Event>("event_create", {
+  return await call<Event>("event_create", {
     data: { ...event, household_id: hh },
   });
 }

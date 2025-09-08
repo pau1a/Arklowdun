@@ -1,12 +1,10 @@
 // src/repos.ts
-// Use our debug invoke so failures show args + stack.
-import { invoke } from "./debug";
+import { call } from "./db/call";
 
 import type {
   Bill,
   Policy,
   PropertyDocument,
-  Vehicle,
   Pet,
   PetMedicalRecord,
   FamilyMember,
@@ -34,7 +32,7 @@ function domainRepo<T extends object>(table: string, defaultOrderBy: string) {
           'Do not use domainRepo("events"). Use eventsApi.listRange(...) (events_list_range) instead.'
         );
       }
-      return await invoke<T[]>(`${table}_list`, {
+      return await call<T[]>(`${table}_list`, {
         householdId: opts.householdId,
         orderBy: opts.orderBy ?? defaultOrderBy,
         limit: opts.limit,
@@ -46,7 +44,7 @@ function domainRepo<T extends object>(table: string, defaultOrderBy: string) {
       if (table === "events") {
         throw new Error('Do not use domainRepo("events"). Use eventsApi.* helpers.');
       }
-      return await invoke<T>(`${table}_create`, {
+      return await call<T>(`${table}_create`, {
         data: { ...data, household_id: householdId },
       });
     },
@@ -55,21 +53,21 @@ function domainRepo<T extends object>(table: string, defaultOrderBy: string) {
       if (table === "events") {
         throw new Error('Do not use domainRepo("events"). Use eventsApi.* helpers.');
       }
-      await invoke(`${table}_update`, { id, data, householdId });
+      await call(`${table}_update`, { id, data, householdId });
     },
 
     async delete(householdId: string, id: string): Promise<void> {
       if (table === "events") {
         throw new Error('Do not use domainRepo("events"). Use eventsApi.* helpers.');
       }
-      await invoke(`${table}_delete`, { householdId, id });
+      await call(`${table}_delete`, { householdId, id });
     },
 
     async restore(householdId: string, id: string): Promise<void> {
       if (table === "events") {
         throw new Error('Do not use domainRepo("events"). Use eventsApi.* helpers.');
       }
-      await invoke(`${table}_restore`, { householdId, id });
+      await call(`${table}_restore`, { householdId, id });
     },
   };
 }
@@ -92,18 +90,18 @@ export const expensesRepo         = domainRepo<Expense>("expenses", "date DESC, 
 // ---- Events: dedicated API (uses events_list_range and singular CRUD) ----
 export const eventsApi = {
   async listRange(householdId: string, start = 0, end = Number.MAX_SAFE_INTEGER): Promise<Event[]> {
-    return await invoke<Event[]>("events_list_range", { householdId, start, end });
+    return await call<Event[]>("events_list_range", { householdId, start, end });
   },
   async create(householdId: string, data: Partial<Event>): Promise<Event> {
-    return await invoke<Event>("event_create", { data: { ...data, household_id: householdId } });
+    return await call<Event>("event_create", { data: { ...data, household_id: householdId } });
   },
   async update(householdId: string, id: string, data: Partial<Event>): Promise<void> {
-    await invoke("event_update", { id, data, householdId });
+    await call("event_update", { id, data, householdId });
   },
   async delete(householdId: string, id: string): Promise<void> {
-    await invoke("event_delete", { householdId, id });
+    await call("event_delete", { householdId, id });
   },
   async restore(householdId: string, id: string): Promise<void> {
-    await invoke("event_restore", { householdId, id });
+    await call("event_restore", { householdId, id });
   },
 };

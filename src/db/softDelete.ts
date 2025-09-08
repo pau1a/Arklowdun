@@ -1,9 +1,9 @@
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "./call";
 
 export async function deleteHousehold(id: string): Promise<void> {
-  await invoke("household_delete", { householdId: id, id });
+  await call("household_delete", { householdId: id, id });
 }
 
 export async function restoreHousehold(id: string): Promise<void> {
-  await invoke("household_restore", { householdId: id, id });
+  await call("household_restore", { householdId: id, id });
 }

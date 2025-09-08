@@ -6,6 +6,7 @@ import type { InventoryItem } from "./models";
 import { defaultHouseholdId } from "./db/household";
 import { nowMs, toDate } from "./db/time";
 import { inventoryRepo } from "./repos";
+import { showError } from "./ui/errors";
 
 const MAX_TIMEOUT = 2_147_483_647; // ~24.8 days
 function scheduleAt(ts: number, cb: () => void) {
@@ -29,7 +30,7 @@ function renderInventory(listEl: HTMLUListElement, items: InventoryItem[]) {
         try {
           await openPath(await resolvePath(it.root_key, it.relative_path));
         } catch {
-          alert(`File location unavailable (root: ${it.root_key})`);
+          showError(`File location unavailable (root: ${it.root_key})`);
         }
       });
       li.appendChild(btn);

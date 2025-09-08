@@ -3,6 +3,7 @@ import { sanitizeRelativePath } from "./files/path";
 import type { Pet, PetMedicalRecord } from "./models";
 import { petMedicalRepo, petsRepo } from "./repos";
 import { defaultHouseholdId } from "./db/household";
+import { showError } from "./ui/errors";
 
 export async function PetDetailView(
   container: HTMLElement,
@@ -74,7 +75,7 @@ export async function PetDetailView(
           const { resolvePath } = await import("./files/path");
           await openPath(await resolvePath(m.root_key, m.relative_path));
         } catch {
-          alert("File location unavailable");
+          showError("File location unavailable");
         }
       });
     });
@@ -91,7 +92,7 @@ export async function PetDetailView(
           await render();
         } catch (err) {
           console.error("pet_medical delete failed:", err);
-          alert(`Could not delete medical record: ${String(err)}`);
+          showError(err);
         }
       });
     });
@@ -138,7 +139,7 @@ export async function PetDetailView(
         await render();
       } catch (err) {
         console.error("pet_medical create failed:", err);
-        alert(`Could not save medical record: ${String(err)}`);
+        showError(err);
       }
     });
   }
