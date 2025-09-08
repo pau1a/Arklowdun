@@ -7,6 +7,7 @@ import { defaultHouseholdId } from "./db/household";
 import { nowMs, toDate } from "./db/time";
 import { inventoryRepo } from "./repos";
 import { showError } from "./ui/errors";
+import { STR } from "./ui/strings";
 
 const MAX_TIMEOUT = 2_147_483_647; // ~24.8 days
 function scheduleAt(ts: number, cb: () => void) {
@@ -16,12 +17,32 @@ function scheduleAt(ts: number, cb: () => void) {
   setTimeout(() => scheduleAt(ts, cb), chunk);
 }
 
-function renderInventory(listEl: HTMLUListElement, items: InventoryItem[]) {
+async function renderInventory(listEl: HTMLUListElement, items: InventoryItem[]) {
   listEl.innerHTML = "";
+  if (items.length === 0) {
+    const li = document.createElement("li");
+    const { createEmptyState } = await import("./ui/emptyState");
+    li.appendChild(
+      createEmptyState({
+        title: STR.empty.inventoryTitle,
+        description: STR.empty.inventoryDesc,
+        actionLabel: "Add item",
+        onAction: () =>
+          document
+            .querySelector<HTMLAnchorElement>("#nav-inventory")
+            ?.click(),
+        icon: "📦",
+      }),
+    );
+    listEl.appendChild(li);
+    return;
+  }
   items.forEach((it) => {
     const li = document.createElement("li");
     const pd = toDate(it.purchase_date).toLocaleDateString();
-    const wx = it.warranty_expiry ? toDate(it.warranty_expiry).toLocaleDateString() : "—";
+    const wx = it.warranty_expiry
+      ? toDate(it.warranty_expiry).toLocaleDateString()
+      : "—";
     li.textContent = `${it.name} (purchased ${pd}, warranty expires ${wx}) `;
     if (it.relative_path) {
       const btn = document.createElement("button");
@@ -91,7 +112,7 @@ export async function InventoryView(container: HTMLElement) {
 
   const hh = await defaultHouseholdId();
   let items: InventoryItem[] = await inventoryRepo.list({ householdId: hh });
-  renderInventory(listEl, items);
+  await renderInventory(listEl, items);
   await scheduleInventoryReminders(items);
 
   form.addEventListener("submit", async (e) => {
@@ -120,7 +141,7 @@ export async function InventoryView(container: HTMLElement) {
     });
 
     items.push(created);
-    renderInventory(listEl, items);
+    await renderInventory(listEl, items);
     await scheduleInventoryReminders([created]);
     form.reset();
   });

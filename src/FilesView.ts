@@ -7,6 +7,7 @@ import {
 } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { STR } from "./ui/strings";
 
 function renderBreadcrumb(path: string, el: HTMLElement) {
   el.innerHTML = "";
@@ -31,19 +32,19 @@ async function listDirectory(
   renderBreadcrumb(dir, pathEl);
   listEl.innerHTML = "";
   if (entries.length === 0) {
-    const emptyRow = document.createElement("tr");
-    const emptyCell = document.createElement("td");
-    emptyCell.colSpan = 5;
-    const msg = document.createElement("div");
-    msg.className = "files__empty";
-    msg.textContent = "No files here yet";
-    const ghostBtn = document.createElement("button");
-    ghostBtn.className = "btn btn--ghost";
-    ghostBtn.textContent = "New File";
-    msg.appendChild(ghostBtn);
-    emptyCell.appendChild(msg);
-    emptyRow.appendChild(emptyCell);
-    listEl.appendChild(emptyRow);
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 5;
+    const { createEmptyState } = await import("./ui/emptyState");
+    cell.appendChild(
+      createEmptyState({
+        title: STR.empty.filesTitle,
+        actionLabel: "New file",
+        onAction: () => setDir(dir),
+      }),
+    );
+    row.appendChild(cell);
+    listEl.appendChild(row);
     return;
   }
   for (const entry of entries) {

@@ -8,6 +8,7 @@ import { propertyDocsRepo } from "./repos";
 import { defaultHouseholdId } from "./db/household";
 import { nowMs, toDate } from "./db/time";
 import { showError } from "./ui/errors";
+import { STR } from "./ui/strings";
 
 const MAX_TIMEOUT = 2_147_483_647; // ~24.8 days
 function scheduleAt(ts: number, cb: () => void) {
@@ -17,8 +18,25 @@ function scheduleAt(ts: number, cb: () => void) {
   setTimeout(() => scheduleAt(ts, cb), chunk);
 }
 
-function renderDocs(listEl: HTMLUListElement, docs: PropertyDocument[]) {
+async function renderDocs(listEl: HTMLUListElement, docs: PropertyDocument[]) {
   listEl.innerHTML = "";
+  if (docs.length === 0) {
+    const li = document.createElement("li");
+    const { createEmptyState } = await import("./ui/emptyState");
+    li.appendChild(
+      createEmptyState({
+        title: STR.empty.propertyTitle,
+        description: STR.empty.propertyDesc,
+        actionLabel: "Add document",
+        onAction: () =>
+          document
+            .querySelector<HTMLInputElement>("#prop-desc")
+            ?.focus(),
+      }),
+    );
+    listEl.appendChild(li);
+    return;
+  }
   docs.forEach((d) => {
     const li = document.createElement("li");
     li.textContent = `${d.description} — renews ${toDate(d.renewal_date).toLocaleDateString()} `;
@@ -97,7 +115,7 @@ export async function PropertyView(container: HTMLElement) {
     householdId: hh,
     orderBy: "position, created_at, id",
   });
-  renderDocs(listEl, docs);
+  await renderDocs(listEl, docs);
   await scheduleDocReminders(docs);
 
   chooseBtn?.addEventListener("click", async () => {
@@ -139,7 +157,7 @@ export async function PropertyView(container: HTMLElement) {
     });
 
     docs.push(created);
-    renderDocs(listEl, docs);
+    await renderDocs(listEl, docs);
     await scheduleDocReminders([created]);
     form.reset();
   });

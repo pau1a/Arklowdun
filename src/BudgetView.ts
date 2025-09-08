@@ -4,6 +4,7 @@ import { defaultHouseholdId } from "./db/household";
 import { toDate, nowMs } from "./db/time";
 import { budgetCategoriesRepo, expensesRepo } from "./repos";
 import { showError } from "./ui/errors";
+import { STR } from "./ui/strings";
 
 const money = new Intl.NumberFormat(undefined, {
   style: "currency",
@@ -34,12 +35,34 @@ function csvEscape(s: string) {
   return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
 }
 
-function renderSummary(tbody: HTMLTableSectionElement, cats: BudgetCategory[], exps: Expense[]) {
+async function renderSummary(
+  tbody: HTMLTableSectionElement,
+  cats: BudgetCategory[],
+  exps: Expense[],
+) {
   const now = toDate(nowMs());
   const m = now.getMonth();
   const y = now.getFullYear();
 
   tbody.innerHTML = "";
+  if (cats.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4;
+    const { createEmptyState } = await import("./ui/emptyState");
+    td.appendChild(
+      createEmptyState({
+        title: STR.empty.budgetTitle,
+        description: STR.empty.budgetDesc,
+        actionLabel: "Add category",
+        onAction: () =>
+          document.querySelector<HTMLInputElement>("#cat-name")?.focus(),
+      }),
+    );
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
   cats.forEach((c) => {
     const spent = exps
       .filter((e) => {
@@ -112,13 +135,13 @@ export async function BudgetView(container: HTMLElement) {
   let categories: BudgetCategory[] = [];
   let expenses: Expense[] = [];
 
-  async function reloadAndRender() {
-    const data = await loadAll(householdId);
-    categories = data.categories;
-    expenses = data.expenses;
-    updateCategoryOptions(expCategory, categories);
-    renderSummary(summaryBody, categories, expenses);
-  }
+    async function reloadAndRender() {
+      const data = await loadAll(householdId);
+      categories = data.categories;
+      expenses = data.expenses;
+      updateCategoryOptions(expCategory, categories);
+      await renderSummary(summaryBody, categories, expenses);
+    }
 
   await reloadAndRender();
 
