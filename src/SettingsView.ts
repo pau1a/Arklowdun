@@ -1,3 +1,6 @@
+import { createEmptyState } from "./ui/emptyState";
+import { STR } from "./ui/strings";
+
 export function SettingsView(container: HTMLElement) {
   const section = document.createElement("section");
   section.className = "settings";
@@ -7,32 +10,36 @@ export function SettingsView(container: HTMLElement) {
 
     <section class="card settings__section" aria-labelledby="settings-general">
       <h3 id="settings-general">General</h3>
-      <p class="settings__empty">No settings yet.</p>
+      <div class="settings__empty"></div>
     </section>
 
     <section class="card settings__section" aria-labelledby="settings-storage">
       <h3 id="settings-storage">Storage and permissions</h3>
-      <p class="settings__empty">No settings yet.</p>
+      <div class="settings__empty"></div>
     </section>
 
     <section class="card settings__section" aria-labelledby="settings-notifications">
       <h3 id="settings-notifications">Notifications</h3>
-      <p class="settings__empty">No settings yet.</p>
+      <div class="settings__empty"></div>
     </section>
 
     <section class="card settings__section" aria-labelledby="settings-appearance">
       <h3 id="settings-appearance">Appearance</h3>
-      <p class="settings__empty">No settings yet.</p>
+      <div class="settings__empty"></div>
     </section>
 
     <section class="card settings__section" aria-labelledby="settings-about">
       <h3 id="settings-about">About and diagnostics</h3>
-      <p class="settings__empty">No settings yet.</p>
+      <div class="settings__empty"></div>
     </section>
   `;
 
   container.innerHTML = "";
   container.appendChild(section);
+
+  section
+    .querySelectorAll<HTMLElement>(".settings__empty")
+    .forEach((el) => el.appendChild(createEmptyState({ title: STR.empty.settingsTitle })));
 
   section
     .querySelector<HTMLAnchorElement>(".settings__back")

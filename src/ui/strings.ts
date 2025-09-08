@@ -1,0 +1,21 @@
+export const STR = {
+  empty: {
+    shoppingTitle: "No shopping items",
+    shoppingDesc: "New items will appear here.",
+    billsTitle: "No bills",
+    billsDesc: "New bills will appear here.",
+    inventoryTitle: "No inventory items",
+    inventoryDesc: "Add your appliances, electronics, and more.",
+    policiesTitle: "No policies",
+    policiesDesc: "New policies will appear here.",
+    propertyTitle: "No property documents",
+    propertyDesc: "Add your property documents here.",
+    vehiclesTitle: "No vehicles",
+    vehiclesDesc: "Add your vehicles to track maintenance.",
+    budgetTitle: "No budget categories",
+    budgetDesc: "Create a category to start budgeting.",
+    filesTitle: "No files here",
+    settingsTitle: "No settings",
+    dashboardTitle: "No upcoming items",
+  },
+} as const;

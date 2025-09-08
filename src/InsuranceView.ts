@@ -10,6 +10,7 @@ import { nowMs, toDate } from "./db/time";
 import { defaultHouseholdId } from "./db/household";
 import { policiesRepo } from "./repos";
 import { showError } from "./ui/errors";
+import { STR } from "./ui/strings";
 
 const money = new Intl.NumberFormat(undefined, {
   style: "currency",
@@ -24,8 +25,25 @@ function scheduleAt(ts: number, cb: () => void) {
   setTimeout(() => scheduleAt(ts, cb), chunk);
 }
 
-function renderPolicies(listEl: HTMLUListElement, policies: Policy[]) {
+async function renderPolicies(listEl: HTMLUListElement, policies: Policy[]) {
   listEl.innerHTML = "";
+  if (policies.length === 0) {
+    const li = document.createElement("li");
+    const { createEmptyState } = await import("./ui/emptyState");
+    li.appendChild(
+      createEmptyState({
+        title: STR.empty.policiesTitle,
+        description: STR.empty.policiesDesc,
+        actionLabel: "Add policy",
+        onAction: () =>
+          document
+            .querySelector<HTMLInputElement>("#policy-amount")
+            ?.focus(),
+      }),
+    );
+    listEl.appendChild(li);
+    return;
+  }
   policies.forEach((p) => {
     const li = document.createElement("li");
     li.textContent = `${money.format(p.amount / 100)} renews ${toDate(p.due_date).toLocaleDateString()} `;
@@ -92,7 +110,7 @@ export async function InsuranceView(container: HTMLElement) {
 
   const hh = await defaultHouseholdId();
   let policies: Policy[] = await policiesRepo.list({ householdId: hh });
-  if (listEl) renderPolicies(listEl, policies);
+  if (listEl) await renderPolicies(listEl, policies);
   await schedulePolicyReminders(policies);
 
   form?.addEventListener("submit", async (e) => {
@@ -110,9 +128,9 @@ export async function InsuranceView(container: HTMLElement) {
       reminder,
       position: policies.length,
     });
-    policies.push(policy);
-    if (listEl) renderPolicies(listEl, policies);
-    schedulePolicyReminders([policy]);
+      policies.push(policy);
+      if (listEl) await renderPolicies(listEl, policies);
+      schedulePolicyReminders([policy]);
     form.reset();
   });
 }

@@ -4,6 +4,7 @@ import { defaultHouseholdId } from "./db/household";
 import { billsRepo, policiesRepo, eventsApi } from "./repos";
 import { vehiclesRepo } from "./db/vehiclesRepo";
 import type { Event } from "./models";
+import { STR } from "./ui/strings";
 const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "GBP" });
 
 function statusFor(dueMs: number, now: number): "soon" | "today" | "overdue" {
@@ -103,7 +104,15 @@ export async function DashboardView(container: HTMLElement) {
   // Render
   items.sort((a, b) => a.date - b.date);
   if (!items.length) {
-    if (listEl) listEl.textContent = "No upcoming items";
+    if (listEl) {
+      const { createEmptyState } = await import("./ui/emptyState");
+      listEl.appendChild(
+        createEmptyState({
+          title: STR.empty.dashboardTitle,
+          description: "You're all caught up.",
+        }),
+      );
+    }
   } else {
     items.forEach(({ date, text }) => {
       const li = document.createElement("div");

@@ -10,6 +10,7 @@ import { nowMs, toDate } from "./db/time";
 import { defaultHouseholdId } from "./db/household";
 import { billsRepo } from "./repos";
 import { showError } from "./ui/errors";
+import { STR } from "./ui/strings";
 
 const money = new Intl.NumberFormat(undefined, {
   style: "currency",
@@ -24,8 +25,25 @@ function scheduleAt(ts: number, cb: () => void) {
   setTimeout(() => scheduleAt(ts, cb), chunk);
 }
 
-function renderBills(listEl: HTMLUListElement, bills: Bill[]) {
+async function renderBills(listEl: HTMLUListElement, bills: Bill[]) {
   listEl.innerHTML = "";
+  if (bills.length === 0) {
+    const li = document.createElement("li");
+    const { createEmptyState } = await import("./ui/emptyState");
+    li.appendChild(
+      createEmptyState({
+        title: STR.empty.billsTitle,
+        description: STR.empty.billsDesc,
+        actionLabel: "Add bill",
+        onAction: () =>
+          document
+            .querySelector<HTMLInputElement>("#bill-amount")
+            ?.focus(),
+      }),
+    );
+    listEl.appendChild(li);
+    return;
+  }
   bills.forEach((b) => {
     const li = document.createElement("li");
     li.textContent = `${money.format(b.amount / 100)} due ${toDate(b.due_date).toLocaleDateString()} `;
@@ -93,7 +111,7 @@ export async function BillsView(container: HTMLElement) {
 
   const hh = await defaultHouseholdId();
   let bills: Bill[] = await billsRepo.list({ householdId: hh });
-  if (listEl) renderBills(listEl, bills);
+  if (listEl) await renderBills(listEl, bills);
   await scheduleBillReminders(bills);
 
   form?.addEventListener("submit", async (e) => {
@@ -112,9 +130,9 @@ export async function BillsView(container: HTMLElement) {
       reminder,
       position: bills.length,
     });
-    bills.push(bill);
-    if (listEl) renderBills(listEl, bills);
-    scheduleBillReminders([bill]);
+      bills.push(bill);
+      if (listEl) await renderBills(listEl, bills);
+      scheduleBillReminders([bill]);
     form.reset();
   });
 }

@@ -19,3 +19,7 @@ export type ArkError = {
   details?: unknown;    // optional structured debug payload
 };
 ```
+
+## Empty State
+Use `createEmptyState({ title, description?, actionLabel?, onAction?, icon? })` for any list view with zero items.
+Policy: avoid ad-hoc "No X yet" strings; render a consistent component for clarity and polish.

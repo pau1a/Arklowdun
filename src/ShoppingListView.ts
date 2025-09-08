@@ -3,6 +3,7 @@ import { defaultHouseholdId } from "./db/household";
 import { shoppingRepo } from "./repos";
 import type { ShoppingItem } from "./models";
 import { showError } from "./ui/errors";
+import { STR } from "./ui/strings";
 
 export async function ShoppingListView(container: HTMLElement) {
   const section = document.createElement("section");
@@ -27,14 +28,25 @@ export async function ShoppingListView(container: HTMLElement) {
     orderBy: "position, created_at, id",
   });
 
-  function render() {
+  async function render() {
     listEl.innerHTML = "";
     const live = items.filter((i) => !i.deleted_at);
     if (live.length === 0) {
-      const empty = document.createElement("li");
-      empty.className = "list empty";
-      empty.textContent = "No items";
-      listEl.appendChild(empty);
+      const wrap = document.createElement("li");
+      wrap.className = "list empty";
+      const { createEmptyState } = await import("./ui/emptyState");
+      wrap.appendChild(
+        createEmptyState({
+          title: STR.empty.shoppingTitle,
+          description: STR.empty.shoppingDesc,
+          actionLabel: "Add item",
+          onAction: () =>
+            document
+              .querySelector<HTMLFormElement>("#item-form")
+              ?.dispatchEvent(new Event("submit")),
+        }),
+      );
+      listEl.appendChild(wrap);
       return;
     }
     for (const item of live) {
@@ -44,10 +56,14 @@ export async function ShoppingListView(container: HTMLElement) {
       cb.type = "checkbox";
       cb.checked = !!item.completed;
       cb.addEventListener("change", async () => {
-        try {
-          item.completed = cb.checked;
-          await shoppingRepo.update(hh, item.id, { completed: item.completed } as Partial<ShoppingItem>);
-          render();
+          try {
+            item.completed = cb.checked;
+            await shoppingRepo.update(
+              hh,
+              item.id,
+              { completed: item.completed } as Partial<ShoppingItem>,
+            );
+            await render();
         } catch (err) {
           showError(err);
           cb.checked = !cb.checked;
@@ -61,10 +77,10 @@ export async function ShoppingListView(container: HTMLElement) {
       const del = document.createElement("button");
       del.textContent = "Delete";
       del.addEventListener("click", async () => {
-        try {
-          await shoppingRepo.delete(hh, item.id);
-          items = items.filter((i) => i.id !== item.id);
-          render();
+          try {
+            await shoppingRepo.delete(hh, item.id);
+            items = items.filter((i) => i.id !== item.id);
+            await render();
         } catch (err) {
           showError(err);
         }
@@ -77,7 +93,7 @@ export async function ShoppingListView(container: HTMLElement) {
     }
   }
 
-  render();
+    await render();
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -89,9 +105,9 @@ export async function ShoppingListView(container: HTMLElement) {
         completed: false,
         position: items.length,
       } as Partial<ShoppingItem>);
-      items.push(created);
-      input.value = "";
-      render();
+        items.push(created);
+        input.value = "";
+        await render();
     } catch (err) {
       showError(err);
     }
