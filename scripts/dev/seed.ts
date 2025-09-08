@@ -5,6 +5,54 @@ import Database from "better-sqlite3";
 
 const DAY = 86_400_000;
 
+function tableColumns(db: any, table: string): string[] {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (rows.length === 0) {
+    throw new Error(`Missing '${table}' table. Run the app once to apply migrations.`);
+  }
+  return rows.map((r) => r.name);
+}
+
+function makeInserter(
+  db: any,
+  table: string,
+  candidates: string[],
+  aliases: Record<string, string[]> = {},
+) {
+  const cols = tableColumns(db, table);
+  const chosen: string[] = [];
+  const map: Record<string, string> = {};
+
+  for (const want of candidates) {
+    if (cols.indexOf(want) !== -1) {
+      chosen.push(want);
+      map[want] = want;
+      continue;
+    }
+    const alts = aliases[want] || [];
+    const alt = alts.find((a) => cols.indexOf(a) !== -1);
+    if (alt) {
+      chosen.push(alt);
+      map[alt] = want;
+    }
+  }
+
+  if (chosen.length < 2) {
+    throw new Error(
+      `Too few usable columns for ${table}. Found: ${cols.join(", ")}`,
+    );
+  }
+
+  const placeholders = chosen.map(() => "?").join(",");
+  const sql = `INSERT INTO ${table} (${chosen.join(",")}) VALUES (${placeholders})`;
+  const stmt = db.prepare(sql);
+
+  return (values: Record<string, any>) => {
+    const args = chosen.map((c) => values[map[c]]);
+    stmt.run(...args);
+  };
+}
+
 interface Options {
   households: number;
   rows: number;
@@ -118,6 +166,8 @@ async function main() {
     process.exit(1);
   }
 
+  console.log(`Using database: ${opts.dbPath}`);
+
   if (opts.reset) {
     fs.rmSync(opts.dbPath, { force: true });
     fs.mkdirSync(path.dirname(opts.dbPath), { recursive: true });
@@ -128,29 +178,198 @@ async function main() {
   db.pragma("synchronous = NORMAL");
   db.pragma("busy_timeout = 5000");
 
-  const check = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='household'").get();
-  if (!check) {
-    console.error("Missing 'household' table. Run the app once to apply migrations.");
-    process.exit(1);
-  }
-
   const rand = mulberry32(opts.seed);
   const counts: Record<string, number> = {};
   const now = Date.now();
 
-  const insertHousehold = db.prepare("INSERT INTO household (id,name,created_at,updated_at,tz) VALUES (?,?,?,?,?)");
-  const insertEvent = db.prepare("INSERT INTO events (id,title,start_at,end_at,tz,start_at_utc,end_at_utc,household_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)");
-  const insertBill = db.prepare("INSERT INTO bills (id,amount,due_date,reminder,household_id,created_at,updated_at,root_key,relative_path) VALUES (?,?,?,?,?,?,?,?,?)");
-  const insertPolicy = db.prepare("INSERT INTO policies (id,amount,due_date,reminder,household_id,created_at,updated_at,root_key,relative_path) VALUES (?,?,?,?,?,?,?,?,?)");
-  const insertInventory = db.prepare("INSERT INTO inventory_items (id,name,purchase_date,warranty_expiry,reminder,household_id,created_at,updated_at,position,root_key,relative_path) VALUES (?,?,?,?,?,?,?,?,?,?,?)");
-  const insertPropDoc = db.prepare("INSERT INTO property_documents (id,description,renewal_date,reminder,household_id,created_at,updated_at,root_key,relative_path) VALUES (?,?,?,?,?,?,?,?,?)");
-  const insertPet = db.prepare("INSERT INTO pets (id,name,type,household_id,created_at,updated_at) VALUES (?,?,?,?,?,?)");
-  const insertPetMed = db.prepare("INSERT INTO pet_medical (id,pet_id,date,description,reminder,household_id,created_at,updated_at,root_key,relative_path) VALUES (?,?,?,?,?,?,?,?,?,?)");
-  const insertVehicle = db.prepare("INSERT INTO vehicles (id,name,make,model,next_mot_due,next_service_due,household_id,created_at,updated_at,position) VALUES (?,?,?,?,?,?,?,?,?,?)");
-  const insertNote = db.prepare("INSERT INTO notes (id,household_id,title,body,z_index,created_at,updated_at) VALUES (?,?,?,?,?,?,?)");
-  const insertShop = db.prepare("INSERT INTO shopping_items (id,household_id,title,is_done,position,created_at,updated_at) VALUES (?,?,?,?,?,?,?)");
-  const insertCategory = db.prepare("INSERT INTO budget_categories (id,name,household_id,created_at,updated_at) VALUES (?,?,?,?,?)");
-  const insertExpense = db.prepare("INSERT INTO expenses (id,category_id,amount,date,household_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?)");
+  let insertHousehold: (v: Record<string, any>) => void;
+  let insertEvent: (v: Record<string, any>) => void;
+  let insertBill: (v: Record<string, any>) => void;
+  let insertPolicy: (v: Record<string, any>) => void;
+  let insertInventory: (v: Record<string, any>) => void;
+  let insertPropDoc: (v: Record<string, any>) => void;
+  let insertPet: (v: Record<string, any>) => void;
+  let insertPetMed: (v: Record<string, any>) => void;
+  let insertVehicle: (v: Record<string, any>) => void;
+  let insertNote: (v: Record<string, any>) => void;
+  let insertShop: (v: Record<string, any>) => void;
+  let insertCategory: (v: Record<string, any>) => void;
+  let insertExpense: (v: Record<string, any>) => void;
+
+  try {
+    insertHousehold = makeInserter(db, "household", ["id", "name", "created_at", "updated_at", "tz"], {
+      tz: ["tz", "timezone"],
+    });
+    insertEvent = makeInserter(
+      db,
+      "events",
+      [
+        "id",
+        "title",
+        "start_at",
+        "end_at",
+        "tz",
+        "start_at_utc",
+        "end_at_utc",
+        "household_id",
+        "created_at",
+        "updated_at",
+      ],
+    );
+    insertBill = makeInserter(
+      db,
+      "bills",
+      [
+        "id",
+        "amount",
+        "due_date",
+        "reminder",
+        "household_id",
+        "created_at",
+        "updated_at",
+        "root_key",
+        "relative_path",
+      ],
+    );
+    insertPolicy = makeInserter(
+      db,
+      "policies",
+      [
+        "id",
+        "amount",
+        "due_date",
+        "reminder",
+        "household_id",
+        "created_at",
+        "updated_at",
+        "root_key",
+        "relative_path",
+      ],
+    );
+    insertInventory = makeInserter(
+      db,
+      "inventory_items",
+      [
+        "id",
+        "name",
+        "purchase_date",
+        "warranty_expiry",
+        "reminder",
+        "household_id",
+        "created_at",
+        "updated_at",
+        "position",
+        "root_key",
+        "relative_path",
+      ],
+      { position: ["position", "z_index"] },
+    );
+    insertPropDoc = makeInserter(
+      db,
+      "property_documents",
+      [
+        "id",
+        "description",
+        "renewal_date",
+        "reminder",
+        "household_id",
+        "created_at",
+        "updated_at",
+        "root_key",
+        "relative_path",
+      ],
+    );
+    insertPet = makeInserter(
+      db,
+      "pets",
+      ["id", "name", "type", "household_id", "created_at", "updated_at"],
+    );
+    insertPetMed = makeInserter(
+      db,
+      "pet_medical",
+      [
+        "id",
+        "pet_id",
+        "date",
+        "description",
+        "reminder",
+        "household_id",
+        "created_at",
+        "updated_at",
+        "root_key",
+        "relative_path",
+      ],
+    );
+    insertVehicle = makeInserter(
+      db,
+      "vehicles",
+      [
+        "id",
+        "name",
+        "make",
+        "model",
+        "next_mot_due",
+        "next_service_due",
+        "household_id",
+        "created_at",
+        "updated_at",
+        "position",
+      ],
+      {
+        next_mot_due: ["next_mot_due", "mot_date"],
+        next_service_due: ["next_service_due", "service_date"],
+        position: ["position", "z_index"],
+      },
+    );
+    insertNote = makeInserter(
+      db,
+      "notes",
+      [
+        "id",
+        "household_id",
+        "title",
+        "body",
+        "z_index",
+        "created_at",
+        "updated_at",
+      ],
+      {
+        body: ["body", "text", "content"],
+        z_index: ["z_index", "z", "position"],
+      },
+    );
+    insertShop = makeInserter(
+      db,
+      "shopping_items",
+      [
+        "id",
+        "household_id",
+        "title",
+        "is_done",
+        "position",
+        "created_at",
+        "updated_at",
+      ],
+      {
+        title: ["title", "label", "name"],
+        is_done: ["is_done", "done"],
+        position: ["position", "z_index"],
+      },
+    );
+    insertCategory = makeInserter(
+      db,
+      "budget_categories",
+      ["id", "name", "household_id", "created_at", "updated_at"],
+    );
+    insertExpense = makeInserter(
+      db,
+      "expenses",
+      ["id", "category_id", "amount", "date", "household_id", "created_at", "updated_at"],
+    );
+  } catch (e) {
+    console.error((e as Error).message);
+    process.exit(1);
+  }
 
   const run = db.transaction(() => {
     for (let i = 0; i < opts.households; i++) {
@@ -159,7 +378,13 @@ async function main() {
       const tz = ["Europe/London", "America/New_York", "Asia/Tokyo"][i % 3];
       const created = now - randInt(rand, 0, 540) * DAY;
       const updated = created + randInt(rand, 0, 30) * DAY;
-      insertHousehold.run(hhId, name, created, updated, tz);
+      insertHousehold({
+        id: hhId,
+        name,
+        created_at: created,
+        updated_at: updated,
+        tz,
+      });
       counts.household = (counts.household || 0) + 1;
 
       const categories: string[] = [];
@@ -168,7 +393,13 @@ async function main() {
         categories.push(id);
         const cAt = now - randInt(rand, 0, 540) * DAY;
         const uAt = cAt + randInt(rand, 0, 30) * DAY;
-        insertCategory.run(id, `Category ${c + 1}`, hhId, cAt, uAt);
+        insertCategory({
+          id,
+          name: `Category ${c + 1}`,
+          household_id: hhId,
+          created_at: cAt,
+          updated_at: uAt,
+        });
         counts.budget_categories = (counts.budget_categories || 0) + 1;
       }
 
@@ -179,7 +410,14 @@ async function main() {
         pets.push(id);
         const cAt = now - randInt(rand, 0, 540) * DAY;
         const uAt = cAt + randInt(rand, 0, 30) * DAY;
-        insertPet.run(id, `Pet ${p + 1}`, pick(rand, ["dog", "cat", "bird"]), hhId, cAt, uAt);
+        insertPet({
+          id,
+          name: `Pet ${p + 1}`,
+          type: pick(rand, ["dog", "cat", "bird"]),
+          household_id: hhId,
+          created_at: cAt,
+          updated_at: uAt,
+        });
         counts.pets = (counts.pets || 0) + 1;
       }
 
@@ -190,7 +428,18 @@ async function main() {
         const end = start + randInt(rand, 1, 48) * 3_600_000;
         const cAt = now - randInt(rand, 0, 540) * DAY;
         const uAt = cAt + randInt(rand, 0, 30) * DAY;
-        insertEvent.run(id, `Event ${e + 1}`, start, end, tz, start, end, hhId, cAt, uAt);
+        insertEvent({
+          id,
+          title: `Event ${e + 1}`,
+          start_at: start,
+          end_at: end,
+          tz,
+          start_at_utc: start,
+          end_at_utc: end,
+          household_id: hhId,
+          created_at: cAt,
+          updated_at: uAt,
+        });
       }
       counts.events = (counts.events || 0) + eventCount;
 
@@ -200,7 +449,17 @@ async function main() {
         const cAt = now - randInt(rand, 0, 540) * DAY;
         const uAt = cAt + randInt(rand, 0, 30) * DAY;
         const { root, rel } = attachment(rand);
-        insertBill.run(id, randInt(rand, 1000, 50000), due, remindMaybe(rand, due), hhId, cAt, uAt, root, rel);
+        insertBill({
+          id,
+          amount: randInt(rand, 1000, 50000),
+          due_date: due,
+          reminder: remindMaybe(rand, due),
+          household_id: hhId,
+          created_at: cAt,
+          updated_at: uAt,
+          root_key: root,
+          relative_path: rel,
+        });
       }
       counts.bills = (counts.bills || 0) + opts.rows;
 
@@ -211,7 +470,17 @@ async function main() {
         const cAt = now - randInt(rand, 0, 540) * DAY;
         const uAt = cAt + randInt(rand, 0, 30) * DAY;
         const { root, rel } = attachment(rand);
-        insertPolicy.run(id, randInt(rand, 1000, 50000), due, remindMaybe(rand, due), hhId, cAt, uAt, root, rel);
+        insertPolicy({
+          id,
+          amount: randInt(rand, 1000, 50000),
+          due_date: due,
+          reminder: remindMaybe(rand, due),
+          household_id: hhId,
+          created_at: cAt,
+          updated_at: uAt,
+          root_key: root,
+          relative_path: rel,
+        });
       }
       counts.policies = (counts.policies || 0) + polCount;
 
@@ -224,7 +493,19 @@ async function main() {
         const cAt = now - randInt(rand, 0, 540) * DAY;
         const uAt = cAt + randInt(rand, 0, 30) * DAY;
         const { root, rel } = attachment(rand);
-        insertInventory.run(id, `Item ${j + 1}`, purchase, warranty, reminder, hhId, cAt, uAt, j, root, rel);
+        insertInventory({
+          id,
+          name: `Item ${j + 1}`,
+          purchase_date: purchase,
+          warranty_expiry: warranty,
+          reminder,
+          household_id: hhId,
+          created_at: cAt,
+          updated_at: uAt,
+          position: j,
+          root_key: root,
+          relative_path: rel,
+        });
       }
       counts.inventory_items = (counts.inventory_items || 0) + invCount;
 
@@ -235,7 +516,17 @@ async function main() {
         const cAt = now - randInt(rand, 0, 540) * DAY;
         const uAt = cAt + randInt(rand, 0, 30) * DAY;
         const { root, rel } = attachment(rand);
-        insertPropDoc.run(id, `Doc ${j + 1}`, renewal, remindMaybe(rand, renewal), hhId, cAt, uAt, root, rel);
+        insertPropDoc({
+          id,
+          description: `Doc ${j + 1}`,
+          renewal_date: renewal,
+          reminder: remindMaybe(rand, renewal),
+          household_id: hhId,
+          created_at: cAt,
+          updated_at: uAt,
+          root_key: root,
+          relative_path: rel,
+        });
       }
       counts.property_documents = (counts.property_documents || 0) + pdCount;
 
@@ -247,7 +538,18 @@ async function main() {
         const cAt = now - randInt(rand, 0, 540) * DAY;
         const uAt = cAt + randInt(rand, 0, 30) * DAY;
         const { root, rel } = attachment(rand);
-        insertPetMed.run(id, pet, date, "Checkup", remindMaybe(rand, date), hhId, cAt, uAt, root, rel);
+        insertPetMed({
+          id,
+          pet_id: pet,
+          date,
+          description: "Checkup",
+          reminder: remindMaybe(rand, date),
+          household_id: hhId,
+          created_at: cAt,
+          updated_at: uAt,
+          root_key: root,
+          relative_path: rel,
+        });
       }
       counts.pet_medical = (counts.pet_medical || 0) + medCount;
 
@@ -260,7 +562,18 @@ async function main() {
         const nextService = chance(rand, 0.5) ? randDateAround(rand, now, 180) : null;
         const cAt = now - randInt(rand, 0, 540) * DAY;
         const uAt = cAt + randInt(rand, 0, 30) * DAY;
-        insertVehicle.run(id, `${make} ${model}`, make, model, nextMot, nextService, hhId, cAt, uAt, j);
+        insertVehicle({
+          id,
+          name: `${make} ${model}`,
+          make,
+          model,
+          next_mot_due: nextMot,
+          next_service_due: nextService,
+          household_id: hhId,
+          created_at: cAt,
+          updated_at: uAt,
+          position: j,
+        });
       }
       counts.vehicles = (counts.vehicles || 0) + vehCount;
 
@@ -269,7 +582,15 @@ async function main() {
         const id = uuidLike(rand);
         const cAt = now - randInt(rand, 0, 540) * DAY;
         const uAt = cAt + randInt(rand, 0, 30) * DAY;
-        insertNote.run(id, hhId, `Note ${j + 1}`, `Body ${j + 1}`, j, cAt, uAt);
+        insertNote({
+          id,
+          household_id: hhId,
+          title: `Note ${j + 1}`,
+          body: `Body ${j + 1}`,
+          z_index: j,
+          created_at: cAt,
+          updated_at: uAt,
+        });
       }
       counts.notes = (counts.notes || 0) + noteCount;
 
@@ -278,7 +599,15 @@ async function main() {
         const id = uuidLike(rand);
         const cAt = now - randInt(rand, 0, 540) * DAY;
         const uAt = cAt + randInt(rand, 0, 30) * DAY;
-        insertShop.run(id, hhId, `Item ${j + 1}`, chance(rand, 0.3) ? 1 : 0, j, cAt, uAt);
+        insertShop({
+          id,
+          household_id: hhId,
+          title: `Item ${j + 1}`,
+          is_done: chance(rand, 0.3) ? 1 : 0,
+          position: j,
+          created_at: cAt,
+          updated_at: uAt,
+        });
       }
       counts.shopping_items = (counts.shopping_items || 0) + shopCount;
 
@@ -289,7 +618,15 @@ async function main() {
         const date = randDateAround(rand, now, 180);
         const cAt = now - randInt(rand, 0, 540) * DAY;
         const uAt = cAt + randInt(rand, 0, 30) * DAY;
-        insertExpense.run(id, cat, randInt(rand, 100, 10000), date, hhId, cAt, uAt);
+        insertExpense({
+          id,
+          category_id: cat,
+          amount: randInt(rand, 100, 10000),
+          date,
+          household_id: hhId,
+          created_at: cAt,
+          updated_at: uAt,
+        });
       }
       counts.expenses = (counts.expenses || 0) + expCount;
     }

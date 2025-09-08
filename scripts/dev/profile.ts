@@ -50,8 +50,9 @@ export function runProfile(dbPath: string) {
   if (process.env.VITE_ENV !== "development") throw new Error("VITE_ENV must be 'development'");
 
   const db = new Database(dbPath);
+  console.log(`Using database: ${dbPath}`);
 
-  const hh = db.prepare("SELECT id FROM household LIMIT 1").get();
+  const hh = db.prepare("SELECT id FROM household LIMIT 1").get() as any;
   if (!hh) {
     console.error("No households found");
     return;
@@ -79,7 +80,7 @@ export function runProfile(dbPath: string) {
 
   for (const q of queries) {
     console.log("QUERY:", q.sql);
-    const plan = db.prepare(`EXPLAIN QUERY PLAN ${q.sql}`).all(...q.params);
+    const plan = db.prepare(`EXPLAIN QUERY PLAN ${q.sql}`).all(...q.params) as any[];
     for (const row of plan) console.log("  ", row.detail);
     const stmt = db.prepare(q.sql);
     const times: number[] = [];
