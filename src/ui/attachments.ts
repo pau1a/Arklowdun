@@ -1,6 +1,5 @@
 import { call } from "../db/call";
 import { showError } from "./errors";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { resolvePath } from "../files/path";
 
 const isMac = navigator.platform.includes("Mac");
@@ -31,11 +30,25 @@ export async function revealAttachment(
       try {
         if (!rootKey || !relPath) throw new Error("Path unavailable");
         const abs = await resolvePath(rootKey, relPath);
-        await writeText(abs);
-        showError({
-          code: "INFO",
-          message: "Reveal not supported — absolute path copied to clipboard.",
-        });
+        // Try web clipboard first; if it fails, fall back to showing the path.
+        let copied = false;
+        try {
+          // navigator.clipboard can throw or be unavailable depending on permissions
+          // in some environments.
+          // optional chaining guards against missing APIs
+          await navigator?.clipboard?.writeText?.(abs);
+          copied = true;
+        } catch {
+          copied = false;
+        }
+        if (copied) {
+          showError({
+            code: "INFO",
+            message: "Reveal not supported — absolute path copied to clipboard.",
+          });
+        } else {
+          showError(`Reveal not supported — path: ${abs}`);
+        }
       } catch {
         showError(e);
       }
