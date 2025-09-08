@@ -923,6 +923,37 @@ footer a.footer__settings {
 }
 .empty-state__action:hover { filter: brightness(0.98); }
 
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: var(--color-panel);
+  padding: var(--space-4);
+  border-radius: var(--radius-base);
+  max-width: 500px;
+  width: 90%;
+  max-height: 80%;
+  overflow: auto;
+  box-shadow: var(--shadow-base);
+}
+
+.modal .log {
+  margin-top: var(--space-3);
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--color-border);
+  padding: var(--space-2);
+  border-radius: var(--radius-base);
+}
+
 /* ========================================================================== */
 /* END                                                                        */
 /* ========================================================================== */
