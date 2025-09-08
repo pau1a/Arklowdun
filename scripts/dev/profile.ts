@@ -65,7 +65,7 @@ export function runProfile(dbPath: string) {
 
   const queries = [
     {
-      sql: "SELECT COUNT(*) FROM events WHERE household_id=? AND start_at BETWEEN ? AND ?",
+      sql: "SELECT COUNT(*) FROM events WHERE household_id=? AND start_at_utc BETWEEN ? AND ?",
       params: [hhId, start, end],
     },
     {

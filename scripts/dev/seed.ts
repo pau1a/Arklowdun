@@ -24,13 +24,13 @@ function makeInserter(
   const map: Record<string, string> = {};
 
   for (const want of candidates) {
-    if (cols.indexOf(want) !== -1) {
+    if (cols.indexOf(want) !== -1 && chosen.indexOf(want) === -1) {
       chosen.push(want);
       map[want] = want;
       continue;
     }
     const alts = aliases[want] || [];
-    const alt = alts.find((a) => cols.indexOf(a) !== -1);
+    const alt = alts.find((a) => cols.indexOf(a) !== -1 && chosen.indexOf(a) === -1);
     if (alt) {
       chosen.push(alt);
       map[alt] = want;
@@ -224,12 +224,18 @@ async function main() {
         "amount",
         "due_date",
         "reminder",
+        "position",
+        "z_index",
         "household_id",
         "created_at",
         "updated_at",
         "root_key",
         "relative_path",
       ],
+      {
+        position: ["position"],
+        z_index: ["z", "z_index", "position"],
+      },
     );
     insertPolicy = makeInserter(
       db,
@@ -239,12 +245,18 @@ async function main() {
         "amount",
         "due_date",
         "reminder",
+        "position",
+        "z_index",
         "household_id",
         "created_at",
         "updated_at",
         "root_key",
         "relative_path",
       ],
+      {
+        position: ["position"],
+        z_index: ["z", "z_index", "position"],
+      },
     );
     insertInventory = makeInserter(
       db,
@@ -255,14 +267,18 @@ async function main() {
         "purchase_date",
         "warranty_expiry",
         "reminder",
+        "position",
+        "z_index",
         "household_id",
         "created_at",
         "updated_at",
-        "position",
         "root_key",
         "relative_path",
       ],
-      { position: ["position", "z_index"] },
+      {
+        position: ["position"],
+        z_index: ["z_index", "position"],
+      },
     );
     insertPropDoc = makeInserter(
       db,
@@ -272,17 +288,24 @@ async function main() {
         "description",
         "renewal_date",
         "reminder",
+        "position",
+        "z_index",
         "household_id",
         "created_at",
         "updated_at",
         "root_key",
         "relative_path",
       ],
+      {
+        position: ["position"],
+        z_index: ["z", "z_index", "position"],
+      },
     );
     insertPet = makeInserter(
       db,
       "pets",
-      ["id", "name", "type", "household_id", "created_at", "updated_at"],
+      ["id", "name", "type", "position", "z_index", "household_id", "created_at", "updated_at"],
+      { position: ["position"], z_index: ["z", "z_index", "position"] },
     );
     insertPetMed = makeInserter(
       db,
@@ -310,15 +333,17 @@ async function main() {
         "model",
         "next_mot_due",
         "next_service_due",
+        "position",
+        "z_index",
         "household_id",
         "created_at",
         "updated_at",
-        "position",
       ],
       {
         next_mot_due: ["next_mot_due", "mot_date"],
         next_service_due: ["next_service_due", "service_date"],
-        position: ["position", "z_index"],
+        position: ["position"],
+        z_index: ["z_index", "position"],
       },
     );
     insertNote = makeInserter(
@@ -330,12 +355,14 @@ async function main() {
         "title",
         "body",
         "z_index",
+        "position",
         "created_at",
         "updated_at",
       ],
       {
         body: ["body", "text", "content"],
-        z_index: ["z_index", "z", "position"],
+        z_index: ["z_index", "z"],
+        position: ["position", "z"],
       },
     );
     insertShop = makeInserter(
@@ -347,21 +374,24 @@ async function main() {
         "title",
         "is_done",
         "position",
+        "z_index",
         "created_at",
         "updated_at",
       ],
       {
         title: ["title", "label", "name"],
         is_done: ["is_done", "done"],
-        position: ["position", "z_index"],
+        position: ["position"],
+        z_index: ["z_index", "position"],
       },
     );
     insertCategory = makeInserter(
       db,
       "budget_categories",
-      ["id", "name", "position", "household_id", "created_at", "updated_at"],
+      ["id", "name", "position", "z", "household_id", "created_at", "updated_at"],
       {
         position: ["position", "z"],
+        z: ["z"],
       },
     );
     insertExpense = makeInserter(
@@ -400,6 +430,7 @@ async function main() {
           id,
           name: `Category ${c + 1}`,
           position: c,
+          z: c,
           household_id: hhId,
           created_at: cAt,
           updated_at: uAt,
@@ -418,6 +449,8 @@ async function main() {
           id,
           name: `Pet ${p + 1}`,
           type: pick(rand, ["dog", "cat", "bird"]),
+          position: p,
+          z_index: p,
           household_id: hhId,
           created_at: cAt,
           updated_at: uAt,
@@ -458,6 +491,8 @@ async function main() {
           amount: randInt(rand, 1000, 50000),
           due_date: due,
           reminder: remindMaybe(rand, due),
+          position: b,
+          z_index: b,
           household_id: hhId,
           created_at: cAt,
           updated_at: uAt,
@@ -479,6 +514,8 @@ async function main() {
           amount: randInt(rand, 1000, 50000),
           due_date: due,
           reminder: remindMaybe(rand, due),
+          position: j,
+          z_index: j,
           household_id: hhId,
           created_at: cAt,
           updated_at: uAt,
@@ -503,10 +540,11 @@ async function main() {
           purchase_date: purchase,
           warranty_expiry: warranty,
           reminder,
+          position: j,
+          z_index: j,
           household_id: hhId,
           created_at: cAt,
           updated_at: uAt,
-          position: j,
           root_key: root,
           relative_path: rel,
         });
@@ -525,6 +563,8 @@ async function main() {
           description: `Doc ${j + 1}`,
           renewal_date: renewal,
           reminder: remindMaybe(rand, renewal),
+          position: j,
+          z_index: j,
           household_id: hhId,
           created_at: cAt,
           updated_at: uAt,
@@ -573,10 +613,11 @@ async function main() {
           model,
           next_mot_due: nextMot,
           next_service_due: nextService,
+          position: j,
+          z_index: j,
           household_id: hhId,
           created_at: cAt,
           updated_at: uAt,
-          position: j,
         });
       }
       counts.vehicles = (counts.vehicles || 0) + vehCount;
@@ -592,6 +633,7 @@ async function main() {
           title: `Note ${j + 1}`,
           body: `Body ${j + 1}`,
           z_index: j,
+          position: j,
           created_at: cAt,
           updated_at: uAt,
         });
@@ -609,6 +651,7 @@ async function main() {
           title: `Item ${j + 1}`,
           is_done: chance(rand, 0.3) ? 1 : 0,
           position: j,
+          z_index: j,
           created_at: cAt,
           updated_at: uAt,
         });
