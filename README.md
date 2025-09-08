@@ -19,6 +19,16 @@ See the [Arklowdun Master Plan](docs/master-plan.md) for the high-level strategi
 
 Recommended IDE: VS Code with Tauri and rust-analyzer extensions.
 
+## Logging & Verbosity
+
+- Backend (Rust):
+  `TAURI_ARKLOWDUN_LOG="arklowdun=debug,sqlx=info" npm run tauri dev`
+  (default: `arklowdun=info,sqlx=warn`)
+  `TAURI_ARKLOWDUN_LOG="arklowdun=info,sqlx=warn" npm run tauri build` # Example production run with quieter SQLx
+- Frontend (TS):
+  `VITE_LOG_LEVEL=debug npm run tauri dev`
+  (allowed: `debug|info|warn|error`)
+
 ## Database integrity
 
 Schema constraint guidelines live in [docs/integrity-rules.md](docs/integrity-rules.md).
