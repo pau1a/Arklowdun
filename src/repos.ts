@@ -87,6 +87,24 @@ export const shoppingRepo         = domainRepo<ShoppingItem>("shopping_items", "
 export const budgetCategoriesRepo = domainRepo<BudgetCategory>("budget_categories", "position, created_at, id");
 export const expensesRepo         = domainRepo<Expense>("expenses", "date DESC, created_at DESC, id");
 
+export const billsApi = {
+  async dueBetween(
+    householdId: string,
+    fromMs: number,
+    toMs: number,
+    limit = 100,
+    offset = 0
+  ) {
+    return await call<any[]>("bills_list_due_between", {
+      householdId,
+      fromMs,
+      toMs,
+      limit,
+      offset,
+    });
+  },
+};
+
 // ---- Events: dedicated API (uses events_list_range and singular CRUD) ----
 export const eventsApi = {
   async listRange(householdId: string, start = 0, end = Number.MAX_SAFE_INTEGER): Promise<Event[]> {

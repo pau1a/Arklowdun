@@ -28,6 +28,10 @@ fn map_sqlx_error(err: sqlx::Error) -> DbErrorPayload {
     }
 }
 
+pub fn map_db_error(err: sqlx::Error) -> DbErrorPayload {
+    map_sqlx_error(err)
+}
+
 fn row_to_value(row: SqliteRow) -> Value {
     let mut map = Map::new();
     for col in row.columns() {

@@ -1,22 +1,22 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use paste::paste;
 use serde::{Deserialize, Serialize};
+use sqlx::Row;
 use std::sync::{Arc, Mutex};
 use tauri::{Manager, State};
 use ts_rs::TS;
-use sqlx::Row;
 
 use crate::state::AppState;
 
 mod commands;
 mod db;
+mod events_tz_backfill;
 mod household; // declare module; avoid `use` to prevent name collision
 mod id;
 mod migrate;
 mod repo;
 mod state;
 mod time;
-mod events_tz_backfill;
 
 use commands::DbErrorPayload;
 use events_tz_backfill::events_backfill_timezone;
@@ -339,6 +339,53 @@ async fn event_restore(
 }
 
 #[tauri::command]
+async fn bills_list_due_between(
+    state: State<'_, AppState>,
+    household_id: String,
+    from_ms: i64,
+    to_ms: i64,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<serde_json::Value>, DbErrorPayload> {
+    use sqlx::query;
+
+    let base_sql = r#"
+        SELECT * FROM bills
+        WHERE household_id = ?1
+          AND deleted_at IS NULL
+          AND due_date >= ?2
+          AND due_date <= ?3
+        ORDER BY due_date ASC, created_at ASC, id ASC
+    "#;
+
+    let mut sql = base_sql.to_string();
+    let has_limit = limit.unwrap_or(0) > 0;
+    let has_offset = offset.unwrap_or(0) > 0;
+    if has_limit {
+        sql.push_str(" LIMIT ?4");
+    }
+    if has_offset {
+        sql.push_str(" OFFSET ?5");
+    }
+
+    let mut q = query(&sql).bind(&household_id).bind(from_ms).bind(to_ms);
+
+    if has_limit {
+        q = q.bind(limit.unwrap());
+    }
+    if has_offset {
+        q = q.bind(offset.unwrap());
+    }
+
+    let rows = q
+        .fetch_all(&state.pool)
+        .await
+        .map_err(crate::commands::map_db_error)?;
+
+    Ok(rows.into_iter().map(crate::repo::row_to_json).collect())
+}
+
+#[tauri::command]
 fn get_default_household_id(state: tauri::State<state::AppState>) -> String {
     state.default_household_id.lock().unwrap().clone()
 }
@@ -394,6 +441,7 @@ pub fn run() {
             bills_update,
             bills_delete,
             bills_restore,
+            bills_list_due_between,
             policies_list,
             policies_get,
             policies_create,

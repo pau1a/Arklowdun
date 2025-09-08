@@ -1,4 +1,6 @@
-use sqlx::{Executor, SqlitePool};
+use sqlx::{Executor, SqlitePool, Row, Column, ValueRef, TypeInfo};
+use sqlx::sqlite::SqliteRow;
+use serde_json::{Map, Value};
 
 use crate::time::now_ms;
 
@@ -32,6 +34,39 @@ const ORDERED_TABLES: &[&str] = &[
     "notes",
     "shopping_items",
 ];
+
+pub(crate) fn row_to_json(row: SqliteRow) -> Value {
+    let mut map = Map::new();
+    for col in row.columns() {
+        let idx = col.ordinal();
+        let v = row.try_get_raw(idx).ok();
+        let val = match v {
+            Some(raw) => {
+                if raw.is_null() {
+                    Value::Null
+                } else {
+                    match raw.type_info().name() {
+                        "INTEGER" => row
+                            .try_get::<i64, _>(idx)
+                            .map(Value::from)
+                            .unwrap_or(Value::Null),
+                        "REAL" => row
+                            .try_get::<f64, _>(idx)
+                            .map(Value::from)
+                            .unwrap_or(Value::Null),
+                        _ => row
+                            .try_get::<String, _>(idx)
+                            .map(Value::from)
+                            .unwrap_or(Value::Null),
+                    }
+                }
+            }
+            None => Value::Null,
+        };
+        map.insert(col.name().to_string(), val);
+    }
+    Value::Object(map)
+}
 
 pub(crate) fn ensure_table(table: &str) -> anyhow::Result<()> {
     if DOMAIN_TABLES.contains(&table) {

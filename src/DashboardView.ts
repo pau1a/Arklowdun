@@ -1,7 +1,7 @@
 // src/DashboardView.ts
 import { nowMs, toDate } from "./db/time";
 import { defaultHouseholdId } from "./db/household";
-import { billsRepo, policiesRepo, eventsApi } from "./repos";
+import { billsApi, policiesRepo, eventsApi } from "./repos";
 import { vehiclesRepo } from "./db/vehiclesRepo";
 import type { Event } from "./models";
 import { STR } from "./ui/strings";
@@ -50,11 +50,15 @@ export async function DashboardView(container: HTMLElement) {
 
   // Bills
   {
-    const bills = await billsRepo.list({ householdId: hh });
-    const next = bills.filter(b => b.due_date >= now).sort((a,b) => a.due_date - b.due_date)[0];
+    const SIXTY_DAYS = 60 * 24 * 60 * 60 * 1000;
+    const upcomingBills = await billsApi.dueBetween(hh, now, now + SIXTY_DAYS, 20, 0);
+    const next = upcomingBills[0];
     if (next) {
       const due = next.due_date;
-      items.push({ date: due, text: `Bill ${money.format(next.amount / 100)} due ${toDate(due).toLocaleDateString()}` });
+      items.push({
+        date: due,
+        text: `Bill ${money.format(next.amount / 100)} due ${toDate(due).toLocaleDateString()}`,
+      });
     }
   }
 

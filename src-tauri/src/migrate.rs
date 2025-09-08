@@ -76,6 +76,10 @@ static MIGRATIONS: &[(&str, &str)] = &[
         "202509041200_vehicles_rework.sql",
         include_str!("../../migrations/202509041200_vehicles_rework.sql"),
     ),
+    (
+        "202509081200_idx_bills_household_due.sql",
+        include_str!("../../migrations/202509081200_idx_bills_household_due.sql"),
+    ),
     // removed: legacy events backfill is handled in code now
 ];
 
