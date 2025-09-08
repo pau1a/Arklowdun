@@ -22,6 +22,7 @@ import { DashboardView } from "./DashboardView";
 import { ManageView } from "./ManageView";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { defaultHouseholdId } from "./db/household";
+import { log } from "./utils/logger";
 const appWindow = getCurrentWindow();
 
 type View =
@@ -175,7 +176,7 @@ async function enforceMinNow(growOnly = true) {
       );
     }
   } catch (e) {
-    console.warn("enforceMinNow failed", e);
+    log.warn("enforceMinNow failed", e);
   }
 }
 
@@ -323,6 +324,7 @@ function navigate(to: View) {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
+  log.debug("app booted");
   defaultHouseholdId().catch((e) => console.error("DB init failed:", e));
 
   linkDashboard()?.addEventListener("click", (e) => {

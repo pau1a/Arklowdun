@@ -20,19 +20,19 @@ mod events_tz_backfill;
 
 use commands::DbErrorPayload;
 use events_tz_backfill::events_backfill_timezone;
-use tracing_subscriber::{prelude::*, EnvFilter};
+use tracing_subscriber::{fmt, EnvFilter};
 
 pub fn init_logging() {
-    let fmt_layer = tracing_subscriber::fmt::layer()
+    let filter = std::env::var("TAURI_ARKLOWDUN_LOG")
+        .unwrap_or_else(|_| "arklowdun=info,sqlx=warn".to_string());
+
+    let _ = fmt()
+        .with_env_filter(EnvFilter::new(filter))
         .json()
         .with_target(true)
-        .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339());
-
-    let filter = EnvFilter::new("arklowdun=info,sqlx=warn");
-
-    let _ = tracing_subscriber::registry()
-        .with(filter)
-        .with(fmt_layer)
+        .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
+        .with_current_span(false)
+        .with_span_list(false)
         .try_init();
 }
 
