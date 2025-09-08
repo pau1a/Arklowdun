@@ -20,7 +20,10 @@
     "guard:invoke": "bash scripts/guards/no-direct-invoke.sh",
     "check": "npm run typecheck && echo TS OK",
     "dev:seed": "VITE_ENV=development node --loader ts-node/esm scripts/dev/seed.ts",
-    "dev:profile": "VITE_ENV=development node --loader ts-node/esm scripts/dev/seed.ts --profile"
+    "dev:profile": "VITE_ENV=development node --loader ts-node/esm scripts/dev/seed.ts --profile",
+    "test:coverage": "vitest run --coverage",
+    "cov:rs": "node scripts/cov-rs.mjs",
+    "cov:all": "npm run test:coverage && npm run cov:rs"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^6.7.2",
@@ -38,6 +41,8 @@
     "sass-embedded": "^1.81.0",
     "ts-node": "^10.9.2",
     "typescript": "~5.6.2",
-    "vite": "^6.0.3"
+    "vite": "^6.0.3",
+    "vitest": "^1.6.0",
+    "@vitest/coverage-v8": "^1.6.0"
   }
 }
