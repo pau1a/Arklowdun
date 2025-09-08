@@ -8,10 +8,10 @@ use tauri::{AppHandle, Manager};
 fn resolve_root(app: &AppHandle, root_key: &str) -> Option<PathBuf> {
     match root_key {
         // app data is what you already use in the UI
-        "appData" => app.path().app_data_dir(),
+        "appData" => app.path().app_data_dir().ok(),
         // useful extras if you ever emit them:
-        "home" => app.path().home_dir(),
-        "temp" => app.path().temp_dir(),
+        "home" => app.path().home_dir().ok(),
+        "temp" => app.path().temp_dir().ok(),
         _ => None,
     }
 }
