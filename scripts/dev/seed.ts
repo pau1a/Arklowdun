@@ -150,6 +150,16 @@ const attachment = (rand: () => number) => {
   return { root, rel };
 };
 
+function posOffset(db: any, table: string, hhId: string, columnNames: string[]) {
+  const cols = new Set(tableColumns(db, table));
+  const orderCol = columnNames.find((c) => cols.has(c));
+  if (!orderCol) return { col: null as string | null, base: 0 };
+  const row = db
+    .prepare(`SELECT COALESCE(MAX(${orderCol}), -1) AS maxpos FROM ${table} WHERE household_id = ?`)
+    .get(hhId) as { maxpos: number };
+  return { col: orderCol, base: (row?.maxpos ?? -1) + 1 };
+}
+
 async function main() {
   const opts = parseArgs();
 
@@ -420,6 +430,16 @@ async function main() {
       });
       counts.household = (counts.household || 0) + 1;
 
+      const petsPos = posOffset(db, "pets", hhId, ["position", "z_index", "z"]);
+      const catsPos = posOffset(db, "budget_categories", hhId, ["position", "z"]);
+      const notesPos = posOffset(db, "notes", hhId, ["position", "z_index", "z"]);
+      const shopPos = posOffset(db, "shopping_items", hhId, ["position", "z_index"]);
+      const invPos = posOffset(db, "inventory_items", hhId, ["position", "z_index"]);
+      const propPos = posOffset(db, "property_documents", hhId, ["position", "z_index", "z"]);
+      const billsPos = posOffset(db, "bills", hhId, ["position", "z_index", "z"]);
+      const polPos = posOffset(db, "policies", hhId, ["position", "z_index", "z"]);
+      const vehPos = posOffset(db, "vehicles", hhId, ["position", "z_index"]);
+
       const categories: string[] = [];
       for (let c = 0; c < 8; c++) {
         const id = uuidLike(rand);
@@ -429,8 +449,8 @@ async function main() {
         insertCategory({
           id,
           name: `Category ${c + 1}`,
-          position: c,
-          z: c,
+          position: catsPos.base + c,
+          z: catsPos.base + c,
           household_id: hhId,
           created_at: cAt,
           updated_at: uAt,
@@ -449,8 +469,8 @@ async function main() {
           id,
           name: `Pet ${p + 1}`,
           type: pick(rand, ["dog", "cat", "bird"]),
-          position: p,
-          z_index: p,
+          position: petsPos.base + p,
+          z_index: petsPos.base + p,
           household_id: hhId,
           created_at: cAt,
           updated_at: uAt,
@@ -491,8 +511,8 @@ async function main() {
           amount: randInt(rand, 1000, 50000),
           due_date: due,
           reminder: remindMaybe(rand, due),
-          position: b,
-          z_index: b,
+           position: billsPos.base + b,
+           z_index: billsPos.base + b,
           household_id: hhId,
           created_at: cAt,
           updated_at: uAt,
@@ -514,8 +534,8 @@ async function main() {
           amount: randInt(rand, 1000, 50000),
           due_date: due,
           reminder: remindMaybe(rand, due),
-          position: j,
-          z_index: j,
+          position: polPos.base + j,
+          z_index: polPos.base + j,
           household_id: hhId,
           created_at: cAt,
           updated_at: uAt,
@@ -540,8 +560,8 @@ async function main() {
           purchase_date: purchase,
           warranty_expiry: warranty,
           reminder,
-          position: j,
-          z_index: j,
+          position: invPos.base + j,
+          z_index: invPos.base + j,
           household_id: hhId,
           created_at: cAt,
           updated_at: uAt,
@@ -563,8 +583,8 @@ async function main() {
           description: `Doc ${j + 1}`,
           renewal_date: renewal,
           reminder: remindMaybe(rand, renewal),
-          position: j,
-          z_index: j,
+          position: propPos.base + j,
+          z_index: propPos.base + j,
           household_id: hhId,
           created_at: cAt,
           updated_at: uAt,
@@ -613,8 +633,8 @@ async function main() {
           model,
           next_mot_due: nextMot,
           next_service_due: nextService,
-          position: j,
-          z_index: j,
+          position: vehPos.base + j,
+          z_index: vehPos.base + j,
           household_id: hhId,
           created_at: cAt,
           updated_at: uAt,
@@ -632,8 +652,8 @@ async function main() {
           household_id: hhId,
           title: `Note ${j + 1}`,
           body: `Body ${j + 1}`,
-          z_index: j,
-          position: j,
+          z_index: notesPos.base + j,
+          position: notesPos.base + j,
           created_at: cAt,
           updated_at: uAt,
         });
@@ -650,8 +670,8 @@ async function main() {
           household_id: hhId,
           title: `Item ${j + 1}`,
           is_done: chance(rand, 0.3) ? 1 : 0,
-          position: j,
-          z_index: j,
+          position: shopPos.base + j,
+          z_index: shopPos.base + j,
           created_at: cAt,
           updated_at: uAt,
         });
