@@ -18,7 +18,9 @@
     "check:models": "npm run gen:models && git diff --exit-code -- src/bindings",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "guard:invoke": "bash scripts/guards/no-direct-invoke.sh",
-    "check": "npm run typecheck && echo TS OK"
+    "check": "npm run typecheck && echo TS OK",
+    "dev:seed": "VITE_ENV=development node --loader ts-node/esm scripts/dev/seed.ts",
+    "dev:profile": "VITE_ENV=development node --loader ts-node/esm scripts/dev/seed.ts --profile"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^6.7.2",
