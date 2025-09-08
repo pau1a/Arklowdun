@@ -9,6 +9,7 @@ import type { Policy } from "./models";
 import { nowMs, toDate } from "./db/time";
 import { defaultHouseholdId } from "./db/household";
 import { policiesRepo } from "./repos";
+import { showError } from "./ui/errors";
 
 const money = new Intl.NumberFormat(undefined, {
   style: "currency",
@@ -34,7 +35,7 @@ function renderPolicies(listEl: HTMLUListElement, policies: Policy[]) {
       try {
         await openPath(await resolvePath(p.root_key, p.relative_path));
       } catch {
-        alert(`File location unavailable (root: ${p.root_key})`);
+        showError(`File location unavailable (root: ${p.root_key})`);
       }
     });
     li.appendChild(btn);

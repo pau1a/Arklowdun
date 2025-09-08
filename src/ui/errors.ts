@@ -1,15 +1,21 @@
-export function showError(err: unknown, context?: string) {
-  const msg = err instanceof Error
-    ? `${context ?? "Error"}: ${err.message}`
-    : typeof err === "string"
-    ? `${context ?? "Error"}: ${err}`
-    : `${context ?? "Error"}: ${JSON.stringify(err)}`;
-  console.error(err);
-  alert(msg);
+import type { ArkError } from "../db/call";
+import { toArkError } from "../db/call";
+import { log } from "../utils/logger";
+
+export function showError(err: unknown) {
+  const e: ArkError =
+    typeof err === "object" && err && "code" in (err as any) && "message" in (err as any)
+      ? (err as ArkError)
+      : toArkError(err);
+
+  const container = document.querySelector("#errors");
+  if (container) {
+    container.textContent = `${e.message} (${e.code})`;
+  }
+  log.error("error", e);
 }
 
 window.addEventListener("unhandledrejection", (e) => {
   console.error("Unhandled promise rejection", e.reason);
-  showError(e.reason, "Unhandled Promise Rejection");
+  showError(e.reason);
 });
-

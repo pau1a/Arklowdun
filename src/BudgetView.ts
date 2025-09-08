@@ -3,6 +3,7 @@ import type { BudgetCategory, Expense } from "./models";
 import { defaultHouseholdId } from "./db/household";
 import { toDate, nowMs } from "./db/time";
 import { budgetCategoriesRepo, expensesRepo } from "./repos";
+import { showError } from "./ui/errors";
 
 const money = new Intl.NumberFormat(undefined, {
   style: "currency",
@@ -142,7 +143,7 @@ export async function BudgetView(container: HTMLElement) {
   expForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!expCategory.value) {
-      alert("Please add a category first.");
+      showError("Please add a category first.");
       return;
     }
     const amt = Number(expAmount.value);

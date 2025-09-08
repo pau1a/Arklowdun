@@ -15,7 +15,10 @@
     "test": "node --loader ts-node/esm --test tests/*.ts tests/*.js",
     "lint:rs": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
     "gen:models": "cargo test --no-default-features --manifest-path src-tauri/Cargo.toml",
-    "check:models": "npm run gen:models && git diff --exit-code -- src/bindings"
+    "check:models": "npm run gen:models && git diff --exit-code -- src/bindings",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "guard:invoke": "bash scripts/guards/no-direct-invoke.sh",
+    "check": "npm run typecheck && echo TS OK"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^6.7.2",

@@ -7,6 +7,7 @@ import type { PropertyDocument } from "./models";
 import { propertyDocsRepo } from "./repos";
 import { defaultHouseholdId } from "./db/household";
 import { nowMs, toDate } from "./db/time";
+import { showError } from "./ui/errors";
 
 const MAX_TIMEOUT = 2_147_483_647; // ~24.8 days
 function scheduleAt(ts: number, cb: () => void) {
@@ -28,7 +29,7 @@ function renderDocs(listEl: HTMLUListElement, docs: PropertyDocument[]) {
         try {
           await openPath(await resolvePath(d.root_key, d.relative_path));
         } catch {
-          alert(`File location unavailable (root: ${d.root_key})`);
+          showError(`File location unavailable (root: ${d.root_key})`);
         }
       });
       li.appendChild(btn);

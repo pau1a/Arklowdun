@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "./call";
 import type { Vehicle } from "../bindings/Vehicle";
 
 function normalize(v: Vehicle): Vehicle {
@@ -11,32 +11,32 @@ function normalize(v: Vehicle): Vehicle {
 
 export const vehiclesRepo = {
   async list(householdId: string): Promise<Vehicle[]> {
-    const rows = await invoke<Vehicle[]>("vehicles_list", { householdId });
+    const rows = await call<Vehicle[]>("vehicles_list", { householdId });
     return rows.map(normalize);
   },
 
     async get(id: string, householdId: string): Promise<Vehicle | null> {
-      const row = await invoke<Vehicle | null>("vehicles_get", { id, householdId });
+      const row = await call<Vehicle | null>("vehicles_get", { id, householdId });
       return row ? normalize(row) : null;
     },
 
   async create(householdId: string, data: Partial<Vehicle>): Promise<Vehicle> {
-    const row = await invoke<Vehicle>("vehicles_create", {
+    const row = await call<Vehicle>("vehicles_create", {
       data: { ...data, household_id: householdId },
     });
     return normalize(row);
   },
 
   async update(householdId: string, id: string, data: Partial<Vehicle>): Promise<void> {
-    await invoke("vehicles_update", { id, data, householdId });
+    await call("vehicles_update", { id, data, householdId });
   },
 
   async delete(householdId: string, id: string): Promise<void> {
-    await invoke("vehicles_delete", { householdId, id });
+    await call("vehicles_delete", { householdId, id });
   },
 
   async restore(householdId: string, id: string): Promise<void> {
-    await invoke("vehicles_restore", { householdId, id });
+    await call("vehicles_restore", { householdId, id });
   },
 };
 

@@ -2,6 +2,7 @@
 import { defaultHouseholdId } from "./db/household";
 import { shoppingRepo } from "./repos";
 import type { ShoppingItem } from "./models";
+import { showError } from "./ui/errors";
 
 export async function ShoppingListView(container: HTMLElement) {
   const section = document.createElement("section");
@@ -47,8 +48,8 @@ export async function ShoppingListView(container: HTMLElement) {
           item.completed = cb.checked;
           await shoppingRepo.update(hh, item.id, { completed: item.completed } as Partial<ShoppingItem>);
           render();
-        } catch {
-          alert("Failed to update item.");
+        } catch (err) {
+          showError(err);
           cb.checked = !cb.checked;
         }
       });
@@ -64,8 +65,8 @@ export async function ShoppingListView(container: HTMLElement) {
           await shoppingRepo.delete(hh, item.id);
           items = items.filter((i) => i.id !== item.id);
           render();
-        } catch {
-          alert("Failed to delete item.");
+        } catch (err) {
+          showError(err);
         }
       });
 
@@ -91,8 +92,8 @@ export async function ShoppingListView(container: HTMLElement) {
       items.push(created);
       input.value = "";
       render();
-    } catch {
-      alert("Failed to add item.");
+    } catch (err) {
+      showError(err);
     }
   });
 }
