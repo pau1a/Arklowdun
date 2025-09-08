@@ -359,7 +359,10 @@ async function main() {
     insertCategory = makeInserter(
       db,
       "budget_categories",
-      ["id", "name", "household_id", "created_at", "updated_at"],
+      ["id", "name", "position", "household_id", "created_at", "updated_at"],
+      {
+        position: ["position", "z"],
+      },
     );
     insertExpense = makeInserter(
       db,
@@ -396,6 +399,7 @@ async function main() {
         insertCategory({
           id,
           name: `Category ${c + 1}`,
+          position: c,
           household_id: hhId,
           created_at: cAt,
           updated_at: uAt,
