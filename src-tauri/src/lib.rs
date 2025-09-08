@@ -17,8 +17,9 @@ mod migrate;
 mod repo;
 mod state;
 mod time;
+mod importer;
 
-use commands::DbErrorPayload;
+use commands::{DbErrorPayload, map_db_error};
 use events_tz_backfill::events_backfill_timezone;
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -390,38 +391,21 @@ fn get_default_household_id(state: tauri::State<state::AppState>) -> String {
     state.default_household_id.lock().unwrap().clone()
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_sql::Builder::default().build())
-        .setup(|app| {
-            let handle = app.handle();
-            #[allow(clippy::needless_borrow)]
-            let pool = tauri::async_runtime::block_on(crate::db::open_sqlite_pool(&handle))?;
-            tauri::async_runtime::block_on(crate::migrate::apply_migrations(&pool))?;
-            tauri::async_runtime::block_on(async {
-                if let Ok(cols) = sqlx::query("PRAGMA table_info(events);").fetch_all(&pool).await {
-                    let names: Vec<String> = cols
-                        .into_iter()
-                        .filter_map(|r| r.try_get::<String, _>("name").ok())
-                        .collect();
-                    let has_start = names.iter().any(|n| n == "start_at");
-                    let has_end = names.iter().any(|n| n == "end_at");
-                    tracing::info!(target="arklowdun", event="events_table_columns", has_start_at=%has_start, has_end_at=%has_end);
-                }
-            });
-            let hh = tauri::async_runtime::block_on(crate::household::default_household_id(&pool))?;
-            app.manage(crate::state::AppState {
-                pool: pool.clone(),
-                default_household_id: Arc::new(Mutex::new(hh)),
-            });
-            Ok(())
-        })
-        .invoke_handler(tauri::generate_handler![
+#[tauri::command]
+async fn import_run_legacy(
+    app: tauri::AppHandle,
+    _state: State<'_, AppState>,
+    household_id: String,
+    dry_run: bool,
+) -> Result<(), DbErrorPayload> {
+    importer::run_import(&app, household_id, dry_run)
+        .await
+        .map_err(map_db_error)
+}
+
+macro_rules! app_commands {
+    ($($extra:ident),* $(,)?) => {
+        tauri::generate_handler![
             events_backfill_timezone,
             events_list_range,
             event_create,
@@ -460,14 +444,12 @@ pub fn run() {
             inventory_items_update,
             inventory_items_delete,
             inventory_items_restore,
-            // Vehicles
-            vehicles_list,      // typed list for Dashboard
-            vehicles_get,       // generic CRUD for Manage UI
+            vehicles_list,
+            vehicles_get,
             vehicles_create,
             vehicles_update,
             vehicles_delete,
             vehicles_restore,
-            // Vehicle maintenance (generic)
             vehicle_maintenance_list,
             vehicle_maintenance_get,
             vehicle_maintenance_create,
@@ -515,8 +497,53 @@ pub fn run() {
             shopping_items_create,
             shopping_items_update,
             shopping_items_delete,
-            shopping_items_restore
-        ])
+            shopping_items_restore,
+            $($extra),*
+        ]
+    };
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    let import_enabled = std::env::var("TAURI_FEATURES_IMPORT").ok().as_deref() == Some("1");
+
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_sql::Builder::default().build())
+        .setup(|app| {
+            let handle = app.handle();
+            #[allow(clippy::needless_borrow)]
+            let pool = tauri::async_runtime::block_on(crate::db::open_sqlite_pool(&handle))?;
+            tauri::async_runtime::block_on(crate::migrate::apply_migrations(&pool))?;
+            tauri::async_runtime::block_on(async {
+                if let Ok(cols) = sqlx::query("PRAGMA table_info(events);").fetch_all(&pool).await {
+                    let names: Vec<String> = cols
+                        .into_iter()
+                        .filter_map(|r| r.try_get::<String, _>("name").ok())
+                        .collect();
+                    let has_start = names.iter().any(|n| n == "start_at");
+                    let has_end = names.iter().any(|n| n == "end_at");
+                    tracing::info!(target="arklowdun", event="events_table_columns", has_start_at=%has_start, has_end_at=%has_end);
+                }
+            });
+            let hh = tauri::async_runtime::block_on(crate::household::default_household_id(&pool))?;
+            app.manage(crate::state::AppState {
+                pool: pool.clone(),
+                default_household_id: Arc::new(Mutex::new(hh)),
+            });
+            Ok(())
+        });
+
+    let builder = if import_enabled {
+        builder.invoke_handler(app_commands![import_run_legacy])
+    } else {
+        builder.invoke_handler(app_commands![])
+    };
+
+    builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
