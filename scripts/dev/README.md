@@ -24,3 +24,38 @@ The development database lives at:
 - Windows: `%APPDATA%\com.paula.arklowdun-dev\arklowdun.sqlite3`
 - Linux: `~/.local/share/com.paula.arklowdun-dev/arklowdun.sqlite3`
 
+## Coverage
+
+Frontend coverage:
+
+```
+npm run test:coverage
+```
+
+Open `coverage/index.html` for the report.
+
+Rust backend coverage (uses `cargo llvm-cov` when available):
+
+```
+rustup component add llvm-tools-preview
+cargo install cargo-llvm-cov
+npm run cov:rs
+```
+
+The report will be in `coverage-rust/html/index.html` and `coverage-rust/lcov.info`.
+
+If `cargo-llvm-cov` isn't installed, the script prints fallback commands using `cargo tarpaulin`:
+
+```
+cargo install cargo-tarpaulin
+cargo tarpaulin -v --timeout 120 --out Html --out Lcov --engine SourceAnalysis
+```
+
+Run both coverage suites in one go with:
+
+```
+npm run cov:all
+```
+
+Coverage is non-blocking and only for local development.
+
