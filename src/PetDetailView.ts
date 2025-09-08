@@ -4,6 +4,7 @@ import type { Pet, PetMedicalRecord } from "./models";
 import { petMedicalRepo, petsRepo } from "./repos";
 import { defaultHouseholdId } from "./db/household";
 import { showError } from "./ui/errors";
+import { openAttachment, revealAttachment, revealLabel } from "./ui/attachments";
 
 export async function PetDetailView(
   container: HTMLElement,
@@ -25,6 +26,7 @@ export async function PetDetailView(
   async function render() {
     const medical = await loadMedical();
 
+    const revealText = revealLabel();
     container.innerHTML = `
       <button id="back-btn">← Back</button>
       <h2>Pet: ${pet.name}</h2>
@@ -38,7 +40,7 @@ export async function PetDetailView(
           <li data-id="${m.id}">
             ${new Date(m.date).toLocaleDateString()} — ${m.description}
             ${m.reminder ? `(reminds ${new Date(m.reminder).toLocaleDateString()})` : ""}
-            ${m.relative_path ? '<button class="open-doc">Open doc</button>' : ""}
+            ${m.relative_path ? '<button class="open-doc">Open</button><button class="reveal-doc">' + revealText + '</button>' : ""}
             <button class="delete-med">Delete</button>
           </li>
         `
@@ -62,21 +64,24 @@ export async function PetDetailView(
     const backBtn = container.querySelector<HTMLButtonElement>("#back-btn");
     backBtn?.addEventListener("click", () => onBack());
 
-    // Open document handler (lazy import opener & resolver)
+    // Open and reveal document handlers
     container.querySelectorAll<HTMLButtonElement>("button.open-doc").forEach((btn) => {
-      btn.addEventListener("click", async () => {
+      btn.addEventListener("click", () => {
+        const li = btn.closest("li[data-id]");
+        if (!li) return;
+        const id = li.getAttribute("data-id")!;
+        openAttachment("pet_medical", id);
+      });
+    });
+
+    container.querySelectorAll<HTMLButtonElement>("button.reveal-doc").forEach((btn) => {
+      btn.addEventListener("click", () => {
         const li = btn.closest("li[data-id]");
         if (!li) return;
         const id = li.getAttribute("data-id")!;
         const m = medical.find((x) => x.id === id);
         if (!m) return;
-        try {
-          const { openPath } = await import("@tauri-apps/plugin-opener");
-          const { resolvePath } = await import("./files/path");
-          await openPath(await resolvePath(m.root_key, m.relative_path));
-        } catch {
-          showError("File location unavailable");
-        }
+        revealAttachment("pet_medical", id, m.root_key, m.relative_path!);
       });
     });
 

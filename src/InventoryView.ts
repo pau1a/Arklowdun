@@ -1,13 +1,12 @@
 // src/InventoryView.ts
-import { openPath } from "@tauri-apps/plugin-opener";
-import { resolvePath, sanitizeRelativePath } from "./files/path";
+import { sanitizeRelativePath } from "./files/path";
 import { isPermissionGranted, requestPermission, sendNotification } from "./notification";
 import type { InventoryItem } from "./models";
 import { defaultHouseholdId } from "./db/household";
 import { nowMs, toDate } from "./db/time";
 import { inventoryRepo } from "./repos";
-import { showError } from "./ui/errors";
 import { STR } from "./ui/strings";
+import { openAttachment, revealAttachment, revealLabel } from "./ui/attachments";
 
 const MAX_TIMEOUT = 2_147_483_647; // ~24.8 days
 function scheduleAt(ts: number, cb: () => void) {
@@ -45,16 +44,19 @@ async function renderInventory(listEl: HTMLUListElement, items: InventoryItem[])
       : "—";
     li.textContent = `${it.name} (purchased ${pd}, warranty expires ${wx}) `;
     if (it.relative_path) {
-      const btn = document.createElement("button");
-      btn.textContent = "Open document";
-      btn.addEventListener("click", async () => {
-        try {
-          await openPath(await resolvePath(it.root_key, it.relative_path));
-        } catch {
-          showError(`File location unavailable (root: ${it.root_key})`);
-        }
-      });
-      li.appendChild(btn);
+      const openBtn = document.createElement("button");
+      openBtn.textContent = "Open";
+      openBtn.addEventListener("click", () =>
+        openAttachment("inventory_items", String(it.id)),
+      );
+      li.appendChild(openBtn);
+
+      const revealBtn = document.createElement("button");
+      revealBtn.textContent = revealLabel();
+      revealBtn.addEventListener("click", () =>
+        revealAttachment("inventory_items", String(it.id), it.root_key, it.relative_path!),
+      );
+      li.appendChild(revealBtn);
     }
     listEl.appendChild(li);
   });

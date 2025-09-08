@@ -1,5 +1,4 @@
-import { openPath } from "@tauri-apps/plugin-opener";
-import { resolvePath, sanitizeRelativePath } from "./files/path";
+import { sanitizeRelativePath } from "./files/path";
 import {
   isPermissionGranted,
   requestPermission,
@@ -9,8 +8,8 @@ import type { Bill } from "./models";
 import { nowMs, toDate } from "./db/time";
 import { defaultHouseholdId } from "./db/household";
 import { billsRepo } from "./repos";
-import { showError } from "./ui/errors";
 import { STR } from "./ui/strings";
+import { openAttachment, revealAttachment, revealLabel } from "./ui/attachments";
 
 const money = new Intl.NumberFormat(undefined, {
   style: "currency",
@@ -47,16 +46,22 @@ async function renderBills(listEl: HTMLUListElement, bills: Bill[]) {
   bills.forEach((b) => {
     const li = document.createElement("li");
     li.textContent = `${money.format(b.amount / 100)} due ${toDate(b.due_date).toLocaleDateString()} `;
-    const btn = document.createElement("button");
-    btn.textContent = "Open document";
-    btn.addEventListener("click", async () => {
-      try {
-        await openPath(await resolvePath(b.root_key, b.relative_path));
-      } catch {
-        showError(`File location unavailable (root: ${b.root_key})`);
-      }
-    });
-    li.appendChild(btn);
+    if (b.relative_path) {
+      const openBtn = document.createElement("button");
+      openBtn.textContent = "Open";
+      openBtn.addEventListener("click", () =>
+        openAttachment("bills", String(b.id)),
+      );
+      li.appendChild(openBtn);
+
+      const revealBtn = document.createElement("button");
+      revealBtn.textContent = revealLabel();
+      revealBtn.addEventListener("click", () =>
+        revealAttachment("bills", String(b.id), b.root_key, b.relative_path),
+      );
+      li.appendChild(revealBtn);
+    }
+
     listEl.appendChild(li);
   });
 }

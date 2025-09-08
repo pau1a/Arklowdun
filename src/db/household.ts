@@ -1,5 +1,5 @@
-import { call } from "./call";
-import { log } from "../utils/logger";
+import { call } from "./call.ts";
+import { log } from "../utils/logger.ts";
 
 export async function defaultHouseholdId(): Promise<string> {
   try {

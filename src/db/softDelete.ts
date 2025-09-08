@@ -1,4 +1,4 @@
-import { call } from "./call";
+import { call } from "./call.ts";
 
 export async function deleteHousehold(id: string): Promise<void> {
   await call("household_delete", { householdId: id, id });
