@@ -340,8 +340,10 @@ pub async fn events_list_range_command(
                                 tz: Some(tz.name().to_string()),
                                 start_at_utc: Some(start_utc_ms),
                                 end_at_utc: Some(end_utc_ms),
-                                rrule: row.rrule.clone(),
-                                exdates: row.exdates.clone(),
+                                // Instances must look like single events to the UI
+                                // so strip recurrence metadata
+                                rrule: None,
+                                exdates: None,
                                 reminder: row.reminder,
                                 created_at: row.created_at,
                                 updated_at: row.updated_at,
