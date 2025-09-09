@@ -8,6 +8,7 @@ export async function search(
   offset = 0,
 ): Promise<SearchResult[]> {
   const householdId = await defaultHouseholdId();
+  // Tauri: Rust `household_id` expects JS key `householdId`
   return call<SearchResult[]>("search_entities", {
     householdId,
     query,

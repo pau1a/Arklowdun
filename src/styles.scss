@@ -1,5 +1,9 @@
 @use "./styles/manage";
 
+:root {
+  --radius-sm: 6px;
+}
+
 /* ========================================================================== */
 /* GLOBAL RESET & ROOT LAYOUT                                                 */
 /* ========================================================================== */
@@ -50,6 +54,18 @@ main {
   flex-direction: column;
   gap: var(--space-3);
   background-color: var(--color-panel);
+}
+
+.sr-only {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ========================================================================== */
@@ -978,6 +994,7 @@ footer a.footer__settings {
   overflow-y: auto;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm, 6px);
   box-shadow: var(--shadow-base);
   z-index: 200;
 }
@@ -1001,6 +1018,20 @@ footer a.footer__settings {
 
 .omnibox__results li[role="option"]:hover {
   background: var(--color-border);
+}
+
+.omnibox__results li[role="option"].is-active {
+  background: var(--color-border);
+  outline: 2px solid var(--color-accent, #4a90e2);
+  outline-offset: -2px;
+}
+
+@media (forced-colors: active) {
+  .omnibox__results li[role="option"].is-active {
+    outline: 2px solid CanvasText;
+    background: Highlight;
+    color: HighlightText;
+  }
 }
 
 .omnibox__load-more {

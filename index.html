@@ -16,12 +16,12 @@
             type="search"
             placeholder="Search…"
             aria-label="Search"
-            aria-controls="omnibox-results"
+            aria-controls="omnibox-list"
             aria-expanded="false"
             autocomplete="off"
           />
           <div id="omnibox-results" class="omnibox__results" hidden>
-            <ul role="listbox" aria-label="Search results"></ul>
+            <ul id="omnibox-list" role="listbox" aria-label="Search results"></ul>
           </div>
         </div>
         <div class="brand">
@@ -103,6 +103,7 @@
         </button>
       </div>
     </footer>
+    <div id="search-live" aria-live="polite" class="sr-only"></div>
     <div id="modal-root"></div>
   </body>
 </html>
