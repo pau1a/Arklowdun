@@ -291,9 +291,10 @@ pub async fn events_list_range_command(
     let mut out = Vec::new();
     'rows: for row in rows {
         if let Some(rrule_str) = row.rrule.clone() {
-            let tz_name = row.tz.clone().unwrap_or_else(|| "UTC".into());
-            let tz_chrono: ChronoTz = tz_name.parse().unwrap_or(chrono_tz::UTC);
-            let tz: Tz = Tz::Tz(tz_chrono);
+            let tz_str = row.tz.clone().unwrap_or_else(|| "UTC".into());
+            let tz_chrono: ChronoTz = tz_str.parse().unwrap_or(chrono_tz::UTC);
+            let tz_name = tz_chrono.name().to_string();
+            let tz: Tz = tz_chrono.into();
             let start_local = from_local_ms(row.start_at, tz);
             let duration = row
                 .end_at
@@ -323,8 +324,7 @@ pub async fn events_list_range_command(
                             .unwrap()
                             .with_timezone(&tz);
                         set = set.after(after).before(before);
-                        let res = set.all(500);
-                        for occ in res.dates {
+                        for occ in set.all(500).dates {
                             let start_utc_ms = occ.with_timezone(&Utc).timestamp_millis();
                             let end_dt = occ + Duration::milliseconds(duration);
                             let end_utc_ms = end_dt.with_timezone(&Utc).timestamp_millis();
@@ -337,7 +337,7 @@ pub async fn events_list_range_command(
                                 title: row.title.clone(),
                                 start_at: start_utc_ms,
                                 end_at: Some(end_utc_ms),
-                                tz: Some(tz.name().to_string()),
+                                tz: Some(tz_name.clone()),
                                 start_at_utc: Some(start_utc_ms),
                                 end_at_utc: Some(end_utc_ms),
                                 // Instances must look like single events to the UI
