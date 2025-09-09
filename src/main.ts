@@ -329,179 +329,232 @@ window.addEventListener("DOMContentLoaded", () => {
   log.debug("app booted");
   defaultHouseholdId().catch((e) => console.error("DB init failed:", e));
 
-    const omnibox = document.querySelector<HTMLInputElement>("#omnibox");
-    const resultsEl = document.querySelector<HTMLElement>("#omnibox-results");
-    if (omnibox && resultsEl) {
-      const input = omnibox;
-      const res = resultsEl;
-      let timer: number | undefined;
-      let offset = 0;
-      let current = "";
-      let reqId = 0;
 
-      function positionResults() {
-        const r = input.getBoundingClientRect();
-        // Place below input with small gap; anchor to the right edge of the sidebar
-        const GAP = 8;
-        const top = Math.round(r.bottom + 6);
-        const left = Math.round(r.right + GAP);
-        const rightPadding = 16; // keep a bit of margin from the window edge
-        const maxWidth = Math.min(520, window.innerWidth - left - rightPadding);
-        res.style.top = `${top}px`;
-        res.style.left = `${left}px`;
-        res.style.width = `${Math.max(260, maxWidth)}px`;
+    const input = document.querySelector<HTMLInputElement>('#omnibox')!;
+    const panel = document.querySelector<HTMLElement>('#omnibox-results')!;
+    const list = panel.querySelector<HTMLUListElement>('ul')!;
+    list.id = 'omnibox-list';
+    const live = document.getElementById('search-live')!;
+
+    let timer: number | undefined;
+    let offset = 0;
+    let current = '';
+    let reqId = 0;
+    let activeIndex = -1;
+
+    let announceTimer: number | undefined;
+    function announce(text: string) {
+      if (announceTimer) clearTimeout(announceTimer);
+      announceTimer = window.setTimeout(() => { live.textContent = text; }, 150);
+    }
+
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-autocomplete', 'list');
+    input.setAttribute('aria-controls', 'omnibox-list');
+    list.setAttribute('role', 'listbox');
+
+    function positionResults() {
+      const r = input.getBoundingClientRect();
+      const GAP = 8;
+      const top = Math.round(r.bottom + 6);
+      const left = Math.round(r.right + GAP);
+      const rightPadding = 16;
+      const maxWidth = Math.min(520, window.innerWidth - left - rightPadding);
+      panel.style.top = `${top}px`;
+      panel.style.left = `${left}px`;
+      panel.style.width = `${Math.max(260, maxWidth)}px`;
+    }
+
+    function hideResults() {
+      list.innerHTML = '';
+      panel.querySelector('.omnibox__empty')?.remove();
+      panel.querySelector('.omnibox__load-more')?.remove();
+      activeIndex = -1;
+      input.removeAttribute('aria-activedescendant');
+      input.setAttribute('aria-expanded', 'false');
+      panel.hidden = true;
+    }
+
+    async function run(q: string, append = false) {
+      const myId = ++reqId;
+      try {
+        const items = await search(q, 100, offset);
+        if (myId !== reqId) return;
+        render(items, append, q);
+      } catch (err) {
+        if (myId !== reqId) return;
+        showError(err);
+      }
+    }
+
+    function render(items: SearchResult[], append: boolean, q: string) {
+      const oldLoad = panel.querySelector('.omnibox__load-more');
+      if (oldLoad) oldLoad.remove();
+      const oldEmpty = panel.querySelector('.omnibox__empty');
+      if (oldEmpty) oldEmpty.remove();
+
+      if (!append) {
+        list.innerHTML = '';
+        activeIndex = -1;
+        input.removeAttribute('aria-activedescendant');
       }
 
-      function hideResults() {
-        res.hidden = true;
-        res.innerHTML = "";
-        const ul = document.createElement("ul");
-        ul.setAttribute("role", "listbox");
-        ul.setAttribute("aria-label", "Search results");
-        res.appendChild(ul);
-        input.setAttribute("aria-expanded", "false");
-      }
-
-      async function run(q: string, append = false) {
-        const myId = ++reqId;
-        try {
-          const items = await search(q, 100, offset);
-          if (myId !== reqId) return;
-          render(items, append, q);
-        } catch (err) {
-          if (myId !== reqId) return;
-          showError(err);
-        }
-      }
-
-      function render(items: SearchResult[], append: boolean, q: string) {
-        if (!append) res.innerHTML = "";
-        // remove old "load more"
-        const oldLoad = res.querySelector(".omnibox__load-more");
-        if (oldLoad) oldLoad.remove();
-
-        let ul = res.querySelector("ul");
-        if (!ul) {
-          ul = document.createElement("ul");
-          ul.setAttribute("role", "listbox");
-          ul.setAttribute("aria-label", "Search results");
-          res.appendChild(ul);
-        }
-
-        if (!append && items.length === 0) {
-          const empty = document.createElement("div");
-          empty.className = "omnibox__empty";
-          empty.textContent = `No results found for ${q}`;
-          ul.replaceWith(empty); // replace list for cleaner a11y when empty
-          res.hidden = false;
-          input.setAttribute("aria-expanded", "true");
-          positionResults();
-          return;
-        }
-
-        for (const it of items) {
-          const li = document.createElement("li");
-          li.setAttribute("role", "option");
-          li.setAttribute("tabindex", "-1");
-          if (it.kind === "File") {
-            const date = new Date(it.updated_at).toLocaleString();
-            li.innerHTML = `<i class="fa-regular fa-file"></i><span>${it.filename}</span><span>${date}</span>`;
-            li.addEventListener("click", () => {
-              location.hash = "#files";
-              hideResults();
-            });
-          } else if (it.kind === "Event") {
-            const date = new Intl.DateTimeFormat(undefined, { timeZone: it.tz }).format(
-              new Date(it.start_at_utc),
-            );
-            li.innerHTML = `<i class="fa-regular fa-calendar"></i><span>${it.title}</span><span>${date}</span>`;
-            li.addEventListener("click", () => {
-              location.hash = "#calendar";
-              hideResults();
-            });
-          } else if (it.kind === "Note") {
-            const date = new Date(it.updated_at).toLocaleString();
-            li.innerHTML = `<i class="fa-regular fa-note-sticky" style="color:${it.color}"></i><span>${it.snippet}</span><span>${date}</span>`;
-            li.addEventListener("click", () => {
-              location.hash = "#notes";
-              hideResults();
-            });
-          }
-          ul.appendChild(li);
-        }
-
-        if (items.length === 100) {
-          const load = document.createElement("div");
-          load.className = "omnibox__load-more";
-          load.textContent = "Load more";
-          load.onclick = () => {
-            offset += 100;
-            run(current, true);
-          };
-          res.appendChild(load);
-        }
-
-        res.hidden = false;
-        input.setAttribute("aria-expanded", "true");
+      if (!append && items.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'omnibox__empty';
+        empty.textContent = `No results found for ${q}`;
+        panel.appendChild(empty);
+        panel.hidden = false;
+        input.setAttribute('aria-expanded', 'true');
         positionResults();
+        announce(`No results for ${q}`);
+        return;
       }
 
-      input.addEventListener("input", () => {
-        const q = input.value.trim();
-        current = q;
-        offset = 0;
-        if (timer) clearTimeout(timer);
-        if (!q) {
-          hideResults();
-          return;
+      const startIndex = list.children.length;
+      items.forEach((it, i) => {
+        const li = document.createElement('li');
+        li.setAttribute('role', 'option');
+        li.setAttribute('tabindex', '-1');
+        li.id = `omnix-option-${startIndex + i}`;
+        li.setAttribute('aria-selected', 'false');
+        if (it.kind === 'File') {
+          const date = new Date(it.updated_at).toLocaleString();
+          li.innerHTML = `<i class="fa-regular fa-file"></i><span>${it.filename}</span><span>${date}</span>`;
+          li.addEventListener('click', () => {
+            location.hash = '#files';
+            hideResults();
+            setTimeout(() => input.blur(), 0);
+          });
+        } else if (it.kind === 'Event') {
+          const date = new Intl.DateTimeFormat(undefined, { timeZone: it.tz }).format(new Date(it.start_at_utc));
+          li.innerHTML = `<i class="fa-regular fa-calendar"></i><span>${it.title}</span><span>${date}</span>`;
+          li.addEventListener('click', () => {
+            location.hash = '#calendar';
+            hideResults();
+            setTimeout(() => input.blur(), 0);
+          });
+        } else if (it.kind === 'Note') {
+          const date = new Date(it.updated_at).toLocaleString();
+          li.innerHTML = `<i class="fa-regular fa-note-sticky" style="color:${it.color}"></i><span>${it.snippet}</span><span>${date}</span>`;
+          li.addEventListener('click', () => {
+            location.hash = '#notes';
+            hideResults();
+            setTimeout(() => input.blur(), 0);
+          });
         }
-        timer = window.setTimeout(() => run(q), 200);
+        list.appendChild(li);
       });
 
-      // Enter triggers search immediately; Escape clears
-      input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
+      if (items.length === 100) {
+        const load = document.createElement('div');
+        load.className = 'omnibox__load-more';
+        load.textContent = 'Load more';
+        load.onclick = () => {
+          offset += 100;
+          run(current, true);
+        };
+        panel.appendChild(load);
+      }
+
+      panel.hidden = false;
+      input.setAttribute('aria-expanded', 'true');
+      positionResults();
+      if (!append) {
+        const msg = items.length === 0
+          ? `No results for ${q}`
+          : items.length === 100
+            ? `100 or more results for ${q}`
+            : `${items.length} results for ${q}`;
+        announce(msg);
+      }
+    }
+
+    input.addEventListener('input', () => {
+      const MINLEN = Number(import.meta.env.VITE_SEARCH_MINLEN ?? '2');
+      const q = input.value.trim();
+      current = q;
+      offset = 0;
+      if (timer) clearTimeout(timer);
+      if (!q) {
+        hideResults();
+        return;
+      }
+      if (q.length < MINLEN) {
+        panel.hidden = true;
+        input.setAttribute('aria-expanded', 'false');
+        live.textContent = '';
+        return;
+      }
+      timer = window.setTimeout(() => run(q), 200);
+    });
+
+    input.addEventListener('keydown', (e) => {
+      const options = Array.from(list.querySelectorAll<HTMLLIElement>('li[role="option"]'));
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (panel.hidden || !options.length) return;
+        e.preventDefault();
+        activeIndex = e.key === 'ArrowDown' ? Math.min(activeIndex + 1, options.length - 1) : Math.max(activeIndex - 1, 0);
+        options.forEach((el, i) => {
+          const active = i === activeIndex;
+          el.classList.toggle('is-active', active);
+          el.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        if (activeIndex >= 0) {
+          const id = options[activeIndex].id || `omnix-option-${activeIndex}`;
+          options[activeIndex].id = id;
+          input.setAttribute('aria-activedescendant', id);
+          options[activeIndex].scrollIntoView({ block: 'nearest' });
+        }
+      } else if (e.key === 'Enter') {
+        if (!panel.hidden && activeIndex >= 0 && options[activeIndex]) {
+          e.preventDefault();
+          options[activeIndex].click();
+        } else {
           if (timer) clearTimeout(timer);
           const q = input.value.trim();
           current = q;
           offset = 0;
-          if (q) run(q);
-          else hideResults();
-        } else if (e.key === "Escape") {
-          input.value = "";
-          hideResults();
-        }
-      });
-      // Close when clicking outside
-      const omniboxWrapper = input.closest(".omnibox");
-      document.addEventListener("click", (e) => {
-        const t = e.target as Node;
-        if (!res.contains(t) && !(omniboxWrapper?.contains(t))) {
-          hideResults();
-        }
-      });
-      // Close on blur (tab away)
-      input.addEventListener("blur", () => {
-        setTimeout(() => {
-          if (document.activeElement !== input && !res.contains(document.activeElement)) {
+          const MINLEN = Number(import.meta.env.VITE_SEARCH_MINLEN ?? '2');
+          if (!q) {
             hideResults();
+            return;
           }
-        }, 100);
-      });
+          if (q.length < MINLEN) {
+            panel.hidden = true;
+            input.setAttribute('aria-expanded', 'false');
+            live.textContent = '';
+            return;
+          }
+          run(q);
+        }
+      } else if (e.key === 'Escape') {
+        input.value = '';
+        hideResults();
+      }
+    });
 
-      // Keep position correct on viewport changes
-      window.addEventListener("resize", () => {
-        if (!res.hidden) positionResults();
-      });
-      window.addEventListener(
-        "scroll",
-        () => {
-          if (!res.hidden) positionResults();
-        },
-        { passive: true },
-      );
-    }
+    const omniboxWrapper = input.closest('.omnibox');
+    document.addEventListener('click', (e) => {
+      const t = e.target as Node;
+      if (!panel.contains(t) && !(omniboxWrapper?.contains(t))) {
+        hideResults();
+      }
+    });
+    input.addEventListener('blur', () => {
+      setTimeout(() => {
+        if (document.activeElement !== input && !panel.contains(document.activeElement)) {
+          hideResults();
+        }
+      }, 100);
+    });
 
+    window.addEventListener('resize', () => {
+      if (!panel.hidden) positionResults();
+    });
+    window.addEventListener('scroll', () => {
+      if (!panel.hidden) positionResults();
+    }, { passive: true });
   linkDashboard()?.addEventListener("click", (e) => {
     e.preventDefault();
     navigate("dashboard");
@@ -540,7 +593,7 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 // minimal debug handle without ts-expect-error
-const DEV = (import.meta as any)?.env?.DEV ?? false;
+const DEV = import.meta.env.DEV ?? false;
 if (DEV) {
   (window as any).__win = {
     label: (appWindow as any).label,
