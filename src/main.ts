@@ -458,9 +458,16 @@ window.addEventListener("DOMContentLoaded", () => {
         timer = window.setTimeout(() => run(q), 200);
       });
 
-      // Close on ESC
+      // Enter triggers search immediately; Escape clears
       input.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") {
+        if (e.key === "Enter") {
+          if (timer) clearTimeout(timer);
+          const q = input.value.trim();
+          current = q;
+          offset = 0;
+          if (q) run(q);
+          else hideResults();
+        } else if (e.key === "Escape") {
           input.value = "";
           hideResults();
         }
