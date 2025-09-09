@@ -372,7 +372,6 @@ textarea:focus-visible {
   padding: var(--space-4) var(--space-4) var(--space-5);
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
   align-items: flex-start;
   background-color: var(--color-sidebar-bg);
   border-inline-end: 1px solid var(--color-sidebar-border);
@@ -383,7 +382,7 @@ textarea:focus-visible {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: var(--space-4); /* Brand ↔ Hub ↔ Nav spacing */
+  gap: var(--space-2);
 }
 
 .sidebar h1 {
@@ -955,54 +954,36 @@ footer a.footer__settings {
 }
 
 /* Omnibox search */
-.topbar {
-  /* fixed header above content area (not full screen) */
-  position: fixed;
-  top: 0;
-  /* keep in sync with sidebar width (extract to var later if you like) */
-  left: 200px;
-  right: 0;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 0 var(--space-3);
-  background: var(--color-bg);
-  border-bottom: 1px solid var(--color-border);
-  z-index: 100; /* above content; below modals */
-}
-
-.topbar input[type="search"] {
-  width: 100%;
-  max-width: 520px;
-  padding: var(--space-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-}
-
-.container {
-  /* room for the fixed header so it doesn’t cover content */
-  padding-top: 48px;
-}
 
 .omnibox {
   position: relative;
-  width: 100%;
-  max-width: 520px;
+  padding: var(--space-2) var(--space-3);
 }
 
-.omnibox__results {
-  position: absolute;
-  top: calc(100% + 6px); /* small gap under input */
-  left: 0;
-  right: 0;
-  background: var(--color-bg);
+.omnibox input[type="search"] {
+  width: 100%;
+  max-width: none;
+  height: 34px;
+  padding: var(--space-2);
   border: 1px solid var(--color-border);
-  border-top: none;
+  border-radius: var(--radius-sm, 6px);
+}
+
+/* The flyout positions via JS. */
+.omnibox__results {
+  position: fixed;
+  width: 520px;
+  max-width: min(90vw, 520px);
   max-height: 400px;
   overflow-y: auto;
-  z-index: 200; /* above header, below modals */
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
   box-shadow: var(--shadow-base);
+  z-index: 200;
+}
+
+.omnibox__results[hidden] {
+  display: none;
 }
 
 .omnibox__results ul {
@@ -1011,14 +992,14 @@ footer a.footer__settings {
   padding: 0;
 }
 
-.omnibox__results li {
+.omnibox__results li[role="option"] {
   display: flex;
   gap: var(--space-2);
   padding: var(--space-2);
   cursor: pointer;
 }
 
-.omnibox__results li:hover {
+.omnibox__results li[role="option"]:hover {
   background: var(--color-border);
 }
 

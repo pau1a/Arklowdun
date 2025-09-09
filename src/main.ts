@@ -332,15 +332,34 @@ window.addEventListener("DOMContentLoaded", () => {
     const omnibox = document.querySelector<HTMLInputElement>("#omnibox");
     const resultsEl = document.querySelector<HTMLElement>("#omnibox-results");
     if (omnibox && resultsEl) {
+      const input = omnibox;
       const res = resultsEl;
       let timer: number | undefined;
       let offset = 0;
       let current = "";
       let reqId = 0;
 
+      function positionResults() {
+        const r = input.getBoundingClientRect();
+        // Place below input with small gap; anchor to the right edge of the sidebar
+        const GAP = 8;
+        const top = Math.round(r.bottom + 6);
+        const left = Math.round(r.right + GAP);
+        const rightPadding = 16; // keep a bit of margin from the window edge
+        const maxWidth = Math.min(520, window.innerWidth - left - rightPadding);
+        res.style.top = `${top}px`;
+        res.style.left = `${left}px`;
+        res.style.width = `${Math.max(260, maxWidth)}px`;
+      }
+
       function hideResults() {
         res.hidden = true;
         res.innerHTML = "";
+        const ul = document.createElement("ul");
+        ul.setAttribute("role", "listbox");
+        ul.setAttribute("aria-label", "Search results");
+        res.appendChild(ul);
+        input.setAttribute("aria-expanded", "false");
       }
 
       async function run(q: string, append = false) {
@@ -356,26 +375,34 @@ window.addEventListener("DOMContentLoaded", () => {
       }
 
       function render(items: SearchResult[], append: boolean, q: string) {
-        if (!append) {
-          res.innerHTML = "";
-        }
+        if (!append) res.innerHTML = "";
+        // remove old "load more"
         const oldLoad = res.querySelector(".omnibox__load-more");
         if (oldLoad) oldLoad.remove();
+
+        let ul = res.querySelector("ul");
+        if (!ul) {
+          ul = document.createElement("ul");
+          ul.setAttribute("role", "listbox");
+          ul.setAttribute("aria-label", "Search results");
+          res.appendChild(ul);
+        }
+
         if (!append && items.length === 0) {
           const empty = document.createElement("div");
           empty.className = "omnibox__empty";
           empty.textContent = `No results found for ${q}`;
-          res.appendChild(empty);
+          ul.replaceWith(empty); // replace list for cleaner a11y when empty
           res.hidden = false;
+          input.setAttribute("aria-expanded", "true");
+          positionResults();
           return;
         }
-        let list = res.querySelector("ul");
-        if (!list) {
-          list = document.createElement("ul");
-          res.appendChild(list);
-        }
+
         for (const it of items) {
           const li = document.createElement("li");
+          li.setAttribute("role", "option");
+          li.setAttribute("tabindex", "-1");
           if (it.kind === "File") {
             const date = new Date(it.updated_at).toLocaleString();
             li.innerHTML = `<i class="fa-regular fa-file"></i><span>${it.filename}</span><span>${date}</span>`;
@@ -400,8 +427,9 @@ window.addEventListener("DOMContentLoaded", () => {
               hideResults();
             });
           }
-          list.appendChild(li);
+          ul.appendChild(li);
         }
+
         if (items.length === 100) {
           const load = document.createElement("div");
           load.className = "omnibox__load-more";
@@ -412,11 +440,14 @@ window.addEventListener("DOMContentLoaded", () => {
           };
           res.appendChild(load);
         }
+
         res.hidden = false;
+        input.setAttribute("aria-expanded", "true");
+        positionResults();
       }
 
-      omnibox.addEventListener("input", () => {
-        const q = omnibox.value.trim();
+      input.addEventListener("input", () => {
+        const q = input.value.trim();
         current = q;
         offset = 0;
         if (timer) clearTimeout(timer);
@@ -428,26 +459,40 @@ window.addEventListener("DOMContentLoaded", () => {
       });
 
       // Close on ESC
-      omnibox.addEventListener("keydown", (e) => {
+      input.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
-          omnibox.value = "";
+          input.value = "";
           hideResults();
         }
       });
       // Close when clicking outside
+      const omniboxWrapper = input.closest(".omnibox");
       document.addEventListener("click", (e) => {
-        if (!res.contains(e.target as Node) && e.target !== omnibox) {
+        const t = e.target as Node;
+        if (!res.contains(t) && !(omniboxWrapper?.contains(t))) {
           hideResults();
         }
       });
       // Close on blur (tab away)
-      omnibox.addEventListener("blur", () => {
+      input.addEventListener("blur", () => {
         setTimeout(() => {
-          if (document.activeElement !== omnibox && !res.contains(document.activeElement)) {
+          if (document.activeElement !== input && !res.contains(document.activeElement)) {
             hideResults();
           }
         }, 100);
       });
+
+      // Keep position correct on viewport changes
+      window.addEventListener("resize", () => {
+        if (!res.hidden) positionResults();
+      });
+      window.addEventListener(
+        "scroll",
+        () => {
+          if (!res.hidden) positionResults();
+        },
+        { passive: true },
+      );
     }
 
   linkDashboard()?.addEventListener("click", (e) => {
