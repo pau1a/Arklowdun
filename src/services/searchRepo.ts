@@ -9,7 +9,7 @@ export async function search(
 ): Promise<SearchResult[]> {
   const householdId = await defaultHouseholdId();
   return call<SearchResult[]>("search_entities", {
-    householdId,
+    household_id: householdId,
     query,
     limit,
     offset,

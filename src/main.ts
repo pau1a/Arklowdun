@@ -380,6 +380,11 @@ window.addEventListener("DOMContentLoaded", () => {
       try {
         const items = await search(q, 100, offset);
         if (myId !== reqId) return;
+        const MINLEN = Number(import.meta.env.VITE_SEARCH_MINLEN ?? '2');
+        if (import.meta.env.DEV && q.length >= MINLEN && items.length === 0) {
+          const householdId = await defaultHouseholdId();
+          console.debug("[search] no results", { q, householdId });
+        }
         render(items, append, q);
       } catch (err) {
         if (myId !== reqId) return;

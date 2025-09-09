@@ -460,6 +460,14 @@ async fn search_entities(
     use sqlx::Row;
     let pool = &state.pool;
 
+    if household_id.trim().is_empty() {
+        return Err(SearchErrorPayload {
+            code: "BAD_REQUEST".into(),
+            message: "household_id is required".into(),
+            details: serde_json::json!({}),
+        });
+    }
+
     let q = query;
     let prefix = format!("{}%", q);
     let sub = format!("%{}%", q);
