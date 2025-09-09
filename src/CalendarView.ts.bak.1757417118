@@ -10,11 +10,10 @@ import type { Event } from "./models";
 
 async function fetchEvents(): Promise<Event[]> {
   const hh = await defaultHouseholdId();
-  console.log("events_list_range window", { start: 0, end: Date.now() + 90*24*60*60*1000 });
   return await call<Event[]>("events_list_range", {
     householdId: hh,
-    start: Date.now()-365*24*60*60*1000,
-    end: Date.now()+365*24*60*60*1000,
+    start: 0,
+    end: Date.now() + 90 * 24 * 60 * 60 * 1000,
   });
 }
 

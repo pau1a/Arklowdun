@@ -8,7 +8,7 @@ use ts_rs::TS;
 
 use crate::state::AppState;
 
-mod commands;
+pub mod commands;
 mod db;
 mod events_tz_backfill;
 mod household; // declare module; avoid `use` to prevent name collision
@@ -280,6 +280,14 @@ pub struct Event {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "number")]
     pub end_at_utc: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    #[sqlx(default)]
+    pub rrule: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    #[sqlx(default)]
+    pub exdates: Option<String>,
     #[ts(optional, type = "number")]
     pub reminder: Option<i64>,
     #[serde(default)]
@@ -292,6 +300,10 @@ pub struct Event {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "number")]
     pub deleted_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    #[sqlx(default)]
+    pub series_parent_id: Option<String>,
 }
 
 #[tauri::command]

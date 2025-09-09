@@ -107,7 +107,8 @@ export const billsApi = {
 
 // ---- Events: dedicated API (uses events_list_range and singular CRUD) ----
 export const eventsApi = {
-  async listRange(householdId: string, start = 0, end = Number.MAX_SAFE_INTEGER): Promise<Event[]> {
+  async listRange(householdId: string, start = 0, end = Date.now() + 90 * 24 * 60 * 60 * 1000): Promise<Event[]> {
+    console.log("events_list_range (repos.ts)", { householdId, start, end });
     return await call<Event[]>("events_list_range", { householdId, start, end });
   },
   async create(householdId: string, data: Partial<Event>): Promise<Event> {
