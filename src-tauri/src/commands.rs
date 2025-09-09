@@ -269,7 +269,8 @@ pub async fn events_list_range_command(
     let rows = sqlx::query_as::<_, Event>(
         r#"
         SELECT id, household_id, title, start_at, end_at, tz, start_at_utc, end_at_utc,
-               rrule, exdates, reminder, created_at, updated_at, deleted_at
+               rrule, exdates, reminder, created_at, updated_at, deleted_at,
+               NULL AS series_parent_id
         FROM events
         WHERE household_id = ? AND deleted_at IS NULL
           AND (
@@ -354,11 +355,19 @@ pub async fn events_list_range_command(
                         }
                     }
                     Err(e) => {
-                        tracing::warn!("invalid rrule for event {}: {}", row.id, e);
+                        tracing::warn!(
+                            event_id = %row.id,
+                            rule = %rrule_str.chars().take(80).collect::<String>(),
+                            "invalid rrule: {e}"
+                        );
                     }
                 },
                 Err(e) => {
-                    tracing::warn!("failed to parse rrule for event {}: {}", row.id, e);
+                    tracing::warn!(
+                        event_id = %row.id,
+                        rule = %rrule_str.chars().take(80).collect::<String>(),
+                        "failed to parse rrule: {e}"
+                    );
                 }
             }
         } else {
