@@ -32,6 +32,7 @@ In scope:
 - Image and PDF previews
 - Single reminders
 - About pane
+- Quick Search MVP (LIKE queries, limit 100, basic ranking). Planned upgrade: FTS5 triggers.
 
 Deferred:
 - Recurrence

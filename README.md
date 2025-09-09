@@ -39,3 +39,4 @@ The first migration to apply them will be
 ## Documentation
 
 - [Architecture Overview](docs/architecture/1-overview.md)
+- Quick Search: available in omnibox at top of views. Limit 100 results, load more supported.
