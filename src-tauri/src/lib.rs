@@ -452,111 +452,108 @@ pub struct SearchErrorPayload {
 #[tauri::command]
 async fn search_entities(
     state: State<'_, AppState>,
+    household_id: String,
     query: String,
     limit: i64,
     offset: i64,
 ) -> Result<Vec<SearchResult>, SearchErrorPayload> {
     use sqlx::Row;
     let pool = &state.pool;
-    let q_lower = query.to_lowercase();
-    let mut results: Vec<(i32, usize, SearchResult)> = Vec::new();
-    let mut ord: usize = 0;
 
-    // Files prefix match
-    let file_rows = sqlx::query(
-        "SELECT id, filename, updated_at FROM files WHERE filename LIKE ?1 || '%' ORDER BY filename ASC LIMIT ?2 OFFSET ?3",
-    )
-    .bind(&query)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| SearchErrorPayload {
-        code: "DB/QUERY_FAILED".into(),
-        message: "Search failed".into(),
-        details: serde_json::json!({ "error": e.to_string() }),
-    })?;
-    for row in file_rows {
-        let filename: String = row.try_get("filename").unwrap_or_default();
-        let score = if filename.eq_ignore_ascii_case(&query) {
-            2
-        } else if filename.to_lowercase().contains(&q_lower) {
-            1
-        } else {
-            0
-        };
-        let id: String = row.try_get("id").unwrap_or_default();
-        let updated_at: i64 = row.try_get("updated_at").unwrap_or_default();
-        results.push((score, ord, SearchResult::File { id, filename, updated_at }));
-        ord += 1;
+    let file_prefix = format!("{}%", query);
+    let sub = format!("%{}%", query);
+
+    // SQL parameters:
+    // ?1 household_id
+    // ?2 file prefix (query%)
+    // ?3 exact query
+    // ?4 substring (%query%)
+    // ?5 limit
+    // ?6 offset
+    let sql = r#"
+      SELECT 'File' AS kind, id, filename AS a1, NULL AS a2, NULL AS a3, updated_at AS ts,
+             CASE
+               WHEN filename = ?3 COLLATE NOCASE THEN 2
+               WHEN filename LIKE ?2 COLLATE NOCASE THEN 1
+               ELSE 0
+             END AS score
+      FROM files
+      WHERE household_id = ?1 AND filename LIKE ?2 COLLATE NOCASE
+
+      UNION ALL
+
+      SELECT 'Event' AS kind, id, title AS a1, CAST(start_at_utc AS TEXT) AS a2, COALESCE(tz, 'Europe/London') AS a3, start_at_utc AS ts,
+             CASE
+               WHEN title = ?3 COLLATE NOCASE THEN 2
+               WHEN title LIKE ?4 COLLATE NOCASE THEN 1
+               ELSE 0
+             END AS score
+      FROM events
+      WHERE household_id = ?1 AND title LIKE ?4 COLLATE NOCASE
+
+      UNION ALL
+
+      SELECT 'Note' AS kind, id, SUBSTR(text, 1, 80) AS a1, color AS a2, NULL AS a3, updated_at AS ts,
+             CASE
+               WHEN text = ?3 COLLATE NOCASE THEN 2
+               WHEN text LIKE ?4 COLLATE NOCASE THEN 1
+               ELSE 0
+             END AS score
+      FROM notes
+      WHERE household_id = ?1 AND text LIKE ?4 COLLATE NOCASE
+
+      ORDER BY score DESC, ts DESC
+      LIMIT ?5 OFFSET ?6;
+    "#;
+
+    let rows = sqlx::query(sql)
+        .bind(&household_id) // ?1
+        .bind(&file_prefix) // ?2
+        .bind(&query) // ?3
+        .bind(&sub) // ?4
+        .bind(limit) // ?5
+        .bind(offset) // ?6
+        .fetch_all(pool)
+        .await
+        .map_err(|e| SearchErrorPayload {
+            code: "DB/QUERY_FAILED".into(),
+            message: "Search failed".into(),
+            details: serde_json::json!({ "error": e.to_string() }),
+        })?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for r in rows {
+        let kind: String = r.try_get("kind").unwrap_or_default();
+        let id: String = r.try_get("id").unwrap_or_default();
+        match kind.as_str() {
+            "File" => {
+                let filename: String = r.try_get("a1").unwrap_or_default();
+                let updated_at: i64 = r.try_get("ts").unwrap_or_default();
+                out.push(SearchResult::File { id, filename, updated_at });
+            }
+            "Event" => {
+                let title: String = r.try_get("a1").unwrap_or_default();
+                let start_at_txt: String = r.try_get("a2").unwrap_or_default();
+                let tz: String = r.try_get("a3").unwrap_or_default();
+                let start_at_utc: i64 = start_at_txt.parse().unwrap_or_default();
+                out.push(SearchResult::Event { id, title, start_at_utc, tz });
+            }
+            "Note" => {
+                let snippet: String = r.try_get("a1").unwrap_or_default();
+                let color: String = r.try_get("a2").unwrap_or_default();
+                let updated_at: i64 = r.try_get("ts").unwrap_or_default();
+                out.push(SearchResult::Note {
+                    id,
+                    snippet,
+                    updated_at,
+                    color,
+                });
+            }
+            _ => {}
+        }
     }
 
-    // Events substring match
-    let event_rows = sqlx::query(
-        "SELECT id, title, start_at_utc, tz FROM events WHERE title LIKE '%' || ?1 || '%' ORDER BY title ASC LIMIT ?2 OFFSET ?3",
-    )
-    .bind(&query)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| SearchErrorPayload {
-        code: "DB/QUERY_FAILED".into(),
-        message: "Search failed".into(),
-        details: serde_json::json!({ "error": e.to_string() }),
-    })?;
-    for row in event_rows {
-        let title: String = row.try_get("title").unwrap_or_default();
-        let score = if title.eq_ignore_ascii_case(&query) {
-            2
-        } else if title.to_lowercase().contains(&q_lower) {
-            1
-        } else {
-            0
-        };
-        let id: String = row.try_get("id").unwrap_or_default();
-        let start_at_utc: i64 = row.try_get("start_at_utc").unwrap_or_default();
-        let tz: String = row.try_get("tz").unwrap_or_default();
-        results.push((score, ord, SearchResult::Event { id, title, start_at_utc, tz }));
-        ord += 1;
-    }
-
-    // Notes substring match
-    let note_rows = sqlx::query(
-        "SELECT id, text, updated_at, color FROM notes WHERE text LIKE '%' || ?1 || '%' ORDER BY updated_at DESC LIMIT ?2 OFFSET ?3",
-    )
-    .bind(&query)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| SearchErrorPayload {
-        code: "DB/QUERY_FAILED".into(),
-        message: "Search failed".into(),
-        details: serde_json::json!({ "error": e.to_string() }),
-    })?;
-    for row in note_rows {
-        let text: String = row.try_get("text").unwrap_or_default();
-        let score = if text.eq_ignore_ascii_case(&query) {
-            2
-        } else if text.to_lowercase().contains(&q_lower) {
-            1
-        } else {
-            0
-        };
-        let snippet: String = text.chars().take(80).collect();
-        let id: String = row.try_get("id").unwrap_or_default();
-        let updated_at: i64 = row.try_get("updated_at").unwrap_or_default();
-        let color: String = row.try_get("color").unwrap_or_default();
-        results.push((score, ord, SearchResult::Note { id, snippet, updated_at, color }));
-        ord += 1;
-    }
-
-    results.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-    if results.len() > 100 {
-        results.truncate(100);
-    }
-    Ok(results.into_iter().map(|(_, _, r)| r).collect())
+    Ok(out)
 }
 
 #[tauri::command]

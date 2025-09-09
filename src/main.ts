@@ -23,7 +23,8 @@ import { ManageView } from "./ManageView";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { defaultHouseholdId } from "./db/household";
 import { log } from "./utils/logger";
-import { search, type SearchResult } from "./services/searchRepo";
+import { search } from "./services/searchRepo";
+import type { SearchResult } from "./bindings/SearchResult";
 const appWindow = getCurrentWindow();
 
 type View =
@@ -328,90 +329,126 @@ window.addEventListener("DOMContentLoaded", () => {
   log.debug("app booted");
   defaultHouseholdId().catch((e) => console.error("DB init failed:", e));
 
-  const omnibox = document.querySelector<HTMLInputElement>("#omnibox");
-  const resultsEl = document.querySelector<HTMLElement>("#omnibox-results");
-  if (omnibox && resultsEl) {
-    let timer: number | undefined;
-    let offset = 0;
-    let current = "";
+    const omnibox = document.querySelector<HTMLInputElement>("#omnibox");
+    const resultsEl = document.querySelector<HTMLElement>("#omnibox-results");
+    if (omnibox && resultsEl) {
+      const res = resultsEl;
+      let timer: number | undefined;
+      let offset = 0;
+      let current = "";
+      let reqId = 0;
 
-    async function run(q: string, append = false) {
-      try {
-        const items = await search(q, 100, offset);
-        render(items, append, q);
-      } catch (err) {
-        showError(err);
+      function hideResults() {
+        res.hidden = true;
+        res.innerHTML = "";
       }
-    }
 
-    function render(items: SearchResult[], append: boolean, q: string) {
-      if (!append) {
-        resultsEl.innerHTML = "";
-      }
-      if (!append && items.length === 0) {
-        resultsEl.innerHTML = `<div class="omnibox__empty">No results found for ${q}</div>`;
-        resultsEl.hidden = false;
-        return;
-      }
-      let list = resultsEl.querySelector("ul");
-      if (!list) {
-        list = document.createElement("ul");
-        resultsEl.appendChild(list);
-      }
-      for (const it of items) {
-        const li = document.createElement("li");
-        if (it.kind === "File") {
-          const date = new Date(it.updated_at).toLocaleString();
-          li.innerHTML = `<i class="fa-regular fa-file"></i><span>${it.filename}</span><span>${date}</span>`;
-          li.addEventListener("click", () => {
-            location.hash = "#files";
-            resultsEl.hidden = true;
-          });
-        } else if (it.kind === "Event") {
-          const date = new Intl.DateTimeFormat(undefined, { timeZone: it.tz }).format(
-            new Date(it.start_at_utc),
-          );
-          li.innerHTML = `<i class="fa-regular fa-calendar"></i><span>${it.title}</span><span>${date}</span>`;
-          li.addEventListener("click", () => {
-            location.hash = "#calendar";
-            resultsEl.hidden = true;
-          });
-        } else if (it.kind === "Note") {
-          const date = new Date(it.updated_at).toLocaleString();
-          li.innerHTML = `<i class="fa-regular fa-note-sticky" style="color:${it.color}"></i><span>${it.snippet}</span><span>${date}</span>`;
-          li.addEventListener("click", () => {
-            location.hash = "#notes";
-            resultsEl.hidden = true;
-          });
+      async function run(q: string, append = false) {
+        const myId = ++reqId;
+        try {
+          const items = await search(q, 100, offset);
+          if (myId !== reqId) return;
+          render(items, append, q);
+        } catch (err) {
+          if (myId !== reqId) return;
+          showError(err);
         }
-        list.appendChild(li);
       }
-      if (items.length === 100) {
-        const load = document.createElement("div");
-        load.className = "omnibox__load-more";
-        load.textContent = "Load more";
-        load.onclick = () => {
-          offset += 100;
-          run(current, true);
-        };
-        resultsEl.appendChild(load);
-      }
-      resultsEl.hidden = false;
-    }
 
-    omnibox.addEventListener("input", () => {
-      const q = omnibox.value.trim();
-      current = q;
-      offset = 0;
-      if (timer) clearTimeout(timer);
-      if (!q) {
-        resultsEl.hidden = true;
-        resultsEl.innerHTML = "";
-        return;
+      function render(items: SearchResult[], append: boolean, q: string) {
+        if (!append) {
+          res.innerHTML = "";
+        }
+        const oldLoad = res.querySelector(".omnibox__load-more");
+        if (oldLoad) oldLoad.remove();
+        if (!append && items.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "omnibox__empty";
+          empty.textContent = `No results found for ${q}`;
+          res.appendChild(empty);
+          res.hidden = false;
+          return;
+        }
+        let list = res.querySelector("ul");
+        if (!list) {
+          list = document.createElement("ul");
+          res.appendChild(list);
+        }
+        for (const it of items) {
+          const li = document.createElement("li");
+          if (it.kind === "File") {
+            const date = new Date(it.updated_at).toLocaleString();
+            li.innerHTML = `<i class="fa-regular fa-file"></i><span>${it.filename}</span><span>${date}</span>`;
+            li.addEventListener("click", () => {
+              location.hash = "#files";
+              hideResults();
+            });
+          } else if (it.kind === "Event") {
+            const date = new Intl.DateTimeFormat(undefined, { timeZone: it.tz }).format(
+              new Date(it.start_at_utc),
+            );
+            li.innerHTML = `<i class="fa-regular fa-calendar"></i><span>${it.title}</span><span>${date}</span>`;
+            li.addEventListener("click", () => {
+              location.hash = "#calendar";
+              hideResults();
+            });
+          } else if (it.kind === "Note") {
+            const date = new Date(it.updated_at).toLocaleString();
+            li.innerHTML = `<i class="fa-regular fa-note-sticky" style="color:${it.color}"></i><span>${it.snippet}</span><span>${date}</span>`;
+            li.addEventListener("click", () => {
+              location.hash = "#notes";
+              hideResults();
+            });
+          }
+          list.appendChild(li);
+        }
+        if (items.length === 100) {
+          const load = document.createElement("div");
+          load.className = "omnibox__load-more";
+          load.textContent = "Load more";
+          load.onclick = () => {
+            offset += 100;
+            run(current, true);
+          };
+          res.appendChild(load);
+        }
+        res.hidden = false;
       }
-      timer = window.setTimeout(() => run(q), 200);
-    });
-  }
+
+      omnibox.addEventListener("input", () => {
+        const q = omnibox.value.trim();
+        current = q;
+        offset = 0;
+        if (timer) clearTimeout(timer);
+        if (!q) {
+          hideResults();
+          return;
+        }
+        timer = window.setTimeout(() => run(q), 200);
+      });
+
+      // Close on ESC
+      omnibox.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          omnibox.value = "";
+          hideResults();
+        }
+      });
+      // Close when clicking outside
+      document.addEventListener("click", (e) => {
+        if (!res.contains(e.target as Node) && e.target !== omnibox) {
+          hideResults();
+        }
+      });
+      // Close on blur (tab away)
+      omnibox.addEventListener("blur", () => {
+        setTimeout(() => {
+          if (document.activeElement !== omnibox && !res.contains(document.activeElement)) {
+            hideResults();
+          }
+        }, 100);
+      });
+    }
 
   linkDashboard()?.addEventListener("click", (e) => {
     e.preventDefault();

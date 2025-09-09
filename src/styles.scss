@@ -956,23 +956,44 @@ footer a.footer__settings {
 
 /* Omnibox search */
 .topbar {
-  position: relative;
+  /* fixed header above content area (not full screen) */
+  position: fixed;
+  top: 0;
+  /* keep in sync with sidebar width (extract to var later if you like) */
+  left: 200px;
+  right: 0;
+  height: 48px;
   display: flex;
-  padding: var(--space-2);
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
   background: var(--color-bg);
   border-bottom: 1px solid var(--color-border);
+  z-index: 100; /* above content; below modals */
 }
 
 .topbar input[type="search"] {
   width: 100%;
+  max-width: 520px;
   padding: var(--space-2);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
 }
 
+.container {
+  /* room for the fixed header so it doesn’t cover content */
+  padding-top: 48px;
+}
+
+.omnibox {
+  position: relative;
+  width: 100%;
+  max-width: 520px;
+}
+
 .omnibox__results {
   position: absolute;
-  top: 100%;
+  top: calc(100% + 6px); /* small gap under input */
   left: 0;
   right: 0;
   background: var(--color-bg);
@@ -980,7 +1001,8 @@ footer a.footer__settings {
   border-top: none;
   max-height: 400px;
   overflow-y: auto;
-  z-index: 1000;
+  z-index: 200; /* above header, below modals */
+  box-shadow: var(--shadow-base);
 }
 
 .omnibox__results ul {
