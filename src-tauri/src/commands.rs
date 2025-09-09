@@ -3,6 +3,9 @@ use serde_json::{Map, Value};
 use sqlx::{sqlite::SqliteRow, Row, SqlitePool, Column, ValueRef, TypeInfo};
 
 use crate::{id::new_uuid_v7, repo, time::now_ms, Event};
+use chrono::{NaiveDateTime, LocalResult, TimeZone, Utc, Duration, DateTime, Offset};
+use chrono_tz::Tz as ChronoTz;
+use rrule::{RRule, RRuleSet, Unvalidated, Tz};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DbErrorPayload {
@@ -30,6 +33,20 @@ fn map_sqlx_error(err: sqlx::Error) -> DbErrorPayload {
 
 pub fn map_db_error(err: sqlx::Error) -> DbErrorPayload {
     map_sqlx_error(err)
+}
+
+fn from_local_ms(ms: i64, tz: Tz) -> DateTime<Tz> {
+    #[allow(deprecated)]
+    let naive = NaiveDateTime::from_timestamp_millis(ms).expect("valid ms");
+    match tz.from_local_datetime(&naive) {
+        LocalResult::Single(dt) => dt,
+        LocalResult::Ambiguous(a, _b) => a,
+        LocalResult::None => tz
+            .offset_from_utc_datetime(&naive)
+            .fix()
+            .from_utc_datetime(&naive)
+            .with_timezone(&tz),
+    }
 }
 
 fn row_to_value(row: SqliteRow) -> Value {
@@ -251,11 +268,14 @@ pub async fn events_list_range_command(
         .map_err(|e| DbErrorPayload { code: "Unknown".into(), message: e.to_string() })?;
     let rows = sqlx::query_as::<_, Event>(
         r#"
-        SELECT id, household_id, title, start_at, end_at, tz, start_at_utc, end_at_utc, reminder, created_at, updated_at, deleted_at
+        SELECT id, household_id, title, start_at, end_at, tz, start_at_utc, end_at_utc,
+               rrule, exdates, reminder, created_at, updated_at, deleted_at
         FROM events
         WHERE household_id = ? AND deleted_at IS NULL
-          AND COALESCE(end_at_utc, end_at, start_at) >= ?
-          AND COALESCE(start_at_utc, start_at) <= ?
+          AND (
+            (rrule IS NULL AND COALESCE(end_at_utc, end_at, start_at) >= ? AND COALESCE(start_at_utc, start_at) <= ?)
+            OR rrule IS NOT NULL
+          )
         ORDER BY COALESCE(start_at_utc, start_at), id
         "#,
     )
@@ -265,5 +285,102 @@ pub async fn events_list_range_command(
     .fetch_all(pool)
     .await
     .map_err(|e| DbErrorPayload { code: "Unknown".into(), message: e.to_string() })?;
-    Ok(rows)
+
+    const TOTAL_LIMIT: usize = 10_000;
+    let mut out = Vec::new();
+    'rows: for row in rows {
+        if let Some(rrule_str) = row.rrule.clone() {
+            let tz_name = row.tz.clone().unwrap_or_else(|| "UTC".into());
+            let tz_chrono: ChronoTz = tz_name.parse().unwrap_or(chrono_tz::UTC);
+            let tz: Tz = Tz::Tz(tz_chrono);
+            let start_local = from_local_ms(row.start_at, tz);
+            let duration = row
+                .end_at
+                .unwrap_or(row.start_at)
+                .saturating_sub(row.start_at);
+            let rrule_un: Result<RRule<Unvalidated>, _> = rrule_str.parse();
+            match rrule_un {
+                Ok(rrule_un) => match rrule_un.validate(start_local) {
+                    Ok(rrule) => {
+                        let mut set = RRuleSet::new(start_local).rrule(rrule);
+                        if let Some(exdates_str) = &row.exdates {
+                            for ex_s in exdates_str.split(',') {
+                                let ex_s = ex_s.trim();
+                                if ex_s.is_empty() {
+                                    continue;
+                                }
+                                if let Ok(ex_utc) = DateTime::parse_from_rfc3339(ex_s) {
+                                    let ex_local = ex_utc.with_timezone(&Utc).with_timezone(&tz);
+                                    set = set.exdate(ex_local);
+                                }
+                            }
+                        }
+                        let after = DateTime::<Utc>::from_timestamp_millis(start)
+                            .unwrap()
+                            .with_timezone(&tz);
+                        let before = DateTime::<Utc>::from_timestamp_millis(end)
+                            .unwrap()
+                            .with_timezone(&tz);
+                        set = set.after(after).before(before);
+                        let res = set.all(500);
+                        for occ in res.dates {
+                            let start_utc_ms = occ.with_timezone(&Utc).timestamp_millis();
+                            let end_dt = occ + Duration::milliseconds(duration);
+                            let end_utc_ms = end_dt.with_timezone(&Utc).timestamp_millis();
+                            if end_utc_ms < start || start_utc_ms > end {
+                                continue;
+                            }
+                            let inst = Event {
+                                id: format!("{}::{}", row.id, start_utc_ms),
+                                household_id: row.household_id.clone(),
+                                title: row.title.clone(),
+                                start_at: start_utc_ms,
+                                end_at: Some(end_utc_ms),
+                                tz: Some(tz.name().to_string()),
+                                start_at_utc: Some(start_utc_ms),
+                                end_at_utc: Some(end_utc_ms),
+                                rrule: row.rrule.clone(),
+                                exdates: row.exdates.clone(),
+                                reminder: row.reminder,
+                                created_at: row.created_at,
+                                updated_at: row.updated_at,
+                                deleted_at: None,
+                                series_parent_id: Some(row.id.clone()),
+                            };
+                            out.push(inst);
+                            if out.len() >= TOTAL_LIMIT {
+                                break 'rows;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("invalid rrule for event {}: {}", row.id, e);
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!("failed to parse rrule for event {}: {}", row.id, e);
+                }
+            }
+        } else {
+            let start_utc = row.start_at_utc.unwrap_or(row.start_at);
+            let end_utc = row.end_at_utc.or(row.end_at).unwrap_or(row.start_at);
+            if end_utc >= start && start_utc <= end {
+                out.push(row);
+                if out.len() >= TOTAL_LIMIT {
+                    break;
+                }
+            }
+        }
+    }
+
+    out.sort_by(|a, b| {
+        a
+            .start_at_utc
+            .unwrap_or(a.start_at)
+            .cmp(&b.start_at_utc.unwrap_or(b.start_at))
+            .then(a.title.cmp(&b.title))
+            .then(a.id.cmp(&b.id))
+    });
+
+    Ok(out)
 }

@@ -15,10 +15,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             tz: None,
             start_at_utc: None,
             end_at_utc: None,
+            rrule: None,
+            exdates: None,
             reminder: None,
             created_at: 0,
             updated_at: 0,
             deleted_at: None,
+            series_parent_id: None,
         };
         println!("{}", serde_json::to_string(&event)?);
     } else {
