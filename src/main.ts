@@ -23,7 +23,8 @@ import { ManageView } from "./ManageView";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { defaultHouseholdId } from "./db/household";
 import { log } from "./utils/logger";
-import { search, type SearchResult } from "./services/searchRepo";
+import { search } from "./services/searchRepo";
+import type { SearchResult } from "./bindings/SearchResult";
 const appWindow = getCurrentWindow();
 
 type View =
@@ -328,35 +329,45 @@ window.addEventListener("DOMContentLoaded", () => {
   log.debug("app booted");
   defaultHouseholdId().catch((e) => console.error("DB init failed:", e));
 
-  const omnibox = document.querySelector<HTMLInputElement>("#omnibox");
-  const resultsEl = document.querySelector<HTMLElement>("#omnibox-results");
-  if (omnibox && resultsEl) {
-    let timer: number | undefined;
-    let offset = 0;
-    let current = "";
+    const omnibox = document.querySelector<HTMLInputElement>("#omnibox");
+    const resultsEl = document.querySelector<HTMLElement>("#omnibox-results");
+    if (omnibox && resultsEl) {
+      const res = resultsEl;
+      let timer: number | undefined;
+      let offset = 0;
+      let current = "";
+      let reqId = 0;
 
     async function run(q: string, append = false) {
+      const myId = ++reqId;
       try {
         const items = await search(q, 100, offset);
+        if (myId !== reqId) return;
         render(items, append, q);
       } catch (err) {
+        if (myId !== reqId) return;
         showError(err);
       }
     }
 
     function render(items: SearchResult[], append: boolean, q: string) {
       if (!append) {
-        resultsEl.innerHTML = "";
+        res.innerHTML = "";
       }
+      const oldLoad = res.querySelector(".omnibox__load-more");
+      if (oldLoad) oldLoad.remove();
       if (!append && items.length === 0) {
-        resultsEl.innerHTML = `<div class="omnibox__empty">No results found for ${q}</div>`;
-        resultsEl.hidden = false;
+        const empty = document.createElement("div");
+        empty.className = "omnibox__empty";
+        empty.textContent = `No results found for ${q}`;
+        res.appendChild(empty);
+        res.hidden = false;
         return;
       }
-      let list = resultsEl.querySelector("ul");
+      let list = res.querySelector("ul");
       if (!list) {
         list = document.createElement("ul");
-        resultsEl.appendChild(list);
+        res.appendChild(list);
       }
       for (const it of items) {
         const li = document.createElement("li");
@@ -365,7 +376,7 @@ window.addEventListener("DOMContentLoaded", () => {
           li.innerHTML = `<i class="fa-regular fa-file"></i><span>${it.filename}</span><span>${date}</span>`;
           li.addEventListener("click", () => {
             location.hash = "#files";
-            resultsEl.hidden = true;
+            res.hidden = true;
           });
         } else if (it.kind === "Event") {
           const date = new Intl.DateTimeFormat(undefined, { timeZone: it.tz }).format(
@@ -374,14 +385,14 @@ window.addEventListener("DOMContentLoaded", () => {
           li.innerHTML = `<i class="fa-regular fa-calendar"></i><span>${it.title}</span><span>${date}</span>`;
           li.addEventListener("click", () => {
             location.hash = "#calendar";
-            resultsEl.hidden = true;
+            res.hidden = true;
           });
         } else if (it.kind === "Note") {
           const date = new Date(it.updated_at).toLocaleString();
           li.innerHTML = `<i class="fa-regular fa-note-sticky" style="color:${it.color}"></i><span>${it.snippet}</span><span>${date}</span>`;
           li.addEventListener("click", () => {
             location.hash = "#notes";
-            resultsEl.hidden = true;
+            res.hidden = true;
           });
         }
         list.appendChild(li);
@@ -394,9 +405,9 @@ window.addEventListener("DOMContentLoaded", () => {
           offset += 100;
           run(current, true);
         };
-        resultsEl.appendChild(load);
+        res.appendChild(load);
       }
-      resultsEl.hidden = false;
+      res.hidden = false;
     }
 
     omnibox.addEventListener("input", () => {
@@ -405,13 +416,13 @@ window.addEventListener("DOMContentLoaded", () => {
       offset = 0;
       if (timer) clearTimeout(timer);
       if (!q) {
-        resultsEl.hidden = true;
-        resultsEl.innerHTML = "";
+        res.hidden = true;
+        res.innerHTML = "";
         return;
       }
       timer = window.setTimeout(() => run(q), 200);
     });
-  }
+    }
 
   linkDashboard()?.addEventListener("click", (e) => {
     e.preventDefault();
