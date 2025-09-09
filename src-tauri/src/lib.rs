@@ -482,7 +482,7 @@ async fn search_entities(
 
       UNION ALL
 
-      SELECT 'Event' AS kind, id, title AS a1, CAST(start_at_utc AS TEXT) AS a2, tz AS a3, start_at_utc AS ts,
+      SELECT 'Event' AS kind, id, title AS a1, CAST(start_at_utc AS TEXT) AS a2, COALESCE(tz, 'Europe/London') AS a3, start_at_utc AS ts,
              CASE
                WHEN title = ?3 COLLATE NOCASE THEN 2
                WHEN title LIKE ?4 COLLATE NOCASE THEN 1
