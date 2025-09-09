@@ -1,10 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import {
-  readDir,
-  writeTextFile,
-  remove,
-  mkdir,
-} from "@tauri-apps/plugin-fs";
+import { readDir, writeTextFile, remove, mkdir } from "./files/fs";
 import { join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { STR } from "./ui/strings";

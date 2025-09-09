@@ -1,25 +1,54 @@
-# Overview
+# Architecture Overview
 
-## Calling backend commands
+## Purpose
+Arklowdun is a desktop app for home management. This document records the major architecture decisions so newcomers understand the system and future work stays aligned.
 
-Use the `call` helper to invoke Tauri backend commands:
+## Runtime Architecture
+- **Frontend**: Vite + TypeScript UI. Uses Tauri APIs for dialogs, notifications and IPC. UI components surface errors via `showError()`.
+- **Backend**: Rust commands exposed to the frontend. Uses `sqlx` for database access, `uuid` for IDs and `chrono` for time handling.
+- **Persistence**: SQLite database for structured data plus a notes JSON file as a v1 fallback. Attachments live on disk and are addressed by `(root_key, relative_path)`.
+- **IPC**: Frontend communicates with backend through Tauri commands.
 
-```ts
-import { call } from "../db/call";
+## Module Boundaries
+- `src/storage.ts` manages root keys and path rules.
+- `src/services/*` call into Tauri commands.
+- `src/views/*` render UI only and never touch the filesystem directly.
+- `src/fs/*` and `src/files/*` are the only modules allowed to import `@tauri-apps/plugin-fs`.
+- UI modules import filesystem helpers via `src/files/fs.ts`.
 
-const rows = await call<MyRow[]>("vehicles_list", { householdId });
-```
+## Storage
+- SQLite schema uses UUIDv7 primary keys and millisecond timestamps.
+- Foreign keys include `ON UPDATE`/`ON DELETE` rules.
+- Notes fall back to JSON files in the first release.
+- File attachments are stored by `(root_key, relative_path)` pairs.
 
-Policy: **No direct `invoke()` outside `src/db/call.ts`.** All errors are normalised into the shared `ArkError` shape:
+## Logging & Env
+- Backend uses `tracing` to emit JSON logs. Defaults: `arklowdun=info`, `sqlx=warn`.
+- Frontend surfaces issues through `showError()`.
+- No telemetry or analytics are collected.
 
-```ts
-export type ArkError = {
-  code: string;         // machine-usable e.g. "DB/NOT_FOUND", "IO/ENOENT", "VALIDATION"
-  message: string;      // user-facing, safe to display
-  details?: unknown;    // optional structured debug payload
-};
-```
+## Feature Flags
+In scope:
+- Image and PDF previews
+- Single reminders
+- About pane
 
-## Empty State
-Use `createEmptyState({ title, description?, actionLabel?, onAction?, icon? })` for any list view with zero items.
-Policy: avoid ad-hoc "No X yet" strings; render a consistent component for clarity and polish.
+Deferred:
+- Recurrence
+- Omnibox search
+- Canvas notes
+- Household switching
+
+## Security Posture
+- Database content is unencrypted.
+- No telemetry or passphrase protection.
+- Users should be aware that local files are accessible to anyone with filesystem access.
+
+## Platform & Packaging
+- Target platform is macOS with DMG packaging first.
+
+## Testing
+- All tests run locally: Node unit tests and Cargo tests for Rust code. No CI or external services.
+
+## Roadmap Pointers
+Next areas of exploration: search features, cross-linking between entities and deeper recurrence support.
