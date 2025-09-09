@@ -954,6 +954,62 @@ footer a.footer__settings {
   border-radius: var(--radius-base);
 }
 
+/* Omnibox search */
+.topbar {
+  position: relative;
+  display: flex;
+  padding: var(--space-2);
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.topbar input[type="search"] {
+  width: 100%;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.omnibox__results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-top: none;
+  max-height: 400px;
+  overflow-y: auto;
+  z-index: 1000;
+}
+
+.omnibox__results ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.omnibox__results li {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  cursor: pointer;
+}
+
+.omnibox__results li:hover {
+  background: var(--color-border);
+}
+
+.omnibox__load-more {
+  text-align: center;
+  padding: var(--space-2);
+  cursor: pointer;
+}
+
+.omnibox__empty {
+  padding: var(--space-2);
+}
+
 /* ========================================================================== */
 /* END                                                                        */
 /* ========================================================================== */
