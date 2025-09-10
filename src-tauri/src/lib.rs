@@ -476,6 +476,40 @@ async fn table_exists(pool: &sqlx::SqlitePool, name: &str) -> bool {
         > 0
 }
 
+/// Return the set of column names for a given table.
+async fn table_columns(pool: &sqlx::SqlitePool, table: &str) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    // NOTE: using a literal table name; NOT user-provided.
+    let sql = format!("PRAGMA table_info({})", table);
+    if let Ok(rows) = sqlx::query(&sql).fetch_all(pool).await {
+        for r in rows {
+            if let Ok(name) = r.try_get::<String, _>("name") {
+                out.insert(name);
+            }
+        }
+    }
+    out
+}
+
+/// Build a COALESCE(expr...) using only the columns that actually exist.
+/// If none of the candidates exist, returns the provided default literal.
+/// `default_literal` should already be a valid SQL literal (e.g. '' or 0).
+fn coalesce_expr(existing: &std::collections::HashSet<String>, candidates: &[&str], default_literal: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for c in candidates {
+        if existing.contains(*c) {
+            parts.push(c);
+        }
+    }
+    if parts.is_empty() {
+        default_literal.to_string()
+    } else if parts.len() == 1 {
+        parts[0].to_string()
+    } else {
+        format!("COALESCE({})", parts.join(", "))
+    }
+}
+
 #[tauri::command]
 async fn search_entities(
     state: State<'_, AppState>,
@@ -667,16 +701,40 @@ async fn search_entities(
 
         if has_vehicles {
             let start = std::time::Instant::now();
-            let rows = sqlx::query(
-                "SELECT id, COALESCE(make,'') AS make, COALESCE(model,'') AS model, COALESCE(reg, registration, plate, '') AS reg, COALESCE(nickname, name, '') AS nickname, COALESCE(updated_at, created_at, 0) AS ts\n         FROM vehicles\n         WHERE household_id=?1 AND (make LIKE ?2 COLLATE NOCASE OR model LIKE ?2 COLLATE NOCASE OR COALESCE(reg, registration, plate, '') LIKE ?2 COLLATE NOCASE OR COALESCE(nickname, name, '') LIKE ?2 COLLATE NOCASE)\n         ORDER BY ts DESC LIMIT ?3 OFFSET ?4",
-            )
-            .bind(&household_id)
-            .bind(&sub)
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(pool)
-            .await
-            .map_err(mapq)?;
+            // Discover available columns to avoid "no such column" at parse time.
+            let vcols = table_columns(pool, "vehicles").await;
+            let reg_expr = coalesce_expr(&vcols, &["reg", "registration", "plate"], "''");
+            let nick_expr = coalesce_expr(&vcols, &["nickname", "name"], "''");
+            let ts_expr = coalesce_expr(&vcols, &["updated_at", "created_at"], "0");
+
+            let make_expr = if vcols.contains("make") { "COALESCE(make,'')" } else { "''" };
+            let model_expr = if vcols.contains("model") { "COALESCE(model,'')" } else { "''" };
+
+            let sql = format!(
+                "SELECT id, {make_expr} AS make, {model_expr} AS model, {reg_expr} AS reg, {nick_expr} AS nickname, {ts_expr} AS ts \
+                 FROM vehicles \
+                 WHERE household_id=?1 AND ( \
+                     {make_expr} LIKE ?2 COLLATE NOCASE OR \
+                     {model_expr} LIKE ?2 COLLATE NOCASE OR \
+                     {reg_expr}   LIKE ?2 COLLATE NOCASE OR \
+                     {nick_expr}  LIKE ?2 COLLATE NOCASE \
+                 ) \
+                 ORDER BY ts DESC LIMIT ?3 OFFSET ?4",
+                make_expr = make_expr,
+                model_expr = model_expr,
+                reg_expr = reg_expr,
+                nick_expr = nick_expr,
+                ts_expr = ts_expr,
+            );
+
+            let rows = sqlx::query(&sql)
+                .bind(&household_id)
+                .bind(&sub)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(pool)
+                .await
+                .map_err(mapq)?;
             let elapsed = start.elapsed().as_millis() as i64;
             tracing::debug!(target: "arklowdun", name = "vehicles", rows = rows.len(), elapsed_ms = elapsed, "branch");
             for r in rows {
@@ -711,16 +769,32 @@ async fn search_entities(
 
         if has_pets {
             let start = std::time::Instant::now();
-            let rows = sqlx::query(
-                "SELECT id, COALESCE(name,'') AS name, COALESCE(species, type, '') AS species, COALESCE(updated_at, created_at, 0) AS ts\n         FROM pets\n         WHERE household_id=?1 AND (COALESCE(name,'') LIKE ?2 COLLATE NOCASE OR COALESCE(species, type, '') LIKE ?2 COLLATE NOCASE)\n         ORDER BY ts DESC LIMIT ?3 OFFSET ?4",
-            )
-            .bind(&household_id)
-            .bind(&sub)
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(pool)
-            .await
-            .map_err(mapq)?;
+            let pcols = table_columns(pool, "pets").await;
+            let name_expr = if pcols.contains("name") { "COALESCE(name,'')" } else { "''" };
+            let species_expr = coalesce_expr(&pcols, &["species", "type"], "''");
+            let ts_expr = coalesce_expr(&pcols, &["updated_at", "created_at"], "0");
+
+            let sql = format!(
+                "SELECT id, {name_expr} AS name, {species_expr} AS species, {ts_expr} AS ts \
+                 FROM pets \
+                 WHERE household_id=?1 AND ( \
+                     {name_expr}   LIKE ?2 COLLATE NOCASE OR \
+                     {species_expr} LIKE ?2 COLLATE NOCASE \
+                 ) \
+                 ORDER BY ts DESC LIMIT ?3 OFFSET ?4",
+                name_expr = name_expr,
+                species_expr = species_expr,
+                ts_expr = ts_expr,
+            );
+
+            let rows = sqlx::query(&sql)
+                .bind(&household_id)
+                .bind(&sub)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(pool)
+                .await
+                .map_err(mapq)?;
             let elapsed = start.elapsed().as_millis() as i64;
             tracing::debug!(target: "arklowdun", name = "pets", rows = rows.len(), elapsed_ms = elapsed, "branch");
             for r in rows {

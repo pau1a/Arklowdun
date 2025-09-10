@@ -36,7 +36,6 @@ pub async fn run_import(
     logs_dir.push("logs");
 
     // Map setup errors into a SQLx Protocol error so callers get a consistent error type.
-    // `sqlx::Error::Protocol` takes a String on our sqlx version (0.8.x), so we stringify the source.
     let (mut ilog, log_path) =
         ImportLogger::new(logs_dir).map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
 
