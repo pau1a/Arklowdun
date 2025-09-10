@@ -1,7 +1,7 @@
 use crate::commands::DbErrorPayload;
 use crate::repo;
 use sqlx::Row;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 /// Map our string root_key to a base directory.
@@ -101,7 +101,7 @@ pub async fn load_attachment_columns(
 }
 
 /// Open the file with the OS.
-pub fn open_with_os(path: &PathBuf) -> Result<(), DbErrorPayload> {
+pub fn open_with_os(path: &Path) -> Result<(), DbErrorPayload> {
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
@@ -111,7 +111,7 @@ pub fn open_with_os(path: &PathBuf) -> Result<(), DbErrorPayload> {
                 code: "IO/UNKNOWN".into(),
                 message: e.to_string(),
             })?;
-        return Ok(());
+        Ok(())
     }
     #[cfg(target_os = "windows")]
     {
@@ -124,7 +124,7 @@ pub fn open_with_os(path: &PathBuf) -> Result<(), DbErrorPayload> {
                 code: "IO/UNKNOWN".into(),
                 message: e.to_string(),
             })?;
-        return Ok(());
+        Ok(())
     }
     #[cfg(target_os = "linux")]
     {
@@ -135,12 +135,12 @@ pub fn open_with_os(path: &PathBuf) -> Result<(), DbErrorPayload> {
                 code: "IO/UNKNOWN".into(),
                 message: e.to_string(),
             })?;
-        return Ok(());
+        Ok(())
     }
 }
 
 /// Reveal the file in the OS file manager.
-pub fn reveal_with_os(path: &PathBuf) -> Result<(), DbErrorPayload> {
+pub fn reveal_with_os(path: &Path) -> Result<(), DbErrorPayload> {
     #[cfg(target_os = "macos")]
     {
         // Reveal in Finder
@@ -151,7 +151,7 @@ pub fn reveal_with_os(path: &PathBuf) -> Result<(), DbErrorPayload> {
                 code: "IO/UNKNOWN".into(),
                 message: e.to_string(),
             })?;
-        return Ok(());
+        Ok(())
     }
     #[cfg(target_os = "windows")]
     {
@@ -163,14 +163,15 @@ pub fn reveal_with_os(path: &PathBuf) -> Result<(), DbErrorPayload> {
                 code: "IO/UNKNOWN".into(),
                 message: e.to_string(),
             })?;
-        return Ok(());
+        Ok(())
     }
     #[cfg(target_os = "linux")]
     {
         // Fallback: not universally supported; let UI copy the path
-        return Err(DbErrorPayload {
+        let _ = path;
+        Err(DbErrorPayload {
             code: "IO/UNSUPPORTED_REVEAL".into(),
             message: "Reveal not supported on this platform".into(),
-        });
+        })
     }
 }
