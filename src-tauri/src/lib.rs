@@ -8,6 +8,8 @@ use ts_rs::TS;
 
 use crate::state::AppState;
 
+const FILES_INDEX_VERSION: i64 = 1;
+
 mod attachments;
 pub mod commands;
 mod db;
@@ -400,8 +402,14 @@ async fn bills_list_due_between(
 }
 
 #[tauri::command]
-fn get_default_household_id(state: tauri::State<state::AppState>) -> String {
-    state.default_household_id.lock().unwrap().clone()
+async fn get_default_household_id(
+    state: tauri::State<'_, state::AppState>,
+) -> Result<String, String> {
+    let guard = state
+        .default_household_id
+        .lock()
+        .map_err(|_| "lock poisoned".to_string())?;
+    Ok(guard.clone())
 }
 
 #[tauri::command]
@@ -491,6 +499,59 @@ async fn table_exists(pool: &sqlx::SqlitePool, name: &str) -> bool {
         > 0
 }
 
+async fn files_index_ready(pool: &sqlx::SqlitePool, household_id: &str) -> bool {
+    if !table_exists(pool, "files_index").await
+        || !table_exists(pool, "files_index_meta").await
+        || !table_exists(pool, "files").await
+    {
+        return false;
+    }
+
+    let meta = match sqlx::query(
+        "SELECT source_row_count, source_max_updated_utc, version FROM files_index_meta WHERE household_id=?1",
+    )
+    .bind(household_id)
+    .fetch_optional(pool)
+    .await
+    {
+        Ok(Some(row)) => {
+            let source_row_count: i64 = row.try_get("source_row_count").unwrap_or_default();
+            let source_max_updated_utc: String =
+                row.try_get("source_max_updated_utc").unwrap_or_default();
+            let version: i64 = row.try_get("version").unwrap_or(0);
+            Some((source_row_count, source_max_updated_utc, version))
+        }
+        Ok(None) => None,
+        Err(_) => return false,
+    };
+
+    let meta = match meta {
+        Some((count_m, max_updated_m, ver)) if ver == FILES_INDEX_VERSION => {
+            (count_m, max_updated_m)
+        }
+        _ => return false,
+    };
+
+    let count: i64 = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM files WHERE household_id=?1",
+    )
+    .bind(household_id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0);
+
+    let max_updated: String = sqlx::query_scalar::<_, String>(
+        "SELECT COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', MAX(updated_at), 'unixepoch'), '1970-01-01T00:00:00Z') FROM files WHERE household_id=?1",
+    )
+    .bind(household_id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or_else(|_| "1970-01-01T00:00:00Z".into());
+
+    // Rebuild tooling must persist `source_max_updated_utc` using the same strftime format
+    meta.0 == count && meta.1 == max_updated
+}
+
 #[tauri::command]
 async fn db_table_exists(state: State<'_, AppState>, name: String) -> Result<bool, String> {
     Ok(table_exists(&state.pool, &name).await)
@@ -499,6 +560,14 @@ async fn db_table_exists(state: State<'_, AppState>, name: String) -> Result<boo
 #[tauri::command]
 async fn db_has_files_index(state: State<'_, AppState>) -> Result<bool, String> {
     Ok(table_exists(&state.pool, "files_index").await)
+}
+
+#[tauri::command]
+async fn db_files_index_ready(
+    state: State<'_, AppState>,
+    household_id: String,
+) -> Result<bool, String> {
+    Ok(files_index_ready(&state.pool, &household_id).await)
 }
 
 #[tauri::command]
@@ -567,6 +636,10 @@ fn coalesce_expr(
     }
 }
 
+fn like_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+}
+
 #[tauri::command]
 async fn search_entities(
     state: State<'_, AppState>,
@@ -598,10 +671,12 @@ async fn search_entities(
     if q.is_empty() {
         return Ok(vec![]);
     }
-    let prefix = format!("{}%", q);
-    let sub = format!("%{}%", q);
+    let esc = like_escape(&q);
+    let prefix = format!("{esc}%");
+    let sub = format!("%{esc}%");
+    let branch_limit = (limit + offset).min(200);
 
-    let has_files_index = table_exists(pool, "files_index").await;
+    let index_ready = files_index_ready(pool, &household_id).await;
     let has_files_table = table_exists(pool, "files").await;
 
     let has_events = table_exists(pool, "events").await;
@@ -622,7 +697,8 @@ async fn search_entities(
     }
 
     let short = q.len() < 2;
-    if short && !(has_files_index || has_files_table) {
+    // allow short prefix via base table when index isn't ready
+    if short && !(index_ready || has_files_table) {
         tracing::debug!(target: "arklowdun", q = %q, len = q.len(), "short_query_bypass");
         return Ok(vec![]);
     }
@@ -636,15 +712,15 @@ async fn search_entities(
     let mut out: Vec<(i32, i64, usize, SearchResult)> = Vec::new();
     let mut ord: usize = 0;
 
-    if has_files_index || has_files_table {
-        let (sql, branch_name) = if has_files_index {
+    if index_ready || has_files_table {
+        let (sql, branch_name) = if index_ready {
             (
-                "SELECT id, filename, updated_at AS ts FROM files_index\n             WHERE household_id=?1 AND filename LIKE ?2 COLLATE NOCASE\n             ORDER BY filename ASC LIMIT ?3 OFFSET ?4",
+                "SELECT file_id AS id, filename, strftime('%s', updated_at_utc) AS ts, ordinal AS ord FROM files_index\n             WHERE household_id=?1 AND filename LIKE ?2 ESCAPE '\\' COLLATE NOCASE LIMIT ?3 OFFSET ?4",
                 "files_index",
             )
         } else {
             (
-                "SELECT id, filename, updated_at AS ts FROM files\n             WHERE household_id=?1 AND filename LIKE ?2 COLLATE NOCASE\n             ORDER BY filename ASC LIMIT ?3 OFFSET ?4",
+                "SELECT id, filename, updated_at AS ts, rowid AS ord FROM files\n             WHERE household_id=?1 AND filename LIKE ?2 ESCAPE '\\' COLLATE NOCASE ORDER BY rowid ASC LIMIT ?3 OFFSET ?4",
                 "files",
             )
         };
@@ -652,8 +728,8 @@ async fn search_entities(
         let rows = sqlx::query(sql)
             .bind(&household_id)
             .bind(&prefix)
-            .bind(limit)
-            .bind(offset)
+            .bind(branch_limit)
+            .bind(0)
             .fetch_all(pool)
             .await
             .map_err(mapq)?;
@@ -662,23 +738,19 @@ async fn search_entities(
         for r in rows {
             let filename: String = r.try_get("filename").unwrap_or_default();
             let ts: i64 = r.try_get("ts").unwrap_or_default();
-            let score = if filename.eq_ignore_ascii_case(&q) {
-                2
-            } else {
-                1
-            };
+            let ord_val: i64 = r.try_get("ord").unwrap_or_default();
+            let score = if filename.eq_ignore_ascii_case(&q) { 2 } else { 1 };
             let id: String = r.try_get("id").unwrap_or_default();
             out.push((
                 score,
                 ts,
-                ord,
+                ord_val as usize,
                 SearchResult::File {
                     id,
                     filename,
                     updated_at: ts,
                 },
             ));
-            ord += 1;
         }
     }
 
@@ -686,12 +758,12 @@ async fn search_entities(
         if has_events {
             let start = std::time::Instant::now();
             let events = sqlx::query(
-                "SELECT id, title, start_at_utc AS ts, COALESCE(tz,'Europe/London') AS tz\n         FROM events\n         WHERE household_id=?1 AND title LIKE ?2 COLLATE NOCASE\n         ORDER BY title ASC LIMIT ?3 OFFSET ?4",
+                "SELECT id, title, start_at_utc AS ts, COALESCE(tz,'Europe/London') AS tz\n         FROM events\n         WHERE household_id=?1 AND title LIKE ?2 ESCAPE '\\' COLLATE NOCASE\n         ORDER BY title ASC LIMIT ?3 OFFSET ?4",
             )
             .bind(&household_id)
             .bind(&sub)
-            .bind(limit)
-            .bind(offset)
+            .bind(branch_limit)
+            .bind(0)
             .fetch_all(pool)
             .await
             .map_err(mapq)?;
@@ -723,12 +795,12 @@ async fn search_entities(
         if has_notes {
             let start = std::time::Instant::now();
             let notes = sqlx::query(
-                "SELECT id, text, updated_at AS ts, COALESCE(color,'') AS color\n         FROM notes\n         WHERE household_id=?1 AND text LIKE ?2 COLLATE NOCASE\n         ORDER BY ts DESC LIMIT ?3 OFFSET ?4",
+                "SELECT id, text, updated_at AS ts, COALESCE(color,'') AS color\n         FROM notes\n         WHERE household_id=?1 AND text LIKE ?2 ESCAPE '\\' COLLATE NOCASE\n         ORDER BY ts DESC LIMIT ?3 OFFSET ?4",
             )
             .bind(&household_id)
             .bind(&sub)
-            .bind(limit)
-            .bind(offset)
+            .bind(branch_limit)
+            .bind(0)
             .fetch_all(pool)
             .await
             .map_err(mapq)?;
@@ -779,10 +851,10 @@ async fn search_entities(
                 "SELECT id, {make_expr} AS make, {model_expr} AS model, {reg_expr} AS reg, {nick_expr} AS nickname, {ts_expr} AS ts \
                  FROM vehicles \
                  WHERE household_id=?1 AND ( \
-                     {make_expr} LIKE ?2 COLLATE NOCASE OR \
-                     {model_expr} LIKE ?2 COLLATE NOCASE OR \
-                     {reg_expr}   LIKE ?2 COLLATE NOCASE OR \
-                     {nick_expr}  LIKE ?2 COLLATE NOCASE \
+                     {make_expr} LIKE ?2 ESCAPE '\\' COLLATE NOCASE OR \
+                     {model_expr} LIKE ?2 ESCAPE '\\' COLLATE NOCASE OR \
+                     {reg_expr}   LIKE ?2 ESCAPE '\\' COLLATE NOCASE OR \
+                     {nick_expr}  LIKE ?2 ESCAPE '\\' COLLATE NOCASE \
                  ) \
                  ORDER BY ts DESC LIMIT ?3 OFFSET ?4",
                 make_expr = make_expr,
@@ -795,8 +867,8 @@ async fn search_entities(
             let rows = sqlx::query(&sql)
                 .bind(&household_id)
                 .bind(&sub)
-                .bind(limit)
-                .bind(offset)
+                .bind(branch_limit)
+                .bind(0)
                 .fetch_all(pool)
                 .await
                 .map_err(mapq)?;
@@ -847,8 +919,8 @@ async fn search_entities(
                 "SELECT id, {name_expr} AS name, {species_expr} AS species, {ts_expr} AS ts \
                  FROM pets \
                  WHERE household_id=?1 AND ( \
-                     {name_expr}   LIKE ?2 COLLATE NOCASE OR \
-                     {species_expr} LIKE ?2 COLLATE NOCASE \
+                     {name_expr}   LIKE ?2 ESCAPE '\\' COLLATE NOCASE OR \
+                     {species_expr} LIKE ?2 ESCAPE '\\' COLLATE NOCASE \
                  ) \
                  ORDER BY ts DESC LIMIT ?3 OFFSET ?4",
                 name_expr = name_expr,
@@ -859,8 +931,8 @@ async fn search_entities(
             let rows = sqlx::query(&sql)
                 .bind(&household_id)
                 .bind(&sub)
-                .bind(limit)
-                .bind(offset)
+                .bind(branch_limit)
+                .bind(0)
                 .fetch_all(pool)
                 .await
                 .map_err(mapq)?;
@@ -894,9 +966,11 @@ async fn search_entities(
 
     out.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
     let total_before = out.len();
-    if out.len() > 100 {
-        out.truncate(100);
-    }
+    let out = out
+        .into_iter()
+        .skip(offset as usize)
+        .take(limit as usize)
+        .collect::<Vec<_>>();
     tracing::debug!(target: "arklowdun", total_before, returned = out.len(), "result_summary");
 
     Ok(out.into_iter().map(|(_, _, _, v)| v).collect())
@@ -1072,9 +1146,11 @@ pub fn run() {
             search_entities,
             import_run_legacy,
             open_path,
+            get_default_household_id,
             set_default_household_id,
             db_table_exists,
             db_has_files_index,
+            db_files_index_ready,
             db_has_vehicle_columns,
             db_has_pet_columns
         ])
@@ -1099,5 +1175,57 @@ mod tests {
         });
         let ev: Event = serde_json::from_value(payload).unwrap();
         assert_eq!(ev.deleted_at, Some(999));
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+    use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+
+    #[tokio::test]
+    async fn files_index_ready_checks_meta() {
+        let pool: SqlitePool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE files (id TEXT PRIMARY KEY, household_id TEXT NOT NULL, filename TEXT NOT NULL, updated_at INTEGER NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO files (id, household_id, filename, updated_at) VALUES ('f1','hh','a',0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE files_index_meta (household_id TEXT PRIMARY KEY, last_built_at_utc TEXT NOT NULL, source_row_count INTEGER NOT NULL, source_max_updated_utc TEXT NOT NULL, version INTEGER NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO files_index_meta (household_id, last_built_at_utc, source_row_count, source_max_updated_utc, version) VALUES ('hh','2024-01-01T00:00:00Z',1,'1970-01-01T00:00:00Z',0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(!files_index_ready(&pool, "hh").await);
+        sqlx::query("UPDATE files_index_meta SET version=?1")
+            .bind(FILES_INDEX_VERSION)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(files_index_ready(&pool, "hh").await);
+        sqlx::query("UPDATE files SET updated_at=1")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(!files_index_ready(&pool, "hh").await);
+    }
+
+    #[test]
+    fn like_escape_escapes_wildcards() {
+        assert_eq!(like_escape("50%_\\test"), "50\\%\\_\\\\test");
     }
 }

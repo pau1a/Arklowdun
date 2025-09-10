@@ -25,7 +25,8 @@
     "cov:rs": "node scripts/cov-rs.mjs",
     "cov:all": "npm run test:coverage && npm run cov:rs",
     "check:plugin-fs": "node scripts/guards/check-plugin-fs-usage.mjs",
-    "check-all": "npm run check:plugin-fs"
+    "check:sqlx-macros": "bash scripts/guards/no-sqlx-macros.sh",
+    "check-all": "npm run check:plugin-fs && npm run check:sqlx-macros"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^6.7.2",

@@ -1,4 +1,5 @@
 import { call } from "../db/call";
+import { defaultHouseholdId } from "../db/household";
 import { log } from "../utils/logger";
 
 let caps: {
@@ -11,8 +12,9 @@ let capsTs = 0;
 let capsLogged = false;
 
 async function probe(): Promise<void> {
+  const household_id = await defaultHouseholdId();
   const [files_index, vehicles_cols, pets_cols] = await Promise.all([
-    call<boolean>("db_has_files_index"),
+    call<boolean>("db_files_index_ready", { household_id }),
     call<boolean>("db_has_vehicle_columns"),
     call<boolean>("db_has_pet_columns"),
   ]);
