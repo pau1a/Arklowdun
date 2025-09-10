@@ -20,6 +20,7 @@ import { BudgetView } from "./BudgetView";
 import { NotesView } from "./NotesView";
 import { DashboardView } from "./DashboardView";
 import { ManageView } from "./ManageView";
+import { ImportModal } from "./ui/ImportModal";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { defaultHouseholdId } from "./db/household";
 import { log } from "./utils/logger";
@@ -208,6 +209,29 @@ function setupDynamicMinSize() {
   calibrateMinHeight(1000);
 }
 
+function addImportButtonToSettings(container: HTMLElement) {
+  if (container.querySelector('[data-testid="open-import-btn"]')) return;
+
+  const row = document.createElement("div");
+  row.style.display = "flex";
+  row.style.justifyContent = "flex-start";
+  row.style.gap = "8px";
+  row.style.marginTop = "12px";
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.dataset.testid = "open-import-btn";
+  btn.textContent = "Import legacy data…";
+  btn.onclick = () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    ImportModal(host);
+  };
+
+  row.appendChild(btn);
+  container.appendChild(row);
+}
+
 function setActive(tab: View) {
   const tabs: Record<View, HTMLAnchorElement | null> = {
     dashboard: linkDashboard(),
@@ -315,6 +339,8 @@ function navigate(to: View) {
   }
   if (to === "settings") {
     SettingsView(el);
+    const settingsContainer = el.querySelector<HTMLElement>(".settings");
+    if (settingsContainer) addImportButtonToSettings(settingsContainer);
     return;
   }
   if (to === "manage") {

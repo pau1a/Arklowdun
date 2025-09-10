@@ -1,5 +1,4 @@
 import { listen } from "@tauri-apps/api/event";
-import { openPath } from "@tauri-apps/plugin-opener";
 import { call } from "../db/call";
 import { defaultHouseholdId } from "../db/household";
 import { showError } from "./errors";
@@ -40,7 +39,7 @@ export function ImportModal(el: HTMLElement) {
         logLink.innerHTML = "";
         const btn = document.createElement("button");
         btn.textContent = "Open log";
-        btn.onclick = () => openPath(lp);
+        btn.onclick = () => call("open_path", { path: lp });
         logLink.appendChild(btn);
       }
       line("Started");
@@ -69,7 +68,7 @@ export function ImportModal(el: HTMLElement) {
     unsub.push(u4);
 
     try {
-      await call("import_run_legacy", { household_id: hh, dry_run: !!dry.checked });
+      await call("import_run_legacy", { householdId: hh, dryRun: !!dry.checked });
     } catch (err) {
       showError(err);
     }
