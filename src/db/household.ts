@@ -1,5 +1,6 @@
-import { call } from "./call.ts";
-import { log } from "../utils/logger.ts";
+import { call } from "./call";
+import { log } from "../utils/logger";
+import { emit } from "../shared/events";
 
 export async function defaultHouseholdId(): Promise<string> {
   try {
@@ -13,4 +14,9 @@ export async function defaultHouseholdId(): Promise<string> {
 export function requireHousehold(householdId: string): string {
   if (!householdId) throw new Error("householdId required");
   return householdId;
+}
+
+export async function setDefaultHouseholdId(id: string): Promise<void> {
+  await call("set_default_household_id", { id });
+  emit("householdChanged");
 }
