@@ -402,8 +402,14 @@ async fn bills_list_due_between(
 }
 
 #[tauri::command]
-fn get_default_household_id(state: tauri::State<state::AppState>) -> String {
-    state.default_household_id.lock().unwrap().clone()
+async fn get_default_household_id(
+    state: tauri::State<'_, state::AppState>,
+) -> Result<String, String> {
+    let guard = state
+        .default_household_id
+        .lock()
+        .map_err(|_| "lock poisoned".to_string())?;
+    Ok(guard.clone())
 }
 
 #[tauri::command]
@@ -501,19 +507,28 @@ async fn files_index_ready(pool: &sqlx::SqlitePool, household_id: &str) -> bool 
         return false;
     }
 
-    let meta = match sqlx::query!(
+    let meta = match sqlx::query(
         "SELECT source_row_count, source_max_updated_utc, version FROM files_index_meta WHERE household_id=?1",
-        household_id
     )
+    .bind(household_id)
     .fetch_optional(pool)
     .await
     {
-        Ok(v) => v,
+        Ok(Some(row)) => {
+            let source_row_count: i64 = row.try_get("source_row_count").unwrap_or_default();
+            let source_max_updated_utc: String =
+                row.try_get("source_max_updated_utc").unwrap_or_default();
+            let version: i64 = row.try_get("version").unwrap_or(0);
+            Some((source_row_count, source_max_updated_utc, version))
+        }
+        Ok(None) => None,
         Err(_) => return false,
     };
 
     let meta = match meta {
-        Some(m) if m.version == FILES_INDEX_VERSION => m,
+        Some((count_m, max_updated_m, ver)) if ver == FILES_INDEX_VERSION => {
+            (count_m, max_updated_m)
+        }
         _ => return false,
     };
 
@@ -534,7 +549,7 @@ async fn files_index_ready(pool: &sqlx::SqlitePool, household_id: &str) -> bool 
     .unwrap_or_else(|_| "1970-01-01T00:00:00Z".into());
 
     // Rebuild tooling must persist `source_max_updated_utc` using the same strftime format
-    meta.source_row_count == count && meta.source_max_updated_utc == max_updated
+    meta.0 == count && meta.1 == max_updated
 }
 
 #[tauri::command]

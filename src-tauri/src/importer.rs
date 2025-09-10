@@ -53,7 +53,7 @@ impl ImportLogger {
     fn write_line(&mut self, line: &str) {
         let _ = writeln!(self.file, "{}", line);
         let _ = self.file.flush();
-        self.bytes += line.as_bytes().len() as u64 + 1;
+        self.bytes += line.len() as u64 + 1;
     }
 
     pub fn record(&mut self, level: &str, event: &str, mut v: Value) -> Option<Value> {
@@ -72,7 +72,7 @@ impl ImportLogger {
         obj.insert("level".into(), level.into());
         obj.insert("event".into(), event.into());
         let line = serde_json::to_string(&v).ok()?;
-        let needed = line.as_bytes().len() as u64 + 1;
+        let needed = line.len() as u64 + 1;
         if self.bytes + needed > self.max_bytes {
             let warn = json!({
                 "ts": Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
@@ -151,7 +151,7 @@ pub async fn run_import(
 
     let steps = ["scan", "validate", "normalize", "write"];
     let overall_start = Instant::now();
-    let result: anyhow::Result<()> = (|| {
+    let result: anyhow::Result<()> = {
         for step in steps.iter() {
             if let Some(p) = ilog.record("info", "step_start", json!({"step": step})) {
                 let _ = app.emit("import://progress", &p);
@@ -168,7 +168,7 @@ pub async fn run_import(
             }
         }
         Ok(())
-    })();
+    };
 
     match result {
         Ok(()) => {
