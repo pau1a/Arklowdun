@@ -492,37 +492,39 @@ async fn table_exists(pool: &sqlx::SqlitePool, name: &str) -> bool {
 }
 
 #[tauri::command]
-async fn db_table_exists(state: State<'_, AppState>, name: String) -> bool {
-    table_exists(&state.pool, &name).await
+async fn db_table_exists(state: State<'_, AppState>, name: String) -> Result<bool, String> {
+    Ok(table_exists(&state.pool, &name).await)
 }
 
 #[tauri::command]
-async fn db_has_files_index(state: State<'_, AppState>) -> bool {
-    table_exists(&state.pool, "files_index").await
+async fn db_has_files_index(state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(table_exists(&state.pool, "files_index").await)
 }
 
 #[tauri::command]
-async fn db_has_vehicle_columns(state: State<'_, AppState>) -> bool {
+async fn db_has_vehicle_columns(state: State<'_, AppState>) -> Result<bool, String> {
     let pool = &state.pool;
     if !table_exists(pool, "vehicles").await {
-        return false;
+        return Ok(false);
     }
     let cols = table_columns(pool, "vehicles").await;
-    cols.contains("reg")
-        || cols.contains("registration")
-        || cols.contains("plate")
-        || cols.contains("nickname")
-        || cols.contains("name")
+    Ok(
+        cols.contains("reg")
+            || cols.contains("registration")
+            || cols.contains("plate")
+            || cols.contains("nickname")
+            || cols.contains("name")
+    )
 }
 
 #[tauri::command]
-async fn db_has_pet_columns(state: State<'_, AppState>) -> bool {
+async fn db_has_pet_columns(state: State<'_, AppState>) -> Result<bool, String> {
     let pool = &state.pool;
     if !table_exists(pool, "pets").await {
-        return false;
+        return Ok(false);
     }
     let cols = table_columns(pool, "pets").await;
-    cols.contains("name") || cols.contains("species") || cols.contains("type")
+    Ok(cols.contains("name") || cols.contains("species") || cols.contains("type"))
 }
 
 /// Return the set of column names for a given table.
