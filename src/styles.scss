@@ -2,6 +2,11 @@
 
 :root {
   --radius-sm: 6px;
+  --z-index-dropdown: 200;
+}
+
+[hidden] {
+  display: none !important;
 }
 
 /* ========================================================================== */
@@ -989,18 +994,20 @@ footer a.footer__settings {
 .omnibox__results {
   position: fixed;
   width: 520px;
-  max-width: min(90vw, 520px);
-  max-height: 400px;
+  max-height: 420px;
   overflow-y: auto;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm, 6px);
   box-shadow: var(--shadow-base);
-  z-index: 200;
+  z-index: var(--z-index-dropdown, 200);
+  transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
-.omnibox__results[hidden] {
-  display: none;
+@media (prefers-reduced-motion: reduce) {
+  .omnibox__results {
+    transition: none;
+  }
 }
 
 .omnibox__results ul {
@@ -1020,14 +1027,15 @@ footer a.footer__settings {
   background: var(--color-border);
 }
 
-.omnibox__results li[role="option"].is-active {
+.omnibox__results li[role="option"][aria-selected="true"] {
   background: var(--color-border);
+  font-weight: 600;
   outline: 2px solid var(--color-accent, #4a90e2);
   outline-offset: -2px;
 }
 
 @media (forced-colors: active) {
-  .omnibox__results li[role="option"].is-active {
+  .omnibox__results li[role="option"][aria-selected="true"] {
     outline: 2px solid CanvasText;
     background: Highlight;
     color: HighlightText;
