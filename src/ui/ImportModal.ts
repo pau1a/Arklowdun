@@ -34,37 +34,39 @@ export function ImportModal(el: HTMLElement) {
     const hh = await defaultHouseholdId();
 
     const u1 = await listen("import://started", (e:any) => {
-      const p = e.payload as { logPath: string };
-      logLink.innerHTML = "";
-      const btn = document.createElement("button");
-      btn.textContent = "Open log";
-      btn.onclick = () => openPath(p.logPath);
-      logLink.appendChild(btn);
+      const p = e.payload as any;
+      const lp = p.fields?.logPath;
+      if (lp) {
+        logLink.innerHTML = "";
+        const btn = document.createElement("button");
+        btn.textContent = "Open log";
+        btn.onclick = () => openPath(lp);
+        logLink.appendChild(btn);
+      }
       line("Started");
     });
     unsub.push(u1);
 
     const u2 = await listen("import://progress", (e:any) => {
-      const { step, current, total } = e.payload as any;
-      line(total ? `Step ${current}/${total}: ${step}` : `Step: ${step}`);
+      const p = e.payload as any;
+      if (p.event === "step_start") {
+        line(`Start: ${p.step}`);
+      } else if (p.event === "step_end") {
+        line(`End: ${p.step} (${p.duration_ms}ms)`);
+      }
     });
     unsub.push(u2);
 
-    const u3 = await listen("import://warn", (e:any) => {
-      line(`Warning: ${e.payload?.message ?? "?"}`);
+    const u3 = await listen("import://error", (e:any) => {
+      line(`Error: ${e.payload?.fields?.source ?? "unknown"}`);
     });
     unsub.push(u3);
 
-    const u4 = await listen("import://error", (e:any) => {
-      line(`Error: ${e.payload?.message ?? "unknown"}`);
+    const u4 = await listen("import://done", (e:any) => {
+      const p = e.payload as any;
+      line(`Done: imported=${p.fields?.imported} skipped=${p.fields?.skipped} (${p.duration_ms}ms)`);
     });
     unsub.push(u4);
-
-    const u5 = await listen("import://done", (e:any) => {
-      const { imported, skipped, durationMs } = e.payload as any;
-      line(`Done: imported=${imported} skipped=${skipped} (${durationMs}ms)`);
-    });
-    unsub.push(u5);
 
     try {
       await call("import_run_legacy", { householdId: hh, dryRun: !!dry.checked });
