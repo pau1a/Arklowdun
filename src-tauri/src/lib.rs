@@ -404,13 +404,23 @@ fn get_default_household_id(state: tauri::State<state::AppState>) -> String {
     state.default_household_id.lock().unwrap().clone()
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportArgs {
+    #[serde(alias = "household_id")]
+    household_id: String,
+    #[serde(alias = "dry_run")]
+    dry_run: bool,
+}
+
 #[tauri::command]
 async fn import_run_legacy(
     app: tauri::AppHandle,
     _state: State<'_, AppState>,
-    household_id: String,
-    dry_run: bool,
+    args: ImportArgs,
 ) -> Result<(), DbErrorPayload> {
+    let household_id = args.household_id;
+    let dry_run = args.dry_run;
     importer::run_import(&app, household_id, dry_run)
         .await
         .map_err(map_db_error)
@@ -857,6 +867,16 @@ async fn attachment_reveal(
     attachments::reveal_with_os(&path)
 }
 
+#[tauri::command]
+async fn open_path(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<(), crate::commands::DbErrorPayload> {
+    use std::path::Path;
+    let _ = app;
+    crate::attachments::open_with_os(Path::new(&path))
+}
+
 macro_rules! app_commands {
     ($($extra:ident),* $(,)?) => {
         tauri::generate_handler![
@@ -961,10 +981,7 @@ macro_rules! app_commands {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let import_enabled = std::env::var("TAURI_FEATURES_IMPORT").ok().as_deref() == Some("1");
-
-    let builder = tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
+    tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -991,15 +1008,8 @@ pub fn run() {
                 default_household_id: Arc::new(Mutex::new(hh)),
             });
             Ok(())
-        });
-
-    let builder = if import_enabled {
-        builder.invoke_handler(app_commands![import_run_legacy, search_entities])
-    } else {
-        builder.invoke_handler(app_commands![search_entities])
-    };
-
-    builder
+        })
+        .invoke_handler(app_commands![search_entities, import_run_legacy, open_path])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

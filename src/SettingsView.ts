@@ -3,7 +3,7 @@ import { STR } from "./ui/strings";
 
 export function SettingsView(container: HTMLElement) {
   const section = document.createElement("section");
-  section.className = "settings";
+  section.className = "settings"; // allow other modules to locate settings root
   section.innerHTML = `
     <a href="#" class="settings__back">Back to dashboard</a>
     <h2 class="settings__title">Settings</h2>
@@ -36,25 +36,6 @@ export function SettingsView(container: HTMLElement) {
 
   container.innerHTML = "";
   container.appendChild(section);
-
-  if (import.meta.env.VITE_FEATURES_IMPORT === "1") {
-    const about = section.querySelector<HTMLElement>('section[aria-labelledby="settings-about"]');
-    if (about) {
-      about.querySelector('.settings__empty')?.remove();
-      const btn = document.createElement('button');
-      btn.textContent = 'Import legacy data';
-      btn.onclick = async () => {
-        const root = document.getElementById('modal-root');
-        if (!root) return;
-        const host = document.createElement('div');
-        host.className = 'modal-overlay';
-        root.appendChild(host);
-        const { ImportModal } = await import('./ui/ImportModal');
-        ImportModal(host);
-      };
-      about.appendChild(btn);
-    }
-  }
 
   section
     .querySelectorAll<HTMLElement>(".settings__empty")
