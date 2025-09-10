@@ -8,19 +8,19 @@ use ts_rs::TS;
 
 use crate::state::AppState;
 
+mod attachments;
 pub mod commands;
 mod db;
 mod events_tz_backfill;
 mod household; // declare module; avoid `use` to prevent name collision
 mod id;
+mod importer;
 mod migrate;
 mod repo;
 mod state;
 mod time;
-mod importer;
-mod attachments;
 
-use commands::{DbErrorPayload, map_db_error};
+use commands::{map_db_error, DbErrorPayload};
 use events_tz_backfill::events_backfill_timezone;
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -440,6 +440,22 @@ pub enum SearchResult {
         updated_at: i64,
         color: String,
     },
+    Vehicle {
+        id: String,
+        make: String,
+        model: String,
+        reg: String,
+        #[ts(type = "number")]
+        updated_at: i64,
+        nickname: String,
+    },
+    Pet {
+        id: String,
+        name: String,
+        species: String,
+        #[ts(type = "number")]
+        updated_at: i64,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -478,7 +494,7 @@ async fn search_entities(
             details: serde_json::json!({}),
         });
     }
-    if limit < 1 || limit > 100 || offset < 0 {
+    if !(1..=100).contains(&limit) || offset < 0 {
         return Err(SearchErrorPayload {
             code: "BAD_REQUEST".into(),
             message: "invalid limit/offset".into(),
@@ -504,6 +520,14 @@ async fn search_entities(
     let has_notes = table_exists(pool, "notes").await;
     if !has_notes {
         tracing::debug!(target: "arklowdun", name = "notes", "missing_table");
+    }
+    let has_vehicles = table_exists(pool, "vehicles").await;
+    if !has_vehicles {
+        tracing::debug!(target: "arklowdun", name = "vehicles", "missing_table");
+    }
+    let has_pets = table_exists(pool, "pets").await;
+    if !has_pets {
+        tracing::debug!(target: "arklowdun", name = "pets", "missing_table");
     }
 
     let short = q.len() < 2;
@@ -547,9 +571,22 @@ async fn search_entities(
         for r in rows {
             let filename: String = r.try_get("filename").unwrap_or_default();
             let ts: i64 = r.try_get("ts").unwrap_or_default();
-            let score = if filename.eq_ignore_ascii_case(&q) { 2 } else { 1 };
+            let score = if filename.eq_ignore_ascii_case(&q) {
+                2
+            } else {
+                1
+            };
             let id: String = r.try_get("id").unwrap_or_default();
-            out.push((score, ts, ord, SearchResult::File { id, filename, updated_at: ts }));
+            out.push((
+                score,
+                ts,
+                ord,
+                SearchResult::File {
+                    id,
+                    filename,
+                    updated_at: ts,
+                },
+            ));
             ord += 1;
         }
     }
@@ -572,10 +609,22 @@ async fn search_entities(
             for r in events {
                 let title: String = r.try_get("title").unwrap_or_default();
                 let ts: i64 = r.try_get("ts").unwrap_or_default();
-                let tz: String = r.try_get("tz").unwrap_or_else(|_| "Europe/London".to_string());
+                let tz: String = r
+                    .try_get("tz")
+                    .unwrap_or_else(|_| "Europe/London".to_string());
                 let score = if title.eq_ignore_ascii_case(&q) { 2 } else { 1 };
                 let id: String = r.try_get("id").unwrap_or_default();
-                out.push((score, ts, ord, SearchResult::Event { id, title, start_at_utc: ts, tz }));
+                out.push((
+                    score,
+                    ts,
+                    ord,
+                    SearchResult::Event {
+                        id,
+                        title,
+                        start_at_utc: ts,
+                        tz,
+                    },
+                ));
                 ord += 1;
             }
         }
@@ -601,7 +650,100 @@ async fn search_entities(
                 let score = if text.eq_ignore_ascii_case(&q) { 2 } else { 1 };
                 let snippet: String = text.chars().take(80).collect();
                 let id: String = r.try_get("id").unwrap_or_default();
-                out.push((score, ts, ord, SearchResult::Note { id, snippet, updated_at: ts, color }));
+                out.push((
+                    score,
+                    ts,
+                    ord,
+                    SearchResult::Note {
+                        id,
+                        snippet,
+                        updated_at: ts,
+                        color,
+                    },
+                ));
+                ord += 1;
+            }
+        }
+
+        if has_vehicles {
+            let start = std::time::Instant::now();
+            let rows = sqlx::query(
+                "SELECT id, COALESCE(make,'') AS make, COALESCE(model,'') AS model, COALESCE(reg, registration, plate, '') AS reg, COALESCE(nickname, name, '') AS nickname, COALESCE(updated_at, created_at, 0) AS ts\n         FROM vehicles\n         WHERE household_id=?1 AND (make LIKE ?2 COLLATE NOCASE OR model LIKE ?2 COLLATE NOCASE OR COALESCE(reg, registration, plate, '') LIKE ?2 COLLATE NOCASE OR COALESCE(nickname, name, '') LIKE ?2 COLLATE NOCASE)\n         ORDER BY ts DESC LIMIT ?3 OFFSET ?4",
+            )
+            .bind(&household_id)
+            .bind(&sub)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(pool)
+            .await
+            .map_err(mapq)?;
+            let elapsed = start.elapsed().as_millis() as i64;
+            tracing::debug!(target: "arklowdun", name = "vehicles", rows = rows.len(), elapsed_ms = elapsed, "branch");
+            for r in rows {
+                let make: String = r.try_get("make").unwrap_or_default();
+                let model: String = r.try_get("model").unwrap_or_default();
+                let reg: String = r.try_get("reg").unwrap_or_default();
+                let nickname: String = r.try_get("nickname").unwrap_or_default();
+                let ts: i64 = r.try_get("ts").unwrap_or_default();
+                let exact = |s: &str| !s.is_empty() && s.eq_ignore_ascii_case(&q);
+                let score = if exact(&make) || exact(&model) || exact(&reg) || exact(&nickname) {
+                    2
+                } else {
+                    1
+                };
+                let id: String = r.try_get("id").unwrap_or_default();
+                out.push((
+                    score,
+                    ts,
+                    ord,
+                    SearchResult::Vehicle {
+                        id,
+                        make,
+                        model,
+                        reg,
+                        updated_at: ts,
+                        nickname,
+                    },
+                ));
+                ord += 1;
+            }
+        }
+
+        if has_pets {
+            let start = std::time::Instant::now();
+            let rows = sqlx::query(
+                "SELECT id, COALESCE(name,'') AS name, COALESCE(species, type, '') AS species, COALESCE(updated_at, created_at, 0) AS ts\n         FROM pets\n         WHERE household_id=?1 AND (COALESCE(name,'') LIKE ?2 COLLATE NOCASE OR COALESCE(species, type, '') LIKE ?2 COLLATE NOCASE)\n         ORDER BY ts DESC LIMIT ?3 OFFSET ?4",
+            )
+            .bind(&household_id)
+            .bind(&sub)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(pool)
+            .await
+            .map_err(mapq)?;
+            let elapsed = start.elapsed().as_millis() as i64;
+            tracing::debug!(target: "arklowdun", name = "pets", rows = rows.len(), elapsed_ms = elapsed, "branch");
+            for r in rows {
+                let name: String = r.try_get("name").unwrap_or_default();
+                let species: String = r.try_get("species").unwrap_or_default();
+                let ts: i64 = r.try_get("ts").unwrap_or_default();
+                let score = if name.eq_ignore_ascii_case(&q) || species.eq_ignore_ascii_case(&q) {
+                    2
+                } else {
+                    1
+                };
+                let id: String = r.try_get("id").unwrap_or_default();
+                out.push((
+                    score,
+                    ts,
+                    ord,
+                    SearchResult::Pet {
+                        id,
+                        name,
+                        species,
+                        updated_at: ts,
+                    },
+                ));
                 ord += 1;
             }
         }

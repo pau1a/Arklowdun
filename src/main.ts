@@ -451,6 +451,26 @@ window.addEventListener("DOMContentLoaded", () => {
             hideResults();
             setTimeout(() => input.blur(), 0);
           });
+        } else if (it.kind === 'Vehicle') {
+          const date = new Date(it.updated_at).toLocaleString();
+          const title = [it.make, it.model].filter(Boolean).join(' ');
+          const reg = it.reg?.trim() ? ` · ${it.reg}` : '';
+          const nick = it.nickname?.trim() ? ` — ${it.nickname}` : '';
+          li.innerHTML = `<i class="fa-solid fa-car"></i><span>${title}${reg}${nick}</span><span>${date}</span>`;
+          li.addEventListener('click', () => {
+            location.hash = '#vehicles';
+            hideResults();
+            setTimeout(() => input.blur(), 0);
+          });
+        } else if (it.kind === 'Pet') {
+          const date = new Date(it.updated_at).toLocaleString();
+          const species = it.species ? ` · ${it.species}` : '';
+          li.innerHTML = `<i class="fa-solid fa-paw"></i><span>${it.name}${species}</span><span>${date}</span>`;
+          li.addEventListener('click', () => {
+            location.hash = '#pets';
+            hideResults();
+            setTimeout(() => input.blur(), 0);
+          });
         }
         list.appendChild(li);
       });
