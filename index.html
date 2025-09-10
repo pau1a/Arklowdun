@@ -10,20 +10,6 @@
   <body class="theme-v1">
     <aside class="sidebar" aria-label="Primary">
       <div class="sidebar__top">
-        <div class="omnibox">
-          <input
-            id="omnibox"
-            type="search"
-            placeholder="Search…"
-            aria-label="Search"
-            aria-controls="omnibox-list"
-            aria-expanded="false"
-            autocomplete="off"
-          />
-          <div id="omnibox-results" class="omnibox__results" hidden>
-            <ul id="omnibox-list" role="listbox" aria-label="Search results"></ul>
-          </div>
-        </div>
         <div class="brand">
           <img src="/src/assets/logo.svg" alt="" class="brand__logo" />
           <h1>Arklowdun</h1>
@@ -65,6 +51,15 @@
           </a>
         </nav>
       </div>
+      <button
+        id="sidebar-search"
+        class="sidebar__cmd-button"
+        type="button"
+        aria-label="Search (Ctrl+K)"
+        title="Search (Ctrl+K)"
+      >
+        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+      </button>
     </aside>
     <main id="view" class="container"></main>
     <footer role="contentinfo" class="footer">
@@ -103,7 +98,7 @@
         </button>
       </div>
     </footer>
-    <div id="search-live" aria-live="polite" class="sr-only"></div>
     <div id="modal-root"></div>
+    <div id="search-live" aria-live="polite" class="sr-only"></div>
   </body>
 </html>

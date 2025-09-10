@@ -40,4 +40,8 @@ The first migration to apply them will be
 
 - [Architecture Overview](docs/architecture/1-overview.md)
 - [Search semantics](docs/search.md)
-  - Quick Search is available in the omnibox. Results are case-insensitive and ordered by score, timestamp and a stable ordinal. Queries shorter than two characters are ignored; set `VITE_SEARCH_MINLEN=1` during development to enable single-character searches.
+  - Quick Search is available via the command palette (⌘K/Ctrl+K). Results are case-insensitive and ordered by score, timestamp and a stable ordinal. Queries shorter than two characters are ignored; set `VITE_SEARCH_MINLEN=1` during development to enable single-character searches.
+
+## Shortcuts
+
+- Command palette: ⌘K (macOS) / Ctrl+K (Windows/Linux)

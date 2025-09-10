@@ -2,7 +2,8 @@
 
 Arklowdun's search covers **Events**, **Notes**, **Vehicles** (make/model/reg/nickname)
 and **Pets** (name/species). Files are included only when the optional
-`files_index` table exists in the database.
+`files_index` table exists in the database. The permanent sidebar search box has
+been removed in favour of a modal command palette.
 
 Queries are case-insensitive: all SQL `LIKE` and equality checks use
 `COLLATE NOCASE`, and exact matches score higher than partial matches.
@@ -17,6 +18,20 @@ Queries shorter than two characters are ignored on the backend and frontend.
 One-character queries are ignored **except** prefix filename searches when a
 `files_index` table is present. Developers can override the front-end rule with
 `VITE_SEARCH_MINLEN`.
+
+## Command Palette
+
+- Open with ⌘K on macOS or Ctrl+K on Windows/Linux, or click the magnifying glass
+  in the sidebar.
+- Palette appears as a centered modal dialog (`role="dialog"`) with a search
+  input using `role="combobox"`; results render in a `role="listbox"`.
+- Items accept `{ kind, title, subtitle, action }` to allow future commands
+  beyond search. Results are shown in backend order without client-side sorting.
+- Arrow keys navigate results; Enter activates; Esc or backdrop closes and
+  focus returns to the main application.
+- The shortcut is ignored when focus is inside an input, textarea, or other
+  editable region.
+- Active options scroll smoothly unless the user prefers reduced motion.
 
 ## Engine Hygiene
 
