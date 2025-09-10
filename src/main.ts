@@ -377,8 +377,11 @@ window.addEventListener("DOMContentLoaded", () => {
 
     async function run(q: string, append = false) {
       const myId = ++reqId;
+      const start = performance.now();
       try {
         const items = await search(q, 100, offset);
+        const took = Math.round(performance.now() - start);
+        log.debug('search:run', { q, offset, count: items.length, took_ms: took });
         if (myId !== reqId) return;
         const MINLEN = Number(import.meta.env.VITE_SEARCH_MINLEN ?? '2');
         if (import.meta.env.DEV && q.length >= MINLEN && items.length === 0) {
@@ -393,6 +396,7 @@ window.addEventListener("DOMContentLoaded", () => {
     }
 
     function render(items: SearchResult[], append: boolean, q: string) {
+      const start = performance.now();
       const oldLoad = panel.querySelector('.omnibox__load-more');
       if (oldLoad) oldLoad.remove();
       const oldEmpty = panel.querySelector('.omnibox__empty');
@@ -473,6 +477,8 @@ window.addEventListener("DOMContentLoaded", () => {
             : `${items.length} results for ${q}`;
         announce(msg);
       }
+      const took = Math.round(performance.now() - start);
+      log.debug('search:render', { count: items.length, append, offset, took_ms: took });
     }
 
     input.addEventListener('input', () => {
@@ -480,6 +486,7 @@ window.addEventListener("DOMContentLoaded", () => {
       const q = input.value.trim();
       current = q;
       offset = 0;
+      log.debug('search:input', { q, len: q.length });
       if (timer) clearTimeout(timer);
       if (!q) {
         hideResults();
@@ -489,6 +496,7 @@ window.addEventListener("DOMContentLoaded", () => {
         panel.hidden = true;
         input.setAttribute('aria-expanded', 'false');
         live.textContent = '';
+        log.debug('search:bypass', { q, len: q.length });
         return;
       }
       timer = window.setTimeout(() => run(q), 200);

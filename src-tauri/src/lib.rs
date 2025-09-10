@@ -449,6 +449,17 @@ pub struct SearchErrorPayload {
     pub details: serde_json::Value,
 }
 
+async fn table_exists(pool: &sqlx::SqlitePool, name: &str) -> bool {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name=?1",
+    )
+    .bind(name)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0)
+        > 0
+}
+
 #[tauri::command]
 async fn search_entities(
     state: State<'_, AppState>,
@@ -467,23 +478,39 @@ async fn search_entities(
             details: serde_json::json!({}),
         });
     }
+    if limit < 1 || limit > 100 || offset < 0 {
+        return Err(SearchErrorPayload {
+            code: "BAD_REQUEST".into(),
+            message: "invalid limit/offset".into(),
+            details: serde_json::json!({ "limit": limit, "offset": offset }),
+        });
+    }
 
-    let q = query;
+    let q = query.trim().to_string();
+    tracing::debug!(target: "arklowdun", household_id = %household_id, q = %q, limit, offset, "search_invoke");
+    if q.is_empty() {
+        return Ok(vec![]);
+    }
     let prefix = format!("{}%", q);
     let sub = format!("%{}%", q);
 
-    async fn table_exists(pool: &sqlx::SqlitePool, name: &str) -> bool {
-        sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name=?1",
-        )
-        .bind(name)
-        .fetch_one(pool)
-        .await
-        .unwrap_or(0) > 0
-    }
-
     let has_files_index = table_exists(pool, "files_index").await;
     let has_files_table = table_exists(pool, "files").await;
+
+    let has_events = table_exists(pool, "events").await;
+    if !has_events {
+        tracing::debug!(target: "arklowdun", name = "events", "missing_table");
+    }
+    let has_notes = table_exists(pool, "notes").await;
+    if !has_notes {
+        tracing::debug!(target: "arklowdun", name = "notes", "missing_table");
+    }
+
+    let short = q.len() < 2;
+    if short && !(has_files_index || has_files_table) {
+        tracing::debug!(target: "arklowdun", q = %q, len = q.len(), "short_query_bypass");
+        return Ok(vec![]);
+    }
 
     let mapq = |e: sqlx::Error| SearchErrorPayload {
         code: "DB/QUERY_FAILED".into(),
@@ -495,11 +522,18 @@ async fn search_entities(
     let mut ord: usize = 0;
 
     if has_files_index || has_files_table {
-        let sql = if has_files_index {
-            "SELECT id, filename, updated_at AS ts FROM files_index\n             WHERE household_id=?1 AND filename LIKE ?2 COLLATE NOCASE\n             ORDER BY filename ASC LIMIT ?3 OFFSET ?4"
+        let (sql, branch_name) = if has_files_index {
+            (
+                "SELECT id, filename, updated_at AS ts FROM files_index\n             WHERE household_id=?1 AND filename LIKE ?2 COLLATE NOCASE\n             ORDER BY filename ASC LIMIT ?3 OFFSET ?4",
+                "files_index",
+            )
         } else {
-            "SELECT id, filename, updated_at AS ts FROM files\n             WHERE household_id=?1 AND filename LIKE ?2 COLLATE NOCASE\n             ORDER BY filename ASC LIMIT ?3 OFFSET ?4"
+            (
+                "SELECT id, filename, updated_at AS ts FROM files\n             WHERE household_id=?1 AND filename LIKE ?2 COLLATE NOCASE\n             ORDER BY filename ASC LIMIT ?3 OFFSET ?4",
+                "files",
+            )
         };
+        let start = std::time::Instant::now();
         let rows = sqlx::query(sql)
             .bind(&household_id)
             .bind(&prefix)
@@ -508,6 +542,8 @@ async fn search_entities(
             .fetch_all(pool)
             .await
             .map_err(mapq)?;
+        let elapsed = start.elapsed().as_millis() as i64;
+        tracing::debug!(target: "arklowdun", name = branch_name, rows = rows.len(), elapsed_ms = elapsed, "branch");
         for r in rows {
             let filename: String = r.try_get("filename").unwrap_or_default();
             let ts: i64 = r.try_get("ts").unwrap_or_default();
@@ -518,51 +554,65 @@ async fn search_entities(
         }
     }
 
-    let events = sqlx::query(
-        "SELECT id, title, start_at_utc AS ts, COALESCE(tz,'Europe/London') AS tz\n         FROM events\n         WHERE household_id=?1 AND title LIKE ?2 COLLATE NOCASE\n         ORDER BY title ASC LIMIT ?3 OFFSET ?4",
-    )
-    .bind(&household_id)
-    .bind(&sub)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(pool)
-    .await
-    .map_err(mapq)?;
-    for r in events {
-        let title: String = r.try_get("title").unwrap_or_default();
-        let ts: i64 = r.try_get("ts").unwrap_or_default();
-        let tz: String = r.try_get("tz").unwrap_or_else(|_| "Europe/London".to_string());
-        let score = if title.eq_ignore_ascii_case(&q) { 2 } else { 1 };
-        let id: String = r.try_get("id").unwrap_or_default();
-        out.push((score, ts, ord, SearchResult::Event { id, title, start_at_utc: ts, tz }));
-        ord += 1;
-    }
+    if !short {
+        if has_events {
+            let start = std::time::Instant::now();
+            let events = sqlx::query(
+                "SELECT id, title, start_at_utc AS ts, COALESCE(tz,'Europe/London') AS tz\n         FROM events\n         WHERE household_id=?1 AND title LIKE ?2 COLLATE NOCASE\n         ORDER BY title ASC LIMIT ?3 OFFSET ?4",
+            )
+            .bind(&household_id)
+            .bind(&sub)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(pool)
+            .await
+            .map_err(mapq)?;
+            let elapsed = start.elapsed().as_millis() as i64;
+            tracing::debug!(target: "arklowdun", name = "events", rows = events.len(), elapsed_ms = elapsed, "branch");
+            for r in events {
+                let title: String = r.try_get("title").unwrap_or_default();
+                let ts: i64 = r.try_get("ts").unwrap_or_default();
+                let tz: String = r.try_get("tz").unwrap_or_else(|_| "Europe/London".to_string());
+                let score = if title.eq_ignore_ascii_case(&q) { 2 } else { 1 };
+                let id: String = r.try_get("id").unwrap_or_default();
+                out.push((score, ts, ord, SearchResult::Event { id, title, start_at_utc: ts, tz }));
+                ord += 1;
+            }
+        }
 
-    let notes = sqlx::query(
-        "SELECT id, text, updated_at AS ts, COALESCE(color,'') AS color\n         FROM notes\n         WHERE household_id=?1 AND text LIKE ?2 COLLATE NOCASE\n         ORDER BY ts DESC LIMIT ?3 OFFSET ?4",
-    )
-    .bind(&household_id)
-    .bind(&sub)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(pool)
-    .await
-    .map_err(mapq)?;
-    for r in notes {
-        let text: String = r.try_get("text").unwrap_or_default();
-        let ts: i64 = r.try_get("ts").unwrap_or_default();
-        let color: String = r.try_get("color").unwrap_or_default();
-        let score = if text.eq_ignore_ascii_case(&q) { 2 } else { 1 };
-        let snippet: String = text.chars().take(80).collect();
-        let id: String = r.try_get("id").unwrap_or_default();
-        out.push((score, ts, ord, SearchResult::Note { id, snippet, updated_at: ts, color }));
-        ord += 1;
+        if has_notes {
+            let start = std::time::Instant::now();
+            let notes = sqlx::query(
+                "SELECT id, text, updated_at AS ts, COALESCE(color,'') AS color\n         FROM notes\n         WHERE household_id=?1 AND text LIKE ?2 COLLATE NOCASE\n         ORDER BY ts DESC LIMIT ?3 OFFSET ?4",
+            )
+            .bind(&household_id)
+            .bind(&sub)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(pool)
+            .await
+            .map_err(mapq)?;
+            let elapsed = start.elapsed().as_millis() as i64;
+            tracing::debug!(target: "arklowdun", name = "notes", rows = notes.len(), elapsed_ms = elapsed, "branch");
+            for r in notes {
+                let text: String = r.try_get("text").unwrap_or_default();
+                let ts: i64 = r.try_get("ts").unwrap_or_default();
+                let color: String = r.try_get("color").unwrap_or_default();
+                let score = if text.eq_ignore_ascii_case(&q) { 2 } else { 1 };
+                let snippet: String = text.chars().take(80).collect();
+                let id: String = r.try_get("id").unwrap_or_default();
+                out.push((score, ts, ord, SearchResult::Note { id, snippet, updated_at: ts, color }));
+                ord += 1;
+            }
+        }
     }
 
     out.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
+    let total_before = out.len();
     if out.len() > 100 {
         out.truncate(100);
     }
+    tracing::debug!(target: "arklowdun", total_before, returned = out.len(), "result_summary");
 
     Ok(out.into_iter().map(|(_, _, _, v)| v).collect())
 }
