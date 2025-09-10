@@ -18,6 +18,13 @@ One-character queries are ignored **except** prefix filename searches when a
 `files_index` table is present. Developers can override the front-end rule with
 `VITE_SEARCH_MINLEN`.
 
+## Engine Hygiene
+
+- A 30 s in-memory micro-cache serves duplicate searches keyed by `{q, offset, limit, householdId}` (includes a version field; bump `CACHE_VERSION` to invalidate keys after semantic changes).
+  - Entries expire after 30 s.
+  - Explicit busts on `householdChanged` or `searchInvalidated` events.
+- Capability checks live in `src/shared/capabilities.ts`; features like `files_index` are gated by these probes. Never sort results on the client—preserve backend order.
+
 ## Troubleshooting
 
 - Files missing? Ensure the `files_index` table is present; otherwise Events,

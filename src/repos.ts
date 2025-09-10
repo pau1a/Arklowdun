@@ -1,5 +1,6 @@
 // src/repos.ts
 import { call } from "./db/call";
+import { emit } from "./shared/events";
 
 import type {
   Bill,
@@ -23,6 +24,8 @@ type ListOpts = {
   offset?: number;
 };
 
+const SEARCH_TABLES = new Set(["notes", "events", "vehicles", "pets"]);
+
 // Generic repo factory with per-table default ordering
 function domainRepo<T extends object>(table: string, defaultOrderBy: string) {
   return {
@@ -44,9 +47,12 @@ function domainRepo<T extends object>(table: string, defaultOrderBy: string) {
       if (table === "events") {
         throw new Error('Do not use domainRepo("events"). Use eventsApi.* helpers.');
       }
-      return await call<T>(`${table}_create`, {
+      const out = await call<T>(`${table}_create`, {
         data: { ...data, household_id: householdId },
       });
+      // after successful write (post-await) by design
+      if (SEARCH_TABLES.has(table)) emit("searchInvalidated");
+      return out;
     },
 
     async update(householdId: string, id: string, data: Partial<T>): Promise<void> {
@@ -54,6 +60,8 @@ function domainRepo<T extends object>(table: string, defaultOrderBy: string) {
         throw new Error('Do not use domainRepo("events"). Use eventsApi.* helpers.');
       }
       await call(`${table}_update`, { id, data, householdId });
+      // after successful write (post-await) by design
+      if (SEARCH_TABLES.has(table)) emit("searchInvalidated");
     },
 
     async delete(householdId: string, id: string): Promise<void> {
@@ -61,6 +69,8 @@ function domainRepo<T extends object>(table: string, defaultOrderBy: string) {
         throw new Error('Do not use domainRepo("events"). Use eventsApi.* helpers.');
       }
       await call(`${table}_delete`, { householdId, id });
+      // after successful write (post-await) by design
+      if (SEARCH_TABLES.has(table)) emit("searchInvalidated");
     },
 
     async restore(householdId: string, id: string): Promise<void> {
@@ -68,6 +78,8 @@ function domainRepo<T extends object>(table: string, defaultOrderBy: string) {
         throw new Error('Do not use domainRepo("events"). Use eventsApi.* helpers.');
       }
       await call(`${table}_restore`, { householdId, id });
+      // after successful write (post-await) by design
+      if (SEARCH_TABLES.has(table)) emit("searchInvalidated");
     },
   };
 }
@@ -112,15 +124,24 @@ export const eventsApi = {
     return await call<Event[]>("events_list_range", { householdId, start, end });
   },
   async create(householdId: string, data: Partial<Event>): Promise<Event> {
-    return await call<Event>("event_create", { data: { ...data, household_id: householdId } });
+    const out = await call<Event>("event_create", { data: { ...data, household_id: householdId } });
+    // after successful write (post-await) by design
+    emit("searchInvalidated");
+    return out;
   },
   async update(householdId: string, id: string, data: Partial<Event>): Promise<void> {
     await call("event_update", { id, data, householdId });
+    // after successful write (post-await) by design
+    emit("searchInvalidated");
   },
   async delete(householdId: string, id: string): Promise<void> {
     await call("event_delete", { householdId, id });
+    // after successful write (post-await) by design
+    emit("searchInvalidated");
   },
   async restore(householdId: string, id: string): Promise<void> {
     await call("event_restore", { householdId, id });
+    // after successful write (post-await) by design
+    emit("searchInvalidated");
   },
 };

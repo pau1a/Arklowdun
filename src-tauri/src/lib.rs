@@ -404,6 +404,11 @@ fn get_default_household_id(state: tauri::State<state::AppState>) -> String {
     state.default_household_id.lock().unwrap().clone()
 }
 
+#[tauri::command]
+fn set_default_household_id(state: tauri::State<state::AppState>, id: String) {
+    *state.default_household_id.lock().unwrap() = id;
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ImportArgs {
@@ -486,10 +491,46 @@ async fn table_exists(pool: &sqlx::SqlitePool, name: &str) -> bool {
         > 0
 }
 
+#[tauri::command]
+async fn db_table_exists(state: State<'_, AppState>, name: String) -> bool {
+    table_exists(&state.pool, &name).await
+}
+
+#[tauri::command]
+async fn db_has_files_index(state: State<'_, AppState>) -> bool {
+    table_exists(&state.pool, "files_index").await
+}
+
+#[tauri::command]
+async fn db_has_vehicle_columns(state: State<'_, AppState>) -> bool {
+    let pool = &state.pool;
+    if !table_exists(pool, "vehicles").await {
+        return false;
+    }
+    let cols = table_columns(pool, "vehicles").await;
+    cols.contains("reg")
+        || cols.contains("registration")
+        || cols.contains("plate")
+        || cols.contains("nickname")
+        || cols.contains("name")
+}
+
+#[tauri::command]
+async fn db_has_pet_columns(state: State<'_, AppState>) -> bool {
+    let pool = &state.pool;
+    if !table_exists(pool, "pets").await {
+        return false;
+    }
+    let cols = table_columns(pool, "pets").await;
+    cols.contains("name") || cols.contains("species") || cols.contains("type")
+}
+
 /// Return the set of column names for a given table.
 async fn table_columns(pool: &sqlx::SqlitePool, table: &str) -> std::collections::HashSet<String> {
     let mut out = std::collections::HashSet::new();
     // NOTE: using a literal table name; NOT user-provided.
+    // PRAGMA returns an error when the table is missing or the DB is malformed; that's expected.
+    // In those cases we swallow the error and return an empty set silently.
     let sql = format!("PRAGMA table_info({})", table);
     if let Ok(rows) = sqlx::query(&sql).fetch_all(pool).await {
         for r in rows {
@@ -504,7 +545,11 @@ async fn table_columns(pool: &sqlx::SqlitePool, table: &str) -> std::collections
 /// Build a COALESCE(expr...) using only the columns that actually exist.
 /// If none of the candidates exist, returns the provided default literal.
 /// `default_literal` should already be a valid SQL literal (e.g. '' or 0).
-fn coalesce_expr(existing: &std::collections::HashSet<String>, candidates: &[&str], default_literal: &str) -> String {
+fn coalesce_expr(
+    existing: &std::collections::HashSet<String>,
+    candidates: &[&str],
+    default_literal: &str,
+) -> String {
     let mut parts: Vec<&str> = Vec::new();
     for c in candidates {
         if existing.contains(*c) {
@@ -717,8 +762,16 @@ async fn search_entities(
             let nick_expr = coalesce_expr(&vcols, &["nickname", "name"], "''");
             let ts_expr = coalesce_expr(&vcols, &["updated_at", "created_at"], "0");
 
-            let make_expr = if vcols.contains("make") { "COALESCE(make,'')" } else { "''" };
-            let model_expr = if vcols.contains("model") { "COALESCE(model,'')" } else { "''" };
+            let make_expr = if vcols.contains("make") {
+                "COALESCE(make,'')"
+            } else {
+                "''"
+            };
+            let model_expr = if vcols.contains("model") {
+                "COALESCE(model,'')"
+            } else {
+                "''"
+            };
 
             let sql = format!(
                 "SELECT id, {make_expr} AS make, {model_expr} AS model, {reg_expr} AS reg, {nick_expr} AS nickname, {ts_expr} AS ts \
@@ -780,7 +833,11 @@ async fn search_entities(
         if has_pets {
             let start = std::time::Instant::now();
             let pcols = table_columns(pool, "pets").await;
-            let name_expr = if pcols.contains("name") { "COALESCE(name,'')" } else { "''" };
+            let name_expr = if pcols.contains("name") {
+                "COALESCE(name,'')"
+            } else {
+                "''"
+            };
             let species_expr = coalesce_expr(&pcols, &["species", "type"], "''");
             let ts_expr = coalesce_expr(&pcols, &["updated_at", "created_at"], "0");
 
@@ -1009,7 +1066,16 @@ pub fn run() {
             });
             Ok(())
         })
-        .invoke_handler(app_commands![search_entities, import_run_legacy, open_path])
+        .invoke_handler(app_commands![
+            search_entities,
+            import_run_legacy,
+            open_path,
+            set_default_household_id,
+            db_table_exists,
+            db_has_files_index,
+            db_has_vehicle_columns,
+            db_has_pet_columns
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
