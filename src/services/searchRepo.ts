@@ -8,9 +8,9 @@ export async function search(
   limit = 100,
   offset = 0,
 ): Promise<SearchResult[]> {
-  const household_id = await defaultHouseholdId();
+  const householdId = await defaultHouseholdId();
   const payload = await call<unknown>("search_entities", {
-    household_id,
+    householdId,
     query,
     limit,
     offset,
