@@ -3,6 +3,10 @@
 :root {
   --radius-sm: 6px;
   --z-index-dropdown: 200;
+
+  /* Surfaces for the omnibox */
+  --surface: var(--color-accent-soft);           /* pale orange (base) */
+  --surface-hover: var(--color-accent-soft-hover, #fcd9a8);
 }
 
 [hidden] {
@@ -1021,14 +1025,12 @@ footer a.footer__settings {
   gap: var(--space-2);
   padding: var(--space-2);
   cursor: pointer;
+  background-color: var(--surface); /* pale orange by default */
 }
 
-.omnibox__results li[role="option"]:hover {
-  background: var(--color-border);
-}
-
+.omnibox__results li[role="option"]:hover,
 .omnibox__results li[role="option"][aria-selected="true"] {
-  background: var(--color-border);
+  background-color: var(--surface-hover); /* deeper orange */
   font-weight: 600;
   outline: 2px solid var(--color-accent, #4a90e2);
   outline-offset: -2px;
