@@ -961,9 +961,7 @@ macro_rules! app_commands {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let import_enabled = std::env::var("TAURI_FEATURES_IMPORT").ok().as_deref() == Some("1");
-
-    let builder = tauri::Builder::default()
+    tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
@@ -991,15 +989,8 @@ pub fn run() {
                 default_household_id: Arc::new(Mutex::new(hh)),
             });
             Ok(())
-        });
-
-    let builder = if import_enabled {
-        builder.invoke_handler(app_commands![import_run_legacy, search_entities])
-    } else {
-        builder.invoke_handler(app_commands![search_entities])
-    };
-
-    builder
+        })
+        .invoke_handler(app_commands![search_entities, import_run_legacy])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
