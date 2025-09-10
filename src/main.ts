@@ -210,7 +210,11 @@ function setupDynamicMinSize() {
 }
 
 function addImportButtonToSettings(container: HTMLElement) {
-  if (container.querySelector('[data-testid="open-import-btn"]')) return;
+  const about =
+    container.querySelector<HTMLElement>(
+      'section[aria-labelledby="settings-about"]'
+    ) ?? container;
+  if (about.querySelector('[data-testid="open-import-btn"]')) return;
 
   const row = document.createElement("div");
   row.style.display = "flex";
@@ -224,12 +228,13 @@ function addImportButtonToSettings(container: HTMLElement) {
   btn.textContent = "Import legacy data…";
   btn.onclick = () => {
     const host = document.createElement("div");
+    host.className = "modal-overlay";
     document.body.appendChild(host);
     ImportModal(host);
   };
 
   row.appendChild(btn);
-  container.appendChild(row);
+  about.appendChild(row);
 }
 
 function setActive(tab: View) {

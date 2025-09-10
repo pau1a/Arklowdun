@@ -68,7 +68,9 @@ export function ImportModal(el: HTMLElement) {
     unsub.push(u4);
 
     try {
-      await call("import_run_legacy", { householdId: hh, dryRun: !!dry.checked });
+      await call("import_run_legacy", {
+        args: { householdId: hh, dryRun: !!dry.checked },
+      });
     } catch (err) {
       showError(err);
     }
