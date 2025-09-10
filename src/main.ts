@@ -372,6 +372,7 @@ window.addEventListener("DOMContentLoaded", () => {
     let current = '';
     let reqId = 0;
     let activeIndex = -1;
+    let suppressBlurFocus = false;
 
     let announceTimer: number | undefined;
     function announce(text: string) {
@@ -386,14 +387,18 @@ window.addEventListener("DOMContentLoaded", () => {
 
     function positionResults() {
       const r = input.getBoundingClientRect();
-      const GAP = 8;
-      const top = Math.round(r.bottom + 6);
-      const left = Math.round(r.right + GAP);
-      const rightPadding = 16;
-      const maxWidth = Math.min(520, window.innerWidth - left - rightPadding);
+      const MARGIN = 8;
+      const panelWidth = Math.min(520, window.innerWidth - MARGIN * 2);
+      let left = r.right + MARGIN;
+      if (left + panelWidth > window.innerWidth - MARGIN) {
+        left = Math.max(MARGIN, r.left - panelWidth - MARGIN);
+      }
+      const top = Math.round(r.bottom + 4);
+      const maxHeight = Math.min(420, window.innerHeight - top - MARGIN);
       panel.style.top = `${top}px`;
       panel.style.left = `${left}px`;
-      panel.style.width = `${Math.max(260, maxWidth)}px`;
+      panel.style.width = `${panelWidth}px`;
+      panel.style.maxHeight = `${maxHeight}px`;
     }
 
     function hideResults() {
@@ -444,9 +449,9 @@ window.addEventListener("DOMContentLoaded", () => {
         empty.className = 'omnibox__empty';
         empty.textContent = `No results found for ${q}`;
         panel.appendChild(empty);
+        positionResults();
         panel.hidden = false;
         input.setAttribute('aria-expanded', 'true');
-        positionResults();
         announce(`No results for ${q}`);
         return;
       }
@@ -463,6 +468,7 @@ window.addEventListener("DOMContentLoaded", () => {
           li.innerHTML = `<i class="fa-regular fa-file"></i><span>${it.filename}</span><span>${date}</span>`;
           li.addEventListener('click', () => {
             location.hash = '#files';
+            suppressBlurFocus = true;
             hideResults();
             setTimeout(() => input.blur(), 0);
           });
@@ -471,6 +477,7 @@ window.addEventListener("DOMContentLoaded", () => {
           li.innerHTML = `<i class="fa-regular fa-calendar"></i><span>${it.title}</span><span>${date}</span>`;
           li.addEventListener('click', () => {
             location.hash = '#calendar';
+            suppressBlurFocus = true;
             hideResults();
             setTimeout(() => input.blur(), 0);
           });
@@ -479,6 +486,7 @@ window.addEventListener("DOMContentLoaded", () => {
           li.innerHTML = `<i class="fa-regular fa-note-sticky" style="color:${it.color}"></i><span>${it.snippet}</span><span>${date}</span>`;
           li.addEventListener('click', () => {
             location.hash = '#notes';
+            suppressBlurFocus = true;
             hideResults();
             setTimeout(() => input.blur(), 0);
           });
@@ -490,6 +498,7 @@ window.addEventListener("DOMContentLoaded", () => {
           li.innerHTML = `<i class="fa-solid fa-car"></i><span>${title}${reg}${nick}</span><span>${date}</span>`;
           li.addEventListener('click', () => {
             location.hash = '#vehicles';
+            suppressBlurFocus = true;
             hideResults();
             setTimeout(() => input.blur(), 0);
           });
@@ -499,6 +508,7 @@ window.addEventListener("DOMContentLoaded", () => {
           li.innerHTML = `<i class="fa-solid fa-paw"></i><span>${it.name}${species}</span><span>${date}</span>`;
           li.addEventListener('click', () => {
             location.hash = '#pets';
+            suppressBlurFocus = true;
             hideResults();
             setTimeout(() => input.blur(), 0);
           });
@@ -507,19 +517,20 @@ window.addEventListener("DOMContentLoaded", () => {
       });
 
       if (items.length === 100) {
-        const load = document.createElement('div');
+        const load = document.createElement('button');
+        load.type = 'button';
         load.className = 'omnibox__load-more';
         load.textContent = 'Load more';
-        load.onclick = () => {
+        load.addEventListener('click', () => {
           offset += 100;
           run(current, true);
-        };
+        });
         panel.appendChild(load);
       }
 
+      positionResults();
       panel.hidden = false;
       input.setAttribute('aria-expanded', 'true');
-      positionResults();
       if (!append) {
         const msg = items.length === 0
           ? `No results for ${q}`
@@ -531,6 +542,10 @@ window.addEventListener("DOMContentLoaded", () => {
       const took = Math.round(performance.now() - start);
       log.debug('search:render', { count: items.length, append, offset, took_ms: took });
     }
+
+    input.addEventListener('focus', () => {
+      positionResults();
+    });
 
     input.addEventListener('input', () => {
       const MINLEN = Number(import.meta.env.VITE_SEARCH_MINLEN ?? '2');
@@ -561,7 +576,6 @@ window.addEventListener("DOMContentLoaded", () => {
         activeIndex = e.key === 'ArrowDown' ? Math.min(activeIndex + 1, options.length - 1) : Math.max(activeIndex - 1, 0);
         options.forEach((el, i) => {
           const active = i === activeIndex;
-          el.classList.toggle('is-active', active);
           el.setAttribute('aria-selected', active ? 'true' : 'false');
         });
         if (activeIndex >= 0) {
@@ -595,6 +609,7 @@ window.addEventListener("DOMContentLoaded", () => {
       } else if (e.key === 'Escape') {
         input.value = '';
         hideResults();
+        input.focus();
       }
     });
 
@@ -608,7 +623,12 @@ window.addEventListener("DOMContentLoaded", () => {
     input.addEventListener('blur', () => {
       setTimeout(() => {
         if (document.activeElement !== input && !panel.contains(document.activeElement)) {
-          hideResults();
+          if (!suppressBlurFocus) {
+            hideResults();
+            input.focus();
+          } else {
+            suppressBlurFocus = false;
+          }
         }
       }, 100);
     });
@@ -617,6 +637,11 @@ window.addEventListener("DOMContentLoaded", () => {
       if (!panel.hidden) positionResults();
     });
     window.addEventListener('scroll', () => {
+      if (!panel.hidden) positionResults();
+    }, { passive: true });
+    // If the sidebar is its own scroll container, keep the panel aligned.
+    const sidebar = document.querySelector<HTMLElement>('.sidebar');
+    sidebar?.addEventListener('scroll', () => {
       if (!panel.hidden) positionResults();
     }, { passive: true });
   linkDashboard()?.addEventListener("click", (e) => {
