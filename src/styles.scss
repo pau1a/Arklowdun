@@ -5,7 +5,8 @@
   --z-index-dropdown: 200;
 
   /* Surfaces for the omnibox */
-  --surface: var(--color-accent-soft);           /* pale orange (base) */
+  /* Use sidebar pale orange; if token isn't in scope, fall back to hex */
+  --surface: var(--color-accent-soft, #ffe4d5);
   --surface-hover: var(--color-accent-soft-hover, #fcd9a8);
 }
 
@@ -1000,7 +1001,7 @@ footer a.footer__settings {
   width: 520px;
   max-height: 420px;
   overflow-y: auto;
-  background-color: var(--surface); /* pale orange from --color-accent-soft */
+  background-color: var(--surface, #ffe4d5); /* pale orange from --color-accent-soft */
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm, 6px);
   box-shadow: var(--shadow-base);
@@ -1025,7 +1026,7 @@ footer a.footer__settings {
   gap: var(--space-2);
   padding: var(--space-2);
   cursor: pointer;
-  background-color: var(--surface); /* pale orange by default */
+  background-color: var(--surface, #ffe4d5); /* pale orange by default */
 }
 
 .omnibox__results li[role="option"]:hover,
