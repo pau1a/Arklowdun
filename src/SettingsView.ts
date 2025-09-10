@@ -3,7 +3,7 @@ import { STR } from "./ui/strings";
 
 export function SettingsView(container: HTMLElement) {
   const section = document.createElement("section");
-  section.className = "settings";
+  section.className = "settings"; // allow other modules to locate settings root
   section.innerHTML = `
     <a href="#" class="settings__back">Back to dashboard</a>
     <h2 class="settings__title">Settings</h2>
