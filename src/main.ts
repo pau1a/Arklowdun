@@ -517,13 +517,14 @@ window.addEventListener("DOMContentLoaded", () => {
       });
 
       if (items.length === 100) {
-        const load = document.createElement('div');
+        const load = document.createElement('button');
+        load.type = 'button';
         load.className = 'omnibox__load-more';
         load.textContent = 'Load more';
-        load.onclick = () => {
+        load.addEventListener('click', () => {
           offset += 100;
           run(current, true);
-        };
+        });
         panel.appendChild(load);
       }
 
@@ -636,6 +637,11 @@ window.addEventListener("DOMContentLoaded", () => {
       if (!panel.hidden) positionResults();
     });
     window.addEventListener('scroll', () => {
+      if (!panel.hidden) positionResults();
+    }, { passive: true });
+    // If the sidebar is its own scroll container, keep the panel aligned.
+    const sidebar = document.querySelector<HTMLElement>('.sidebar');
+    sidebar?.addEventListener('scroll', () => {
       if (!panel.hidden) positionResults();
     }, { passive: true });
   linkDashboard()?.addEventListener("click", (e) => {

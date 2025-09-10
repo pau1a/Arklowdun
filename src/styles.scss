@@ -1000,7 +1000,7 @@ footer a.footer__settings {
   width: 520px;
   max-height: 420px;
   overflow-y: auto;
-  background: var(--color-bg);
+  background-color: var(--surface); /* pale orange from --color-accent-soft */
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm, 6px);
   box-shadow: var(--shadow-base);
@@ -1045,8 +1045,12 @@ footer a.footer__settings {
 }
 
 .omnibox__load-more {
-  text-align: center;
+  display: block;
+  width: 100%;
   padding: var(--space-2);
+  text-align: center;
+  background: none;
+  border: 0;
   cursor: pointer;
 }
 
