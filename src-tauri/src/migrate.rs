@@ -1,4 +1,4 @@
-use anyhow::bail;
+use anyhow::{anyhow, bail};
 use include_dir::{include_dir, Dir};
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -191,7 +191,7 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
                     id.clone() + ".up.sql"
                 };
                 sqlx::query(
-                    "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)"
+                    "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
                 )
                 .bind(mapped)
                 .bind(applied_at)
@@ -233,8 +233,48 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
                 info!(target = "arklowdun", event = "migration_stmt_skip", sql = %preview(&stmt));
                 continue;
             }
-            info!(target = "arklowdun", event = "migration_stmt", sql = %preview(&stmt));
-            if let Err(e) = tx.execute(stmt.as_str()).await {
+
+            let mut stmt_to_run = stmt.clone();
+            let upper_trim = stmt.trim_start().to_ascii_uppercase();
+            if upper_trim.starts_with("INSERT INTO EVENTS_NEW")
+                && upper_trim.contains("FROM EVENTS")
+            {
+                let has_datetime = column_exists(tx.as_mut(), "events", "datetime").await?;
+                let has_start_at = column_exists(tx.as_mut(), "events", "start_at").await?;
+                let has_starts_at = column_exists(tx.as_mut(), "events", "starts_at").await?;
+
+                let src_col = if has_datetime {
+                    "datetime"
+                } else if has_start_at {
+                    "start_at"
+                } else if has_starts_at {
+                    "starts_at"
+                } else {
+                    return Err(anyhow!(
+                        "events table has none of [datetime,start_at,starts_at]"
+                    ));
+                };
+
+                stmt_to_run = format!(
+                    "INSERT INTO events_new \
+             (id, title, datetime, reminder, household_id, created_at, updated_at, deleted_at) \
+             SELECT id, title, {src} AS datetime, reminder, household_id, created_at, updated_at, deleted_at \
+             FROM events",
+                    src = src_col
+                );
+                info!(
+                    target = "arklowdun",
+                    event = "migration_stmt_rewrite",
+                    sql = %preview(&stmt_to_run)
+                );
+            }
+
+            info!(
+                target = "arklowdun",
+                event = "migration_stmt",
+                sql = %preview(&stmt_to_run)
+            );
+            if let Err(e) = tx.execute(stmt_to_run.as_str()).await {
                 error!(target = "arklowdun", event = "migration_stmt_error", file = %filename, error = %e);
                 return Err(e.into());
             }
