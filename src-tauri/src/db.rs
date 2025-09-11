@@ -128,7 +128,7 @@ async fn log_effective_pragmas(pool: &Pool<Sqlite>) {
 pub async fn with_transaction<T>(
     pool: &Pool<Sqlite>,
     f: impl for<'a> FnOnce(
-        &'a mut Transaction<'a, Sqlite>,
+        &'a mut Transaction<'_, Sqlite>,
     ) -> Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>,
 ) -> Result<T> {
     let mut tx = pool.begin().await?;
