@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use sqlx::{sqlite::SqlitePoolOptions, Row, SqlitePool};
+use sqlx::{sqlite::SqlitePoolOptions, Row, Sqlite, SqlitePool, Transaction};
 use std::{fs, path::PathBuf};
 use tempfile::tempdir;
 
@@ -139,23 +139,26 @@ async fn rollback_all_migrations_leaves_clean_db() -> Result<()> {
     );
 
     let dir_mig = migrations_dir();
+
+    // First full rollback (down)
     for version in expected.iter().rev() {
         let down_path = dir_mig.join(version.replace(".up.sql", ".down.sql"));
         let sql = fs::read_to_string(&down_path)
             .with_context(|| format!("read {}", down_path.display()))?;
-        let mut tx = pool.begin().await?;
+
+        let mut tx: Transaction<'_, Sqlite> = pool.begin().await?;
         let has_sm: Option<i64> = sqlx::query_scalar(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations';",
         )
-        .fetch_optional(tx.as_mut())
+        .fetch_optional(&mut *tx)
         .await?;
         if has_sm.is_some() {
             sqlx::query("DELETE FROM schema_migrations WHERE version = ?")
                 .bind(version)
-                .execute(tx.as_mut())
+                .execute(&mut *tx)
                 .await?;
         }
-        sqlx::query(&sql).execute(tx.as_mut()).await?;
+        sqlx::query(&sql).execute(&mut *tx).await?;
         tx.commit().await?;
     }
 
@@ -186,23 +189,25 @@ async fn rollback_all_migrations_leaves_clean_db() -> Result<()> {
     let before_tables = tables;
     let before_indexes = indexes;
 
+    // Second pass (downs must be idempotent / no-op)
     for version in expected.iter().rev() {
         let down_path = dir_mig.join(version.replace(".up.sql", ".down.sql"));
         let sql = fs::read_to_string(&down_path)
             .with_context(|| format!("read {}", down_path.display()))?;
-        let mut tx = pool.begin().await?;
+
+        let mut tx: Transaction<'_, Sqlite> = pool.begin().await?;
         let has_sm: Option<i64> = sqlx::query_scalar(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations';",
         )
-        .fetch_optional(tx.as_mut())
+        .fetch_optional(&mut *tx)
         .await?;
         if has_sm.is_some() {
             sqlx::query("DELETE FROM schema_migrations WHERE version = ?")
                 .bind(version)
-                .execute(tx.as_mut())
+                .execute(&mut *tx)
                 .await?;
         }
-        sqlx::query(&sql).execute(tx.as_mut()).await?;
+        sqlx::query(&sql).execute(&mut *tx).await?;
         tx.commit().await?;
     }
 
