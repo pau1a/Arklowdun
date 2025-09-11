@@ -1,6 +1,7 @@
 use serde_json::{Map, Value};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Column, Row, Sqlite, SqlitePool, Transaction, TypeInfo, ValueRef};
+use sqlx::Executor;
 
 use crate::db::with_transaction;
 use crate::time::now_ms;
