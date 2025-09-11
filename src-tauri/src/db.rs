@@ -129,7 +129,14 @@ where
     for<'c> Fut: std::future::Future<Output = Result<T>> + 'c,
 {
     let mut tx = pool.begin().await?;
-    match f(&mut tx).await {
+
+    // Scope the mutable borrow so `tx` can be moved for commit/rollback.
+    let res: Result<T> = {
+        let tx_ref: &mut Transaction<'_, Sqlite> = &mut tx;
+        f(tx_ref).await
+    };
+
+    match res {
         Ok(v) => {
             tx.commit().await?;
             Ok(v)
