@@ -1,6 +1,6 @@
 use serde_json::{Map, Value};
 use sqlx::sqlite::SqliteRow;
-use sqlx::{Column, Executor, Row, SqlitePool, TypeInfo, ValueRef};
+use sqlx::{Column, Row, Sqlite, SqlitePool, Transaction, TypeInfo, ValueRef};
 
 use crate::db::with_transaction;
 use crate::time::now_ms;
@@ -271,14 +271,11 @@ pub async fn clear_deleted_at(
     .await
 }
 
-pub async fn renumber_positions<'a, E>(
-    exec: &mut E,
+pub async fn renumber_positions(
+    tx: &mut Transaction<'_, Sqlite>,
     table: &str,
     household_id: &str,
-) -> anyhow::Result<()>
-where
-    E: Executor<'a, Database = sqlx::Sqlite>,
-{
+) -> anyhow::Result<()> {
     ensure_table(table)?;
     let household_id = require_household(household_id)?;
     let sql = format!(
@@ -296,10 +293,7 @@ where
         WHERE id IN (SELECT id FROM ordered)
         "#
     );
-    sqlx::query(&sql)
-        .bind(household_id)
-        .execute(&mut *exec)
-        .await?;
+    sqlx::query(&sql).bind(household_id).execute(tx).await?;
     Ok(())
 }
 
