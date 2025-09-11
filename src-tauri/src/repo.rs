@@ -1,7 +1,7 @@
 use serde_json::{Map, Value};
 use sqlx::sqlite::SqliteRow;
-use sqlx::{Column, Row, Sqlite, SqlitePool, Transaction, TypeInfo, ValueRef};
 use sqlx::Executor;
+use sqlx::{Column, Row, Sqlite, SqlitePool, Transaction, TypeInfo, ValueRef};
 
 use crate::db::with_transaction;
 use crate::time::now_ms;
@@ -193,7 +193,7 @@ pub async fn set_deleted_at(
         let hh = hh.to_string();
         let tbl = tbl.clone();
         let id = id.clone();
-        Box::pin(async move {
+        async move {
             let res = if tbl == "household" {
                 let sql = format!("UPDATE {tbl} SET deleted_at = ?, updated_at = ? WHERE id = ?");
                 sqlx::query(&sql)
@@ -221,7 +221,7 @@ pub async fn set_deleted_at(
                 renumber_positions(&mut *tx, &tbl, &hh).await?;
             }
             Ok(())
-        })
+        }
     })
     .await
 }
@@ -241,7 +241,7 @@ pub async fn clear_deleted_at(
         let hh = hh.to_string();
         let tbl = tbl.clone();
         let id = id.clone();
-        Box::pin(async move {
+        async move {
             let res = if tbl == "household" {
                 let sql = format!("UPDATE {tbl} SET deleted_at = NULL, updated_at = ? WHERE id = ?");
                 sqlx::query(&sql)
@@ -267,7 +267,7 @@ pub async fn clear_deleted_at(
                 renumber_positions(&mut *tx, &tbl, &hh).await?;
             }
             Ok(())
-        })
+        }
     })
     .await
 }
@@ -312,12 +312,10 @@ pub(crate) async fn reorder_positions(
     with_transaction(pool, move |tx| {
         let hh = hh.to_string();
         let tbl = tbl.clone();
-        Box::pin(async move {
+        async move {
             let now = now_ms();
             let bump_sql = format!(
-                "UPDATE {tbl} \
-                 SET position = position + 1000000, updated_at = ? \
-                 WHERE household_id = ? AND deleted_at IS NULL",
+                "UPDATE {tbl} SET position = position + 1000000, updated_at = ? WHERE household_id = ? AND deleted_at IS NULL",
             );
             sqlx::query(&bump_sql)
                 .bind(now)
@@ -326,9 +324,7 @@ pub(crate) async fn reorder_positions(
                 .await?;
 
             let update_sql = format!(
-                "UPDATE {tbl} \
-                 SET position = ?, updated_at = ? \
-                 WHERE id = ? AND household_id = ?",
+                "UPDATE {tbl} SET position = ?, updated_at = ? WHERE id = ? AND household_id = ?",
             );
             for (id, pos) in &updates {
                 let res = sqlx::query(&update_sql)
@@ -345,8 +341,9 @@ pub(crate) async fn reorder_positions(
 
             renumber_positions(&mut *tx, &tbl, &hh).await?;
             Ok(())
-        })
+        }
     })
+
     .await
 }
 

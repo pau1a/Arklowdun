@@ -125,8 +125,8 @@ async fn log_effective_pragmas(pool: &Pool<Sqlite>) {
 
 pub async fn with_transaction<F, Fut, T>(pool: &Pool<Sqlite>, f: F) -> Result<T>
 where
-    F: FnOnce(&mut Transaction<'_, Sqlite>) -> Fut,
-    Fut: std::future::Future<Output = Result<T>>,
+    for<'c> F: FnOnce(&'c mut Transaction<'c, Sqlite>) -> Fut,
+    for<'c> Fut: std::future::Future<Output = Result<T>> + 'c,
 {
     let mut tx = pool.begin().await?;
     match f(&mut tx).await {
