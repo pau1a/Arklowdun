@@ -1,0 +1,24 @@
+-- Migration template (do NOT include BEGIN/COMMIT/PRAGMA; runner owns TX/FKs)
+-- Name your objects explicitly; always create/drop indexes/triggers by name.
+-- For foreign keys, specify ON DELETE/ON UPDATE actions.
+
+-- up
+-- Put forward-only statements here.
+-- Examples:
+--   CREATE TABLE example (
+--     id INTEGER PRIMARY KEY,
+--     name TEXT NOT NULL
+--   );
+--   ALTER TABLE example ADD COLUMN new_col TEXT NOT NULL DEFAULT '';
+
+-- down
+-- Put exact inverse here.
+-- Use rebuild-table patterns for column removal or constraint loosening.
+-- Examples:
+--   DROP TABLE IF EXISTS example;
+--   -- Rebuild table to remove a column:
+--   -- CREATE TABLE example_new (...original columns only...);
+--   -- INSERT INTO example_new (...) SELECT ... FROM example;
+--   -- DROP TABLE example;
+--   -- ALTER TABLE example_new RENAME TO example;
+--   -- (recreate indexes/triggers/FKs)
