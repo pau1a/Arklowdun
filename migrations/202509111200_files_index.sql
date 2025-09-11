@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS files_index_meta (
   household_id TEXT PRIMARY KEY,
   last_built_at_utc TEXT NOT NULL,
   source_row_count INTEGER NOT NULL,
+  -- Columns monitored by `files_index_ready()`
   source_max_updated_utc TEXT NOT NULL,
   version INTEGER NOT NULL
 );
