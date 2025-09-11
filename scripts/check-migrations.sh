@@ -2,7 +2,7 @@
 set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 
-on_disk="$(git -C "$repo_root" ls-files migrations/*.sql | xargs -n1 basename | sort | grep -v '^202509011559_initial.sql$')"
+on_disk="$(git -C "$repo_root" ls-files migrations/*.sql | xargs -n1 basename | sort)"
 
 in_code="$(
   grep -o "include_str!(\"[^\"]*migrations/[^\"]*\.sql\")" "$repo_root/src-tauri/src/migrate.rs" \

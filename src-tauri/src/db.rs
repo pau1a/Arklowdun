@@ -30,7 +30,7 @@ pub async fn open_sqlite_pool(app: &AppHandle) -> Result<Pool<Sqlite>> {
         .synchronous(SqliteSynchronous::Full)
         .foreign_keys(true);
 
-    let connect_res = SqlitePoolOptions::new()
+    let pool = SqlitePoolOptions::new()
         .max_connections(8)
         .after_connect(|conn, _| {
             Box::pin(async move {
@@ -40,45 +40,35 @@ pub async fn open_sqlite_pool(app: &AppHandle) -> Result<Pool<Sqlite>> {
                 sqlx::query("PRAGMA wal_autocheckpoint = 1000;")
                     .execute(&mut *conn)
                     .await?;
-                sqlx::query("PRAGMA foreign_keys = ON;")
-                    .execute(&mut *conn)
-                    .await?;
-                let (integrity,): (String,) = sqlx::query_as("PRAGMA quick_check;")
-                    .fetch_one(&mut *conn)
-                    .await?;
-                if integrity.to_ascii_lowercase() != "ok" {
-                    return Err(sqlx::Error::Protocol(integrity));
-                }
                 Ok::<_, sqlx::Error>(())
             })
         })
         .connect_with(opts)
-        .await;
+        .await?;
 
-    let pool = match connect_res {
-        Ok(pool) => pool,
-        Err(sqlx::Error::Protocol(msg)) => {
-            tracing::error!(
-                target = "arklowdun",
-                event = "integrity_check_failed",
-                pragma_msg = %msg
-            );
-            let open_backup = app
-                .dialog()
-                .message("Database integrity check failed. Restore from the latest backup.")
-                .buttons(MessageDialogButtons::OkCancelCustom(
-                    "Open Backup Folder".to_string(),
-                    "Quit".to_string(),
-                ))
-                .blocking_show();
-            if open_backup {
-                // Open the app's data directory (where backups live) with the default file manager.
-                let _ = app.opener().open_path(&app_dir, None);
-            }
-            std::process::exit(1);
+    let (integrity,): (String,) = sqlx::query_as("PRAGMA quick_check;")
+        .fetch_one(&pool)
+        .await?;
+    if integrity.to_ascii_lowercase() != "ok" {
+        tracing::error!(
+            target = "arklowdun",
+            event = "integrity_check_failed",
+            pragma_msg = %integrity
+        );
+        let open_backup = app
+            .dialog()
+            .message("Database integrity check failed. Restore from the latest backup.")
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "Open Backup Folder".to_string(),
+                "Quit".to_string(),
+            ))
+            .blocking_show();
+        if open_backup {
+            // Open the app's data directory (where backups live) with the default file manager.
+            let _ = app.opener().open_path(&app_dir, None);
         }
-        Err(e) => return Err(e.into()),
-    };
+        std::process::exit(1);
+    }
 
     log_effective_pragmas(&pool).await;
 

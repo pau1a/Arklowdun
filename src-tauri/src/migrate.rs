@@ -18,6 +18,10 @@ fn preview(sql: &str) -> String {
 
 static MIGRATIONS: &[(&str, &str)] = &[
     (
+        "202509011559_initial.sql",
+        include_str!("../../migrations/202509011559_initial.sql"),
+    ),
+    (
         "202509012006_household.sql",
         include_str!("../../migrations/202509012006_household.sql"),
     ),
