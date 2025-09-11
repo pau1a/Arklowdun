@@ -25,4 +25,4 @@ The sqlite:app.sqlite path resolves under the app’s data dir, e.g.:
 
 Schema integrity conventions are documented in [integrity-rules.md](integrity-rules.md).
 The first migration to enforce them is
-`migrations/202509021200_add_integrity_constraints.sql`.
+`migrations/0008_explicit_fk_actions.up.sql`.

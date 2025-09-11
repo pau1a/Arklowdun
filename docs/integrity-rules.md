@@ -50,7 +50,7 @@ This prevents orphaned rows and keeps cleanup simple.
 The first migration to apply these rules will be:
 
 ```
-migrations/202509021300_explicit_fk_actions.sql
+migrations/0008_explicit_fk_actions.up.sql
 ```
 
 Future schema changes should conform to the guidance above.

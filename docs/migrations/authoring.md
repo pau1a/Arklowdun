@@ -6,6 +6,17 @@ statements for the change; the runner wraps them in a transaction and enables
 foreign keys automatically, so omit any `BEGIN`, `COMMIT`, or `PRAGMA` lines.
 Avoid queries that return rows (e.g., `PRAGMA foreign_key_check`); run such checks in the runner.
 
+## Numbering
+
+Migration files use a gapless, zero-padded counter shared by each pair:
+
+```
+NNNN_label.up.sql
+NNNN_label.down.sql
+```
+
+Numbers start at `0001` and increase by one for each subsequent migration. Run `scripts/check_migrations.sh` before committing to verify numbering and pairing.
+
 ## Common Patterns
 
 ### Create table
