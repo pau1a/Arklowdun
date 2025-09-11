@@ -2,6 +2,7 @@ use anyhow::bail;
 use include_dir::{include_dir, Dir};
 use once_cell::sync::Lazy;
 use regex::Regex;
+use sqlx::sqlite::SqliteConnection;
 use sqlx::{Executor, Row, SqlitePool};
 use std::collections::HashSet;
 use std::time::Instant;
@@ -116,32 +117,30 @@ fn split_statements(sql: &str) -> Vec<String> {
     statements
 }
 
-async fn column_exists<'e, E>(exec: E, table: &str, col: &str) -> anyhow::Result<bool>
-where
-    E: Executor<'e, Database = sqlx::Sqlite>,
-{
+async fn column_exists(
+    conn: &mut SqliteConnection,
+    table: &str,
+    col: &str,
+) -> anyhow::Result<bool> {
     let q = format!(
         "SELECT 1 FROM pragma_table_info('{}') WHERE name = ?",
         table.replace('\'', "''")
     );
     Ok(sqlx::query_scalar::<_, i64>(&q)
         .bind(col)
-        .fetch_optional(exec)
+        .fetch_optional(&mut *conn)
         .await?
         .is_some())
 }
 
-async fn should_skip_stmt<'e, E>(exec: E, stmt: &str) -> anyhow::Result<bool>
-where
-    E: Executor<'e, Database = sqlx::Sqlite>,
-{
+async fn should_skip_stmt(conn: &mut SqliteConnection, stmt: &str) -> anyhow::Result<bool> {
     static ADD_RE: Lazy<Regex> = Lazy::new(|| {
         Regex::new(r"(?i)^\s*ALTER\s+TABLE\s+([^\s]+)\s+ADD\s+COLUMN\s+([^\s(]+)").unwrap()
     });
     if let Some(c) = ADD_RE.captures(stmt) {
         let table = c.get(1).unwrap().as_str().trim_matches('"');
         let col = c.get(2).unwrap().as_str().trim_matches('"');
-        return Ok(column_exists(exec, table, col).await?);
+        return Ok(column_exists(conn, table, col).await?);
     }
 
     static RENAME_RE: Lazy<Regex> = Lazy::new(|| {
@@ -151,7 +150,7 @@ where
     if let Some(c) = RENAME_RE.captures(stmt) {
         let table = c.get(1).unwrap().as_str().trim_matches('"');
         let from = c.get(2).unwrap().as_str().trim_matches('"');
-        return Ok(!column_exists(exec, table, from).await?);
+        return Ok(!column_exists(conn, table, from).await?);
     }
 
     Ok(false)
@@ -195,7 +194,7 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
         let start = Instant::now();
         info!(target = "arklowdun", event = "migration_begin", file = %filename);
         for stmt in split_statements(&cleaned) {
-            if should_skip_stmt(&mut tx, &stmt).await? {
+            if should_skip_stmt(tx.as_mut(), &stmt).await? {
                 info!(target = "arklowdun", event = "migration_stmt_skip", sql = %preview(&stmt));
                 continue;
             }
@@ -278,7 +277,7 @@ pub async fn revert_last_migration(pool: &SqlitePool) -> anyhow::Result<()> {
         let start = Instant::now();
         info!(target = "arklowdun", event = "migration_begin", file = %version);
         for stmt in split_statements(&cleaned) {
-            if should_skip_stmt(&mut tx, &stmt).await? {
+            if should_skip_stmt(tx.as_mut(), &stmt).await? {
                 info!(target = "arklowdun", event = "migration_stmt_skip", sql = %preview(&stmt));
                 continue;
             }
