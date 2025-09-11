@@ -8,7 +8,7 @@
 - Model households in-schema: every domain table has **`household_id`**.
 - Store the DB at **appDataDir()** (already app-scoped in Tauri v2), filename **`app.sqlite`**.
 - On open, set pragmas: `journal_mode=WAL`, `synchronous=NORMAL`, `foreign_keys=ON`.
-- Migrations: timestamped IDs `YYYYMMDDhhmm_label`, **idempotent**, one transaction each; record applied IDs in table `migrations`.
+- Migrations: timestamped IDs `YYYYMMDDhhmm_label`, **idempotent**, one transaction each; record versions and checksums in table `schema_migrations`.
 
 ## Rationale
 - One file = trivial backup/restore and portable WAL behavior.

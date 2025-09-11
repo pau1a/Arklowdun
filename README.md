@@ -45,3 +45,7 @@ The first migration to apply them will be
 ## Shortcuts
 
 - Command palette: ⌘K (macOS) / Ctrl+K (Windows/Linux)
+
+## Crash Recovery
+
+SQLite uses WAL journaling and all writes run inside transactions. On startup the app runs `PRAGMA quick_check;` and will refuse to open if it reports corruption so the user can restore the most recent backup. When the check fails a dialog lets you open the backup folder or quit. If the app crashes during a write, restart and the database will roll back to the last committed state. In rare cases you can remove any `arklowdun.sqlite3-wal` or `arklowdun.sqlite3-shm` files and relaunch to rebuild the database from migrations.

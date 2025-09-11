@@ -1,5 +1,4 @@
 -- id: 202509021400_soft_delete_notes_shopping
--- checksum: 4992776ddfbe2526b45bf413af02d31cc4f457af8f5ad33f95a7c60aaa9d9f39
 
 BEGIN;
 

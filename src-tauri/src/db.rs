@@ -1,8 +1,9 @@
 use anyhow::Result;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
-use sqlx::{Pool, Sqlite};
+use sqlx::{Pool, Sqlite, Transaction};
 use std::str::FromStr;
-use tauri::{AppHandle, Manager};
+use tauri::{api::shell, AppHandle, Manager};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 pub async fn open_sqlite_pool(app: &AppHandle) -> Result<Pool<Sqlite>> {
     let app_dir = app
@@ -28,7 +29,7 @@ pub async fn open_sqlite_pool(app: &AppHandle) -> Result<Pool<Sqlite>> {
         .synchronous(SqliteSynchronous::Full)
         .foreign_keys(true);
 
-    let pool = SqlitePoolOptions::new()
+    let connect_res = SqlitePoolOptions::new()
         .max_connections(8)
         .after_connect(|conn, _| {
             Box::pin(async move {
@@ -38,11 +39,44 @@ pub async fn open_sqlite_pool(app: &AppHandle) -> Result<Pool<Sqlite>> {
                 sqlx::query("PRAGMA wal_autocheckpoint = 1000;")
                     .execute(&mut *conn)
                     .await?;
+                sqlx::query("PRAGMA foreign_keys = ON;")
+                    .execute(&mut *conn)
+                    .await?;
+                let (integrity,): (String,) = sqlx::query_as("PRAGMA quick_check;")
+                    .fetch_one(&mut *conn)
+                    .await?;
+                if integrity.to_ascii_lowercase() != "ok" {
+                    return Err(sqlx::Error::Protocol(integrity));
+                }
                 Ok::<_, sqlx::Error>(())
             })
         })
         .connect_with(opts)
-        .await?;
+        .await;
+
+    let pool = match connect_res {
+        Ok(pool) => pool,
+        Err(sqlx::Error::Protocol(msg)) => {
+            tracing::error!(
+                target = "arklowdun",
+                event = "integrity_check_failed",
+                pragma_msg = %msg
+            );
+            let open_backup = app
+                .dialog()
+                .message("Database integrity check failed. Restore from the latest backup.")
+                .buttons(MessageDialogButtons::OkCancelCustom(
+                    "Open Backup Folder",
+                    "Quit",
+                ))
+                .blocking_show();
+            if open_backup {
+                let _ = shell::open(&app.shell_scope(), &app_dir, None);
+            }
+            std::process::exit(1);
+        }
+        Err(e) => return Err(e.into()),
+    };
 
     log_effective_pragmas(&pool).await;
 
@@ -93,5 +127,23 @@ async fn log_effective_pragmas(pool: &Pool<Sqlite>) {
             event = "db_open_warning",
             msg = "journal_mode != WAL; running with reduced crash safety"
         );
+    }
+}
+
+pub async fn with_transaction<F, Fut, T>(pool: &Pool<Sqlite>, f: F) -> Result<T>
+where
+    F: FnOnce(&mut Transaction<'_, Sqlite>) -> Fut,
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    let mut tx = pool.begin().await?;
+    match f(&mut tx).await {
+        Ok(v) => {
+            tx.commit().await?;
+            Ok(v)
+        }
+        Err(e) => {
+            tx.rollback().await?;
+            Err(e)
+        }
     }
 }

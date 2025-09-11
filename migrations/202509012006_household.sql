@@ -1,5 +1,4 @@
 -- id: 202509012006_household
--- checksum: f3ffbea1851b41d44abb4a364f099ed1d1eb57c786c6aadda95f5cd5e75a2eb4
 
 BEGIN;
 

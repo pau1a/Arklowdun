@@ -1,5 +1,4 @@
 -- id: 202509020900_add_positions
--- checksum: a619c37adf7207c53c6a5f17bcb0334ee405708caa7b6892d301427cd3296836
 
 BEGIN;
 

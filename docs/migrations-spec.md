@@ -14,28 +14,34 @@ This document outlines conventions for SQL migrations used by the project.
 The application maintains a table to track applied migrations:
 
 ```sql
-CREATE TABLE IF NOT EXISTS migrations (
-  id TEXT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version TEXT PRIMARY KEY,
   applied_at INTEGER NOT NULL,
   checksum TEXT NOT NULL
 );
 ```
 
-- `id` is the filename without the `.sql` suffix.
+- `version` is the full filename, e.g. `202509012006_household.sql`.
 - `applied_at` records the Unix epoch time when a migration ran.
-- `checksum` is a SHA-256 digest of the migration file after normalizing its contents.
+- `checksum` is a SHA-256 digest of the normalized SQL actually executed.
 
 ## Checksums
-- Before applying a migration, compute its SHA-256 checksum using `npm run migrate:checksum -- <file>`.
-- Normalize files before hashing:
-  - Strip any UTF-8 byte order mark (BOM).
-  - Convert CRLF sequences to `\n`.
-  - Trim trailing whitespace from each line.
-  - Ensure the file ends with a single trailing `\n`.
-  These steps keep checksums stable across editors and platforms.
-- Store the checksum in the `migrations` table. On startup, verify stored checksums against the files to detect accidental edits.
+- When applying a migration the application normalizes the SQL (drops comments and blank lines) and computes its SHA-256 checksum.
+- If an entry already exists in `schema_migrations` with a different checksum, migration stops with an error.
+- New migrations insert their checksum alongside the version in the same transaction.
 
 ## Ordering & Transactions
 - Execute migrations sequentially in ascending filename order.
 - Each migration runs inside a single transaction and must be idempotent.
 
+
+## Reversibility
+- Migrations must be safe to run multiple times and should leave the schema unchanged when re-executed.
+- Every migration is wrapped in a transaction so partial changes are rolled back if an error occurs.
+- When rebuilding tables, drop any temporary tables with `DROP TABLE IF EXISTS` before creation so reruns succeed.
+
+## Versioning & Recovery
+- Applied migrations are recorded in `schema_migrations`.
+- On startup the application compares this table with migrations on disk and applies any new versions.
+- If a crash occurs during a migration, SQLite rolls back the transaction and the next launch re-runs the migration.
+- To force a rebuild from scratch, remove the database file; the app will recreate it and reapply all migrations.

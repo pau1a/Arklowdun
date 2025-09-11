@@ -1,5 +1,4 @@
 -- id: 202509021100_add_file_paths
--- checksum: 90ac40bec31fc8ce6355a7bfa99379c9d150605231cb984039bed269c8cd0445
 
 BEGIN;
 

@@ -1,7 +1,8 @@
-use sqlx::{Executor, SqlitePool, Row, Column, ValueRef, TypeInfo};
-use sqlx::sqlite::SqliteRow;
 use serde_json::{Map, Value};
+use sqlx::sqlite::SqliteRow;
+use sqlx::{Column, Executor, Row, SqlitePool, TypeInfo, ValueRef};
 
+use crate::db::with_transaction;
 use crate::time::now_ms;
 
 pub(crate) const DOMAIN_TABLES: &[&str] = &[
@@ -183,35 +184,45 @@ pub async fn set_deleted_at(
     id: &str,
 ) -> anyhow::Result<()> {
     ensure_table(table)?;
-    let household_id = require_household(household_id)?;
+    let hh = require_household(household_id)?;
+    let tbl = table.to_string();
+    let id = id.to_string();
     let now = now_ms();
-    let res = if table == "household" {
-        let sql = format!("UPDATE {table} SET deleted_at = ?, updated_at = ? WHERE id = ?");
-        sqlx::query(&sql)
-            .bind(now)
-            .bind(now)
-            .bind(id)
-            .execute(pool)
-            .await?
-    } else {
-        let sql = format!(
-            "UPDATE {table} SET deleted_at = ?, updated_at = ? WHERE household_id = ? AND id = ?",
-        );
-        sqlx::query(&sql)
-            .bind(now)
-            .bind(now)
-            .bind(household_id)
-            .bind(id)
-            .execute(pool)
-            .await?
-    };
-    if res.rows_affected() == 0 {
-        anyhow::bail!("id not found");
-    }
-    if table != "household" && ORDERED_TABLES.contains(&table) {
-        renumber_positions(pool, table, household_id).await?;
-    }
-    Ok(())
+    with_transaction(pool, move |tx| {
+        let hh = hh.to_string();
+        let tbl = tbl.clone();
+        let id = id.clone();
+        Box::pin(async move {
+            let res = if tbl == "household" {
+                let sql = format!("UPDATE {tbl} SET deleted_at = ?, updated_at = ? WHERE id = ?");
+                sqlx::query(&sql)
+                    .bind(now)
+                    .bind(now)
+                    .bind(&id)
+                    .execute(&mut *tx)
+                    .await?
+            } else {
+                let sql = format!(
+                    "UPDATE {tbl} SET deleted_at = ?, updated_at = ? WHERE household_id = ? AND id = ?",
+                );
+                sqlx::query(&sql)
+                    .bind(now)
+                    .bind(now)
+                    .bind(&hh)
+                    .bind(&id)
+                    .execute(&mut *tx)
+                    .await?
+            };
+            if res.rows_affected() == 0 {
+                anyhow::bail!("id not found");
+            }
+            if tbl != "household" && ORDERED_TABLES.contains(&tbl.as_str()) {
+                renumber_positions(&mut *tx, &tbl, &hh).await?;
+            }
+            Ok(())
+        })
+    })
+    .await
 }
 
 pub async fn clear_deleted_at(
@@ -221,29 +232,43 @@ pub async fn clear_deleted_at(
     id: &str,
 ) -> anyhow::Result<()> {
     ensure_table(table)?;
-    let household_id = require_household(household_id)?;
+    let hh = require_household(household_id)?;
+    let tbl = table.to_string();
+    let id = id.to_string();
     let now = now_ms();
-    let res = if table == "household" {
-        let sql = format!("UPDATE {table} SET deleted_at = NULL, updated_at = ? WHERE id = ?");
-        sqlx::query(&sql).bind(now).bind(id).execute(pool).await?
-    } else {
-        let sql = format!(
-            "UPDATE {table} SET deleted_at = NULL, position = position + 1000000, updated_at = ? WHERE household_id = ? AND id = ?",
-        );
-        sqlx::query(&sql)
-            .bind(now)
-            .bind(household_id)
-            .bind(id)
-            .execute(pool)
-            .await?
-    };
-    if res.rows_affected() == 0 {
-        anyhow::bail!("id not found");
-    }
-    if table != "household" && ORDERED_TABLES.contains(&table) {
-        renumber_positions(pool, table, household_id).await?;
-    }
-    Ok(())
+    with_transaction(pool, move |tx| {
+        let hh = hh.to_string();
+        let tbl = tbl.clone();
+        let id = id.clone();
+        Box::pin(async move {
+            let res = if tbl == "household" {
+                let sql = format!("UPDATE {tbl} SET deleted_at = NULL, updated_at = ? WHERE id = ?");
+                sqlx::query(&sql)
+                    .bind(now)
+                    .bind(&id)
+                    .execute(&mut *tx)
+                    .await?
+            } else {
+                let sql = format!(
+                    "UPDATE {tbl} SET deleted_at = NULL, position = position + 1000000, updated_at = ? WHERE household_id = ? AND id = ?",
+                );
+                sqlx::query(&sql)
+                    .bind(now)
+                    .bind(&hh)
+                    .bind(&id)
+                    .execute(&mut *tx)
+                    .await?
+            };
+            if res.rows_affected() == 0 {
+                anyhow::bail!("id not found");
+            }
+            if tbl != "household" && ORDERED_TABLES.contains(&tbl.as_str()) {
+                renumber_positions(&mut *tx, &tbl, &hh).await?;
+            }
+            Ok(())
+        })
+    })
+    .await
 }
 
 pub async fn renumber_positions<'a, E>(
@@ -283,39 +308,48 @@ pub(crate) async fn reorder_positions(
     updates: &[(String, i64)],
 ) -> anyhow::Result<()> {
     ensure_table(table)?;
-    let household_id = require_household(household_id)?;
-    let mut tx = pool.begin().await?;
-    let now = now_ms();
+    let hh = require_household(household_id)?;
+    let tbl = table.to_string();
+    let updates = updates.to_vec();
+    with_transaction(pool, move |tx| {
+        let hh = hh.to_string();
+        let tbl = tbl.clone();
+        Box::pin(async move {
+            let now = now_ms();
+            let bump_sql = format!(
+                "UPDATE {tbl} \
+                 SET position = position + 1000000, updated_at = ? \
+                 WHERE household_id = ? AND deleted_at IS NULL",
+            );
+            sqlx::query(&bump_sql)
+                .bind(now)
+                .bind(&hh)
+                .execute(&mut *tx)
+                .await?;
 
-    let bump_sql = format!(
-        "UPDATE {table} \
-         SET position = position + 1000000, updated_at = ? \
-         WHERE household_id = ? AND deleted_at IS NULL",
-    );
-    sqlx::query(&bump_sql)
-        .bind(now)
-        .bind(household_id)
-        .execute(&mut *tx)
-        .await?;
+            let update_sql = format!(
+                "UPDATE {tbl} \
+                 SET position = ?, updated_at = ? \
+                 WHERE id = ? AND household_id = ?",
+            );
+            for (id, pos) in &updates {
+                let res = sqlx::query(&update_sql)
+                    .bind(pos)
+                    .bind(now)
+                    .bind(id)
+                    .bind(&hh)
+                    .execute(&mut *tx)
+                    .await?;
+                if res.rows_affected() == 0 {
+                    anyhow::bail!("id not found");
+                }
+            }
 
-    let update_sql = format!(
-        "UPDATE {table} \
-         SET position = ?, updated_at = ? \
-         WHERE id = ? AND household_id = ?",
-    );
-    for (id, pos) in updates {
-        sqlx::query(&update_sql)
-            .bind(pos)
-            .bind(now)
-            .bind(id)
-            .bind(household_id)
-            .execute(&mut *tx)
-            .await?;
-    }
-
-    renumber_positions(&mut *tx, table, household_id).await?;
-    tx.commit().await?;
-    Ok(())
+            renumber_positions(&mut *tx, &tbl, &hh).await?;
+            Ok(())
+        })
+    })
+    .await
 }
 
 // Kept for the future SQLite-backed Notes path; UI is file-based today.
@@ -370,8 +404,7 @@ pub mod admin {
         let order = order_by
             .filter(|ob| ALLOWED_ORDERS.contains(ob))
             .unwrap_or(default_order);
-        let mut sql =
-            format!("SELECT * FROM {table} WHERE deleted_at IS NULL ORDER BY {order}");
+        let mut sql = format!("SELECT * FROM {table} WHERE deleted_at IS NULL ORDER BY {order}");
         if limit.is_some() {
             sql.push_str(" LIMIT ?");
         }
@@ -394,8 +427,7 @@ pub mod admin {
         table: &str,
         order_by: Option<&str>,
     ) -> anyhow::Result<Option<SqliteRow>> {
-        let mut rows =
-            list_active_for_all_households(pool, table, order_by, Some(1), None).await?;
+        let mut rows = list_active_for_all_households(pool, table, order_by, Some(1), None).await?;
         Ok(rows.pop())
     }
 }
@@ -428,21 +460,31 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        let rows_a = list_active(&pool, "events", "A", None, None, None).await.unwrap();
+        let rows_a = list_active(&pool, "events", "A", None, None, None)
+            .await
+            .unwrap();
         assert_eq!(rows_a.len(), 1);
         let id_a: String = rows_a[0].try_get("id").unwrap();
         assert_eq!(id_a, "a");
 
-        let first_a = first_active(&pool, "events", "A", None).await.unwrap().unwrap();
+        let first_a = first_active(&pool, "events", "A", None)
+            .await
+            .unwrap()
+            .unwrap();
         let first_id_a: String = first_a.try_get("id").unwrap();
         assert_eq!(first_id_a, "a");
 
-        let rows_b = list_active(&pool, "events", "B", None, None, None).await.unwrap();
+        let rows_b = list_active(&pool, "events", "B", None, None, None)
+            .await
+            .unwrap();
         assert_eq!(rows_b.len(), 1);
         let id_b: String = rows_b[0].try_get("id").unwrap();
         assert_eq!(id_b, "b");
 
-        let first_b = first_active(&pool, "events", "B", None).await.unwrap().unwrap();
+        let first_b = first_active(&pool, "events", "B", None)
+            .await
+            .unwrap()
+            .unwrap();
         let first_id_b: String = first_b.try_get("id").unwrap();
         assert_eq!(first_id_b, "b");
     }
@@ -450,11 +492,15 @@ mod tests {
     #[tokio::test]
     async fn smoke_with_valid_household() {
         let pool = setup_db().await;
-        sqlx::query("INSERT INTO events (id, household_id, created_at, updated_at) VALUES ('a', 'A', 0, 0)")
-            .execute(&pool)
+        sqlx::query(
+            "INSERT INTO events (id, household_id, created_at, updated_at) VALUES ('a', 'A', 0, 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let rows = list_active(&pool, "events", "A", None, None, None)
             .await
             .unwrap();
-        let rows = list_active(&pool, "events", "A", None, None, None).await.unwrap();
         assert_eq!(rows.len(), 1);
     }
 
@@ -476,7 +522,16 @@ mod tests {
         reorder_positions(&pool, "bills", "A", &[("a".into(), 1), ("b".into(), 0)])
             .await
             .unwrap();
-        let rows = list_active(&pool, "bills", "A", Some("position, created_at, id"), None, None).await.unwrap();
+        let rows = list_active(
+            &pool,
+            "bills",
+            "A",
+            Some("position, created_at, id"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         let first_id: String = rows[0].try_get("id").unwrap();
         let first_pos: i64 = rows[0].try_get("position").unwrap();
         assert_eq!(first_id, "b");
@@ -485,6 +540,37 @@ mod tests {
         let second_pos: i64 = rows[1].try_get("position").unwrap();
         assert_eq!(second_id, "a");
         assert_eq!(second_pos, 1);
+    }
+
+    #[tokio::test]
+    async fn reorder_positions_rolls_back_on_error() {
+        let pool = setup_ordered_db().await;
+        sqlx::query("INSERT INTO bills (id, household_id, position, created_at, updated_at) VALUES ('a','A',0,0,0), ('b','A',1,0,0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let res = reorder_positions(&pool, "bills", "A", &[("a".into(), 1), ("c".into(), 0)]).await;
+        assert!(res.is_err());
+        let rows = list_active(
+            &pool,
+            "bills",
+            "A",
+            Some("position, created_at, id"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let first: (String, i64) = (
+            rows[0].try_get("id").unwrap(),
+            rows[0].try_get("position").unwrap(),
+        );
+        let second: (String, i64) = (
+            rows[1].try_get("id").unwrap(),
+            rows[1].try_get("position").unwrap(),
+        );
+        assert_eq!(first, ("a".into(), 0));
+        assert_eq!(second, ("b".into(), 1));
     }
 
     async fn setup_notes_db() -> SqlitePool {
@@ -507,7 +593,9 @@ mod tests {
             .unwrap();
 
         set_deleted_at(&pool, "notes", "H", "a").await.unwrap();
-        let rows = list_active(&pool, "notes", "H", None, None, None).await.unwrap();
+        let rows = list_active(&pool, "notes", "H", None, None, None)
+            .await
+            .unwrap();
         assert_eq!(rows.len(), 1);
         let id: String = rows[0].try_get("id").unwrap();
         let pos: i64 = rows[0].try_get("position").unwrap();
@@ -515,9 +603,16 @@ mod tests {
         assert_eq!(pos, 0); // renumbered
 
         clear_deleted_at(&pool, "notes", "H", "a").await.unwrap();
-        let rows = list_active(&pool, "notes", "H", Some("position, created_at, id"), None, None)
-            .await
-            .unwrap();
+        let rows = list_active(
+            &pool,
+            "notes",
+            "H",
+            Some("position, created_at, id"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(rows.len(), 2);
         let first_id: String = rows[0].try_get("id").unwrap();
         let first_pos: i64 = rows[0].try_get("position").unwrap();

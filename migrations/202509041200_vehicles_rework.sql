@@ -1,5 +1,4 @@
 -- id: 202509041200_vehicles_rework
--- checksum: 2f9396c2aab6fd5b62ca18d14f2a2d715a7b93ffdf83e95b1a5520ca206ecba8
 
 BEGIN;
 

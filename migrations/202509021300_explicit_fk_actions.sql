@@ -1,5 +1,4 @@
 -- id: 202509021300_explicit_fk_actions
--- checksum: 0c83377e5b462c21c8d57c01a20d175f650ccc3d268264048246f133b54291c0
 -- Rebuild tables to ensure every foreign key declares explicit ON DELETE and ON UPDATE actions.
 
 PRAGMA foreign_keys=OFF;

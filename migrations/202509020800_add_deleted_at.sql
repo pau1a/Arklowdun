@@ -1,5 +1,4 @@
 -- id: 202509020800_add_deleted_at
--- checksum: 6c167b38d3c702beba80db645309a08eaa956d103b51cfb518f3eb3e143d2e66
 -- Add deleted_at column to all domain tables for soft deletion
 
 BEGIN;
