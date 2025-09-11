@@ -62,7 +62,7 @@ async fn transaction_rolls_back_on_error() {
         .await
         .unwrap();
     db::with_transaction(&pool, |tx| {
-        async move {
+        Box::pin(async move {
             sqlx::query("CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)")
                 .execute(&mut *tx)
                 .await
@@ -74,7 +74,7 @@ async fn transaction_rolls_back_on_error() {
             anyhow::bail!("boom");
             #[allow(unreachable_code)]
             Ok(())
-        }
+        })
     })
     .await
     .unwrap_err();

@@ -1,6 +1,8 @@
 use anyhow::Result;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Pool, Sqlite, Transaction};
+use std::future::Future;
+use std::pin::Pin;
 use std::str::FromStr;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
@@ -123,20 +125,14 @@ async fn log_effective_pragmas(pool: &Pool<Sqlite>) {
     }
 }
 
-pub async fn with_transaction<F, Fut, T>(pool: &Pool<Sqlite>, f: F) -> Result<T>
-where
-    for<'c> F: FnOnce(&'c mut Transaction<'c, Sqlite>) -> Fut,
-    for<'c> Fut: std::future::Future<Output = Result<T>> + 'c,
-{
-    let tx0 = pool.begin().await?;
-
-    // Run the user closure on a separate binding and bring it back out.
-    let (res, mut tx) = {
-        let mut tx_in = tx0;
-        let res = f(&mut tx_in).await;
-        (res, tx_in)
-    };
-
+pub async fn with_transaction<T>(
+    pool: &Pool<Sqlite>,
+    f: impl for<'a> FnOnce(
+        &'a mut Transaction<'a, Sqlite>,
+    ) -> Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>,
+) -> Result<T> {
+    let mut tx = pool.begin().await?;
+    let res = f(&mut tx).await;
     match res {
         Ok(v) => {
             tx.commit().await?;

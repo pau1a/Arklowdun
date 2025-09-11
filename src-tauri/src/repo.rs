@@ -190,10 +190,10 @@ pub async fn set_deleted_at(
     let id = id.to_string();
     let now = now_ms();
     with_transaction(pool, move |tx| {
-        let hh = hh.to_string();
-        let tbl = tbl.clone();
-        let id = id.clone();
-        async move {
+        Box::pin(async move {
+            let hh = hh.to_string();
+            let tbl = tbl.clone();
+            let id = id.clone();
             let res = if tbl == "household" {
                 let sql = format!("UPDATE {tbl} SET deleted_at = ?, updated_at = ? WHERE id = ?");
                 sqlx::query(&sql)
@@ -204,8 +204,8 @@ pub async fn set_deleted_at(
                     .await?
             } else {
                 let sql = format!(
-                    "UPDATE {tbl} SET deleted_at = ?, updated_at = ? WHERE household_id = ? AND id = ?",
-                );
+                "UPDATE {tbl} SET deleted_at = ?, updated_at = ? WHERE household_id = ? AND id = ?",
+            );
                 sqlx::query(&sql)
                     .bind(now)
                     .bind(now)
@@ -221,7 +221,7 @@ pub async fn set_deleted_at(
                 renumber_positions(&mut *tx, &tbl, &hh).await?;
             }
             Ok(())
-        }
+        })
     })
     .await
 }
@@ -237,38 +237,36 @@ pub async fn clear_deleted_at(
     let tbl = table.to_string();
     let id = id.to_string();
     let now = now_ms();
-    with_transaction(pool, move |tx| {
+    with_transaction(pool, move |tx| Box::pin(async move {
         let hh = hh.to_string();
         let tbl = tbl.clone();
         let id = id.clone();
-        async move {
-            let res = if tbl == "household" {
-                let sql = format!("UPDATE {tbl} SET deleted_at = NULL, updated_at = ? WHERE id = ?");
-                sqlx::query(&sql)
-                    .bind(now)
-                    .bind(&id)
-                    .execute(&mut *tx)
-                    .await?
-            } else {
-                let sql = format!(
-                    "UPDATE {tbl} SET deleted_at = NULL, position = position + 1000000, updated_at = ? WHERE household_id = ? AND id = ?",
-                );
-                sqlx::query(&sql)
-                    .bind(now)
-                    .bind(&hh)
-                    .bind(&id)
-                    .execute(&mut *tx)
-                    .await?
-            };
-            if res.rows_affected() == 0 {
-                anyhow::bail!("id not found");
-            }
-            if tbl != "household" && ORDERED_TABLES.contains(&tbl.as_str()) {
-                renumber_positions(&mut *tx, &tbl, &hh).await?;
-            }
-            Ok(())
+        let res = if tbl == "household" {
+            let sql = format!("UPDATE {tbl} SET deleted_at = NULL, updated_at = ? WHERE id = ?");
+            sqlx::query(&sql)
+                .bind(now)
+                .bind(&id)
+                .execute(&mut *tx)
+                .await?
+        } else {
+            let sql = format!(
+                "UPDATE {tbl} SET deleted_at = NULL, position = position + 1000000, updated_at = ? WHERE household_id = ? AND id = ?",
+            );
+            sqlx::query(&sql)
+                .bind(now)
+                .bind(&hh)
+                .bind(&id)
+                .execute(&mut *tx)
+                .await?
+        };
+        if res.rows_affected() == 0 {
+            anyhow::bail!("id not found");
         }
-    })
+        if tbl != "household" && ORDERED_TABLES.contains(&tbl.as_str()) {
+            renumber_positions(&mut *tx, &tbl, &hh).await?;
+        }
+        Ok(())
+    }))
     .await
 }
 
@@ -309,41 +307,38 @@ pub(crate) async fn reorder_positions(
     let hh = require_household(household_id)?;
     let tbl = table.to_string();
     let updates = updates.to_vec();
-    with_transaction(pool, move |tx| {
+    with_transaction(pool, move |tx| Box::pin(async move {
         let hh = hh.to_string();
         let tbl = tbl.clone();
-        async move {
-            let now = now_ms();
-            let bump_sql = format!(
-                "UPDATE {tbl} SET position = position + 1000000, updated_at = ? WHERE household_id = ? AND deleted_at IS NULL",
-            );
-            sqlx::query(&bump_sql)
+        let now = now_ms();
+        let bump_sql = format!(
+            "UPDATE {tbl} SET position = position + 1000000, updated_at = ? WHERE household_id = ? AND deleted_at IS NULL",
+        );
+        sqlx::query(&bump_sql)
+            .bind(now)
+            .bind(&hh)
+            .execute(&mut *tx)
+            .await?;
+
+        let update_sql = format!(
+            "UPDATE {tbl} SET position = ?, updated_at = ? WHERE id = ? AND household_id = ?",
+        );
+        for (id, pos) in &updates {
+            let res = sqlx::query(&update_sql)
+                .bind(pos)
                 .bind(now)
+                .bind(id)
                 .bind(&hh)
                 .execute(&mut *tx)
                 .await?;
-
-            let update_sql = format!(
-                "UPDATE {tbl} SET position = ?, updated_at = ? WHERE id = ? AND household_id = ?",
-            );
-            for (id, pos) in &updates {
-                let res = sqlx::query(&update_sql)
-                    .bind(pos)
-                    .bind(now)
-                    .bind(id)
-                    .bind(&hh)
-                    .execute(&mut *tx)
-                    .await?;
-                if res.rows_affected() == 0 {
-                    anyhow::bail!("id not found");
-                }
+            if res.rows_affected() == 0 {
+                anyhow::bail!("id not found");
             }
-
-            renumber_positions(&mut *tx, &tbl, &hh).await?;
-            Ok(())
         }
-    })
 
+        renumber_positions(&mut *tx, &tbl, &hh).await?;
+        Ok(())
+    }))
     .await
 }
 
