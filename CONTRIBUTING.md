@@ -20,10 +20,11 @@ Thank you for helping improve this project.
   #   migrations/00XX_add_widgets_table.down.sql
   ```
 
-- Before opening a PR, ensure migrations are valid:
+- Before opening a PR, ensure migrations are valid and idempotent:
 
   ```sh
   ./scripts/check_migrations.sh
+  npm run migrations:idempotency
   ```
 
 Edit the generated files, run the check script, then commit both `up` and `down` files.
