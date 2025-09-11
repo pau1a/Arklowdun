@@ -90,6 +90,7 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-opener",
  "tauri-plugin-sql",
+ "tempfile",
  "time",
  "tokio",
  "tracing",

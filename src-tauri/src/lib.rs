@@ -17,7 +17,7 @@ mod events_tz_backfill;
 mod household; // declare module; avoid `use` to prevent name collision
 mod id;
 mod importer;
-mod migrate;
+pub mod migrate;
 mod repo;
 mod state;
 mod time;
