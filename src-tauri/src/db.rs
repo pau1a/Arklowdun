@@ -2,8 +2,9 @@ use anyhow::Result;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Pool, Sqlite, Transaction};
 use std::str::FromStr;
-use tauri::{api::shell, AppHandle, Manager};
+use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+use tauri_plugin_opener::OpenerExt;
 
 pub async fn open_sqlite_pool(app: &AppHandle) -> Result<Pool<Sqlite>> {
     let app_dir = app
@@ -66,12 +67,13 @@ pub async fn open_sqlite_pool(app: &AppHandle) -> Result<Pool<Sqlite>> {
                 .dialog()
                 .message("Database integrity check failed. Restore from the latest backup.")
                 .buttons(MessageDialogButtons::OkCancelCustom(
-                    "Open Backup Folder",
-                    "Quit",
+                    "Open Backup Folder".to_string(),
+                    "Quit".to_string(),
                 ))
                 .blocking_show();
             if open_backup {
-                let _ = shell::open(&app.shell_scope(), &app_dir, None);
+                // Open the app's data directory (where backups live) with the default file manager.
+                let _ = app.opener().open_path(&app_dir, None);
             }
             std::process::exit(1);
         }
