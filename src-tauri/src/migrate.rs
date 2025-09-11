@@ -1,10 +1,10 @@
 use anyhow::bail;
-use sqlx::{Executor, Row, SqlitePool};
-use std::collections::HashSet;
-use std::time::Instant;
 use include_dir::{include_dir, Dir};
 use once_cell::sync::Lazy;
 use regex::Regex;
+use sqlx::{Executor, Row, SqlitePool};
+use std::collections::HashSet;
+use std::time::Instant;
 
 use crate::time::now_ms;
 use tracing::{error, info};
@@ -116,21 +116,22 @@ fn split_statements(sql: &str) -> Vec<String> {
     statements
 }
 
-async fn column_exists<'e, E>(exec: &mut E, table: &str, col: &str) -> anyhow::Result<bool>
+async fn column_exists<'e, E>(exec: E, table: &str, col: &str) -> anyhow::Result<bool>
 where
     E: Executor<'e, Database = sqlx::Sqlite>,
 {
-    let q = format!("SELECT 1 FROM pragma_table_info('{}') WHERE name = ?", table.replace('\'', "''"));
-    Ok(
-        sqlx::query_scalar::<_, i64>(&q)
-            .bind(col)
-            .fetch_optional(&mut *exec)
-            .await?
-            .is_some(),
-    )
+    let q = format!(
+        "SELECT 1 FROM pragma_table_info('{}') WHERE name = ?",
+        table.replace('\'', "''")
+    );
+    Ok(sqlx::query_scalar::<_, i64>(&q)
+        .bind(col)
+        .fetch_optional(exec)
+        .await?
+        .is_some())
 }
 
-async fn should_skip_stmt<'e, E>(exec: &mut E, stmt: &str) -> anyhow::Result<bool>
+async fn should_skip_stmt<'e, E>(exec: E, stmt: &str) -> anyhow::Result<bool>
 where
     E: Executor<'e, Database = sqlx::Sqlite>,
 {
@@ -140,20 +141,17 @@ where
     if let Some(c) = ADD_RE.captures(stmt) {
         let table = c.get(1).unwrap().as_str().trim_matches('"');
         let col = c.get(2).unwrap().as_str().trim_matches('"');
-        if column_exists(exec, table, col).await? {
-            return Ok(true);
-        }
+        return Ok(column_exists(exec, table, col).await?);
     }
 
     static RENAME_RE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"(?i)^\s*ALTER\s+TABLE\s+([^\s]+)\s+RENAME\s+COLUMN\s+([^\s]+)\s+TO\s+([^\s]+)").unwrap()
+        Regex::new(r"(?i)^\s*ALTER\s+TABLE\s+([^\s]+)\s+RENAME\s+COLUMN\s+([^\s]+)\s+TO\s+([^\s]+)")
+            .unwrap()
     });
     if let Some(c) = RENAME_RE.captures(stmt) {
         let table = c.get(1).unwrap().as_str().trim_matches('"');
         let from = c.get(2).unwrap().as_str().trim_matches('"');
-        if !column_exists(exec, table, from).await? {
-            return Ok(true);
-        }
+        return Ok(!column_exists(exec, table, from).await?);
     }
 
     Ok(false)
@@ -197,7 +195,7 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
         let start = Instant::now();
         info!(target = "arklowdun", event = "migration_begin", file = %filename);
         for stmt in split_statements(&cleaned) {
-            if should_skip_stmt(&mut *tx, &stmt).await? {
+            if should_skip_stmt(&mut tx, &stmt).await? {
                 info!(target = "arklowdun", event = "migration_stmt_skip", sql = %preview(&stmt));
                 continue;
             }
@@ -256,9 +254,11 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
 
 pub async fn revert_last_migration(pool: &SqlitePool) -> anyhow::Result<()> {
     pool.execute("PRAGMA foreign_keys=ON").await?;
-    if let Some(row) = sqlx::query("SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1")
-        .fetch_optional(pool)
-        .await? {
+    if let Some(row) =
+        sqlx::query("SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1")
+            .fetch_optional(pool)
+            .await?
+    {
         let version: String = row.try_get("version")?;
         let migrations = load_migrations()?;
         let (_, _, down_sql) = migrations
@@ -278,7 +278,7 @@ pub async fn revert_last_migration(pool: &SqlitePool) -> anyhow::Result<()> {
         let start = Instant::now();
         info!(target = "arklowdun", event = "migration_begin", file = %version);
         for stmt in split_statements(&cleaned) {
-            if should_skip_stmt(&mut *tx, &stmt).await? {
+            if should_skip_stmt(&mut tx, &stmt).await? {
                 info!(target = "arklowdun", event = "migration_stmt_skip", sql = %preview(&stmt));
                 continue;
             }
