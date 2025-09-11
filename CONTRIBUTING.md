@@ -27,3 +27,4 @@ Thank you for helping improve this project.
   ```
 
 Edit the generated files, run the check script, then commit both `up` and `down` files.
+Refer to [docs/migration-guidelines.md](docs/migration-guidelines.md) for rollback patterns, commenting standards, and testing expectations.
