@@ -35,6 +35,7 @@ Recommended IDE: VS Code with Tauri and rust-analyzer extensions.
 ## Database integrity
 
 Schema constraint guidelines live in [docs/integrity-rules.md](docs/integrity-rules.md).
+See [docs/migration-guidelines.md](docs/migration-guidelines.md) for detailed safety and testing practices.
 
 ## Documentation
 
