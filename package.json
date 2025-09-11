@@ -27,7 +27,9 @@
     "check:sqlx-macros": "bash scripts/guards/no-sqlx-macros.sh",
     "check-all": "npm run check:plugin-fs && npm run check:sqlx-macros",
     "migrate:new": "scripts/new_migration.sh",
-    "migrations:check": "scripts/check_migrations.sh"
+    "migrations:check": "scripts/check_migrations.sh",
+    "migrations:idempotency": "scripts/test_idempotency.sh",
+    "migrations:idempotency:keep": "scripts/test_idempotency.sh --keep"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^6.7.2",
