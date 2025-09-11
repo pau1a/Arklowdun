@@ -17,6 +17,8 @@ See the [Arklowdun Master Plan](docs/master-plan.md) for the high-level strategi
 - `npm run dev` — run Vite dev server (Tauri will attach).
 - `npm run tauri` — run Tauri CLI (build/dev/bundle).
 - `npm run check-all` — run local guard checks.
+- `scripts/check_migrations.sh` — verify numbering/pairing (prints OK or first error)
+- `scripts/renumber_migrations.sh -n|--apply` — dry-run/apply contiguous renumbering
 
 Recommended IDE: VS Code with Tauri and rust-analyzer extensions.
 
@@ -33,8 +35,6 @@ Recommended IDE: VS Code with Tauri and rust-analyzer extensions.
 ## Database integrity
 
 Schema constraint guidelines live in [docs/integrity-rules.md](docs/integrity-rules.md).
-The first migration to apply them will be
-`migrations/202509021200_add_integrity_constraints.sql`.
 
 ## Documentation
 

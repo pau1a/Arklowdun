@@ -1,9 +1,11 @@
 # Migration Template
 
-Each migration consists of a pair of files:
+## Numbering
 
-- `YYYYMMDDhhmm_label.up.sql`
-- `YYYYMMDDhhmm_label.down.sql`
+Migrations use a zero-padded counter shared by each pair:
+
+- `NNNN_label.up.sql`
+- `NNNN_label.down.sql`
 
 Files should contain only the statements required for the migration. The runner
 automatically wraps execution in a transaction and enables foreign keys, so do
