@@ -1,7 +1,6 @@
 -- id: 202509021100_add_file_paths
 -- checksum: 90ac40bec31fc8ce6355a7bfa99379c9d150605231cb984039bed269c8cd0445
 
-BEGIN;
 
 -- 1) Add nullable columns
 ALTER TABLE bills               ADD COLUMN root_key TEXT;
@@ -79,4 +78,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS pet_medical_household_file_idx
   ON pet_medical(household_id, root_key, relative_path)
   WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
 
-COMMIT;

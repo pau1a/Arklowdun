@@ -1,7 +1,6 @@
 -- id: 202509021400_soft_delete_notes_shopping
 -- checksum: 4992776ddfbe2526b45bf413af02d31cc4f457af8f5ad33f95a7c60aaa9d9f39
 
-BEGIN;
 
 -- Ensure tables exist with the full, current schema.
 CREATE TABLE IF NOT EXISTS notes (
@@ -44,4 +43,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS shopping_household_position_idx
   ON shopping_items(household_id, position)
   WHERE deleted_at IS NULL;
 
-COMMIT;

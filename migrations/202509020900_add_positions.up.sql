@@ -1,7 +1,6 @@
 -- id: 202509020900_add_positions
 -- checksum: a619c37adf7207c53c6a5f17bcb0334ee405708caa7b6892d301427cd3296836
 
-BEGIN;
 
 -- 1) Add columns (no index yet)
 ALTER TABLE bills              ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
@@ -119,4 +118,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS family_members_household_position_idx
 CREATE UNIQUE INDEX IF NOT EXISTS budget_categories_household_position_idx
   ON budget_categories(household_id, position) WHERE deleted_at IS NULL;
 
-COMMIT;

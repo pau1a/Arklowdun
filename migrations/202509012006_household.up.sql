@@ -1,7 +1,6 @@
 -- id: 202509012006_household
 -- checksum: f3ffbea1851b41d44abb4a364f099ed1d1eb57c786c6aadda95f5cd5e75a2eb4
 
-BEGIN;
 
 CREATE TABLE IF NOT EXISTS household (
   id TEXT PRIMARY KEY,
@@ -24,4 +23,3 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS events_household_updated_idx
   ON events(household_id, updated_at);
 
-COMMIT;

@@ -2,7 +2,6 @@
 -- checksum: 6c167b38d3c702beba80db645309a08eaa956d103b51cfb518f3eb3e143d2e66
 -- Add deleted_at column to all domain tables for soft deletion
 
-BEGIN;
 ALTER TABLE household ADD COLUMN deleted_at INTEGER NULL;
 ALTER TABLE events ADD COLUMN deleted_at INTEGER NULL;
 ALTER TABLE bills ADD COLUMN deleted_at INTEGER NULL;
@@ -18,4 +17,3 @@ ALTER TABLE budget_categories ADD COLUMN deleted_at INTEGER NULL;
 ALTER TABLE expenses ADD COLUMN deleted_at INTEGER NULL;
 CREATE INDEX IF NOT EXISTS idx_events_household_active
   ON events(household_id, updated_at) WHERE deleted_at IS NULL;
-COMMIT;
