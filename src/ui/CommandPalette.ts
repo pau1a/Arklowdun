@@ -1,6 +1,7 @@
 import { search } from "../services/searchRepo";
 import type { SearchResult } from "../bindings/SearchResult";
 import { showError } from "./errors";
+import { highlight } from "../utils/highlight";
 
 interface PaletteItem {
   kind: string;
@@ -156,7 +157,7 @@ export function initCommandPalette() {
         return;
       }
       const items = results.map(mapResult);
-      render(items);
+      render(items, q);
       announce(`${results.length} results for ${q}`);
     } catch (err) {
       if (my !== reqId) return;
@@ -173,14 +174,16 @@ export function initCommandPalette() {
     list.innerHTML = `<li role="presentation" class="cmd-${kind}">${msg}</li>`;
   }
 
-  function render(items: PaletteItem[]) {
+  function render(items: PaletteItem[], q: string) {
     list.innerHTML = "";
     items.forEach((item, i) => {
       const li = document.createElement("li");
       li.setAttribute("role", "option");
       li.setAttribute("tabindex", "-1");
       li.setAttribute("aria-selected", "false");
-      li.innerHTML = `<i class="${item.icon}"></i><span>${item.title}</span>${item.subtitle ? `<span>${item.subtitle}</span>` : ""}`;
+      const title = highlight(item.title, q);
+      const subtitle = highlight(item.subtitle ?? "", q);
+      li.innerHTML = `<i class="${item.icon}"></i><span>${title}</span>${item.subtitle ? `<span>${subtitle}</span>` : ""}`;
       li.addEventListener("click", () => {
         item.action();
         close();

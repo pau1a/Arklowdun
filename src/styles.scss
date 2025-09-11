@@ -1067,6 +1067,19 @@ footer a.footer__settings {
 .command-palette__results li.cmd-error {
   color: var(--color-danger);
 }
+mark.search-hit {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  padding: 0 2px;
+  border-radius: var(--radius-sm);
+}
+
+@media (prefers-contrast: more) {
+  mark.search-hit {
+    outline: 2px solid currentColor;
+    text-shadow: 0 0 0 currentColor;
+  }
+}
 
 
 /* ========================================================================== */
