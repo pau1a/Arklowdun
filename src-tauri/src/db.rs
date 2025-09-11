@@ -132,8 +132,11 @@ pub async fn with_transaction<T>(
     ) -> Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>,
 ) -> Result<T> {
     let mut tx = pool.begin().await?;
-    let res = f(&mut tx).await;
-    match res {
+    let result = {
+        let fut = f(&mut tx);
+        fut.await
+    };
+    match result {
         Ok(v) => {
             tx.commit().await?;
             Ok(v)
