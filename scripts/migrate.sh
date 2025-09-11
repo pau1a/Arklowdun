@@ -14,7 +14,7 @@ integrity_check(){ sqlite3 "$DB" 'PRAGMA integrity_check;' | grep -qx ok; }
 
 ensure_pairs() {
   local missing=0
-  for f in "$MIG_DIR"/*.up.sql; do
+  for f in "$MIG_DIR"/[0-9]*.up.sql; do
     local base="$(basename "$f" .up.sql)"
     if [[ ! -f "$MIG_DIR/${base}.down.sql" ]]; then
       echo "missing down migration for $base" >&2
@@ -37,7 +37,7 @@ SQL
 
 migrate_up_all() {
   ensure_pairs || return 1
-  mapfile -t ups < <(printf '%s\n' "$MIG_DIR"/*.up.sql | sort)
+  mapfile -t ups < <(printf '%s\n' "$MIG_DIR"/[0-9]*.up.sql | sort)
   for f in "${ups[@]}"; do
     run_file "$f"
   done
@@ -51,7 +51,7 @@ migrate_down_one() {
 }
 
 migrate_down_all() {
-  mapfile -t downs < <(printf '%s\n' "$MIG_DIR"/*.down.sql | sort -r)
+  mapfile -t downs < <(printf '%s\n' "$MIG_DIR"/[0-9]*.down.sql | sort -r)
   for f in "${downs[@]}"; do
     run_file "$f"
   done

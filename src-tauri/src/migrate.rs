@@ -30,6 +30,9 @@ fn load_migrations() -> anyhow::Result<Vec<(String, String, String)>> {
         if !name.ends_with(".up.sql") {
             continue;
         }
+        if name.starts_with('_') {
+            continue;
+        }
         let stem = name.trim_end_matches(".up.sql");
         let down_name = format!("{}.down.sql", stem);
         let down_file = MIGRATIONS_DIR
@@ -49,6 +52,7 @@ fn load_migrations() -> anyhow::Result<Vec<(String, String, String)>> {
     Ok(entries)
 }
 
+#[allow(unused_assignments)]
 fn split_statements(sql: &str) -> Vec<String> {
     let mut statements = Vec::new();
     let mut current = String::new();
@@ -343,6 +347,7 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn revert_last_migration(pool: &SqlitePool) -> anyhow::Result<()> {
     pool.execute("PRAGMA foreign_keys=ON").await?;
     if let Some(row) =
