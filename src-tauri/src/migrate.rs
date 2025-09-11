@@ -261,5 +261,13 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
+    if let Err(e) = sqlx::query("PRAGMA optimize").execute(pool).await {
+        error!(
+            target = "arklowdun",
+            event = "migration_optimize_failed",
+            error = %e
+        );
+    }
+
     Ok(())
 }

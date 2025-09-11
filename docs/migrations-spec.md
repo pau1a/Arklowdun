@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 - `checksum` is a SHA-256 digest of the normalized SQL actually executed.
 
 ## Checksums
-- When applying a migration the application normalizes the SQL (drops comments and blank lines) and computes its SHA-256 checksum.
+- When applying a migration the application normalizes the SQL (drops `--` line comments and blank lines) and computes its SHA-256 checksum.
 - If an entry already exists in `schema_migrations` with a different checksum, migration stops with an error.
 - New migrations insert their checksum alongside the version in the same transaction.
 
