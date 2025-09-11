@@ -153,6 +153,23 @@ async fn should_skip_stmt(conn: &mut SqliteConnection, stmt: &str) -> anyhow::Re
         return Ok(!column_exists(conn, table, from).await?);
     }
 
+    static CREATE_INDEX_RE: Lazy<Regex> = Lazy::new(|| {
+        Regex::new(r"(?i)^\s*CREATE\s+(?:UNIQUE\s+)?INDEX(?:\s+IF\s+NOT\s+EXISTS)?\s+[^\s]+\s+ON\s+([^\s(]+)")
+            .unwrap()
+    });
+    if let Some(c) = CREATE_INDEX_RE.captures(stmt) {
+        let table = c.get(1).unwrap().as_str().trim_matches('"');
+        let exists: Option<i64> = sqlx::query_scalar(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        )
+        .bind(table)
+        .fetch_optional(&mut *conn)
+        .await?;
+        if exists.is_none() {
+            return Ok(true);
+        }
+    }
+
     Ok(false)
 }
 
