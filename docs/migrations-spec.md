@@ -1,41 +1,31 @@
 # Migrations Specification
 
-This document outlines conventions for SQL migrations used by the project.
+This project uses paired SQL migration files to evolve the schema.
 
 ## Naming
 - Migrations live in the `migrations/` directory.
-- File names use the form `YYYYMMDDhhmm_label.sql`.
-  - `YYYYMMDDhhmm` is the UTC timestamp when the migration was created.
-  - `label` is a short, snake_case description.
-- Apply migrations in lexicographic order. The timestamp ensures correct ordering.
-- Once committed, migration files are **immutable**. Create a new migration to change prior work.
+- Each migration consists of two files:
+  - `NNNN_label.up.sql`
+  - `NNNN_label.down.sql`
+- `NNNN` is a zero-padded, gapless 4-digit number incremented for each migration.
+- `label` is a short, snake_case description.
 
-## Tracking Table
-The application maintains a table to track applied migrations:
+## Content
+- Do **not** include `BEGIN`, `COMMIT`, or `PRAGMA` statements; the migration runner manages transactions and foreign-key enforcement.
+- The `.up.sql` file contains forward-only changes.
+- The `.down.sql` file contains the exact inverse and should use rebuild-table patterns when dropping columns or loosening constraints.
+- Always name indexes, triggers, and foreign keys explicitly, and specify `ON DELETE`/`ON UPDATE` actions where relevant.
 
-```sql
-CREATE TABLE IF NOT EXISTS migrations (
-  id TEXT PRIMARY KEY,
-  applied_at INTEGER NOT NULL,
-  checksum TEXT NOT NULL
-);
-```
+## Workflow
+1. Generate files from the template:
+   ```sh
+   ./scripts/new_migration.sh "add widgets table"
+   ```
+2. Edit the generated `up` and `down` files.
+3. Verify numbering and pairing:
+   ```sh
+   ./scripts/check_migrations.sh
+   ```
+4. Commit both files together.
 
-- `id` is the filename without the `.sql` suffix.
-- `applied_at` records the Unix epoch time when a migration ran.
-- `checksum` is a SHA-256 digest of the migration file after normalizing its contents.
-
-## Checksums
-- Before applying a migration, compute its SHA-256 checksum using `npm run migrate:checksum -- <file>`.
-- Normalize files before hashing:
-  - Strip any UTF-8 byte order mark (BOM).
-  - Convert CRLF sequences to `\n`.
-  - Trim trailing whitespace from each line.
-  - Ensure the file ends with a single trailing `\n`.
-  These steps keep checksums stable across editors and platforms.
-- Store the checksum in the `migrations` table. On startup, verify stored checksums against the files to detect accidental edits.
-
-## Ordering & Transactions
-- Execute migrations sequentially in ascending filename order.
-- Each migration runs inside a single transaction and must be idempotent.
-
+The runner records applied versions in `schema_migrations` and executes files in ascending filename order.

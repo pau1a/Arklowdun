@@ -10,7 +10,6 @@
     "tauri": "tauri",
     "migrate:checksum": "node --loader ts-node/esm scripts/migrate-checksum.ts",
     "migrate:batch1": "node --loader ts-node/esm src/tools/migrate-batch1.ts",
-    "check:migrations": "bash scripts/check-migrations.sh",
     "check:household": "bash scripts/check-household-scope.sh",
     "test": "node --loader ts-node/esm --test tests/*.ts tests/*.js",
     "lint:rs": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
@@ -26,7 +25,9 @@
     "cov:all": "npm run test:coverage && npm run cov:rs",
     "check:plugin-fs": "node scripts/guards/check-plugin-fs-usage.mjs",
     "check:sqlx-macros": "bash scripts/guards/no-sqlx-macros.sh",
-    "check-all": "npm run check:plugin-fs && npm run check:sqlx-macros"
+    "check-all": "npm run check:plugin-fs && npm run check:sqlx-macros",
+    "migrate:new": "scripts/new_migration.sh",
+    "migrations:check": "scripts/check_migrations.sh"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^6.7.2",
