@@ -65,7 +65,9 @@ pub async fn open_sqlite_pool(app: &AppHandle) -> Result<Pool<Sqlite>> {
             .blocking_show();
         if open_backup {
             // Open the app's data directory (where backups live) with the default file manager.
-            let _ = app.opener().open_path(&app_dir, None);
+            let _ = app
+                .opener()
+                .open_path(app_dir.display().to_string(), None);
         }
         std::process::exit(1);
     }

@@ -272,7 +272,7 @@ pub async fn clear_deleted_at(
 }
 
 pub async fn renumber_positions<'a, E>(
-    exec: E,
+    exec: &mut E,
     table: &str,
     household_id: &str,
 ) -> anyhow::Result<()>
@@ -296,7 +296,10 @@ where
         WHERE id IN (SELECT id FROM ordered)
         "#
     );
-    sqlx::query(&sql).bind(household_id).execute(exec).await?;
+    sqlx::query(&sql)
+        .bind(household_id)
+        .execute(&mut *exec)
+        .await?;
     Ok(())
 }
 
