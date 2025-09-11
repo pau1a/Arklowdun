@@ -14,7 +14,9 @@ CREATE TABLE events_new (
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER
 );
-INSERT INTO events_new SELECT id, title, datetime, reminder, household_id, created_at, updated_at, deleted_at FROM events;
+INSERT INTO events_new
+  SELECT id, title, COALESCE(start_at, datetime) AS datetime, reminder, household_id, created_at, updated_at, deleted_at
+  FROM events;
 DROP TABLE events;
 ALTER TABLE events_new RENAME TO events;
 CREATE INDEX IF NOT EXISTS events_household_updated_idx ON events(household_id, updated_at);

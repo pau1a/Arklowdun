@@ -166,6 +166,41 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .await?;
 
+    // import legacy `migrations` table if present and no records exist yet
+    if sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM schema_migrations")
+        .fetch_one(pool)
+        .await?
+        == 0
+    {
+        if sqlx::query_scalar::<_, i64>(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='migrations'",
+        )
+        .fetch_optional(pool)
+        .await?
+        .is_some()
+        {
+            let old = sqlx::query("SELECT id, applied_at FROM migrations")
+                .fetch_all(pool)
+                .await?;
+            for row in old {
+                let id: String = row.try_get("id")?;
+                let applied_at: i64 = row.try_get("applied_at")?;
+                let mapped = if id.ends_with(".sql") {
+                    id.trim_end_matches(".sql").to_string() + ".up.sql"
+                } else {
+                    id.clone() + ".up.sql"
+                };
+                sqlx::query(
+                    "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)"
+                )
+                .bind(mapped)
+                .bind(applied_at)
+                .execute(pool)
+                .await?;
+            }
+        }
+    }
+
     let rows = sqlx::query("SELECT version FROM schema_migrations")
         .fetch_all(pool)
         .await?;
