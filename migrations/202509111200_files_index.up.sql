@@ -1,7 +1,6 @@
 -- id: 202509111200_files_index
 -- checksum: 40348c9c1e9a644b3a98e2e2e30b938ca38ec5b2b1ba935632fad7b8e17261f1
 
-BEGIN;
 
 CREATE TABLE IF NOT EXISTS files_index (
   id INTEGER PRIMARY KEY,
@@ -29,4 +28,3 @@ CREATE TABLE IF NOT EXISTS files_index_meta (
   version INTEGER NOT NULL
 );
 
-COMMIT;

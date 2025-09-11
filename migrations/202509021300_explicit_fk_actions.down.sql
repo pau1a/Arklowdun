@@ -2,8 +2,6 @@
 -- checksum: 0c83377e5b462c21c8d57c01a20d175f650ccc3d268264048246f133b54291c0
 -- Rebuild tables to ensure every foreign key declares explicit ON DELETE and ON UPDATE actions.
 
-PRAGMA foreign_keys=OFF;
-BEGIN;
 
 -- events: cascade household changes to dependent events
 CREATE TABLE events_new (
@@ -11,12 +9,14 @@ CREATE TABLE events_new (
   title TEXT NOT NULL,
   datetime INTEGER NOT NULL,
   reminder INTEGER,
-  household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  household_id TEXT NOT NULL REFERENCES household(id),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER
 );
-INSERT INTO events_new SELECT id, title, datetime, reminder, household_id, created_at, updated_at, deleted_at FROM events;
+INSERT INTO events_new
+  SELECT id, title, COALESCE(start_at, datetime) AS datetime, reminder, household_id, created_at, updated_at, deleted_at
+  FROM events;
 DROP TABLE events;
 ALTER TABLE events_new RENAME TO events;
 CREATE INDEX IF NOT EXISTS events_household_updated_idx ON events(household_id, updated_at);
@@ -30,7 +30,7 @@ CREATE TABLE bills_new (
   due_date INTEGER NOT NULL,
   document TEXT,
   reminder INTEGER,
-  household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  household_id TEXT NOT NULL REFERENCES household(id),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER,
@@ -52,7 +52,7 @@ CREATE TABLE policies_new (
   due_date INTEGER NOT NULL,
   document TEXT,
   reminder INTEGER,
-  household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  household_id TEXT NOT NULL REFERENCES household(id),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER,
@@ -74,7 +74,7 @@ CREATE TABLE property_documents_new (
   renewal_date INTEGER NOT NULL,
   document TEXT,
   reminder INTEGER,
-  household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  household_id TEXT NOT NULL REFERENCES household(id),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER,
@@ -97,7 +97,7 @@ CREATE TABLE inventory_items_new (
   warranty_expiry INTEGER,
   document TEXT,
   reminder INTEGER,
-  household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  household_id TEXT NOT NULL REFERENCES household(id),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER,
@@ -120,7 +120,7 @@ CREATE TABLE vehicles_new (
   service_date INTEGER,
   mot_reminder INTEGER,
   service_reminder INTEGER,
-  household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  household_id TEXT NOT NULL REFERENCES household(id),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER,
@@ -135,12 +135,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS vehicles_household_position_idx ON vehicles(ho
 -- vehicle_maintenance: cascade vehicle and household changes to maintenance records
 CREATE TABLE vehicle_maintenance_new (
   id TEXT PRIMARY KEY,
-  vehicle_id TEXT NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  vehicle_id TEXT NOT NULL REFERENCES vehicles(id),
   date INTEGER NOT NULL,
   type TEXT NOT NULL,
   cost INTEGER,
   document TEXT,
-  household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  household_id TEXT NOT NULL REFERENCES household(id),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER,
@@ -159,7 +159,7 @@ CREATE TABLE pets_new (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   type TEXT NOT NULL,
-  household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  household_id TEXT NOT NULL REFERENCES household(id),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER,
@@ -174,12 +174,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS pets_household_position_idx ON pets(household_
 -- pet_medical: cascade pet and household changes to medical records
 CREATE TABLE pet_medical_new (
   id TEXT PRIMARY KEY,
-  pet_id TEXT NOT NULL REFERENCES pets(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  pet_id TEXT NOT NULL REFERENCES pets(id),
   date INTEGER NOT NULL,
   description TEXT NOT NULL,
   document TEXT,
   reminder INTEGER,
-  household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  household_id TEXT NOT NULL REFERENCES household(id),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER,
@@ -199,7 +199,7 @@ CREATE TABLE family_members_new (
   name TEXT NOT NULL,
   birthday INTEGER,
   notes TEXT,
-  household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  household_id TEXT NOT NULL REFERENCES household(id),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER,
@@ -216,7 +216,7 @@ CREATE TABLE budget_categories_new (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   monthly_budget INTEGER,
-  household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  household_id TEXT NOT NULL REFERENCES household(id),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER,
@@ -231,11 +231,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS budget_categories_household_position_idx ON bu
 -- expenses: cascade category and household changes to expenses
 CREATE TABLE expenses_new (
   id TEXT PRIMARY KEY,
-  category_id TEXT NOT NULL REFERENCES budget_categories(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  category_id TEXT NOT NULL REFERENCES budget_categories(id),
   amount INTEGER NOT NULL,
   date INTEGER NOT NULL,
   description TEXT,
-  household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  household_id TEXT NOT NULL REFERENCES household(id),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER
@@ -246,6 +246,4 @@ ALTER TABLE expenses_new RENAME TO expenses;
 CREATE INDEX IF NOT EXISTS expenses_household_updated_idx ON expenses(household_id, updated_at);
 CREATE INDEX IF NOT EXISTS expenses_category_date_idx ON expenses(category_id, date);
 
-COMMIT;
 
-PRAGMA foreign_keys=ON;

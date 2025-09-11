@@ -1,7 +1,6 @@
 -- id: 202509012007_domain_tables
 -- checksum: 33d2fc70eac8a4b096edd1e6bef8a3a51c9e0d59cbfffbd561aaa5c13bb3c433
 
-BEGIN;
 
 CREATE TABLE IF NOT EXISTS bills (
   id TEXT PRIMARY KEY,
@@ -135,4 +134,3 @@ CREATE TABLE IF NOT EXISTS expenses (
 );
 CREATE INDEX IF NOT EXISTS expenses_household_updated_idx ON expenses(household_id, updated_at);
 
-COMMIT;
