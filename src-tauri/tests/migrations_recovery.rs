@@ -1,4 +1,4 @@
-use arklowdun_lib::{db, migrate};
+use arklowdun::{db, migrate};
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 
 #[tokio::test]

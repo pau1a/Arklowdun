@@ -1,4 +1,4 @@
-use arklowdun_lib::commands;
+use arklowdun::commands;
 use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
 
 #[tokio::test]
