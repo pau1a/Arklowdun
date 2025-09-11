@@ -76,6 +76,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "include_dir",
+ "once_cell",
  "paste",
  "regex",
  "rrule",

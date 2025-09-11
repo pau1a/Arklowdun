@@ -3,6 +3,8 @@ use sqlx::{Executor, Row, SqlitePool};
 use std::collections::HashSet;
 use std::time::Instant;
 use include_dir::{include_dir, Dir};
+use once_cell::sync::Lazy;
+use regex::Regex;
 
 use crate::time::now_ms;
 use tracing::{error, info};
@@ -114,6 +116,49 @@ fn split_statements(sql: &str) -> Vec<String> {
     statements
 }
 
+async fn column_exists<'e, E>(exec: &mut E, table: &str, col: &str) -> anyhow::Result<bool>
+where
+    E: Executor<'e, Database = sqlx::Sqlite>,
+{
+    let q = format!("SELECT 1 FROM pragma_table_info('{}') WHERE name = ?", table.replace('\'', "''"));
+    Ok(
+        sqlx::query_scalar::<_, i64>(&q)
+            .bind(col)
+            .fetch_optional(&mut *exec)
+            .await?
+            .is_some(),
+    )
+}
+
+async fn should_skip_stmt<'e, E>(exec: &mut E, stmt: &str) -> anyhow::Result<bool>
+where
+    E: Executor<'e, Database = sqlx::Sqlite>,
+{
+    static ADD_RE: Lazy<Regex> = Lazy::new(|| {
+        Regex::new(r"(?i)^\s*ALTER\s+TABLE\s+([^\s]+)\s+ADD\s+COLUMN\s+([^\s(]+)").unwrap()
+    });
+    if let Some(c) = ADD_RE.captures(stmt) {
+        let table = c.get(1).unwrap().as_str().trim_matches('"');
+        let col = c.get(2).unwrap().as_str().trim_matches('"');
+        if column_exists(exec, table, col).await? {
+            return Ok(true);
+        }
+    }
+
+    static RENAME_RE: Lazy<Regex> = Lazy::new(|| {
+        Regex::new(r"(?i)^\s*ALTER\s+TABLE\s+([^\s]+)\s+RENAME\s+COLUMN\s+([^\s]+)\s+TO\s+([^\s]+)").unwrap()
+    });
+    if let Some(c) = RENAME_RE.captures(stmt) {
+        let table = c.get(1).unwrap().as_str().trim_matches('"');
+        let from = c.get(2).unwrap().as_str().trim_matches('"');
+        if !column_exists(exec, table, from).await? {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
 pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     pool.execute("PRAGMA foreign_keys=ON").await?;
     pool.execute(
@@ -152,6 +197,10 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
         let start = Instant::now();
         info!(target = "arklowdun", event = "migration_begin", file = %filename);
         for stmt in split_statements(&cleaned) {
+            if should_skip_stmt(&mut *tx, &stmt).await? {
+                info!(target = "arklowdun", event = "migration_stmt_skip", sql = %preview(&stmt));
+                continue;
+            }
             info!(target = "arklowdun", event = "migration_stmt", sql = %preview(&stmt));
             if let Err(e) = tx.execute(stmt.as_str()).await {
                 error!(target = "arklowdun", event = "migration_stmt_error", file = %filename, error = %e);
@@ -229,6 +278,10 @@ pub async fn revert_last_migration(pool: &SqlitePool) -> anyhow::Result<()> {
         let start = Instant::now();
         info!(target = "arklowdun", event = "migration_begin", file = %version);
         for stmt in split_statements(&cleaned) {
+            if should_skip_stmt(&mut *tx, &stmt).await? {
+                info!(target = "arklowdun", event = "migration_stmt_skip", sql = %preview(&stmt));
+                continue;
+            }
             info!(target = "arklowdun", event = "migration_stmt", sql = %preview(&stmt));
             tx.execute(stmt.as_str()).await?;
         }
