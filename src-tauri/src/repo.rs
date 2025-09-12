@@ -296,7 +296,6 @@ where
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) async fn reorder_positions(
     pool: &SqlitePool,
     table: &str,

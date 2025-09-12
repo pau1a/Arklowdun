@@ -2,7 +2,7 @@ use anyhow::Result;
 use sqlx::sqlite::SqlitePoolOptions;
 use tempfile::tempdir;
 
-use arklowdun_lib::db::{save_note, save_note_twice_fail};
+use arklowdun::db::{save_note, save_note_twice_fail};
 
 #[tokio::test]
 async fn save_note_commits() -> Result<()> {

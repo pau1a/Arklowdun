@@ -2,7 +2,7 @@ use anyhow::Result;
 use sqlx::{sqlite::SqlitePoolOptions, Row};
 use tempfile::tempdir;
 
-use arklowdun_lib::db::run_in_tx;
+use arklowdun::db::run_in_tx;
 use futures::FutureExt;
 
 #[tokio::test]
