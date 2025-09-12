@@ -27,5 +27,25 @@ Thank you for helping improve this project.
   npm run migrations:idempotency
   ```
 
+After running migrations locally (which creates `dev.sqlite`), verify the schema stays in sync:
+
+```sh
+npm run schema:verify
+```
+
+If `schema:verify` complains that the database is missing, run your migrations first.
+
+If `schema.sql` is missing or DDL changes, regenerate the canonical file:
+
+```sh
+npm run schema:update
+```
+
+To verify from a clean database the way CI does, run:
+
+```sh
+npm run schema:ci
+```
+
 Edit the generated files, run the check script, then commit both `up` and `down` files.
 Refer to [docs/migration-guidelines.md](docs/migration-guidelines.md) for rollback patterns, commenting standards, and testing expectations.

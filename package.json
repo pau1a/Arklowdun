@@ -29,7 +29,11 @@
     "migrate:new": "scripts/new_migration.sh",
     "migrations:check": "scripts/check_migrations.sh",
     "migrations:idempotency": "scripts/test_idempotency.sh",
-    "migrations:idempotency:keep": "scripts/test_idempotency.sh --keep"
+    "migrations:idempotency:keep": "scripts/test_idempotency.sh --keep",
+    "schema:verify": "scripts/verify_schema.sh --db dev.sqlite --schema schema.sql --verbose",
+    "schema:update": "scripts/verify_schema.sh --db dev.sqlite --schema schema.sql --update --verbose",
+    "schema:verify:strict": "scripts/verify_schema.sh --db dev.sqlite --schema schema.sql --strict --include-migrations --verbose",
+    "schema:ci": "scripts/ci/verify-schema.sh"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^6.7.2",
