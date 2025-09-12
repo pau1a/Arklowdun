@@ -135,13 +135,21 @@ pub async fn save_note(
 ) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
     // hi
-    sqlx::query("INSERT INTO notes (id, body) VALUES (?, ?)")
+    let res = sqlx::query("INSERT INTO notes (id, body) VALUES (?, ?)")
         .bind(id)
         .bind(body)
         .execute(&mut tx)
-        .await?;
-    tx.commit().await?;
-    Ok(())
+        .await;
+    match res {
+        Ok(_) => {
+            tx.commit().await?;
+            Ok(())
+        }
+        Err(e) => {
+            tx.rollback().await?;
+            Err(e)
+        }
+    }
 }
 
 /// Update an item inside a transaction.
@@ -151,13 +159,21 @@ pub async fn update_item(
     name: &str,
 ) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
-    sqlx::query("UPDATE items SET name = ? WHERE id = ?")
+    let res = sqlx::query("UPDATE items SET name = ? WHERE id = ?")
         .bind(name)
         .bind(id)
         .execute(&mut tx)
-        .await?;
-    tx.commit().await?;
-    Ok(())
+        .await;
+    match res {
+        Ok(_) => {
+            tx.commit().await?;
+            Ok(())
+        }
+        Err(e) => {
+            tx.rollback().await?;
+            Err(e)
+        }
+    }
 }
 
 /// Try inserting the same note twice; the second insert fails and the
