@@ -7,6 +7,7 @@ use std::collections::HashSet;
 use std::time::Instant;
 
 use crate::{db::run_in_tx, time::now_ms};
+use futures::FutureExt;
 use tracing::{debug, error, info, warn};
 
 static MIGRATIONS_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../migrations");
@@ -214,15 +215,18 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
                 } else {
                     id.clone() + ".up.sql"
                 };
-                run_in_tx(pool, |tx| async move {
-                    sqlx::query(
-                        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
-                    )
-                    .bind(mapped)
-                    .bind(applied_at)
-                    .execute(&mut *tx)
-                    .await?;
-                    Ok::<_, sqlx::Error>(())
+                run_in_tx(pool, |tx| {
+                    async move {
+                        sqlx::query(
+                            "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                        )
+                        .bind(mapped)
+                        .bind(applied_at)
+                        .execute(&mut *tx)
+                        .await?;
+                        Ok::<_, sqlx::Error>(())
+                    }
+                    .boxed()
                 })
                 .await?;
             }
@@ -254,7 +258,8 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
 
         let start = Instant::now();
         info!(target = "arklowdun", event = "migration_tx_begin", file = %filename);
-        if let Err(e) = run_in_tx(pool, |tx| async move {
+        if let Err(e) = run_in_tx(pool, |tx| {
+            async move {
             for stmt in split_statements(&cleaned) {
                 if should_skip_stmt(&mut *tx, &stmt).await? {
                     debug!(target = "arklowdun", event = "migration_stmt_skip", sql = %preview(&stmt));
@@ -323,6 +328,8 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
                 .execute(&mut *tx)
                 .await?;
             Ok::<_, anyhow::Error>(())
+        }
+        .boxed()
         })
         .await
         {
@@ -346,9 +353,12 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     {
         let sql = "UPDATE vehicles SET next_mot_due = mot_date WHERE next_mot_due IS NULL AND mot_date IS NOT NULL";
         info!(target = "arklowdun", event = "migration_stmt", sql = %preview(sql));
-        run_in_tx(pool, |tx| async move {
-            sqlx::query(sql).execute(&mut *tx).await?;
-            Ok::<_, sqlx::Error>(())
+        run_in_tx(pool, |tx| {
+            async move {
+                sqlx::query(sql).execute(&mut *tx).await?;
+                Ok::<_, sqlx::Error>(())
+            }
+            .boxed()
         })
         .await?;
     }
@@ -361,20 +371,26 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     {
         let sql = "UPDATE vehicles SET next_service_due = service_date WHERE next_service_due IS NULL AND service_date IS NOT NULL";
         info!(target = "arklowdun", event = "migration_stmt", sql = %preview(sql));
-        run_in_tx(pool, |tx| async move {
-            sqlx::query(sql).execute(&mut *tx).await?;
-            Ok::<_, sqlx::Error>(())
+        run_in_tx(pool, |tx| {
+            async move {
+                sqlx::query(sql).execute(&mut *tx).await?;
+                Ok::<_, sqlx::Error>(())
+            }
+            .boxed()
         })
         .await?;
     }
 
-    run_in_tx(pool, |tx| async move {
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_events_household_start_end ON events(household_id, start_at, end_at)",
-        )
-        .execute(&mut *tx)
-        .await?;
-        Ok::<_, sqlx::Error>(())
+    run_in_tx(pool, |tx| {
+        async move {
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS idx_events_household_start_end ON events(household_id, start_at, end_at)",
+            )
+            .execute(&mut *tx)
+            .await?;
+            Ok::<_, sqlx::Error>(())
+        }
+        .boxed()
     })
     .await?;
 
@@ -404,7 +420,8 @@ pub async fn revert_last_migration(pool: &SqlitePool) -> anyhow::Result<()> {
             .join("\n");
         let start = Instant::now();
         info!(target = "arklowdun", event = "migration_tx_begin", file = %version);
-        if let Err(e) = run_in_tx(pool, |tx| async move {
+        if let Err(e) = run_in_tx(pool, |tx| {
+            async move {
             for stmt in split_statements(&cleaned) {
                 if should_skip_stmt(&mut *tx, &stmt).await? {
                     debug!(target = "arklowdun", event = "migration_stmt_skip", sql = %preview(&stmt));
@@ -432,6 +449,8 @@ pub async fn revert_last_migration(pool: &SqlitePool) -> anyhow::Result<()> {
                 .execute(&mut *tx)
                 .await?;
             Ok::<_, anyhow::Error>(())
+        }
+        .boxed()
         })
         .await
         {

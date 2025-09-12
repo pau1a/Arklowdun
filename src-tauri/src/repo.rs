@@ -4,6 +4,7 @@ use serde_json::{Map, Value};
 
 use crate::db::run_in_tx;
 use crate::time::now_ms;
+use futures::FutureExt;
 
 pub(crate) const DOMAIN_TABLES: &[&str] = &[
     "household",
@@ -186,8 +187,9 @@ pub async fn set_deleted_at(
     ensure_table(table)?;
     let household_id = require_household(household_id)?;
     let now = now_ms();
-    run_in_tx(pool, |tx| async move {
-        let res = if table == "household" {
+    run_in_tx(pool, |tx| {
+        async move {
+            let res = if table == "household" {
             let sql = format!("UPDATE {table} SET deleted_at = ?, updated_at = ? WHERE id = ?");
             sqlx::query(&sql)
                 .bind(now)
@@ -207,13 +209,15 @@ pub async fn set_deleted_at(
                 .execute(&mut *tx)
                 .await?
         };
-        if res.rows_affected() == 0 {
-            anyhow::bail!("id not found");
+            if res.rows_affected() == 0 {
+                anyhow::bail!("id not found");
+            }
+            if table != "household" && ORDERED_TABLES.contains(&table) {
+                renumber_positions(&mut *tx, table, household_id).await?;
+            }
+            Ok::<_, anyhow::Error>(())
         }
-        if table != "household" && ORDERED_TABLES.contains(&table) {
-            renumber_positions(&mut *tx, table, household_id).await?;
-        }
-        Ok::<_, anyhow::Error>(())
+        .boxed()
     })
     .await?;
     Ok(())
@@ -228,8 +232,9 @@ pub async fn clear_deleted_at(
     ensure_table(table)?;
     let household_id = require_household(household_id)?;
     let now = now_ms();
-    run_in_tx(pool, |tx| async move {
-        let res = if table == "household" {
+    run_in_tx(pool, |tx| {
+        async move {
+            let res = if table == "household" {
             let sql = format!("UPDATE {table} SET deleted_at = NULL, updated_at = ? WHERE id = ?");
             sqlx::query(&sql)
                 .bind(now)
@@ -247,13 +252,15 @@ pub async fn clear_deleted_at(
                 .execute(&mut *tx)
                 .await?
         };
-        if res.rows_affected() == 0 {
-            anyhow::bail!("id not found");
+            if res.rows_affected() == 0 {
+                anyhow::bail!("id not found");
+            }
+            if table != "household" && ORDERED_TABLES.contains(&table) {
+                renumber_positions(&mut *tx, table, household_id).await?;
+            }
+            Ok::<_, anyhow::Error>(())
         }
-        if table != "household" && ORDERED_TABLES.contains(&table) {
-            renumber_positions(&mut *tx, table, household_id).await?;
-        }
-        Ok::<_, anyhow::Error>(())
+        .boxed()
     })
     .await?;
     Ok(())
@@ -297,37 +304,40 @@ pub(crate) async fn reorder_positions(
 ) -> anyhow::Result<()> {
     ensure_table(table)?;
     let household_id = require_household(household_id)?;
-    run_in_tx(pool, |tx| async move {
-        let now = now_ms();
+        SET position = position + 1000000, updated_at = ? \
+        WHERE household_id = ? AND deleted_at IS NULL",
+        SET position = ?, updated_at = ? \
+        WHERE id = ? AND household_id = ?",
+    run_in_tx(pool, |tx| {
+        async move {
+            let now = now_ms();
 
-        let bump_sql = format!(
-            "UPDATE {table} \
-         SET position = position + 1000000, updated_at = ? \
-         WHERE household_id = ? AND deleted_at IS NULL",
-        );
-        sqlx::query(&bump_sql)
-            .bind(now)
-            .bind(household_id)
-            .execute(&mut *tx)
-            .await?;
-
-        let update_sql = format!(
-            "UPDATE {table} \
-         SET position = ?, updated_at = ? \
-         WHERE id = ? AND household_id = ?",
-        );
-        for (id, pos) in updates {
-            sqlx::query(&update_sql)
-                .bind(pos)
+            let bump_sql = format!(
+                "UPDATE {table} \n         SET position = position + 1000000, updated_at = ? \n         WHERE household_id = ? AND deleted_at IS NULL",
+            );
+            sqlx::query(&bump_sql)
                 .bind(now)
-                .bind(id)
                 .bind(household_id)
                 .execute(&mut *tx)
                 .await?;
-        }
 
-        renumber_positions(&mut *tx, table, household_id).await?;
-        Ok::<_, anyhow::Error>(())
+            let update_sql = format!(
+                "UPDATE {table} \n         SET position = ?, updated_at = ? \n         WHERE id = ? AND household_id = ?",
+            );
+            for (id, pos) in updates {
+                sqlx::query(&update_sql)
+                    .bind(pos)
+                    .bind(now)
+                    .bind(id)
+                    .bind(household_id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+
+            renumber_positions(&mut *tx, table, household_id).await?;
+            Ok::<_, anyhow::Error>(())
+        }
+        .boxed()
     })
     .await?;
     Ok(())

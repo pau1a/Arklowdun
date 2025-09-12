@@ -1,7 +1,7 @@
 use anyhow::Result as AnyResult;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Pool, Sqlite, Transaction};
-use std::future::Future;
+use futures::future::BoxFuture;
 use std::str::FromStr;
 use tauri::{AppHandle, Manager};
 
@@ -100,11 +100,10 @@ async fn log_effective_pragmas(pool: &Pool<Sqlite>) {
 }
 
 /// Run work inside a transaction. Commits on success, rolls back on error.
-pub async fn run_in_tx<R, E, F, Fut>(pool: &Pool<Sqlite>, f: F) -> Result<R, E>
+pub async fn run_in_tx<R, E, F>(pool: &Pool<Sqlite>, f: F) -> Result<R, E>
 where
     E: From<sqlx::Error>,
-    F: for<'c> FnOnce(&'c mut Transaction<'c, Sqlite>) -> Fut,
-    Fut: Future<Output = Result<R, E>>,
+    F: for<'c> FnOnce(&'c mut Transaction<'c, Sqlite>) -> BoxFuture<'c, Result<R, E>>,
 {
     use tracing::{error, info, warn};
 

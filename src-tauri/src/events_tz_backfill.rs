@@ -5,6 +5,7 @@ use sqlx::Row;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{db::run_in_tx, state::AppState, time::now_ms};
+use futures::FutureExt;
 use super::commands::DbErrorPayload as DbError;
 
 #[derive(Serialize)]
@@ -89,8 +90,9 @@ pub async fn events_backfill_timezone(
     let total_u = total as u64;
     let app_emit = app.clone();
     let household_id_clone = household_id.clone();
-    let processed = run_in_tx(&pool, move |tx| async move {
-        let app = app_emit.clone();
+    let processed = run_in_tx(&pool, move |tx| {
+        async move {
+            let app = app_emit.clone();
             // Legacy rows store `start_at` as wall-clock ms in `tz`; derive UTC values.
             let rows = sqlx::query("SELECT id, start_at, end_at FROM events WHERE household_id = ? AND (tz IS NULL OR start_at_utc IS NULL)")
                 .bind(&household_id_clone)
@@ -106,13 +108,13 @@ pub async fn events_backfill_timezone(
                 let start_at_utc = to_utc_ms(start_at, tz);
                 let end_at_utc = end_at.map(|e| to_utc_ms(e, tz));
 
-                    sqlx::query("UPDATE events SET tz = ?, start_at_utc = ?, end_at_utc = ? WHERE id = ?")
-                        .bind(tz.name())
-                        .bind(start_at_utc)
-                        .bind(end_at_utc)
-                        .bind(&id)
-                        .execute(&mut *tx)
-                        .await?;
+                sqlx::query("UPDATE events SET tz = ?, start_at_utc = ?, end_at_utc = ? WHERE id = ?")
+                    .bind(tz.name())
+                    .bind(start_at_utc)
+                    .bind(end_at_utc)
+                    .bind(&id)
+                    .execute(&mut *tx)
+                    .await?;
 
                 processed += 1;
                 if processed % 50 == 0 || processed == total_u {
@@ -123,6 +125,8 @@ pub async fn events_backfill_timezone(
                 }
             }
             Ok::<_, sqlx::Error>(processed)
+        }
+        .boxed()
     })
     .await
     .map_err(|e| DbError { code: "Unknown".into(), message: e.to_string() })?;
