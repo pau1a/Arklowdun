@@ -6,6 +6,7 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
     Row, SqlitePool,
 };
+use similar::TextDiff;
 
 #[derive(Parser)]
 struct Args {
@@ -308,14 +309,12 @@ fn normalize_stmt(input: &str) -> String {
 }
 
 fn unified_diff(old: &str, new: &str) -> String {
-    use similar::{utils::UnifiedDiffBuilder, TextDiff};
     let diff = TextDiff::from_lines(old, new);
-    let mut buf = String::new();
-    let builder = UnifiedDiffBuilder::new(&mut buf);
+    let mut buf: Vec<u8> = Vec::new();
     diff.unified_diff()
         .header("schema.sql", "schema")
         .context_radius(3)
-        .build(&builder)
-        .unwrap();
-    buf
+        .to_writer(&mut buf)
+        .expect("write unified diff");
+    String::from_utf8(buf).expect("utf8 diff")
 }
