@@ -1,10 +1,11 @@
-use anyhow::Result;
+use anyhow::Result as AnyResult;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
-use sqlx::{Pool, Sqlite};
+use sqlx::{Pool, Sqlite, Transaction, SqliteConnection};
+use std::future::Future;
 use std::str::FromStr;
 use tauri::{AppHandle, Manager};
 
-pub async fn open_sqlite_pool(app: &AppHandle) -> Result<Pool<Sqlite>> {
+pub async fn open_sqlite_pool(app: &AppHandle) -> AnyResult<Pool<Sqlite>> {
     let app_dir = app
         .path()
         .app_data_dir()
@@ -25,13 +26,15 @@ pub async fn open_sqlite_pool(app: &AppHandle) -> Result<Pool<Sqlite>> {
         .expect("valid DB path")
         .create_if_missing(true)
         .journal_mode(SqliteJournalMode::Wal)
-        .synchronous(SqliteSynchronous::Full)
-        .foreign_keys(true);
+        .synchronous(SqliteSynchronous::Full);
 
     let pool = SqlitePoolOptions::new()
         .max_connections(8)
         .after_connect(|conn, _| {
             Box::pin(async move {
+                sqlx::query("PRAGMA foreign_keys=ON;")
+                    .execute(&mut *conn)
+                    .await?;
                 sqlx::query("PRAGMA busy_timeout = 5000;")
                     .execute(&mut *conn)
                     .await?;
@@ -94,4 +97,82 @@ async fn log_effective_pragmas(pool: &Pool<Sqlite>) {
             msg = "journal_mode != WAL; running with reduced crash safety"
         );
     }
+}
+
+/// Run work inside a transaction. Commits on success, rolls back on error.
+pub async fn run_in_tx<R, E, F, Fut>(pool: &Pool<Sqlite>, f: F) -> Result<R, E>
+where
+    E: From<sqlx::Error>,
+    F: for<'c> FnOnce(&'c mut SqliteConnection) -> Fut,
+    Fut: Future<Output = Result<R, E>>,
+{
+    use tracing::{error, info, warn};
+
+    let mut tx = pool.begin().await.map_err(E::from)?;
+    info!(target = "arklowdun", event = "db_tx_begin");
+    let res = f(tx.as_mut()).await;
+    match res {
+        Ok(val) => {
+            tx.commit().await.map_err(E::from)?;
+            info!(target = "arklowdun", event = "db_tx_commit");
+            Ok(val)
+        }
+        Err(e) => {
+            if let Err(rb) = tx.rollback().await {
+                error!(target = "arklowdun", event = "db_tx_rollback_failed", error = %rb);
+            } else {
+                warn!(target = "arklowdun", event = "db_tx_rollback");
+            }
+            Err(e)
+        }
+    }
+}
+
+/// Save a note within a transaction.
+pub async fn save_note(
+    pool: &Pool<Sqlite>,
+    id: &str,
+    body: &str,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    // hi
+    sqlx::query("INSERT INTO notes (id, body) VALUES (?, ?)")
+        .bind(id)
+        .bind(body)
+        .execute(&mut tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Update an item inside a transaction.
+pub async fn update_item(
+    pool: &Pool<Sqlite>,
+    id: &str,
+    name: &str,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("UPDATE items SET name = ? WHERE id = ?")
+        .bind(name)
+        .bind(id)
+        .execute(&mut tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Try inserting the same note twice; the second insert fails and the
+/// transaction should roll back.
+pub async fn save_note_twice_fail(pool: &Pool<Sqlite>, id: &str) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("INSERT INTO notes (id, body) VALUES (?, 'first')")
+        .bind(id)
+        .execute(&mut tx)
+        .await?;
+    sqlx::query("INSERT INTO notes (id, body) VALUES (?, 'second')")
+        .bind(id)
+        .execute(&mut tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
 }
