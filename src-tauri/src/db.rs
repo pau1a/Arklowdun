@@ -168,10 +168,14 @@ pub async fn save_note_twice_fail(pool: &Pool<Sqlite>, id: &str) -> Result<(), s
         .bind(id)
         .execute(&mut tx)
         .await?;
-    sqlx::query("INSERT INTO notes (id, body) VALUES (?, 'second')")
+    if let Err(e) = sqlx::query("INSERT INTO notes (id, body) VALUES (?, 'second')")
         .bind(id)
         .execute(&mut tx)
-        .await?;
+        .await
+    {
+        tx.rollback().await?;
+        return Err(e);
+    }
     tx.commit().await?;
     Ok(())
 }
