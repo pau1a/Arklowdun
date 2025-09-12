@@ -134,13 +134,13 @@ async fn create(
         cols.join(","),
         placeholders.join(",")
     );
-    let mut query = sqlx::query(&sql);
-    for c in &cols {
-        let v = data.get(c).unwrap();
-        query = bind_value(query, v);
-    }
-    run_in_tx(pool, |tx| async move {
-        query.execute(&mut *tx).await?;
+    run_in_tx(pool, move |tx| async move {
+        let mut query = sqlx::query(&sql);
+        for c in &cols {
+            let v = data.get(c).unwrap();
+            query = bind_value(query, v);
+        }
+        query.execute(tx).await?;
         Ok::<_, sqlx::Error>(Value::Object(data))
     })
     .await
@@ -170,19 +170,19 @@ async fn update(
             set_clause.join(",")
         )
     };
-    let mut query = sqlx::query(&sql);
-    for c in &cols {
-        let v = data.get(c).unwrap();
-        query = bind_value(query, v);
-    }
-    if table == "household" {
-        query = query.bind(id);
-    } else {
-        let hh = household_id.unwrap_or("");
-        query = query.bind(hh).bind(id);
-    }
-    run_in_tx(pool, |tx| async move {
-        query.execute(&mut *tx).await?;
+    run_in_tx(pool, move |tx| async move {
+        let mut query = sqlx::query(&sql);
+        for c in &cols {
+            let v = data.get(c).unwrap();
+            query = bind_value(query, v);
+        }
+        if table == "household" {
+            query = query.bind(id);
+        } else {
+            let hh = household_id.unwrap_or("");
+            query = query.bind(hh).bind(id);
+        }
+        query.execute(tx).await?;
         Ok::<_, sqlx::Error>(())
     })
     .await

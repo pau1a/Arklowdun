@@ -1,6 +1,6 @@
 use anyhow::Result as AnyResult;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
-use sqlx::{Pool, Sqlite, Transaction, SqliteConnection};
+use sqlx::{Pool, Sqlite, Transaction};
 use std::future::Future;
 use std::str::FromStr;
 use tauri::{AppHandle, Manager};
@@ -103,15 +103,14 @@ async fn log_effective_pragmas(pool: &Pool<Sqlite>) {
 pub async fn run_in_tx<R, E, F, Fut>(pool: &Pool<Sqlite>, f: F) -> Result<R, E>
 where
     E: From<sqlx::Error>,
-    F: for<'c> FnOnce(&'c mut SqliteConnection) -> Fut,
+    F: for<'c> FnOnce(&'c mut Transaction<'c, Sqlite>) -> Fut,
     Fut: Future<Output = Result<R, E>>,
 {
     use tracing::{error, info, warn};
 
     let mut tx = pool.begin().await.map_err(E::from)?;
     info!(target = "arklowdun", event = "db_tx_begin");
-    let res = f(tx.as_mut()).await;
-    match res {
+    match f(&mut tx).await {
         Ok(val) => {
             tx.commit().await.map_err(E::from)?;
             info!(target = "arklowdun", event = "db_tx_commit");
