@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DB="${DB:-dev.db}"
+DB="${DB:-dev.sqlite}"
 MIG_DIR="$(dirname "$0")/../migrations"
 export LC_ALL=C
 shopt -s nullglob

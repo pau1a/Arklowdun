@@ -99,6 +99,27 @@ DROP INDEX IF EXISTS bills_household_idx;
 - Integrity check: `sqlite3 dev.sqlite "PRAGMA integrity_check;"`.
 - Optional: snapshot schemas and compare diffs after round-trip.
 
+### Canonical schema
+After applying migrations, ensure the canonical schema file matches your database:
+
+```sh
+npm run schema:verify
+```
+
+If the database is missing, run your migrations first.
+
+If `schema.sql` is missing or you changed DDL, refresh the file:
+
+```sh
+npm run schema:update
+```
+
+For a clean-room check that builds a temporary database (used in CI):
+
+```sh
+npm run schema:ci
+```
+
 ## Large Migration Strategies
 - Break long-running migrations into smaller steps.
 - Use feature flags or phased rollout when table locks could impact production.

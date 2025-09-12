@@ -1,0 +1,1 @@
+-- canonical schema; generated via scripts/verify_schema
