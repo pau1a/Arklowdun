@@ -5,7 +5,6 @@ use sqlx::Row;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{db::run_in_tx, state::AppState, time::now_ms};
-use futures::FutureExt;
 use super::commands::DbErrorPayload as DbError;
 
 #[derive(Serialize)]
@@ -90,9 +89,8 @@ pub async fn events_backfill_timezone(
     let total_u = total as u64;
     let app_emit = app.clone();
     let household_id_clone = household_id.clone();
-    let processed = run_in_tx(&pool, move |tx| {
+    let processed = run_in_tx(&pool, move |tx| async move {
         let app = app_emit.clone();
-        async move {
             // Legacy rows store `start_at` as wall-clock ms in `tz`; derive UTC values.
             let rows = sqlx::query("SELECT id, start_at, end_at FROM events WHERE household_id = ? AND (tz IS NULL OR start_at_utc IS NULL)")
                 .bind(&household_id_clone)
@@ -125,8 +123,6 @@ pub async fn events_backfill_timezone(
                 }
             }
             Ok::<_, sqlx::Error>(processed)
-        }
-        .boxed()
     })
     .await
     .map_err(|e| DbError { code: "Unknown".into(), message: e.to_string() })?;

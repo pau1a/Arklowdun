@@ -4,7 +4,6 @@ use serde_json::{Map, Value};
 
 use crate::db::run_in_tx;
 use crate::time::now_ms;
-use futures::FutureExt;
 
 pub(crate) const DOMAIN_TABLES: &[&str] = &[
     "household",
@@ -187,8 +186,7 @@ pub async fn set_deleted_at(
     ensure_table(table)?;
     let household_id = require_household(household_id)?;
     let now = now_ms();
-    run_in_tx(pool, |tx| {
-        async move {
+    run_in_tx(pool, |tx| async move {
         let res = if table == "household" {
             let sql = format!("UPDATE {table} SET deleted_at = ?, updated_at = ? WHERE id = ?");
             sqlx::query(&sql)
@@ -216,8 +214,6 @@ pub async fn set_deleted_at(
             renumber_positions(&mut *tx, table, household_id).await?;
         }
         Ok::<_, anyhow::Error>(())
-        }
-        .boxed()
     })
     .await?;
     Ok(())
@@ -232,8 +228,7 @@ pub async fn clear_deleted_at(
     ensure_table(table)?;
     let household_id = require_household(household_id)?;
     let now = now_ms();
-    run_in_tx(pool, |tx| {
-        async move {
+    run_in_tx(pool, |tx| async move {
         let res = if table == "household" {
             let sql = format!("UPDATE {table} SET deleted_at = NULL, updated_at = ? WHERE id = ?");
             sqlx::query(&sql)
@@ -259,8 +254,6 @@ pub async fn clear_deleted_at(
             renumber_positions(&mut *tx, table, household_id).await?;
         }
         Ok::<_, anyhow::Error>(())
-        }
-        .boxed()
     })
     .await?;
     Ok(())
@@ -304,8 +297,7 @@ pub(crate) async fn reorder_positions(
 ) -> anyhow::Result<()> {
     ensure_table(table)?;
     let household_id = require_household(household_id)?;
-    run_in_tx(pool, |tx| {
-        async move {
+    run_in_tx(pool, |tx| async move {
         let now = now_ms();
 
         let bump_sql = format!(
@@ -336,8 +328,6 @@ pub(crate) async fn reorder_positions(
 
         renumber_positions(&mut *tx, table, household_id).await?;
         Ok::<_, anyhow::Error>(())
-        }
-        .boxed()
     })
     .await?;
     Ok(())

@@ -3,7 +3,6 @@ use serde_json::{Map, Value};
 use sqlx::{sqlite::SqliteRow, Row, SqlitePool, Column, ValueRef, TypeInfo};
 
 use crate::db::run_in_tx;
-use futures::FutureExt;
 
 use crate::{id::new_uuid_v7, repo, time::now_ms, Event};
 use chrono::{NaiveDateTime, LocalResult, TimeZone, Utc, Duration, DateTime, Offset};
@@ -135,8 +134,7 @@ async fn create(
         cols.join(","),
         placeholders.join(",")
     );
-    run_in_tx(pool, move |tx| {
-        async move {
+    run_in_tx(pool, move |tx| async move {
         let mut query = sqlx::query(&sql);
         for c in &cols {
             let v = data.get(c).unwrap();
@@ -144,8 +142,6 @@ async fn create(
         }
         query.execute(&mut *tx).await?;
         Ok::<_, sqlx::Error>(Value::Object(data))
-        }
-        .boxed()
     })
     .await
 }
@@ -174,8 +170,7 @@ async fn update(
             set_clause.join(",")
         )
     };
-    run_in_tx(pool, move |tx| {
-        async move {
+    run_in_tx(pool, move |tx| async move {
         let mut query = sqlx::query(&sql);
         for c in &cols {
             let v = data.get(c).unwrap();
@@ -189,8 +184,6 @@ async fn update(
         }
         query.execute(&mut *tx).await?;
         Ok::<_, sqlx::Error>(())
-        }
-        .boxed()
     })
     .await
 }

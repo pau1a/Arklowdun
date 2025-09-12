@@ -3,7 +3,6 @@ use sqlx::{sqlite::SqlitePoolOptions, Row};
 use tempfile::tempdir;
 
 use arklowdun_lib::db::run_in_tx;
-use futures::FutureExt;
 
 #[tokio::test]
 async fn tx_rolls_back_on_error() -> Result<()> {
@@ -35,8 +34,7 @@ async fn tx_rolls_back_on_error() -> Result<()> {
         .execute(&pool)
         .await?;
 
-    let res = run_in_tx(&pool, |tx| {
-        async move {
+    let res = run_in_tx(&pool, |tx| async move {
         sqlx::query("INSERT INTO children (id, parent_id) VALUES ('c1','p1')")
             .execute(&mut *tx)
             .await?;
@@ -44,8 +42,6 @@ async fn tx_rolls_back_on_error() -> Result<()> {
             .execute(&mut *tx)
             .await?;
         Ok::<_, sqlx::Error>(())
-        }
-        .boxed()
     })
     .await;
 
@@ -87,14 +83,11 @@ async fn tx_commits_on_success() -> Result<()> {
         .execute(&pool)
         .await?;
 
-    run_in_tx(&pool, |tx| {
-        async move {
+    run_in_tx(&pool, |tx| async move {
         sqlx::query("INSERT INTO children (id, parent_id) VALUES ('c-ok','p1')")
             .execute(&mut *tx)
             .await?;
         Ok::<_, sqlx::Error>(())
-        }
-        .boxed()
     })
     .await?;
 
