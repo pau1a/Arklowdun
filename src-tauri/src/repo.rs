@@ -296,6 +296,7 @@ where
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) async fn reorder_positions(
     pool: &SqlitePool,
     table: &str,
@@ -304,42 +305,47 @@ pub(crate) async fn reorder_positions(
 ) -> anyhow::Result<()> {
     ensure_table(table)?;
     let household_id = require_household(household_id)?;
-        SET position = position + 1000000, updated_at = ? \
-        WHERE household_id = ? AND deleted_at IS NULL",
-        SET position = ?, updated_at = ? \
-        WHERE id = ? AND household_id = ?",
+
     run_in_tx(pool, |tx| {
         async move {
             let now = now_ms();
 
+            // Temporarily bump all visible rows to avoid unique/ordering clashes.
             let bump_sql = format!(
-                "UPDATE {table} \n         SET position = position + 1000000, updated_at = ? \n         WHERE household_id = ? AND deleted_at IS NULL",
+                "UPDATE {table} \
+                 SET position = position + 1000000, updated_at = ? \
+                 WHERE household_id = ? AND deleted_at IS NULL"
             );
             sqlx::query(&bump_sql)
                 .bind(now)
-                .bind(household_id)
+                .bind(&household_id)
                 .execute(&mut *tx)
                 .await?;
 
+            // Apply requested positions.
             let update_sql = format!(
-                "UPDATE {table} \n         SET position = ?, updated_at = ? \n         WHERE id = ? AND household_id = ?",
+                "UPDATE {table} \
+                 SET position = ?, updated_at = ? \
+                 WHERE id = ? AND household_id = ?"
             );
             for (id, pos) in updates {
                 sqlx::query(&update_sql)
-                    .bind(pos)
+                    .bind(*pos)
                     .bind(now)
                     .bind(id)
-                    .bind(household_id)
+                    .bind(&household_id)
                     .execute(&mut *tx)
                     .await?;
             }
 
-            renumber_positions(&mut *tx, table, household_id).await?;
+            // Normalize to 0..n-1 and keep it tidy.
+            renumber_positions(&mut *tx, table, &household_id).await?;
             Ok::<_, anyhow::Error>(())
         }
         .boxed()
     })
     .await?;
+
     Ok(())
 }
 
