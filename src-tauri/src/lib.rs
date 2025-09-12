@@ -12,7 +12,7 @@ const FILES_INDEX_VERSION: i64 = 1;
 
 mod attachments;
 pub mod commands;
-mod db;
+pub mod db;
 mod events_tz_backfill;
 mod household; // declare module; avoid `use` to prevent name collision
 mod id;
