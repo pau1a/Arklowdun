@@ -30,3 +30,4 @@ dev.sqlite
 sample.json
 arklowdun@0.1.0
 tauri
+*.sqlite-*
