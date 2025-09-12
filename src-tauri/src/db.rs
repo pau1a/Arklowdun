@@ -100,16 +100,23 @@ async fn log_effective_pragmas(pool: &Pool<Sqlite>) {
 }
 
 /// Run work inside a transaction. Commits on success, rolls back on error.
-pub async fn run_in_tx<R, E, F>(pool: &Pool<Sqlite>, f: F) -> Result<R, E>
+pub async fn run_in_tx<R, E, F>(
+    pool: &Pool<Sqlite>,
+    f: F,
+) -> Result<R, E>
 where
     E: From<sqlx::Error>,
-    F: for<'c> FnOnce(&'c mut Transaction<'c, Sqlite>) -> BoxFuture<'c, Result<R, E>>,
+    F: for<'c> FnOnce(&'c mut Transaction<'c, Sqlite>) -> futures::future::BoxFuture<'c, Result<R, E>>,
 {
     use tracing::{error, info, warn};
 
     let mut tx = pool.begin().await.map_err(E::from)?;
     info!(target = "arklowdun", event = "db_tx_begin");
-    match f(&mut tx).await {
+
+    // <<< THE FIX: end the &mut borrow before commit/rollback >>>
+    let res = f(&mut tx).await;
+
+    match res {
         Ok(val) => {
             tx.commit().await.map_err(E::from)?;
             info!(target = "arklowdun", event = "db_tx_commit");
