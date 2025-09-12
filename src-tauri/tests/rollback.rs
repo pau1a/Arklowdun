@@ -150,15 +150,15 @@ async fn rollback_all_migrations_leaves_clean_db() -> Result<()> {
         let has_sm: Option<i64> = sqlx::query_scalar(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations';",
         )
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut tx)
         .await?;
         if has_sm.is_some() {
             sqlx::query("DELETE FROM schema_migrations WHERE version = ?")
                 .bind(version)
-                .execute(&mut *tx)
+                .execute(&mut tx)
                 .await?;
         }
-        sqlx::query(&sql).execute(&mut *tx).await?;
+        sqlx::query(&sql).execute(&mut tx).await?;
         tx.commit().await?;
     }
 
@@ -199,15 +199,15 @@ async fn rollback_all_migrations_leaves_clean_db() -> Result<()> {
         let has_sm: Option<i64> = sqlx::query_scalar(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations';",
         )
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut tx)
         .await?;
         if has_sm.is_some() {
             sqlx::query("DELETE FROM schema_migrations WHERE version = ?")
                 .bind(version)
-                .execute(&mut *tx)
+                .execute(&mut tx)
                 .await?;
         }
-        sqlx::query(&sql).execute(&mut *tx).await?;
+        sqlx::query(&sql).execute(&mut tx).await?;
         tx.commit().await?;
     }
 
