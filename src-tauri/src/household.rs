@@ -1,8 +1,10 @@
 use sqlx::{Row, SqlitePool};
 
+use crate::db::run_in_tx;
 use crate::id::new_uuid_v7;
 use crate::repo::admin;
 use crate::time::now_ms;
+use futures::FutureExt;
 
 pub async fn default_household_id(pool: &SqlitePool) -> anyhow::Result<String> {
     if let Some(row) = admin::first_active_for_all_households(pool, "household", None).await? {
@@ -12,12 +14,19 @@ pub async fn default_household_id(pool: &SqlitePool) -> anyhow::Result<String> {
 
     let id = new_uuid_v7();
     let now = now_ms();
-    sqlx::query("INSERT INTO household (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)")
-        .bind(&id)
-        .bind("Default")
-        .bind(now)
-        .bind(now)
-        .execute(pool)
-        .await?;
+    run_in_tx(pool, |tx| {
+        async move {
+        sqlx::query("INSERT INTO household (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)")
+            .bind(&id)
+            .bind("Default")
+            .bind(now)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+        Ok::<_, sqlx::Error>(())
+        }
+        .boxed()
+    })
+    .await?;
     Ok(id)
 }

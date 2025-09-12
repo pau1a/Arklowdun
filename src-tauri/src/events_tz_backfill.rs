@@ -4,7 +4,8 @@ use serde::Serialize;
 use sqlx::Row;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::{state::AppState, time::now_ms};
+use crate::{db::run_in_tx, state::AppState, time::now_ms};
+use futures::FutureExt;
 use super::commands::DbErrorPayload as DbError;
 
 #[derive(Serialize)]
@@ -86,49 +87,49 @@ pub async fn events_backfill_timezone(
         });
     }
 
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(|e| DbError { code: "Unknown".into(), message: e.to_string() })?;
-
-    // Legacy rows store `start_at` as wall-clock ms in `tz`; derive UTC values.
-    let rows = sqlx::query("SELECT id, start_at, end_at FROM events WHERE household_id = ? AND (tz IS NULL OR start_at_utc IS NULL)")
-        .bind(&household_id)
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(|e| DbError { code: "Unknown".into(), message: e.to_string() })?;
-
     let total_u = total as u64;
-    let mut processed = 0u64;
-    for row in rows {
-        let id: String = row.try_get("id").unwrap();
-        let start_at: i64 = row.try_get("start_at").unwrap_or(0);
-        let end_at: Option<i64> = row.try_get("end_at").ok();
+    let app_emit = app.clone();
+    let household_id_clone = household_id.clone();
+    let processed = run_in_tx(&pool, move |tx| {
+        let app = app_emit.clone();
+        async move {
+            // Legacy rows store `start_at` as wall-clock ms in `tz`; derive UTC values.
+            let rows = sqlx::query("SELECT id, start_at, end_at FROM events WHERE household_id = ? AND (tz IS NULL OR start_at_utc IS NULL)")
+                .bind(&household_id_clone)
+                .fetch_all(&mut *tx)
+                .await?;
 
-        let start_at_utc = to_utc_ms(start_at, tz);
-        let end_at_utc = end_at.map(|e| to_utc_ms(e, tz));
+            let mut processed = 0u64;
+            for row in rows {
+                let id: String = row.try_get("id").unwrap();
+                let start_at: i64 = row.try_get("start_at").unwrap_or(0);
+                let end_at: Option<i64> = row.try_get("end_at").ok();
 
-        sqlx::query("UPDATE events SET tz = ?, start_at_utc = ?, end_at_utc = ? WHERE id = ?")
-            .bind(tz.name())
-            .bind(start_at_utc)
-            .bind(end_at_utc)
-            .bind(&id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError { code: "Unknown".into(), message: e.to_string() })?;
+                let start_at_utc = to_utc_ms(start_at, tz);
+                let end_at_utc = end_at.map(|e| to_utc_ms(e, tz));
 
-        processed += 1;
-        if processed % 50 == 0 || processed == total_u {
-            let _ = app.emit(
-                "events_tz_backfill_progress",
-                Progress { processed, total: total_u },
-            );
+                    sqlx::query("UPDATE events SET tz = ?, start_at_utc = ?, end_at_utc = ? WHERE id = ?")
+                        .bind(tz.name())
+                        .bind(start_at_utc)
+                        .bind(end_at_utc)
+                        .bind(&id)
+                        .execute(&mut *tx)
+                        .await?;
+
+                processed += 1;
+                if processed % 50 == 0 || processed == total_u {
+                    let _ = app.emit(
+                        "events_tz_backfill_progress",
+                        Progress { processed, total: total_u },
+                    );
+                }
+            }
+            Ok::<_, sqlx::Error>(processed)
         }
-    }
-
-    tx.commit()
-        .await
-        .map_err(|e| DbError { code: "Unknown".into(), message: e.to_string() })?;
+        .boxed()
+    })
+    .await
+    .map_err(|e| DbError { code: "Unknown".into(), message: e.to_string() })?;
 
     use std::fs::{create_dir_all, File};
     use std::io::Write;

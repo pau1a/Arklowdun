@@ -2,6 +2,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sqlx::{sqlite::SqliteRow, Row, SqlitePool, Column, ValueRef, TypeInfo};
 
+use crate::db::run_in_tx;
+use futures::FutureExt;
+
 use crate::{id::new_uuid_v7, repo, time::now_ms, Event};
 use chrono::{NaiveDateTime, LocalResult, TimeZone, Utc, Duration, DateTime, Offset};
 use chrono_tz::Tz as ChronoTz;
@@ -28,6 +31,12 @@ fn map_sqlx_error(err: sqlx::Error) -> DbErrorPayload {
     DbErrorPayload {
         code: "Unknown".into(),
         message: err.to_string(),
+    }
+}
+
+impl From<sqlx::Error> for DbErrorPayload {
+    fn from(err: sqlx::Error) -> Self {
+        map_sqlx_error(err)
     }
 }
 
@@ -126,13 +135,19 @@ async fn create(
         cols.join(","),
         placeholders.join(",")
     );
-    let mut query = sqlx::query(&sql);
-    for c in &cols {
-        let v = data.get(c).unwrap();
-        query = bind_value(query, v);
-    }
-    query.execute(pool).await?;
-    Ok(Value::Object(data))
+    run_in_tx(pool, move |tx| {
+        async move {
+        let mut query = sqlx::query(&sql);
+        for c in &cols {
+            let v = data.get(c).unwrap();
+            query = bind_value(query, v);
+        }
+        query.execute(&mut *tx).await?;
+        Ok::<_, sqlx::Error>(Value::Object(data))
+        }
+        .boxed()
+    })
+    .await
 }
 
 async fn update(
@@ -159,19 +174,25 @@ async fn update(
             set_clause.join(",")
         )
     };
-    let mut query = sqlx::query(&sql);
-    for c in &cols {
-        let v = data.get(c).unwrap();
-        query = bind_value(query, v);
-    }
-    if table == "household" {
-        query = query.bind(id);
-    } else {
-        let hh = household_id.unwrap_or("");
-        query = query.bind(hh).bind(id);
-    }
-    query.execute(pool).await?;
-    Ok(())
+    run_in_tx(pool, move |tx| {
+        async move {
+        let mut query = sqlx::query(&sql);
+        for c in &cols {
+            let v = data.get(c).unwrap();
+            query = bind_value(query, v);
+        }
+        if table == "household" {
+            query = query.bind(id);
+        } else {
+            let hh = household_id.unwrap_or("");
+            query = query.bind(hh).bind(id);
+        }
+        query.execute(&mut *tx).await?;
+        Ok::<_, sqlx::Error>(())
+        }
+        .boxed()
+    })
+    .await
 }
 
 fn bind_value<'q>(q: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>>, v: &Value) -> sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>> {
