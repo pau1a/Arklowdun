@@ -3,7 +3,6 @@ use anyhow::Result;
 #[path = "../src/db.rs"]
 mod db;
 use db::with_tx;
-use sqlx::Executor;
 
 #[path = "util.rs"]
 mod util;

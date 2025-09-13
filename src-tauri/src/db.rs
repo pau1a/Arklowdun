@@ -7,20 +7,20 @@ use std::str::FromStr;
 use tauri::{AppHandle, Manager};
 
 // Boxed future whose lifetime is tied to the borrowed Transaction.
-#[allow(dead_code)]
-type TxFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
+pub type TxFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 
-#[allow(dead_code)]
 pub async fn with_tx<T, F>(pool: &SqlitePool, f: F) -> Result<T>
 where
     T: Send + 'static,
-    // For any 'a, the closure takes &mut Transaction<'a, Sqlite> and returns a future
-    // that is valid for 'a. This avoids borrowing across await in the caller.
-    F: for<'a> FnOnce(&'a mut Transaction<'_, Sqlite>) -> TxFuture<'a, T>,
+    // For any 'a, take &mut Transaction<'a, Sqlite> and return a future valid for 'a.
+    // Tying both lifetimes to 'a allows &mut Transaction to satisfy sqlx::Executor.
+    F: for<'a> FnOnce(&'a mut Transaction<'a, Sqlite>) -> TxFuture<'a, T>,
 {
     let mut tx = pool.begin().await?;
 
-    match f(&mut tx).await {
+    let res = f(&mut tx).await;
+
+    match res {
         Ok(out) => {
             tx.commit().await?;
             Ok(out)
