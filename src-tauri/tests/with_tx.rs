@@ -1,11 +1,37 @@
 use anyhow::Result;
 
+#[allow(dead_code)]
 #[path = "../src/db.rs"]
 mod db;
 use db::with_tx;
 
 #[path = "util.rs"]
 mod util;
+
+use sqlx::{Executor, Sqlite, Transaction};
+
+async fn insert_ok<'a>(tx: &'a mut Transaction<'a, Sqlite>) -> Result<()> {
+    tx.execute(sqlx::query("INSERT INTO t (val) VALUES ('ok');"))
+        .await?;
+    Ok(())
+}
+
+async fn insert_dup<'a>(tx: &'a mut Transaction<'a, Sqlite>) -> Result<()> {
+    tx.execute(sqlx::query("INSERT INTO t (val) VALUES ('dup');"))
+        .await?;
+    tx.execute(sqlx::query("INSERT INTO t (val) VALUES ('dup');"))
+        .await?;
+    Ok(())
+}
+
+async fn insert_then_panic<'a>(tx: &'a mut Transaction<'a, Sqlite>) -> Result<()> {
+    tx.execute(sqlx::query("INSERT INTO t (val) VALUES ('p');"))
+        .await
+        .unwrap();
+    panic!("boom");
+    #[allow(unreachable_code)]
+    Ok(())
+}
 
 #[tokio::test]
 async fn commit_happy_path() -> Result<()> {
@@ -14,15 +40,7 @@ async fn commit_happy_path() -> Result<()> {
         .execute(&pool)
         .await?;
 
-    with_tx(&pool, |tx| {
-        Box::pin(async move {
-            sqlx::query("INSERT INTO t (val) VALUES ('ok');")
-                .execute(&mut *tx)
-                .await?;
-            Ok(())
-        })
-    })
-    .await?;
+    with_tx(&pool, |tx| Box::pin(insert_ok(tx))).await?;
 
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM t;")
         .fetch_one(&pool)
@@ -38,18 +56,7 @@ async fn rollback_on_unique_violation() -> Result<()> {
         .execute(&pool)
         .await?;
 
-    let res = with_tx(&pool, |tx| {
-        Box::pin(async move {
-            sqlx::query("INSERT INTO t (val) VALUES ('dup');")
-                .execute(&mut *tx)
-                .await?;
-            sqlx::query("INSERT INTO t (val) VALUES ('dup');")
-                .execute(&mut *tx)
-                .await?;
-            Ok(())
-        })
-    })
-    .await;
+    let res = with_tx(&pool, |tx| Box::pin(insert_dup(tx))).await;
 
     assert!(res.is_err());
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM t;")
@@ -69,18 +76,7 @@ async fn rollback_on_panic() -> Result<()> {
     // Spawn a task that panics inside the transaction
     let pool2 = pool.clone();
     let j = tokio::spawn(async move {
-        let _ = with_tx(&pool2, |tx| {
-            Box::pin(async move {
-                sqlx::query("INSERT INTO t (val) VALUES ('p');")
-                    .execute(&mut *tx)
-                    .await
-                    .unwrap();
-                panic!("boom");
-                #[allow(unreachable_code)]
-                Ok::<(), anyhow::Error>(())
-            })
-        })
-        .await;
+        let _ = with_tx(&pool2, |tx| Box::pin(insert_then_panic(tx))).await;
     });
 
     let join_err = j.await.unwrap_err();

@@ -6,27 +6,34 @@ use std::pin::Pin;
 use std::str::FromStr;
 use tauri::{AppHandle, Manager};
 
-// Boxed future whose lifetime is tied to the borrowed Transaction.
+// A helper trait that ties the future's lifetime to the borrow lifetime using a GAT.
+/// Boxed future whose lifetime is tied to the borrowed transaction.
+#[allow(dead_code)]
 pub type TxFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 
+#[allow(dead_code)]
 pub async fn with_tx<T, F>(pool: &SqlitePool, f: F) -> Result<T>
 where
-    T: Send + 'static,
-    // For any 'a, take &mut Transaction<'a, Sqlite> and return a future valid for 'a.
-    // Tying both lifetimes to 'a allows &mut Transaction to satisfy sqlx::Executor.
+    T: Send,
+    // Tie both the tx borrow and the returned future to the same `'a`.
     F: for<'a> FnOnce(&'a mut Transaction<'a, Sqlite>) -> TxFuture<'a, T>,
 {
     let mut tx = pool.begin().await?;
-
-    let res = f(&mut tx).await;
-
+    // Borrow-checker shim: pass &mut tx via a raw pointer and await to completion
+    // so the borrow ends before we move `tx` into commit/rollback.
+    let tx_ptr: *mut Transaction<'_, Sqlite> = &mut tx;
+    let res = unsafe {
+        // SAFETY: We create a unique &mut from tx_ptr, hand it to `f`, await to completion,
+        // and do not touch `tx` elsewhere until after this await finishes.
+        f(&mut *tx_ptr).await
+    };
     match res {
         Ok(out) => {
             tx.commit().await?;
             Ok(out)
         }
         Err(err) => {
-            // Drop would roll back, but do it explicitly for clarity.
+            // (Drop would roll back; do it explicitly.)
             let _ = tx.rollback().await;
             Err(err)
         }
