@@ -187,33 +187,59 @@ pub async fn set_deleted_at(
     ensure_table(table)?;
     let household_id = require_household(household_id)?;
     let now = now_ms();
-    let res = if table == "household" {
-        let sql = format!("UPDATE {table} SET deleted_at = ?, updated_at = ? WHERE id = ?");
-        sqlx::query(&sql)
-            .bind(now)
-            .bind(now)
-            .bind(id)
-            .execute(pool)
-            .await?
-    } else {
-        let sql = format!(
-            "UPDATE {table} SET deleted_at = ?, updated_at = ? WHERE household_id = ? AND id = ?",
-        );
-        sqlx::query(&sql)
-            .bind(now)
-            .bind(now)
-            .bind(household_id)
-            .bind(id)
-            .execute(pool)
-            .await?
-    };
-    if res.rows_affected() == 0 {
-        anyhow::bail!("id not found");
-    }
     if table != "household" && ORDERED_TABLES.contains(&table) {
-        renumber_positions(pool, table, household_id).await?;
+        let household_id = household_id.to_string();
+        let id = id.to_string();
+        let table = table.to_string();
+        with_tx(pool, |tx| {
+            Box::pin(async move {
+                let tx: &mut sqlx::Transaction<'_, sqlx::Sqlite> = tx;
+                let sql = format!(
+                    "UPDATE {table} SET deleted_at = ?, updated_at = ? WHERE household_id = ? AND id = ?",
+                );
+                let res = tx
+                    .execute(
+                        sqlx::query(&sql)
+                            .bind(now)
+                            .bind(now)
+                            .bind(&household_id)
+                            .bind(&id),
+                    )
+                    .await?;
+                if res.rows_affected() == 0 {
+                    anyhow::bail!("id not found");
+                }
+                renumber_positions(&mut **tx, &table, &household_id).await?;
+                Ok(())
+            })
+        })
+        .await
+    } else {
+        let res = if table == "household" {
+            let sql = format!("UPDATE {table} SET deleted_at = ?, updated_at = ? WHERE id = ?");
+            sqlx::query(&sql)
+                .bind(now)
+                .bind(now)
+                .bind(id)
+                .execute(pool)
+                .await?
+        } else {
+            let sql = format!(
+                "UPDATE {table} SET deleted_at = ?, updated_at = ? WHERE household_id = ? AND id = ?",
+            );
+            sqlx::query(&sql)
+                .bind(now)
+                .bind(now)
+                .bind(household_id)
+                .bind(id)
+                .execute(pool)
+                .await?
+        };
+        if res.rows_affected() == 0 {
+            anyhow::bail!("id not found");
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 // TXN: domain=OUT OF SCOPE tables=*
@@ -226,27 +252,50 @@ pub async fn clear_deleted_at(
     ensure_table(table)?;
     let household_id = require_household(household_id)?;
     let now = now_ms();
-    let res = if table == "household" {
-        let sql = format!("UPDATE {table} SET deleted_at = NULL, updated_at = ? WHERE id = ?");
-        sqlx::query(&sql).bind(now).bind(id).execute(pool).await?
-    } else {
-        let sql = format!(
-            "UPDATE {table} SET deleted_at = NULL, position = position + 1000000, updated_at = ? WHERE household_id = ? AND id = ?",
-        );
-        sqlx::query(&sql)
-            .bind(now)
-            .bind(household_id)
-            .bind(id)
-            .execute(pool)
-            .await?
-    };
-    if res.rows_affected() == 0 {
-        anyhow::bail!("id not found");
-    }
     if table != "household" && ORDERED_TABLES.contains(&table) {
-        renumber_positions(pool, table, household_id).await?;
+        let household_id = household_id.to_string();
+        let id = id.to_string();
+        let table = table.to_string();
+        with_tx(pool, |tx| {
+            Box::pin(async move {
+                let tx: &mut sqlx::Transaction<'_, sqlx::Sqlite> = tx;
+                let sql = format!(
+                    "UPDATE {table} SET deleted_at = NULL, position = position + 1000000, updated_at = ? WHERE household_id = ? AND id = ?",
+                );
+                let res = tx
+                    .execute(sqlx::query(&sql).bind(now).bind(&household_id).bind(&id))
+                    .await?;
+                if res.rows_affected() == 0 {
+                    anyhow::bail!("id not found");
+                }
+                renumber_positions(&mut **tx, &table, &household_id).await?;
+                Ok(())
+            })
+        })
+        .await
+    } else {
+        let res = if table == "household" {
+            let sql = format!("UPDATE {table} SET deleted_at = NULL, updated_at = ? WHERE id = ?");
+            sqlx::query(&sql).bind(now).bind(id).execute(pool).await?
+        } else {
+            let sql = format!(
+                "UPDATE {table} SET deleted_at = NULL, position = position + 1000000, updated_at = ? WHERE household_id = ? AND id = ?",
+            );
+            sqlx::query(&sql)
+                .bind(now)
+                .bind(household_id)
+                .bind(id)
+                .execute(pool)
+                .await?
+        };
+        if res.rows_affected() == 0 {
+            anyhow::bail!("id not found");
+        }
+        if table != "household" && ORDERED_TABLES.contains(&table) {
+            renumber_positions(pool, table, household_id).await?;
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 pub mod items {
@@ -401,39 +450,47 @@ pub(crate) async fn reorder_positions(
     updates: &[(String, i64)],
 ) -> anyhow::Result<()> {
     ensure_table(table)?;
-    let household_id = require_household(household_id)?;
-    let mut tx = pool.begin().await?;
+    let household_id = require_household(household_id)?.to_string();
+    let table = table.to_string();
+    let updates: Vec<(String, i64)> = updates.to_vec();
     let now = now_ms();
 
-    let bump_sql = format!(
-        "UPDATE {table} \
+    with_tx(pool, |tx| {
+        Box::pin(async move {
+            let tx: &mut sqlx::Transaction<'_, sqlx::Sqlite> = tx;
+            let bump_sql = format!(
+                "UPDATE {table} \
          SET position = position + 1000000, updated_at = ? \
          WHERE household_id = ? AND deleted_at IS NULL",
-    );
-    sqlx::query(&bump_sql)
-        .bind(now)
-        .bind(household_id)
-        .execute(&mut *tx)
-        .await?;
+            );
+            tx.execute(sqlx::query(&bump_sql).bind(now).bind(&household_id))
+                .await?;
 
-    let update_sql = format!(
-        "UPDATE {table} \
+            let update_sql = format!(
+                "UPDATE {table} \
          SET position = ?, updated_at = ? \
          WHERE id = ? AND household_id = ?",
-    );
-    for (id, pos) in updates {
-        sqlx::query(&update_sql)
-            .bind(pos)
-            .bind(now)
-            .bind(id)
-            .bind(household_id)
-            .execute(&mut *tx)
-            .await?;
-    }
+            );
+            for (id, pos) in &updates {
+                let res = tx
+                    .execute(
+                        sqlx::query(&update_sql)
+                            .bind(pos)
+                            .bind(now)
+                            .bind(id)
+                            .bind(&household_id),
+                    )
+                    .await?;
+                if res.rows_affected() == 0 {
+                    anyhow::bail!("id not found");
+                }
+            }
 
-    renumber_positions(&mut *tx, table, household_id).await?;
-    tx.commit().await?;
-    Ok(())
+            renumber_positions(&mut **tx, &table, &household_id).await?;
+            Ok(())
+        })
+    })
+    .await
 }
 
 // Kept for the future SQLite-backed Notes path; UI is file-based today.
@@ -640,6 +697,42 @@ mod tests {
         assert_eq!(second_pos, 1);
     }
 
+    #[tokio::test]
+    async fn reorder_positions_rollback_on_bad_id() {
+        let pool = setup_ordered_db().await;
+        sqlx::query(
+            "INSERT INTO bills (id, household_id, position, created_at, updated_at) VALUES ('a','A',0,0,0), ('b','A',1,0,0), ('c','A',2,0,0)"
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let res = reorder_positions(
+            &pool,
+            "bills",
+            "A",
+            &[("a".into(), 2), ("b".into(), 0), ("zzz".into(), 1)],
+        )
+        .await;
+        assert!(res.is_err());
+
+        let rows = list_active(
+            &pool,
+            "bills",
+            "A",
+            Some("position, created_at, id"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let ids: Vec<(String, i64)> = rows
+            .iter()
+            .map(|r| (r.try_get("id").unwrap(), r.try_get("position").unwrap()))
+            .collect();
+        assert_eq!(ids, vec![("a".into(), 0), ("b".into(), 1), ("c".into(), 2)]);
+    }
+
     async fn setup_notes_db() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         sqlx::query(
@@ -687,6 +780,88 @@ mod tests {
         let second_pos: i64 = rows[1].try_get("position").unwrap();
         assert_eq!((first_id, first_pos), ("b".into(), 0));
         assert_eq!((second_id, second_pos), ("a".into(), 1));
+    }
+
+    #[tokio::test]
+    async fn soft_delete_renumbers_bills() {
+        let pool = setup_ordered_db().await;
+        sqlx::query("INSERT INTO bills (id, household_id, position, created_at, updated_at) VALUES ('a','A',0,0,0), ('b','A',1,0,0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        set_deleted_at(&pool, "bills", "A", "a").await.unwrap();
+        let rows = list_active(
+            &pool,
+            "bills",
+            "A",
+            Some("position, created_at, id"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), 1);
+        let id: String = rows[0].try_get("id").unwrap();
+        let pos: i64 = rows[0].try_get("position").unwrap();
+        assert_eq!(id, "b");
+        assert_eq!(pos, 0);
+    }
+
+    #[tokio::test]
+    async fn soft_delete_failure_is_rolled_back() {
+        let pool = setup_ordered_db().await;
+        sqlx::query("INSERT INTO bills (id, household_id, position, created_at, updated_at) VALUES ('a','A',0,0,0), ('b','A',1,0,0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let res = set_deleted_at(&pool, "bills", "A", "zzz").await;
+        assert!(res.is_err());
+
+        let rows = list_active(
+            &pool,
+            "bills",
+            "A",
+            Some("position, created_at, id"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let ids: Vec<(String, i64)> = rows
+            .iter()
+            .map(|r| (r.try_get("id").unwrap(), r.try_get("position").unwrap()))
+            .collect();
+        assert_eq!(ids, vec![("a".into(), 0), ("b".into(), 1)]);
+    }
+
+    #[tokio::test]
+    async fn restore_renumbers_bills() {
+        let pool = setup_ordered_db().await;
+        sqlx::query("INSERT INTO bills (id, household_id, position, created_at, updated_at) VALUES ('a','A',0,0,0), ('b','A',1,0,0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        set_deleted_at(&pool, "bills", "A", "b").await.unwrap();
+        clear_deleted_at(&pool, "bills", "A", "b").await.unwrap();
+
+        let rows = list_active(
+            &pool,
+            "bills",
+            "A",
+            Some("position, created_at, id"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let ids: Vec<(String, i64)> = rows
+            .iter()
+            .map(|r| (r.try_get("id").unwrap(), r.try_get("position").unwrap()))
+            .collect();
+        assert_eq!(ids, vec![("a".into(), 0), ("b".into(), 1)]);
     }
 
     #[tokio::test]
