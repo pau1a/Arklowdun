@@ -1,6 +1,6 @@
-use sqlx::{Executor, SqlitePool, Row, Column, ValueRef, TypeInfo};
-use sqlx::sqlite::SqliteRow;
 use serde_json::{Map, Value};
+use sqlx::sqlite::SqliteRow;
+use sqlx::{Column, Executor, Row, SqlitePool, TypeInfo, ValueRef};
 
 use crate::db::with_tx;
 use crate::time::now_ms;
@@ -249,6 +249,119 @@ pub async fn clear_deleted_at(
     Ok(())
 }
 
+pub mod items {
+    use super::{ensure_table, require_household};
+    use crate::{db::with_tx, time::now_ms};
+    use sqlx::{Executor, SqlitePool};
+
+    // TXN: domain=items tables=inventory_items,shopping_items
+    pub async fn delete_item(
+        pool: &SqlitePool,
+        table: &str,
+        household_id: &str,
+        id: &str,
+    ) -> anyhow::Result<()> {
+        ensure_table(table)?;
+        let household_id = require_household(household_id)?.to_string();
+        let id = id.to_string();
+        let table = table.to_string();
+        let now = now_ms();
+
+        with_tx(pool, |tx| {
+            Box::pin(async move {
+                let tx: &mut sqlx::Transaction<'_, sqlx::Sqlite> = tx;
+                let sql = format!(
+                    "UPDATE {table} SET deleted_at = ?, updated_at = ? \
+                     WHERE household_id = ? AND id = ?"
+                );
+                let res = tx
+                    .execute(
+                        sqlx::query(&sql)
+                            .bind(now)
+                            .bind(now)
+                            .bind(&household_id)
+                            .bind(&id),
+                    )
+                    .await?;
+                if res.rows_affected() == 0 {
+                    anyhow::bail!("id not found");
+                }
+
+                let renumber_sql = format!(
+                    r#"
+        WITH ordered AS (
+            SELECT id,
+                   ROW_NUMBER() OVER (ORDER BY position, created_at, id) - 1 AS new_pos
+            FROM {table}
+            WHERE household_id = ? AND deleted_at IS NULL
+        )
+        UPDATE {table}
+        SET position = (
+            SELECT new_pos FROM ordered WHERE ordered.id = {table}.id
+        )
+        WHERE id IN (SELECT id FROM ordered)
+        "#,
+                );
+                tx.execute(sqlx::query(&renumber_sql).bind(&household_id))
+                    .await?;
+                Ok(())
+            })
+        })
+        .await
+    }
+
+    // TXN: domain=items tables=inventory_items,shopping_items
+    pub async fn restore_item(
+        pool: &SqlitePool,
+        table: &str,
+        household_id: &str,
+        id: &str,
+    ) -> anyhow::Result<()> {
+        ensure_table(table)?;
+        let household_id = require_household(household_id)?.to_string();
+        let id = id.to_string();
+        let table = table.to_string();
+        let now = now_ms();
+
+        with_tx(pool, |tx| {
+            Box::pin(async move {
+                let tx: &mut sqlx::Transaction<'_, sqlx::Sqlite> = tx;
+                let sql = format!(
+                    "UPDATE {table} \
+                     SET deleted_at = NULL, position = position + 1000000, updated_at = ? \
+                     WHERE household_id = ? AND id = ?"
+                );
+                let res = tx
+                    .execute(sqlx::query(&sql).bind(now).bind(&household_id).bind(&id))
+                    .await?;
+                if res.rows_affected() == 0 {
+                    anyhow::bail!("id not found");
+                }
+
+                let renumber_sql = format!(
+                    r#"
+        WITH ordered AS (
+            SELECT id,
+                   ROW_NUMBER() OVER (ORDER BY position, created_at, id) - 1 AS new_pos
+            FROM {table}
+            WHERE household_id = ? AND deleted_at IS NULL
+        )
+        UPDATE {table}
+        SET position = (
+            SELECT new_pos FROM ordered WHERE ordered.id = {table}.id
+        )
+        WHERE id IN (SELECT id FROM ordered)
+        "#,
+                );
+                tx.execute(sqlx::query(&renumber_sql).bind(&household_id))
+                    .await?;
+                Ok(())
+            })
+        })
+        .await
+    }
+}
+
 // TXN: domain=ordering tables=*
 pub async fn renumber_positions<'a, E>(
     exec: E,
@@ -388,8 +501,7 @@ pub mod admin {
         let order = order_by
             .filter(|ob| ALLOWED_ORDERS.contains(ob))
             .unwrap_or(default_order);
-        let mut sql =
-            format!("SELECT * FROM {table} WHERE deleted_at IS NULL ORDER BY {order}");
+        let mut sql = format!("SELECT * FROM {table} WHERE deleted_at IS NULL ORDER BY {order}");
         if limit.is_some() {
             sql.push_str(" LIMIT ?");
         }
@@ -412,8 +524,7 @@ pub mod admin {
         table: &str,
         order_by: Option<&str>,
     ) -> anyhow::Result<Option<SqliteRow>> {
-        let mut rows =
-            list_active_for_all_households(pool, table, order_by, Some(1), None).await?;
+        let mut rows = list_active_for_all_households(pool, table, order_by, Some(1), None).await?;
         Ok(rows.pop())
     }
 }
@@ -421,8 +532,8 @@ pub mod admin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::{Row, SqlitePool};
     use sqlx::sqlite::SqlitePoolOptions;
+    use sqlx::{Row, SqlitePool};
 
     async fn setup_db() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
@@ -447,21 +558,31 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        let rows_a = list_active(&pool, "events", "A", None, None, None).await.unwrap();
+        let rows_a = list_active(&pool, "events", "A", None, None, None)
+            .await
+            .unwrap();
         assert_eq!(rows_a.len(), 1);
         let id_a: String = rows_a[0].try_get("id").unwrap();
         assert_eq!(id_a, "a");
 
-        let first_a = first_active(&pool, "events", "A", None).await.unwrap().unwrap();
+        let first_a = first_active(&pool, "events", "A", None)
+            .await
+            .unwrap()
+            .unwrap();
         let first_id_a: String = first_a.try_get("id").unwrap();
         assert_eq!(first_id_a, "a");
 
-        let rows_b = list_active(&pool, "events", "B", None, None, None).await.unwrap();
+        let rows_b = list_active(&pool, "events", "B", None, None, None)
+            .await
+            .unwrap();
         assert_eq!(rows_b.len(), 1);
         let id_b: String = rows_b[0].try_get("id").unwrap();
         assert_eq!(id_b, "b");
 
-        let first_b = first_active(&pool, "events", "B", None).await.unwrap().unwrap();
+        let first_b = first_active(&pool, "events", "B", None)
+            .await
+            .unwrap()
+            .unwrap();
         let first_id_b: String = first_b.try_get("id").unwrap();
         assert_eq!(first_id_b, "b");
     }
@@ -469,11 +590,15 @@ mod tests {
     #[tokio::test]
     async fn smoke_with_valid_household() {
         let pool = setup_db().await;
-        sqlx::query("INSERT INTO events (id, household_id, created_at, updated_at) VALUES ('a', 'A', 0, 0)")
-            .execute(&pool)
+        sqlx::query(
+            "INSERT INTO events (id, household_id, created_at, updated_at) VALUES ('a', 'A', 0, 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let rows = list_active(&pool, "events", "A", None, None, None)
             .await
             .unwrap();
-        let rows = list_active(&pool, "events", "A", None, None, None).await.unwrap();
         assert_eq!(rows.len(), 1);
     }
 
@@ -495,7 +620,16 @@ mod tests {
         reorder_positions(&pool, "bills", "A", &[("a".into(), 1), ("b".into(), 0)])
             .await
             .unwrap();
-        let rows = list_active(&pool, "bills", "A", Some("position, created_at, id"), None, None).await.unwrap();
+        let rows = list_active(
+            &pool,
+            "bills",
+            "A",
+            Some("position, created_at, id"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         let first_id: String = rows[0].try_get("id").unwrap();
         let first_pos: i64 = rows[0].try_get("position").unwrap();
         assert_eq!(first_id, "b");
@@ -526,7 +660,9 @@ mod tests {
             .unwrap();
 
         set_deleted_at(&pool, "notes", "H", "a").await.unwrap();
-        let rows = list_active(&pool, "notes", "H", None, None, None).await.unwrap();
+        let rows = list_active(&pool, "notes", "H", None, None, None)
+            .await
+            .unwrap();
         assert_eq!(rows.len(), 1);
         let id: String = rows[0].try_get("id").unwrap();
         let pos: i64 = rows[0].try_get("position").unwrap();
@@ -534,9 +670,16 @@ mod tests {
         assert_eq!(pos, 0); // renumbered
 
         clear_deleted_at(&pool, "notes", "H", "a").await.unwrap();
-        let rows = list_active(&pool, "notes", "H", Some("position, created_at, id"), None, None)
-            .await
-            .unwrap();
+        let rows = list_active(
+            &pool,
+            "notes",
+            "H",
+            Some("position, created_at, id"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(rows.len(), 2);
         let first_id: String = rows[0].try_get("id").unwrap();
         let first_pos: i64 = rows[0].try_get("position").unwrap();
@@ -628,12 +771,10 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        sqlx::query(
-            "INSERT INTO notes (id, household_id, z, updated_at) VALUES ('n1','hh',5,0)",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        sqlx::query("INSERT INTO notes (id, household_id, z, updated_at) VALUES ('n1','hh',5,0)")
+            .execute(&pool)
+            .await
+            .unwrap();
 
         // Capture pre-state
         let z_before: i64 = sqlx::query_scalar("SELECT z FROM notes WHERE id='n1'")
@@ -642,9 +783,7 @@ mod tests {
             .unwrap();
 
         // Act: call with a non-existent id to force an error
-        let err = super::bring_note_to_front(&pool, "hh", "nope")
-            .await
-            .err();
+        let err = super::bring_note_to_front(&pool, "hh", "nope").await.err();
         assert!(err.is_some(), "expected error for non-existent id");
 
         // Assert: state unchanged (no partial writes persisted)

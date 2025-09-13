@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use sqlx::{sqlite::SqliteRow, Row, SqlitePool, Column, ValueRef, TypeInfo};
+use sqlx::{sqlite::SqliteRow, Column, Row, SqlitePool, TypeInfo, ValueRef};
 
 use crate::{id::new_uuid_v7, repo, time::now_ms, Event};
-use chrono::{NaiveDateTime, LocalResult, TimeZone, Utc, Duration, DateTime, Offset};
+use chrono::{DateTime, Duration, LocalResult, NaiveDateTime, Offset, TimeZone, Utc};
 use chrono_tz::Tz as ChronoTz;
-use rrule::{RRule, RRuleSet, Unvalidated, Tz};
+use rrule::{RRule, RRuleSet, Tz, Unvalidated};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DbErrorPayload {
@@ -117,7 +117,8 @@ async fn create(
         .unwrap_or_else(new_uuid_v7);
     data.insert("id".into(), Value::String(id.clone()));
     let now = now_ms();
-    data.entry(String::from("created_at")).or_insert(Value::from(now));
+    data.entry(String::from("created_at"))
+        .or_insert(Value::from(now));
     data.insert("updated_at".into(), Value::from(now));
 
     let cols: Vec<String> = data.keys().cloned().collect();
@@ -151,10 +152,7 @@ async fn update(
     let cols: Vec<String> = data.keys().cloned().collect();
     let set_clause: Vec<String> = cols.iter().map(|c| format!("{c} = ?")).collect();
     let sql = if table == "household" {
-        format!(
-            "UPDATE {table} SET {} WHERE id = ?",
-            set_clause.join(",")
-        )
+        format!("UPDATE {table} SET {} WHERE id = ?", set_clause.join(","))
     } else {
         format!(
             "UPDATE {table} SET {} WHERE household_id = ? AND id = ?",
@@ -176,7 +174,10 @@ async fn update(
     Ok(())
 }
 
-fn bind_value<'q>(q: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>>, v: &Value) -> sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>> {
+fn bind_value<'q>(
+    q: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>>,
+    v: &Value,
+) -> sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>> {
     match v {
         Value::Null => q.bind(Option::<i64>::None),
         Value::Number(n) => {
@@ -204,7 +205,10 @@ pub async fn list_command(
 ) -> Result<Vec<Value>, DbErrorPayload> {
     list(pool, table, household_id, order_by, limit, offset)
         .await
-        .map_err(|e| DbErrorPayload { code: "Unknown".into(), message: e.to_string() })
+        .map_err(|e| DbErrorPayload {
+            code: "Unknown".into(),
+            message: e.to_string(),
+        })
 }
 
 pub async fn get_command(
@@ -215,7 +219,10 @@ pub async fn get_command(
 ) -> Result<Option<Value>, DbErrorPayload> {
     get(pool, table, household_id, id)
         .await
-        .map_err(|e| DbErrorPayload { code: "Unknown".into(), message: e.to_string() })
+        .map_err(|e| DbErrorPayload {
+            code: "Unknown".into(),
+            message: e.to_string(),
+        })
 }
 
 // TXN: domain=OUT OF SCOPE tables=*
@@ -247,9 +254,20 @@ pub async fn delete_command(
     household_id: &str,
     id: &str,
 ) -> Result<(), DbErrorPayload> {
+    if table == "inventory_items" || table == "shopping_items" {
+        return repo::items::delete_item(pool, table, household_id, id)
+            .await
+            .map_err(|e| DbErrorPayload {
+                code: "Unknown".into(),
+                message: e.to_string(),
+            });
+    }
     repo::set_deleted_at(pool, table, household_id, id)
         .await
-        .map_err(|e| DbErrorPayload { code: "Unknown".into(), message: e.to_string() })
+        .map_err(|e| DbErrorPayload {
+            code: "Unknown".into(),
+            message: e.to_string(),
+        })
 }
 
 // TXN: domain=OUT OF SCOPE tables=*
@@ -259,9 +277,20 @@ pub async fn restore_command(
     household_id: &str,
     id: &str,
 ) -> Result<(), DbErrorPayload> {
+    if table == "inventory_items" || table == "shopping_items" {
+        return repo::items::restore_item(pool, table, household_id, id)
+            .await
+            .map_err(|e| DbErrorPayload {
+                code: "Unknown".into(),
+                message: e.to_string(),
+            });
+    }
     repo::clear_deleted_at(pool, table, household_id, id)
         .await
-        .map_err(|e| DbErrorPayload { code: "Unknown".into(), message: e.to_string() })
+        .map_err(|e| DbErrorPayload {
+            code: "Unknown".into(),
+            message: e.to_string(),
+        })
 }
 
 pub async fn events_list_range_command(
@@ -270,8 +299,10 @@ pub async fn events_list_range_command(
     start: i64,
     end: i64,
 ) -> Result<Vec<Event>, DbErrorPayload> {
-    let hh = repo::require_household(household_id)
-        .map_err(|e| DbErrorPayload { code: "Unknown".into(), message: e.to_string() })?;
+    let hh = repo::require_household(household_id).map_err(|e| DbErrorPayload {
+        code: "Unknown".into(),
+        message: e.to_string(),
+    })?;
     let rows = sqlx::query_as::<_, Event>(
         r#"
         SELECT id, household_id, title, start_at, end_at, tz, start_at_utc, end_at_utc,
@@ -391,8 +422,7 @@ pub async fn events_list_range_command(
     }
 
     out.sort_by(|a, b| {
-        a
-            .start_at_utc
+        a.start_at_utc
             .unwrap_or(a.start_at)
             .cmp(&b.start_at_utc.unwrap_or(b.start_at))
             .then(a.title.cmp(&b.title))
