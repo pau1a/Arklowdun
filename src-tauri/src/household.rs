@@ -4,6 +4,7 @@ use crate::id::new_uuid_v7;
 use crate::repo::admin;
 use crate::time::now_ms;
 
+// TXN: domain=OUT OF SCOPE tables=household
 pub async fn default_household_id(pool: &SqlitePool) -> anyhow::Result<String> {
     if let Some(row) = admin::first_active_for_all_households(pool, "household", None).await? {
         let id: String = row.try_get("id")?;

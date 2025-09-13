@@ -176,6 +176,7 @@ async fn should_skip_stmt(conn: &mut SqliteConnection, stmt: &str) -> anyhow::Re
     Ok(false)
 }
 
+// TXN: domain=OUT OF SCOPE tables=schema_migrations
 pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     pool.execute("PRAGMA foreign_keys=ON").await?;
     pool.execute(
@@ -364,6 +365,7 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
 }
 
 #[allow(dead_code)]
+// TXN: domain=OUT OF SCOPE tables=schema_migrations
 pub async fn revert_last_migration(pool: &SqlitePool) -> anyhow::Result<()> {
     pool.execute("PRAGMA foreign_keys=ON").await?;
     if let Some(row) =

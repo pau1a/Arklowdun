@@ -42,6 +42,7 @@ fn to_utc_ms(local_ms: i64, tz: Tz) -> i64 {
 }
 
 #[tauri::command]
+// TXN: domain=OUT OF SCOPE tables=events
 pub async fn events_backfill_timezone(
     app: AppHandle,
     household_id: String,

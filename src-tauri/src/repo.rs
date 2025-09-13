@@ -176,6 +176,7 @@ pub(crate) async fn get_active(
     Ok(row)
 }
 
+// TXN: domain=OUT OF SCOPE tables=*
 pub async fn set_deleted_at(
     pool: &SqlitePool,
     table: &str,
@@ -214,6 +215,7 @@ pub async fn set_deleted_at(
     Ok(())
 }
 
+// TXN: domain=OUT OF SCOPE tables=*
 pub async fn clear_deleted_at(
     pool: &SqlitePool,
     table: &str,
@@ -246,6 +248,7 @@ pub async fn clear_deleted_at(
     Ok(())
 }
 
+// TXN: domain=ordering tables=*
 pub async fn renumber_positions<'a, E>(
     exec: E,
     table: &str,
@@ -276,6 +279,7 @@ where
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
+// TXN: domain=ordering tables=*
 pub(crate) async fn reorder_positions(
     pool: &SqlitePool,
     table: &str,
@@ -320,6 +324,7 @@ pub(crate) async fn reorder_positions(
 
 // Kept for the future SQLite-backed Notes path; UI is file-based today.
 #[cfg_attr(not(test), allow(dead_code))]
+// TXN: domain=notes tables=notes
 pub(crate) async fn bring_note_to_front(
     pool: &SqlitePool,
     household_id: &str,
