@@ -16,3 +16,5 @@
 | OUT OF SCOPE | apply_migrations | src-tauri/src/migrate.rs:180 | schema_migrations | Yes | No | Applies pending migrations |
 | OUT OF SCOPE | revert_last_migration | src-tauri/src/migrate.rs:369 | schema_migrations | Yes | No | Rolls back last migration |
 | OUT OF SCOPE | open_sqlite_pool | src-tauri/src/db.rs:8 | PRAGMA | No | No | Sets PRAGMA defaults on connection |
+
+> **TODO:** Idempotent retries for cross-domain writes are currently unsupported. Deterministic inserts without conflict handling (e.g., `order_items`) will roll back on conflict; future design should add upsert semantics for all entities.
