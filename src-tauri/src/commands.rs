@@ -104,6 +104,7 @@ async fn get(
     Ok(row.map(row_to_value))
 }
 
+// TXN: domain=OUT OF SCOPE tables=*
 async fn create(
     pool: &SqlitePool,
     table: &str,
@@ -135,6 +136,7 @@ async fn create(
     Ok(Value::Object(data))
 }
 
+// TXN: domain=OUT OF SCOPE tables=*
 async fn update(
     pool: &SqlitePool,
     table: &str,
@@ -216,6 +218,7 @@ pub async fn get_command(
         .map_err(|e| DbErrorPayload { code: "Unknown".into(), message: e.to_string() })
 }
 
+// TXN: domain=OUT OF SCOPE tables=*
 pub async fn create_command(
     pool: &SqlitePool,
     table: &str,
@@ -224,6 +227,7 @@ pub async fn create_command(
     create(pool, table, data).await.map_err(map_sqlx_error)
 }
 
+// TXN: domain=OUT OF SCOPE tables=*
 pub async fn update_command(
     pool: &SqlitePool,
     table: &str,
@@ -236,6 +240,7 @@ pub async fn update_command(
         .map_err(map_sqlx_error)
 }
 
+// TXN: domain=OUT OF SCOPE tables=*
 pub async fn delete_command(
     pool: &SqlitePool,
     table: &str,
@@ -247,6 +252,7 @@ pub async fn delete_command(
         .map_err(|e| DbErrorPayload { code: "Unknown".into(), message: e.to_string() })
 }
 
+// TXN: domain=OUT OF SCOPE tables=*
 pub async fn restore_command(
     pool: &SqlitePool,
     table: &str,

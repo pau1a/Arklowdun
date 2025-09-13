@@ -4,6 +4,7 @@ use sqlx::{Pool, Sqlite};
 use std::str::FromStr;
 use tauri::{AppHandle, Manager};
 
+// TXN: domain=OUT OF SCOPE tables=PRAGMA
 pub async fn open_sqlite_pool(app: &AppHandle) -> Result<Pool<Sqlite>> {
     let app_dir = app
         .path()
