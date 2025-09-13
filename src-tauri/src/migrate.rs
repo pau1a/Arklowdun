@@ -144,7 +144,7 @@ async fn should_skip_stmt(conn: &mut SqliteConnection, stmt: &str) -> anyhow::Re
     if let Some(c) = ADD_RE.captures(stmt) {
         let table = c.get(1).unwrap().as_str().trim_matches('"');
         let col = c.get(2).unwrap().as_str().trim_matches('"');
-        return Ok(column_exists(conn, table, col).await?);
+        return column_exists(conn, table, col).await;
     }
 
     static RENAME_RE: Lazy<Regex> = Lazy::new(|| {
@@ -192,33 +192,31 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
         .fetch_one(pool)
         .await?
         == 0
-    {
-        if sqlx::query_scalar::<_, i64>(
+        && sqlx::query_scalar::<_, i64>(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='migrations'",
         )
         .fetch_optional(pool)
         .await?
         .is_some()
-        {
-            let old = sqlx::query("SELECT id, applied_at FROM migrations")
-                .fetch_all(pool)
-                .await?;
-            for row in old {
-                let id: String = row.try_get("id")?;
-                let applied_at: i64 = row.try_get("applied_at")?;
-                let mapped = if id.ends_with(".sql") {
-                    id.trim_end_matches(".sql").to_string() + ".up.sql"
-                } else {
-                    id.clone() + ".up.sql"
-                };
-                sqlx::query(
-                    "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
-                )
-                .bind(mapped)
-                .bind(applied_at)
-                .execute(pool)
-                .await?;
-            }
+    {
+        let old = sqlx::query("SELECT id, applied_at FROM migrations")
+            .fetch_all(pool)
+            .await?;
+        for row in old {
+            let id: String = row.try_get("id")?;
+            let applied_at: i64 = row.try_get("applied_at")?;
+            let mapped = if id.ends_with(".sql") {
+                id.trim_end_matches(".sql").to_string() + ".up.sql"
+            } else {
+                id.clone() + ".up.sql"
+            };
+            sqlx::query(
+                "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+            )
+            .bind(mapped)
+            .bind(applied_at)
+            .execute(pool)
+            .await?;
         }
     }
 
