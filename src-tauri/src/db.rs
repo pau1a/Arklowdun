@@ -2,18 +2,35 @@ use anyhow::Result;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Pool, Sqlite, SqlitePool, Transaction};
 use std::future::Future;
+use std::pin::Pin;
 use std::str::FromStr;
 use tauri::{AppHandle, Manager};
 
-pub async fn with_tx<T, F, Fut>(pool: &SqlitePool, f: F) -> Result<T>
+// Boxed future whose lifetime is tied to the borrowed Transaction.
+#[allow(dead_code)]
+type TxFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
+
+#[allow(dead_code)]
+pub async fn with_tx<T, F>(pool: &SqlitePool, f: F) -> Result<T>
 where
-    F: for<'a> FnOnce(&'a mut Transaction<'a, Sqlite>) -> Fut,
-    Fut: Future<Output = Result<T>>,
+    T: Send + 'static,
+    // For any 'a, the closure takes &mut Transaction<'a, Sqlite> and returns a future
+    // that is valid for 'a. This avoids borrowing across await in the caller.
+    F: for<'a> FnOnce(&'a mut Transaction<'_, Sqlite>) -> TxFuture<'a, T>,
 {
     let mut tx = pool.begin().await?;
-    let out = f(&mut tx).await?;
-    tx.commit().await?;
-    Ok(out)
+
+    match f(&mut tx).await {
+        Ok(out) => {
+            tx.commit().await?;
+            Ok(out)
+        }
+        Err(err) => {
+            // Drop would roll back, but do it explicitly for clarity.
+            let _ = tx.rollback().await;
+            Err(err)
+        }
+    }
 }
 
 // TXN: domain=OUT OF SCOPE tables=PRAGMA
