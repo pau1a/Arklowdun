@@ -1,8 +1,20 @@
 use anyhow::Result;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
-use sqlx::{Pool, Sqlite};
+use sqlx::{Pool, Sqlite, SqlitePool, Transaction};
+use std::future::Future;
 use std::str::FromStr;
 use tauri::{AppHandle, Manager};
+
+pub async fn with_tx<T, F, Fut>(pool: &SqlitePool, f: F) -> Result<T>
+where
+    F: for<'a> FnOnce(&'a mut Transaction<'a, Sqlite>) -> Fut,
+    Fut: Future<Output = Result<T>>,
+{
+    let mut tx = pool.begin().await?;
+    let out = f(&mut tx).await?;
+    tx.commit().await?;
+    Ok(out)
+}
 
 // TXN: domain=OUT OF SCOPE tables=PRAGMA
 pub async fn open_sqlite_pool(app: &AppHandle) -> Result<Pool<Sqlite>> {
