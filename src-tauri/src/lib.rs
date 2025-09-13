@@ -1196,6 +1196,11 @@ mod search_tests {
         .execute(&pool)
         .await
         .unwrap();
+        // make the index table exist so readiness can ever be true
+        sqlx::query("CREATE TABLE files_index (dummy INTEGER)")
+            .execute(&pool)
+            .await
+            .unwrap();
         sqlx::query("INSERT INTO files (id, household_id, filename, updated_at) VALUES ('f1','hh','a',0)")
             .execute(&pool)
             .await
