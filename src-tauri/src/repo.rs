@@ -2,6 +2,7 @@ use sqlx::{Executor, SqlitePool, Row, Column, ValueRef, TypeInfo};
 use sqlx::sqlite::SqliteRow;
 use serde_json::{Map, Value};
 
+use crate::db::with_tx;
 use crate::time::now_ms;
 
 pub(crate) const DOMAIN_TABLES: &[&str] = &[
@@ -330,26 +331,38 @@ pub(crate) async fn bring_note_to_front(
     household_id: &str,
     id: &str,
 ) -> anyhow::Result<()> {
-    let household_id = require_household(household_id)?;
+    let household_id = require_household(household_id)?.to_string();
+    let id = id.to_string();
     let now = now_ms();
-    let res = sqlx::query(
-        r#"
-        UPDATE notes
-           SET z = (SELECT COALESCE(MAX(z), 0) + 1 FROM notes WHERE household_id = ? AND deleted_at IS NULL),
-               updated_at = ?
-         WHERE household_id = ? AND id = ? AND deleted_at IS NULL
-        "#,
-    )
-    .bind(household_id)
-    .bind(now)
-    .bind(household_id)
-    .bind(id)
-    .execute(pool)
-    .await?;
-    if res.rows_affected() == 0 {
-        anyhow::bail!("id not found");
-    }
-    Ok(())
+
+    with_tx(pool, |tx| {
+        Box::pin(async move {
+            let res = tx
+                .execute(
+                    sqlx::query(
+                        r#"
+                    UPDATE notes
+                       SET z = (SELECT COALESCE(MAX(z), 0) + 1
+                                FROM notes
+                                WHERE household_id = ? AND deleted_at IS NULL),
+                           updated_at = ?
+                     WHERE household_id = ? AND id = ? AND deleted_at IS NULL
+                    "#,
+                    )
+                    .bind(&household_id)
+                    .bind(now)
+                    .bind(&household_id)
+                    .bind(&id),
+                )
+                .await?;
+
+            if res.rows_affected() == 0 {
+                anyhow::bail!("id not found");
+            }
+            Ok(())
+        })
+    })
+    .await
 }
 
 pub mod admin {
@@ -409,6 +422,7 @@ pub mod admin {
 mod tests {
     use super::*;
     use sqlx::{Row, SqlitePool};
+    use sqlx::sqlite::SqlitePoolOptions;
 
     async fn setup_db() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
@@ -559,5 +573,86 @@ mod tests {
         let second_z: i64 = rows[1].try_get("z").unwrap();
         assert_eq!(first_id, "a");
         assert!(first_z > second_z);
+    }
+
+    #[tokio::test]
+    async fn bring_to_front_nonexistent_errors_and_no_change() {
+        // Arrange: in-memory DB with minimal schema + a note row
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+
+        // Minimal schema
+        sqlx::query("PRAGMA foreign_keys=ON;")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            r#"
+            CREATE TABLE household (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                tz TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                deleted_at INTEGER
+            );
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            r#"
+            CREATE TABLE notes (
+                id TEXT PRIMARY KEY,
+                household_id TEXT NOT NULL,
+                z INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL,
+                deleted_at INTEGER,
+                FOREIGN KEY(household_id) REFERENCES household(id)
+            );
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Seed data
+        sqlx::query(
+            "INSERT INTO household (id, name, created_at, updated_at) VALUES ('hh','H',0,0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO notes (id, household_id, z, updated_at) VALUES ('n1','hh',5,0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Capture pre-state
+        let z_before: i64 = sqlx::query_scalar("SELECT z FROM notes WHERE id='n1'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        // Act: call with a non-existent id to force an error
+        let err = super::bring_note_to_front(&pool, "hh", "nope")
+            .await
+            .err();
+        assert!(err.is_some(), "expected error for non-existent id");
+
+        // Assert: state unchanged (no partial writes persisted)
+        let z_after: i64 = sqlx::query_scalar("SELECT z FROM notes WHERE id='n1'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        assert_eq!(z_after, z_before, "z must be unchanged after failed tx");
     }
 }
