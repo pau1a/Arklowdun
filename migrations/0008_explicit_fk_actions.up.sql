@@ -15,7 +15,7 @@ CREATE TABLE events_new (
   deleted_at INTEGER
 );
 INSERT INTO events_new
-  SELECT id, title, COALESCE(datetime, start_at) AS datetime, reminder, household_id, created_at, updated_at, deleted_at
+  SELECT id, title, datetime AS datetime, reminder, household_id, created_at, updated_at, deleted_at
   FROM events;
 DROP TABLE events;
 ALTER TABLE events_new RENAME TO events;

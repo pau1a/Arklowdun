@@ -80,9 +80,14 @@ async fn main() -> Result<()> {
 }
 
 async fn open_pool(path: &Path, ro_only: bool) -> Result<SqlitePool> {
-    if !path.exists() {
+    if !path.exists()
+        || std::fs::metadata(path)
+            .map(|m| m.len() == 0)
+            .unwrap_or(true)
+    {
         return Err(anyhow!(
-            "database not found at {} (run migrations first)",
+            "database not found at {}; run `cargo run --bin migrate -- --db {} up` first",
+            path.display(),
             path.display()
         ));
     }

@@ -102,6 +102,15 @@ DROP INDEX IF EXISTS bills_household_idx;
   candidate columns without an explicit constraint. The auditor prints a
   JSON summary of missing FKs for investigation.
 
+```bash
+TMPDB="$(mktemp -t arklowdun.XXXXXX).sqlite"
+cargo run --bin migrate -- --db "$TMPDB" up
+cargo run --bin verify_schema -- --db "$TMPDB" --strict-fk
+```
+
+`verify_schema` expects a migrated database path; run migrations first and pass
+the resulting file (not `:memory:`).
+
 ## Data Migrations
 - Small backfills may live in `.up.sql` with explicit values and sanity checks.
 - For large or batch updates, document the batching strategy or move the work into application-level tooling.
