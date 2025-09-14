@@ -30,6 +30,12 @@ pub fn init_logging() {
     let filter = std::env::var("TAURI_ARKLOWDUN_LOG")
         .unwrap_or_else(|_| "arklowdun=info,sqlx=warn".to_string());
 
+    // Forward `log` crate macros to the `tracing` subscriber so that
+    // `log::info!`/`log::error!` statements are captured alongside
+    // existing `tracing` instrumentation and end up in the persistent
+    // log directory.
+    let _ = tracing_log::LogTracer::init();
+
     let _ = fmt()
         .with_env_filter(EnvFilter::new(filter))
         .json()
