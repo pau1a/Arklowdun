@@ -108,8 +108,9 @@ cargo run --bin migrate -- --db "$TMPDB" up
 cargo run --bin verify_schema -- --db "$TMPDB" --strict-fk
 ```
 
-`verify_schema` expects a migrated database path; run migrations first and pass
-the resulting file (not `:memory:`).
+`verify_schema` audits the specified database file and will not auto-migrate.
+It expects a migrated database path; run migrations first and pass the resulting
+file (not `:memory:`).
 
 ## Data Migrations
 - Small backfills may live in `.up.sql` with explicit values and sanity checks.

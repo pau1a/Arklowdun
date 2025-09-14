@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
         .execute(&pool)
         .await?;
     run_integrity_checks(&pool).await?;
-    audit_foreign_keys(args.strict_fk).await?;
+    audit_foreign_keys(&pool, args.strict_fk).await?;
 
     let db_schema = load_db_schema(&pool, args.strict, args.include_migrations).await?;
     if let Some(dump) = &args.dump {
@@ -143,38 +143,34 @@ struct MissingFk {
     parent_key: String,
 }
 
-async fn audit_foreign_keys(strict: bool) -> Result<()> {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect_with(
-            SqliteConnectOptions::new()
-                .filename(":memory:")
-                .create_if_missing(true),
-        )
-        .await?;
-    sqlx::query("PRAGMA foreign_keys=ON;")
-        .execute(&pool)
-        .await?;
-    sqlx::migrate!("../migrations").run(&pool).await?;
+async fn audit_foreign_keys(pool: &SqlitePool, strict: bool) -> Result<()> {
+    use std::collections::HashSet;
 
     let mut missing = Vec::new();
+
+    // enumerate real tables in the target DB
     let tables: Vec<String> = sqlx::query_scalar(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+        "SELECT name FROM sqlite_master
+         WHERE type='table' AND name NOT LIKE 'sqlite_%'",
     )
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await?;
+
     let table_set: HashSet<String> = tables.iter().cloned().collect();
+
     for table in &tables {
         let fk_rows = sqlx::query(&format!("PRAGMA foreign_key_list('{table}')"))
-            .fetch_all(&pool)
+            .fetch_all(pool)
             .await?;
         let existing: HashSet<String> = fk_rows
             .iter()
-            .filter_map(|r| r.try_get("from").ok())
+            .filter_map(|r| r.try_get::<String, _>("from").ok())
             .collect();
+
         let cols = sqlx::query(&format!("PRAGMA table_info('{table}')"))
-            .fetch_all(&pool)
+            .fetch_all(pool)
             .await?;
+
         for col in cols {
             let name: String = col.get("name");
             if name == "id" || !name.ends_with("_id") || existing.contains(&name) {
@@ -190,6 +186,7 @@ async fn audit_foreign_keys(strict: bool) -> Result<()> {
             }
         }
     }
+
     if !missing.is_empty() {
         println!("{}", serde_json::to_string_pretty(&missing)?);
         if strict {
