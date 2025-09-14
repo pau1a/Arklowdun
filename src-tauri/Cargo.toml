@@ -56,6 +56,7 @@ windows-sys = { version = "0.52", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 
+libc = "0.2"
 
 
 [[bin]]
