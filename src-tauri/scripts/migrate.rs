@@ -289,11 +289,7 @@ async fn down(db: &Path, dry: bool, to: Option<&str>) -> Result<()> {
     }
 
     let mut plan: Vec<(String, String)> = vec![];
-    loop {
-        let (stem, down_path) = match applied_in_order.pop() {
-            Some(x) => x,
-            None => break,
-        };
+    while let Some((stem, down_path)) = applied_in_order.pop() {
         let fname = format!("{}.down.sql", stem);
         let path = down_path.ok_or_else(|| anyhow!("no down file for {}", stem))?;
         let sql = fs::read_to_string(&path)?;
