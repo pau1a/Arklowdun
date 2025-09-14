@@ -12,7 +12,7 @@ const FILES_INDEX_VERSION: i64 = 1;
 
 mod attachments;
 pub mod commands;
-mod db;
+pub mod db;
 mod events_tz_backfill;
 mod household; // declare module; avoid `use` to prevent name collision
 mod id;
@@ -532,13 +532,12 @@ async fn files_index_ready(pool: &sqlx::SqlitePool, household_id: &str) -> bool 
         _ => return false,
     };
 
-    let count: i64 = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM files WHERE household_id=?1",
-    )
-    .bind(household_id)
-    .fetch_one(pool)
-    .await
-    .unwrap_or(0);
+    let count: i64 =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM files WHERE household_id=?1")
+            .bind(household_id)
+            .fetch_one(pool)
+            .await
+            .unwrap_or(0);
 
     let max_updated: String = sqlx::query_scalar::<_, String>(
         "SELECT COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', MAX(updated_at), 'unixepoch'), '1970-01-01T00:00:00Z') FROM files WHERE household_id=?1",
@@ -577,13 +576,11 @@ async fn db_has_vehicle_columns(state: State<'_, AppState>) -> Result<bool, Stri
         return Ok(false);
     }
     let cols = table_columns(pool, "vehicles").await;
-    Ok(
-        cols.contains("reg")
-            || cols.contains("registration")
-            || cols.contains("plate")
-            || cols.contains("nickname")
-            || cols.contains("name")
-    )
+    Ok(cols.contains("reg")
+        || cols.contains("registration")
+        || cols.contains("plate")
+        || cols.contains("nickname")
+        || cols.contains("name"))
 }
 
 #[tauri::command]
@@ -637,7 +634,9 @@ fn coalesce_expr(
 }
 
 fn like_escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 #[tauri::command]
@@ -739,7 +738,11 @@ async fn search_entities(
             let filename: String = r.try_get("filename").unwrap_or_default();
             let ts: i64 = r.try_get("ts").unwrap_or_default();
             let ord_val: i64 = r.try_get("ord").unwrap_or_default();
-            let score = if filename.eq_ignore_ascii_case(&q) { 2 } else { 1 };
+            let score = if filename.eq_ignore_ascii_case(&q) {
+                2
+            } else {
+                1
+            };
             let id: String = r.try_get("id").unwrap_or_default();
             out.push((
                 score,
@@ -1201,10 +1204,12 @@ mod search_tests {
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::query("INSERT INTO files (id, household_id, filename, updated_at) VALUES ('f1','hh','a',0)")
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT INTO files (id, household_id, filename, updated_at) VALUES ('f1','hh','a',0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         sqlx::query(
             "CREATE TABLE files_index_meta (household_id TEXT PRIMARY KEY, last_built_at_utc TEXT NOT NULL, source_row_count INTEGER NOT NULL, source_max_updated_utc TEXT NOT NULL, version INTEGER NOT NULL)",
         )

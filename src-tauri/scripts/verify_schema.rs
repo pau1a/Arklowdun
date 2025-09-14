@@ -1,12 +1,13 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
+use arklowdun_lib::db::write_atomic;
 use clap::Parser;
+use similar::TextDiff;
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
     Row, SqlitePool,
 };
-use similar::TextDiff;
 
 #[derive(Parser)]
 struct Args {
@@ -38,7 +39,7 @@ async fn main() -> Result<()> {
 
     let db_schema = load_db_schema(&pool, args.strict, args.include_migrations).await?;
     if let Some(dump) = &args.dump {
-        std::fs::write(dump, &db_schema)?;
+        write_atomic(dump, db_schema.as_bytes())?;
     }
 
     let file_raw = std::fs::read_to_string(&args.schema).ok();
@@ -64,7 +65,7 @@ async fn main() -> Result<()> {
     }
 
     if args.update {
-        std::fs::write(&args.schema, &db_schema)?;
+        write_atomic(&args.schema, db_schema.as_bytes())?;
         println!("schema.sql updated");
         return Ok(());
     }
