@@ -37,6 +37,12 @@ Recommended IDE: VS Code with Tauri and rust-analyzer extensions.
 Schema constraint guidelines live in [docs/integrity-rules.md](docs/integrity-rules.md).
 See [docs/migration-guidelines.md](docs/migration-guidelines.md) for detailed safety and testing practices.
 
+## Migrations
+
+Schema changes are managed through sequential SQL files; see
+[docs/migrations-spec.md](docs/migrations-spec.md) for versioning rules and
+upgrade paths.
+
 ## Documentation
 
 - [Architecture Overview](docs/architecture/1-overview.md)
