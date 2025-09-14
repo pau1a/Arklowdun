@@ -1,9 +1,5 @@
 use anyhow::Result;
-
-#[allow(dead_code)]
-#[path = "../src/db.rs"]
-mod db;
-use db::with_tx;
+use arklowdun_lib::db::with_tx;
 
 #[path = "util.rs"]
 mod util;

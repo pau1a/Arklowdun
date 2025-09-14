@@ -1,14 +1,15 @@
 use anyhow::{anyhow, Result};
+use futures::FutureExt;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
+use sqlx::Executor;
 use sqlx::{Pool, Sqlite, SqlitePool, Transaction};
+use std::fmt;
 use std::fs::{self, File};
 use std::future::Future;
 use std::io::Write;
 use std::path::Path;
 use std::pin::Pin;
 use std::str::FromStr;
-use std::fmt;
-use futures::FutureExt;
 use tauri::{AppHandle, Manager};
 
 #[allow(dead_code)]
