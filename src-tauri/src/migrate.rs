@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use crate::time::now_ms;
 use tracing::{debug, error, info, warn};
+// The `log` crate macros are used via fully-qualified paths for persistence.
 
 static MIGRATIONS_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../migrations");
 
@@ -234,6 +235,13 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             continue;
         }
 
+        let stem = filename.trim_end_matches(".up.sql");
+        let mut parts = stem.splitn(2, '_');
+        let version = parts.next().unwrap_or("");
+        let name = parts.next().unwrap_or("");
+
+        log::info!("starting migration {name} {version}");
+
         let cleaned = raw_sql
             .lines()
             .filter(|line| {
@@ -271,6 +279,9 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
                 } else if has_starts_at {
                     "starts_at"
                 } else {
+                    log::error!(
+                        "migration failed {name} {version}: events table missing datetime/start_at/starts_at"
+                    );
                     return Err(anyhow!(
                         "events table has none of [datetime,start_at,starts_at]"
                     ));
@@ -296,6 +307,7 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
                 sql = %preview(&stmt_to_run)
             );
             if let Err(e) = sqlx::query(stmt_to_run.as_str()).execute(&mut *tx).await {
+                log::error!("migration failed {name} {version}: {e}");
                 error!(target = "arklowdun", event = "migration_stmt_error", file = %filename, sql = %preview(&stmt_to_run), error = %e);
                 warn!(target = "arklowdun", event = "migration_tx_rollback", file = %filename);
                 return Err(e.into());
@@ -305,6 +317,7 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             .fetch_all(&mut *tx)
             .await?;
         if !fk_rows.is_empty() {
+            log::error!("migration failed {name} {version}: foreign key violations");
             warn!(target = "arklowdun", event = "migration_tx_rollback", file = %filename);
             bail!("foreign key violations inside transaction for {}", filename);
         }
@@ -319,9 +332,11 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             .execute(&mut *tx)
             .await?;
         if let Err(e) = tx.commit().await {
+            log::error!("migration failed {name} {version}: {e}");
             warn!(target = "arklowdun", event = "migration_tx_rollback", file = %filename);
             return Err(e.into());
         }
+        log::info!("migration success {name} {version}");
         info!(
             target = "arklowdun",
             event = "migration_tx_commit",
