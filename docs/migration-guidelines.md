@@ -83,6 +83,25 @@ CREATE INDEX IF NOT EXISTS bills_household_idx
 DROP INDEX IF EXISTS bills_household_idx;
 ```
 
+### Adding Foreign Keys
+
+- Use the rebuild pattern to add a constraint:
+  1. **Backfill** or delete orphaned rows before rebuilding.
+  2. Create a new table with the desired `FOREIGN KEY` clause and explicit
+     `ON DELETE`/`ON UPDATE` actions (`CASCADE` for strong ownership,
+     `SET NULL` when the column is nullable).
+  3. Copy data from the old table and rename.
+  4. Recreate indexes and unique constraints.
+- Down migrations drop the constraint by rebuilding without it.
+
+### Auditor & Verify Flow
+
+- `npm run schema:verify` builds a temporary database, runs integrity checks,
+  and compares the live schema against `schema.sql`.
+- Pass `--strict-fk` to fail the run if the foreign-key auditor detects any
+  candidate columns without an explicit constraint. The auditor prints a
+  JSON summary of missing FKs for investigation.
+
 ## Data Migrations
 - Small backfills may live in `.up.sql` with explicit values and sanity checks.
 - For large or batch updates, document the batching strategy or move the work into application-level tooling.
