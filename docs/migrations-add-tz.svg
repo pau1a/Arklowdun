@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="120" font-family="monospace" font-size="14">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="black" />
+    </marker>
+  </defs>
+  <rect x="10" y="20" width="150" height="80" fill="none" stroke="black" />
+  <text x="20" y="40">events</text>
+  <text x="20" y="60">id</text>
+  <text x="20" y="80">title</text>
+
+  <rect x="260" y="20" width="150" height="80" fill="none" stroke="black" />
+  <text x="270" y="40">events</text>
+  <text x="270" y="60">id</text>
+  <text x="270" y="80">title</text>
+  <text x="270" y="100">tz</text>
+
+  <line x1="160" y1="60" x2="260" y2="60" stroke="black" marker-end="url(#arrow)" />
+</svg>

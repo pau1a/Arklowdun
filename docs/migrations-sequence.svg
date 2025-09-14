@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="60" font-family="monospace" font-size="16">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="black" />
+    </marker>
+  </defs>
+  <text x="10" y="35">0001</text>
+  <line x1="60" y1="30" x2="100" y2="30" stroke="black" marker-end="url(#arrow)" />
+  <text x="110" y="35">0002</text>
+  <line x1="160" y1="30" x2="200" y2="30" stroke="black" marker-end="url(#arrow)" />
+  <text x="210" y="35">0003</text>
+</svg>
