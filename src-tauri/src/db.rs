@@ -1,10 +1,69 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Pool, Sqlite, SqlitePool, Transaction};
+use std::fs::{self, File};
 use std::future::Future;
+use std::io::Write;
+use std::path::Path;
 use std::pin::Pin;
 use std::str::FromStr;
 use tauri::{AppHandle, Manager};
+
+#[allow(dead_code)]
+pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
+    let dir = path
+        .parent()
+        .ok_or_else(|| anyhow!("no parent directory"))?;
+    let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
+
+    #[cfg(unix)]
+    if let Ok(meta) = fs::metadata(path) {
+        let perm = meta.permissions();
+        let _ = fs::set_permissions(tmp.path(), perm);
+    }
+
+    tmp.write_all(data)?;
+    tmp.as_file().sync_all()?;
+    let tmp_path = tmp.into_temp_path();
+
+    #[cfg(unix)]
+    {
+        fs::rename(&tmp_path, path)?;
+        let dir_file = File::open(dir)?;
+        dir_file.sync_all()?;
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use std::ptr::null_mut;
+        use windows_sys::Win32::Storage::FileSystem::ReplaceFileW;
+
+        let dest: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let src: Vec<u16> = tmp_path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let res = unsafe {
+            ReplaceFileW(
+                dest.as_ptr(),
+                src.as_ptr(),
+                std::ptr::null(),
+                0,
+                null_mut(),
+                null_mut(),
+            )
+        };
+        if res == 0 {
+            if path.exists() {
+                let err = std::io::Error::last_os_error();
+                let _ = fs::remove_file(&tmp_path);
+                return Err(err.into());
+            } else {
+                fs::rename(&tmp_path, path)?;
+            }
+        }
+    }
+
+    Ok(())
+}
 
 // A helper trait that ties the future's lifetime to the borrow lifetime using a GAT.
 /// Boxed future whose lifetime is tied to the borrowed transaction.
@@ -41,6 +100,7 @@ where
 }
 
 // TXN: domain=OUT OF SCOPE tables=PRAGMA
+#[allow(dead_code)]
 pub async fn open_sqlite_pool(app: &AppHandle) -> Result<Pool<Sqlite>> {
     let app_dir = app
         .path()
@@ -86,6 +146,7 @@ pub async fn open_sqlite_pool(app: &AppHandle) -> Result<Pool<Sqlite>> {
     Ok(pool)
 }
 
+#[allow(dead_code)]
 async fn log_effective_pragmas(pool: &Pool<Sqlite>) {
     use tracing::{info, warn};
 
