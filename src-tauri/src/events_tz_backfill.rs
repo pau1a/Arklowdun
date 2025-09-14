@@ -4,8 +4,8 @@ use serde::Serialize;
 use sqlx::Row;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::{state::AppState, time::now_ms};
 use super::commands::DbErrorPayload as DbError;
+use crate::{state::AppState, time::now_ms};
 
 #[derive(Serialize)]
 pub struct BackfillReport {
@@ -87,10 +87,10 @@ pub async fn events_backfill_timezone(
         });
     }
 
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(|e| DbError { code: "Unknown".into(), message: e.to_string() })?;
+    let mut tx = pool.begin().await.map_err(|e| DbError {
+        code: "Unknown".into(),
+        message: e.to_string(),
+    })?;
 
     // Legacy rows store `start_at` as wall-clock ms in `tz`; derive UTC values.
     let rows = sqlx::query("SELECT id, start_at, end_at FROM events WHERE household_id = ? AND (tz IS NULL OR start_at_utc IS NULL)")
@@ -116,20 +116,27 @@ pub async fn events_backfill_timezone(
             .bind(&id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| DbError { code: "Unknown".into(), message: e.to_string() })?;
+            .map_err(|e| DbError {
+                code: "Unknown".into(),
+                message: e.to_string(),
+            })?;
 
         processed += 1;
         if processed % 50 == 0 || processed == total_u {
             let _ = app.emit(
                 "events_tz_backfill_progress",
-                Progress { processed, total: total_u },
+                Progress {
+                    processed,
+                    total: total_u,
+                },
             );
         }
     }
 
-    tx.commit()
-        .await
-        .map_err(|e| DbError { code: "Unknown".into(), message: e.to_string() })?;
+    tx.commit().await.map_err(|e| DbError {
+        code: "Unknown".into(),
+        message: e.to_string(),
+    })?;
 
     use std::fs::{create_dir_all, File};
     use std::io::Write;

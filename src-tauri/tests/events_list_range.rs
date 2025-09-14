@@ -1,5 +1,5 @@
 use arklowdun_lib::commands;
-use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
+use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 
 #[tokio::test]
 async fn events_list_range_tolerates_missing_series_parent_id() {
@@ -31,7 +31,7 @@ async fn events_list_range_tolerates_missing_series_parent_id() {
     .unwrap();
     sqlx::query(
         "INSERT INTO events (id, household_id, title, start_at, created_at, updated_at)
-         VALUES ('e1', 'HH', 't', 0, 0, 0)"
+         VALUES ('e1', 'HH', 't', 0, 0, 0)",
     )
     .execute(&pool)
     .await

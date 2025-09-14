@@ -1,5 +1,10 @@
 use anyhow::Result;
 
+// Shim so `crate::migrate` in included db.rs resolves in this test crate.
+mod migrate {
+    pub use arklowdun_lib::migrate::*;
+}
+
 #[path = "../src/db.rs"]
 mod db;
 use db::with_tx;

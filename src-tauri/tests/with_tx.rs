@@ -1,5 +1,12 @@
 use anyhow::Result;
 
+// When including `db.rs` directly, provide a `crate::migrate` shim that
+// re-exports the library's migrate module so references to `crate::migrate`
+// inside db.rs resolve in this test crate as well.
+mod migrate {
+    pub use arklowdun_lib::migrate::*;
+}
+
 #[allow(dead_code)]
 #[path = "../src/db.rs"]
 mod db;
