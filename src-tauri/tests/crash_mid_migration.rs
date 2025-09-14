@@ -14,10 +14,6 @@ use std::env;
 use std::path::PathBuf;
 use std::process::Command;
 use tempfile::tempdir;
-
-#[cfg(unix)]
-use libc;
-
 #[tokio::test]
 async fn crash_mid_migration() -> Result<()> {
     if env::var("CRASH_CHILD").as_deref() == Ok("1") {
@@ -84,11 +80,10 @@ async fn parent() -> Result<()> {
         .connect()
         .await?;
 
-    let exists: Option<String> = sqlx::query_scalar(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='crashy';",
-    )
-    .fetch_optional(&mut conn)
-    .await?;
+    let exists: Option<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' AND name='crashy';")
+            .fetch_optional(&mut conn)
+            .await?;
     assert!(exists.is_none(), "table `crashy` should not exist");
 
     let ok: String = sqlx::query_scalar("PRAGMA integrity_check;")
@@ -99,8 +94,10 @@ async fn parent() -> Result<()> {
     let quick: String = sqlx::query_scalar("PRAGMA quick_check;")
         .fetch_one(&mut conn)
         .await?;
-    assert!(quick == "ok" || quick == "0", "quick_check expected ok/0 got {quick}");
+    assert!(
+        quick == "ok" || quick == "0",
+        "quick_check expected ok/0 got {quick}"
+    );
 
     Ok(())
 }
-
