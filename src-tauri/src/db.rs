@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Pool, Sqlite, SqlitePool, Transaction};
+use sqlx::Executor;
 use std::fs::{self, File};
 use std::future::Future;
 use std::io::Write;
