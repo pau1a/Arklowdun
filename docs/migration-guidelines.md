@@ -120,6 +120,32 @@ For a clean-room check that builds a temporary database (used in CI):
 npm run schema:ci
 ```
 
+## Migration CLI
+
+A small helper exists for inspecting and controlling migrations locally:
+
+```bash
+# list and status
+cargo run --bin migrate -- list
+cargo run --bin migrate -- status
+
+# apply all pending (prod-like)
+cargo run --bin migrate -- up
+
+# apply up to a target version
+cargo run --bin migrate -- up --to 0015
+
+# DEV-ONLY rollback (requires ARKLOWDUN_ALLOW_DOWN=1, refused in CI)
+ARKLOWDUN_ALLOW_DOWN=1 cargo run --bin migrate -- down
+ARKLOWDUN_ALLOW_DOWN=1 cargo run --bin migrate -- down --to 0012
+
+# use a specific db file
+cargo run --bin migrate -- --db /path/to/app.sqlite3 up --to 0014
+```
+
+* `up`/`down` run each migration inside a transaction and enforce FK checks.
+* `down` is for development only; prefer backup restore for real recovery.
+
 ## Large Migration Strategies
 - Break long-running migrations into smaller steps.
 - Use feature flags or phased rollout when table locks could impact production.
