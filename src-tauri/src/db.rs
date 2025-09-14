@@ -7,6 +7,8 @@ use std::io::Write;
 use std::path::Path;
 use std::pin::Pin;
 use std::str::FromStr;
+use std::fmt;
+use futures::FutureExt;
 use tauri::{AppHandle, Manager};
 
 #[allow(dead_code)]
@@ -191,5 +193,42 @@ async fn log_effective_pragmas(pool: &Pool<Sqlite>) {
             event = "db_open_warning",
             msg = "journal_mode != WAL; running with reduced crash safety"
         );
+    }
+}
+
+#[derive(Debug)]
+struct MigrationPanic(String);
+
+impl fmt::Display for MigrationPanic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "migration panicked: {}", self.0)
+    }
+}
+
+impl std::error::Error for MigrationPanic {}
+
+#[allow(dead_code)]
+pub async fn apply_migrations(pool: &SqlitePool) -> Result<()> {
+    use std::panic::AssertUnwindSafe;
+    use tracing::error;
+
+    let result = AssertUnwindSafe(crate::migrate::apply_migrations(pool))
+        .catch_unwind()
+        .await;
+
+    match result {
+        Ok(res) => res,
+        Err(panic) => {
+            let _ = pool.execute("ROLLBACK").await;
+            let msg = if let Some(s) = panic.downcast_ref::<&str>() {
+                (*s).to_string()
+            } else if let Some(s) = panic.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "unknown panic".to_string()
+            };
+            error!(target = "arklowdun", event = "migration_panic", error = %msg);
+            Err(MigrationPanic(msg).into())
+        }
     }
 }

@@ -1126,7 +1126,7 @@ pub fn run() {
             let handle = app.handle();
             #[allow(clippy::needless_borrow)]
             let pool = tauri::async_runtime::block_on(crate::db::open_sqlite_pool(&handle))?;
-            tauri::async_runtime::block_on(crate::migrate::apply_migrations(&pool))?;
+            tauri::async_runtime::block_on(crate::db::apply_migrations(&pool))?;
             tauri::async_runtime::block_on(async {
                 if let Ok(cols) = sqlx::query("PRAGMA table_info(events);").fetch_all(&pool).await {
                     let names: Vec<String> = cols
