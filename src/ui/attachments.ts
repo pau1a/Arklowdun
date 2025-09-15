@@ -1,6 +1,6 @@
 import { call } from "../db/call";
 import { showError } from "./errors";
-import { resolvePath } from "../files/path";
+import { canonicalizeAndVerify, rejectSymlinks, PathError, RootKey } from "../files/path";
 
 const isMac = navigator.platform.includes("Mac");
 const isWin = navigator.platform.includes("Win");
@@ -20,7 +20,7 @@ export async function openAttachment(table: string, id: string) {
 export async function revealAttachment(
   table: string,
   id: string,
-  rootKey?: string,
+  rootKey?: RootKey,
   relPath?: string,
 ) {
   try {
@@ -29,14 +29,15 @@ export async function revealAttachment(
     if (e?.code === "IO/UNSUPPORTED_REVEAL") {
       try {
         if (!rootKey || !relPath) throw new Error("Path unavailable");
-        const abs = await resolvePath(rootKey, relPath);
+        const { realPath } = await canonicalizeAndVerify(relPath, rootKey);
+        await rejectSymlinks(realPath, rootKey);
         // Try web clipboard first; if it fails, fall back to showing the path.
         let copied = false;
         try {
           // navigator.clipboard can throw or be unavailable depending on permissions
           // in some environments.
           // optional chaining guards against missing APIs
-          await navigator?.clipboard?.writeText?.(abs);
+          await navigator?.clipboard?.writeText?.(realPath);
           copied = true;
         } catch {
           copied = false;
@@ -47,10 +48,14 @@ export async function revealAttachment(
             message: "Reveal not supported — absolute path copied to clipboard.",
           });
         } else {
-          showError(`Reveal not supported — path: ${abs}`);
+          showError(`Reveal not supported — path: ${realPath}`);
         }
-      } catch {
-        showError(e);
+      } catch (err: any) {
+        if (err instanceof PathError) {
+          showError({ code: "INFO", message: "That location isn't allowed" });
+        } else {
+          showError(err);
+        }
       }
     } else {
       showError(e);
