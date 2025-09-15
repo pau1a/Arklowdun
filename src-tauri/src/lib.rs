@@ -13,6 +13,7 @@ const FILES_INDEX_VERSION: i64 = 1;
 mod attachments;
 pub mod commands;
 pub mod db;
+pub mod error;
 mod events_tz_backfill;
 mod household; // declare module; avoid `use` to prevent name collision
 mod id;
@@ -23,7 +24,7 @@ pub mod security;
 mod state;
 mod time;
 
-use commands::{map_db_error, DbErrorPayload};
+pub use error::{AppError, AppResult};
 use events_tz_backfill::events_backfill_timezone;
 use security::{error_map::UiError, fs_policy, fs_policy::RootKey, hash_path};
 use tracing_subscriber::{fmt, EnvFilter};
@@ -80,7 +81,7 @@ macro_rules! gen_domain_cmds {
                     order_by: Option<String>,
                     limit: Option<i64>,
                     offset: Option<i64>,
-                ) -> Result<Vec<serde_json::Value>, DbErrorPayload> {
+                ) -> AppResult<Vec<serde_json::Value>> {
                     commands::list_command(
                         &state.pool,
                         stringify!($table),
@@ -96,7 +97,7 @@ macro_rules! gen_domain_cmds {
                     state: State<'_, AppState>,
                     household_id: Option<String>,
                     id: String,
-                ) -> Result<Option<serde_json::Value>, DbErrorPayload> {
+                ) -> AppResult<Option<serde_json::Value>> {
                     let hh = household_id.as_deref();
                     commands::get_command(
                         &state.pool,
@@ -110,7 +111,7 @@ macro_rules! gen_domain_cmds {
                 async fn [<$table _create>](
                     state: State<'_, AppState>,
                     data: serde_json::Map<String, serde_json::Value>,
-                ) -> Result<serde_json::Value, DbErrorPayload> {
+                ) -> AppResult<serde_json::Value> {
                     commands::create_command(
                         &state.pool,
                         stringify!($table),
@@ -124,7 +125,7 @@ macro_rules! gen_domain_cmds {
                     id: String,
                     data: serde_json::Map<String, serde_json::Value>,
                     household_id: Option<String>,
-                ) -> Result<(), DbErrorPayload> {
+                ) -> AppResult<()> {
                     let hh = household_id.as_deref();
                     commands::update_command(
                         &state.pool,
@@ -140,7 +141,7 @@ macro_rules! gen_domain_cmds {
                     state: State<'_, AppState>,
                     household_id: String,
                     id: String,
-                ) -> Result<(), DbErrorPayload> {
+                ) -> AppResult<()> {
                     commands::delete_command(
                         &state.pool,
                         stringify!($table),
@@ -154,7 +155,7 @@ macro_rules! gen_domain_cmds {
                     state: State<'_, AppState>,
                     household_id: String,
                     id: String,
-                ) -> Result<(), DbErrorPayload> {
+                ) -> AppResult<()> {
                     commands::restore_command(
                         &state.pool,
                         stringify!($table),
@@ -230,16 +231,17 @@ pub struct Vehicle {
 async fn vehicles_list(
     state: State<'_, AppState>,
     household_id: String,
-) -> Result<Vec<Vehicle>, DbErrorPayload> {
+) -> AppResult<Vec<Vehicle>> {
     sqlx::query_as::<_, Vehicle>(
         "SELECT id, household_id, name, make, model, reg, vin,\n         COALESCE(next_mot_due, mot_date)         AS next_mot_due,\n         COALESCE(next_service_due, service_date) AS next_service_due,\n         created_at, updated_at, deleted_at, position\n    FROM vehicles\n   WHERE household_id = ? AND deleted_at IS NULL\n   ORDER BY position, created_at, id",
     )
-    .bind(household_id)
+    .bind(household_id.clone())
     .fetch_all(&state.pool)
     .await
-    .map_err(|e| DbErrorPayload {
-        code: "Unknown".into(),
-        message: e.to_string(),
+    .map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "vehicles_list")
+            .with_context("household_id", household_id)
     })
 }
 
@@ -249,7 +251,7 @@ async fn vehicles_get(
     state: State<'_, AppState>,
     household_id: Option<String>,
     id: String,
-) -> Result<Option<serde_json::Value>, DbErrorPayload> {
+) -> AppResult<Option<serde_json::Value>> {
     commands::get_command(&state.pool, "vehicles", household_id.as_deref(), &id).await
 }
 
@@ -257,7 +259,7 @@ async fn vehicles_get(
 async fn vehicles_create(
     state: State<'_, AppState>,
     data: serde_json::Map<String, serde_json::Value>,
-) -> Result<serde_json::Value, DbErrorPayload> {
+) -> AppResult<serde_json::Value> {
     commands::create_command(&state.pool, "vehicles", data).await
 }
 
@@ -267,7 +269,7 @@ async fn vehicles_update(
     id: String,
     data: serde_json::Map<String, serde_json::Value>,
     household_id: Option<String>,
-) -> Result<(), DbErrorPayload> {
+) -> AppResult<()> {
     commands::update_command(&state.pool, "vehicles", &id, data, household_id.as_deref()).await
 }
 
@@ -276,7 +278,7 @@ async fn vehicles_delete(
     state: State<'_, AppState>,
     household_id: String,
     id: String,
-) -> Result<(), DbErrorPayload> {
+) -> AppResult<()> {
     commands::delete_command(&state.pool, "vehicles", &household_id, &id).await
 }
 
@@ -285,7 +287,7 @@ async fn vehicles_restore(
     state: State<'_, AppState>,
     household_id: String,
     id: String,
-) -> Result<(), DbErrorPayload> {
+) -> AppResult<()> {
     commands::restore_command(&state.pool, "vehicles", &household_id, &id).await
 }
 
@@ -343,7 +345,7 @@ async fn events_list_range(
     household_id: String,
     start: i64,
     end: i64,
-) -> Result<Vec<Event>, DbErrorPayload> {
+) -> AppResult<Vec<Event>> {
     commands::events_list_range_command(&state.pool, &household_id, start, end).await
 }
 
@@ -351,7 +353,7 @@ async fn events_list_range(
 async fn event_create(
     state: State<'_, AppState>,
     data: serde_json::Map<String, serde_json::Value>,
-) -> Result<serde_json::Value, DbErrorPayload> {
+) -> AppResult<serde_json::Value> {
     commands::create_command(&state.pool, "events", data).await
 }
 
@@ -361,7 +363,7 @@ async fn event_update(
     id: String,
     data: serde_json::Map<String, serde_json::Value>,
     household_id: String,
-) -> Result<(), DbErrorPayload> {
+) -> AppResult<()> {
     commands::update_command(&state.pool, "events", &id, data, Some(&household_id)).await
 }
 
@@ -370,7 +372,7 @@ async fn event_delete(
     state: State<'_, AppState>,
     household_id: String,
     id: String,
-) -> Result<(), DbErrorPayload> {
+) -> AppResult<()> {
     commands::delete_command(&state.pool, "events", &household_id, &id).await
 }
 
@@ -379,7 +381,7 @@ async fn event_restore(
     state: State<'_, AppState>,
     household_id: String,
     id: String,
-) -> Result<(), DbErrorPayload> {
+) -> AppResult<()> {
     commands::restore_command(&state.pool, "events", &household_id, &id).await
 }
 
@@ -391,7 +393,7 @@ async fn bills_list_due_between(
     to_ms: i64,
     limit: Option<i64>,
     offset: Option<i64>,
-) -> Result<Vec<serde_json::Value>, DbErrorPayload> {
+) -> AppResult<Vec<serde_json::Value>> {
     use sqlx::query;
 
     let base_sql = r#"
@@ -422,10 +424,11 @@ async fn bills_list_due_between(
         q = q.bind(offset.unwrap());
     }
 
-    let rows = q
-        .fetch_all(&state.pool)
-        .await
-        .map_err(crate::commands::map_db_error)?;
+    let rows = q.fetch_all(&state.pool).await.map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "bills_list_due_between")
+            .with_context("household_id", household_id.clone())
+    })?;
 
     Ok(rows.into_iter().map(crate::repo::row_to_json).collect())
 }
@@ -460,12 +463,17 @@ async fn import_run_legacy(
     app: tauri::AppHandle,
     _state: State<'_, AppState>,
     args: ImportArgs,
-) -> Result<(), DbErrorPayload> {
+) -> AppResult<()> {
     let household_id = args.household_id;
     let dry_run = args.dry_run;
-    importer::run_import(&app, household_id, dry_run)
+    importer::run_import(&app, household_id.clone(), dry_run)
         .await
-        .map_err(map_db_error)
+        .map_err(|err| {
+            AppError::from(err)
+                .with_context("operation", "import_run_legacy")
+                .with_context("household_id", household_id)
+                .with_context("dry_run", dry_run.to_string())
+        })
 }
 
 #[derive(Serialize, Deserialize, Clone, TS)]
@@ -675,23 +683,19 @@ async fn search_entities(
     query: String,
     limit: i64,
     offset: i64,
-) -> Result<Vec<SearchResult>, SearchErrorPayload> {
+) -> AppResult<Vec<SearchResult>> {
     use sqlx::Row;
     let pool = &state.pool;
 
     if household_id.trim().is_empty() {
-        return Err(SearchErrorPayload {
-            code: "BAD_REQUEST".into(),
-            message: "household_id is required".into(),
-            details: serde_json::json!({}),
-        });
+        return Err(AppError::new("BAD_REQUEST", "household_id is required"));
     }
     if !(1..=100).contains(&limit) || offset < 0 {
-        return Err(SearchErrorPayload {
-            code: "BAD_REQUEST".into(),
-            message: "invalid limit/offset".into(),
-            details: serde_json::json!({ "limit": limit, "offset": offset }),
-        });
+        return Err(
+            AppError::new("BAD_REQUEST", "invalid limit/offset")
+                .with_context("limit", limit.to_string())
+                .with_context("offset", offset.to_string()),
+        );
     }
 
     let q = query.trim().to_string();
@@ -731,10 +735,10 @@ async fn search_entities(
         return Ok(vec![]);
     }
 
-    let mapq = |e: sqlx::Error| SearchErrorPayload {
-        code: "DB/QUERY_FAILED".into(),
-        message: "Search failed".into(),
-        details: serde_json::json!({ "error": e.to_string() }),
+    let mapq = |branch: &str, e: sqlx::Error| {
+        AppError::from(e)
+            .with_context("operation", "search_query")
+            .with_context("branch", branch.to_string())
     };
 
     let mut out: Vec<(i32, i64, usize, SearchResult)> = Vec::new();
@@ -760,7 +764,7 @@ async fn search_entities(
             .bind(0)
             .fetch_all(pool)
             .await
-            .map_err(mapq)?;
+            .map_err(|e| mapq(branch_name, e))?;
         let elapsed = start.elapsed().as_millis() as i64;
         tracing::debug!(target: "arklowdun", name = branch_name, rows = rows.len(), elapsed_ms = elapsed, "branch");
         for r in rows {
@@ -798,7 +802,7 @@ async fn search_entities(
             .bind(0)
             .fetch_all(pool)
             .await
-            .map_err(mapq)?;
+            .map_err(|e| mapq("events", e))?;
             let elapsed = start.elapsed().as_millis() as i64;
             tracing::debug!(target: "arklowdun", name = "events", rows = events.len(), elapsed_ms = elapsed, "branch");
             for r in events {
@@ -835,7 +839,7 @@ async fn search_entities(
             .bind(0)
             .fetch_all(pool)
             .await
-            .map_err(mapq)?;
+            .map_err(|e| mapq("notes", e))?;
             let elapsed = start.elapsed().as_millis() as i64;
             tracing::debug!(target: "arklowdun", name = "notes", rows = notes.len(), elapsed_ms = elapsed, "branch");
             for r in notes {
@@ -903,7 +907,7 @@ async fn search_entities(
                 .bind(0)
                 .fetch_all(pool)
                 .await
-                .map_err(mapq)?;
+                .map_err(|e| mapq("vehicles", e))?;
             let elapsed = start.elapsed().as_millis() as i64;
             tracing::debug!(target: "arklowdun", name = "vehicles", rows = rows.len(), elapsed_ms = elapsed, "branch");
             for r in rows {
@@ -967,7 +971,7 @@ async fn search_entities(
                 .bind(0)
                 .fetch_all(pool)
                 .await
-                .map_err(mapq)?;
+                .map_err(|e| mapq("pets", e))?;
             let elapsed = start.elapsed().as_millis() as i64;
             tracing::debug!(target: "arklowdun", name = "pets", rows = rows.len(), elapsed_ms = elapsed, "branch");
             for r in rows {
@@ -1014,7 +1018,7 @@ async fn attachment_open(
     state: tauri::State<'_, crate::state::AppState>,
     table: String,
     id: String,
-) -> Result<(), crate::commands::DbErrorPayload> {
+) -> AppResult<()> {
     let (root_key, rel) = attachments::load_attachment_columns(&state.pool, &table, &id).await?;
     let root = match root_key.as_str() {
         "attachments" => RootKey::Attachments,
@@ -1027,20 +1031,20 @@ async fn attachment_open(
             let reason = e.name();
             let ui: UiError = e.into();
             log_fs_deny(root, &ui, reason);
-            return Err(DbErrorPayload {
-                code: ui.code.into(),
-                message: ui.message.into(),
-            });
+            return Err(AppError::from(ui)
+                .with_context("operation", "attachment_open")
+                .with_context("table", table.clone())
+                .with_context("id", id.clone()));
         }
     };
     if let Err(e) = fs_policy::reject_symlinks(&res.real_path) {
         let reason = e.name();
         let ui: UiError = e.into();
         log_fs_deny(root, &ui, reason);
-        return Err(DbErrorPayload {
-            code: ui.code.into(),
-            message: ui.message.into(),
-        });
+        return Err(AppError::from(ui)
+            .with_context("operation", "attachment_open")
+            .with_context("table", table.clone())
+            .with_context("id", id.clone()));
     }
     log_fs_ok(root, &res.real_path);
     attachments::open_with_os(&res.real_path)
@@ -1052,7 +1056,7 @@ async fn attachment_reveal(
     state: tauri::State<'_, crate::state::AppState>,
     table: String,
     id: String,
-) -> Result<(), crate::commands::DbErrorPayload> {
+) -> AppResult<()> {
     let (root_key, rel) = attachments::load_attachment_columns(&state.pool, &table, &id).await?;
     let root = match root_key.as_str() {
         "attachments" => RootKey::Attachments,
@@ -1065,30 +1069,27 @@ async fn attachment_reveal(
             let reason = e.name();
             let ui: UiError = e.into();
             log_fs_deny(root, &ui, reason);
-            return Err(DbErrorPayload {
-                code: ui.code.into(),
-                message: ui.message.into(),
-            });
+            return Err(AppError::from(ui)
+                .with_context("operation", "attachment_reveal")
+                .with_context("table", table.clone())
+                .with_context("id", id.clone()));
         }
     };
     if let Err(e) = fs_policy::reject_symlinks(&res.real_path) {
         let reason = e.name();
         let ui: UiError = e.into();
         log_fs_deny(root, &ui, reason);
-        return Err(DbErrorPayload {
-            code: ui.code.into(),
-            message: ui.message.into(),
-        });
+        return Err(AppError::from(ui)
+            .with_context("operation", "attachment_reveal")
+            .with_context("table", table.clone())
+            .with_context("id", id.clone()));
     }
     log_fs_ok(root, &res.real_path);
     attachments::reveal_with_os(&res.real_path)
 }
 
 #[tauri::command]
-async fn open_path(
-    app: tauri::AppHandle,
-    path: String,
-) -> Result<(), crate::commands::DbErrorPayload> {
+async fn open_path(app: tauri::AppHandle, path: String) -> AppResult<()> {
     let root = RootKey::AppData;
     let res = match fs_policy::canonicalize_and_verify(&path, root, &app) {
         Ok(r) => r,
@@ -1096,20 +1097,18 @@ async fn open_path(
             let reason = e.name();
             let ui: UiError = e.into();
             log_fs_deny(root, &ui, reason);
-            return Err(DbErrorPayload {
-                code: ui.code.into(),
-                message: ui.message.into(),
-            });
+            return Err(AppError::from(ui)
+                .with_context("operation", "open_path")
+                .with_context("path", path.clone()));
         }
     };
     if let Err(e) = fs_policy::reject_symlinks(&res.real_path) {
         let reason = e.name();
         let ui: UiError = e.into();
         log_fs_deny(root, &ui, reason);
-        return Err(DbErrorPayload {
-            code: ui.code.into(),
-            message: ui.message.into(),
-        });
+        return Err(AppError::from(ui)
+            .with_context("operation", "open_path")
+            .with_context("path", path.clone()));
     }
     log_fs_ok(root, &res.real_path);
     crate::attachments::open_with_os(&res.real_path)

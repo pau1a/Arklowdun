@@ -1,24 +1,61 @@
-import { invoke } from "@tauri-apps/api/core";
+import type { AppError } from "../bindings/AppError";
 
-export type ArkError = { code: string; message: string; details?: unknown };
+const FALLBACK_CODE = "APP/UNKNOWN";
 
-export function toArkError(e: unknown): ArkError {
-  // Tauri error shapes are inconsistent: strings, { message }, { code, message, data }, etc.
-  if (typeof e === "string") return { code: "UNKNOWN", message: e };
-  if (e && typeof e === "object") {
-    const any = e as any;
-    const code = any.code || any.name || "UNKNOWN";
-    const message = any.message || String(e);
-    const details = any.data ?? any.details ?? any.stack ?? undefined;
-    return { code: String(code), message: String(message), details };
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === "object" && value !== null;
+}
+
+function normalizeContext(value: unknown): Record<string, string> | undefined {
+  if (!isRecord(value)) return undefined;
+  const entries = Object.entries(value)
+    .filter(([key]) => typeof key === "string")
+    .map(([key, val]) => [key, String(val)] as const);
+  if (entries.length === 0) return undefined;
+  return Object.fromEntries(entries);
+}
+
+export function normalizeError(error: unknown): AppError {
+  if (typeof error === "string") {
+    return { code: FALLBACK_CODE, message: error, context: undefined };
   }
-  return { code: "UNKNOWN", message: String(e) };
+
+  if (isRecord(error)) {
+    const code = typeof error.code === "string" ? error.code : FALLBACK_CODE;
+    const message =
+      typeof error.message === "string"
+        ? error.message
+        : typeof error.name === "string"
+          ? error.name
+          : JSON.stringify(error);
+
+    const normalized: AppError = { code, message, context: undefined };
+
+    const context = normalizeContext(error.context);
+    if (context) normalized.context = context;
+
+    if (error.cause) {
+      normalized.cause = normalizeError(error.cause);
+    } else if (typeof error.stack === "string" && !normalized.context?.stack) {
+      normalized.context = {
+        ...(normalized.context ?? {}),
+        stack: error.stack,
+      };
+    }
+
+    return normalized;
+  }
+
+  return { code: FALLBACK_CODE, message: String(error), context: undefined };
 }
 
 export async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   try {
+    const { invoke } = await import("@tauri-apps/api/core");
     return await invoke<T>(cmd, args);
-  } catch (e) {
-    throw toArkError(e);
+  } catch (err) {
+    throw normalizeError(err);
   }
 }

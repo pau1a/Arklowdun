@@ -4,8 +4,7 @@ use serde::Serialize;
 use sqlx::Row;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use super::commands::DbErrorPayload as DbError;
-use crate::{state::AppState, time::now_ms};
+use crate::{state::AppState, time::now_ms, AppError};
 
 #[derive(Serialize)]
 pub struct BackfillReport {
@@ -48,7 +47,7 @@ pub async fn events_backfill_timezone(
     household_id: String,
     default_tz: Option<String>,
     dry_run: bool,
-) -> Result<BackfillReport, DbError> {
+) -> Result<BackfillReport, AppError> {
     let pool = {
         let state: State<AppState> = app.state();
         state.pool.clone()
@@ -75,7 +74,12 @@ pub async fn events_backfill_timezone(
     .bind(&household_id)
     .fetch_one(&pool)
     .await
-    .map_err(|e| DbError { code: "Unknown".into(), message: e.to_string() })?;
+    .map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "events_backfill_timezone")
+            .with_context("step", "count")
+            .with_context("household_id", household_id.clone())
+    })?;
 
     if dry_run {
         return Ok(BackfillReport {
@@ -87,9 +91,11 @@ pub async fn events_backfill_timezone(
         });
     }
 
-    let mut tx = pool.begin().await.map_err(|e| DbError {
-        code: "Unknown".into(),
-        message: e.to_string(),
+    let mut tx = pool.begin().await.map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "events_backfill_timezone")
+            .with_context("step", "begin_tx")
+            .with_context("household_id", household_id.clone())
     })?;
 
     // Legacy rows store `start_at` as wall-clock ms in `tz`; derive UTC values.
@@ -97,7 +103,12 @@ pub async fn events_backfill_timezone(
         .bind(&household_id)
         .fetch_all(&mut *tx)
         .await
-        .map_err(|e| DbError { code: "Unknown".into(), message: e.to_string() })?;
+        .map_err(|err| {
+            AppError::from(err)
+                .with_context("operation", "events_backfill_timezone")
+                .with_context("step", "load_events")
+                .with_context("household_id", household_id.clone())
+        })?;
 
     let total_u = total as u64;
     let mut processed = 0u64;
@@ -116,9 +127,12 @@ pub async fn events_backfill_timezone(
             .bind(&id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| DbError {
-                code: "Unknown".into(),
-                message: e.to_string(),
+            .map_err(|err| {
+                AppError::from(err)
+                    .with_context("operation", "events_backfill_timezone")
+                    .with_context("step", "update_event")
+                    .with_context("event_id", id.clone())
+                    .with_context("household_id", household_id.clone())
             })?;
 
         processed += 1;
@@ -133,21 +147,25 @@ pub async fn events_backfill_timezone(
         }
     }
 
-    tx.commit().await.map_err(|e| DbError {
-        code: "Unknown".into(),
-        message: e.to_string(),
+    tx.commit().await.map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "events_backfill_timezone")
+            .with_context("step", "commit_tx")
+            .with_context("household_id", household_id.clone())
     })?;
 
     use std::fs::{create_dir_all, File};
     use std::io::Write;
     let ts = now_ms();
-    let dir = std::path::Path::new("logs");
-    let _ = create_dir_all(dir);
-    let path = dir.join(format!("events_tz_backfill_{}_{}.log", household_id, ts));
-    if let Ok(mut f) = File::create(&path) {
-        let _ = writeln!(f, "tz_used={}", tz.name());
-        let _ = writeln!(f, "to_update={}", total_u);
-        let _ = writeln!(f, "updated={}", processed);
+    if let Ok(mut dir) = app.path().app_data_dir() {
+        dir.push("logs");
+        let _ = create_dir_all(&dir);
+        let path = dir.join(format!("events_tz_backfill_{}_{}.log", household_id, ts));
+        if let Ok(mut f) = File::create(&path) {
+            let _ = writeln!(f, "tz_used={}", tz.name());
+            let _ = writeln!(f, "to_update={}", total_u);
+            let _ = writeln!(f, "updated={}", processed);
+        }
     }
 
     Ok(BackfillReport {

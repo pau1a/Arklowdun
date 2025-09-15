@@ -1,39 +1,10 @@
-use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sqlx::{sqlite::SqliteRow, Column, Row, SqlitePool, TypeInfo, ValueRef};
 
-use crate::{id::new_uuid_v7, repo, time::now_ms, Event};
+use crate::{id::new_uuid_v7, repo, time::now_ms, AppError, AppResult, Event};
 use chrono::{DateTime, Duration, LocalResult, NaiveDateTime, Offset, TimeZone, Utc};
 use chrono_tz::Tz as ChronoTz;
 use rrule::{RRule, RRuleSet, Tz, Unvalidated};
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct DbErrorPayload {
-    pub code: String,
-    pub message: String,
-}
-
-fn map_sqlx_error(err: sqlx::Error) -> DbErrorPayload {
-    if let sqlx::Error::Database(db) = &err {
-        if let Some(code) = db.code() {
-            // SQLite constraint violations have extended code 2067
-            if code == "2067" || code == "1555" || code == "19" {
-                return DbErrorPayload {
-                    code: "Constraint".into(),
-                    message: db.message().to_string(),
-                };
-            }
-        }
-    }
-    DbErrorPayload {
-        code: "Unknown".into(),
-        message: err.to_string(),
-    }
-}
-
-pub fn map_db_error(err: sqlx::Error) -> DbErrorPayload {
-    map_sqlx_error(err)
-}
 
 fn from_local_ms(ms: i64, tz: Tz) -> DateTime<Tz> {
     #[allow(deprecated)]
@@ -89,8 +60,10 @@ async fn list(
     order_by: Option<&str>,
     limit: Option<i64>,
     offset: Option<i64>,
-) -> anyhow::Result<Vec<Value>> {
-    let rows = repo::list_active(pool, table, household_id, order_by, limit, offset).await?;
+) -> AppResult<Vec<Value>> {
+    let rows = repo::list_active(pool, table, household_id, order_by, limit, offset)
+        .await
+        .map_err(AppError::from)?;
     Ok(rows.into_iter().map(row_to_value).collect())
 }
 
@@ -99,17 +72,15 @@ async fn get(
     table: &str,
     household_id: Option<&str>,
     id: &str,
-) -> anyhow::Result<Option<Value>> {
-    let row = repo::get_active(pool, table, household_id, id).await?;
+) -> AppResult<Option<Value>> {
+    let row = repo::get_active(pool, table, household_id, id)
+        .await
+        .map_err(AppError::from)?;
     Ok(row.map(row_to_value))
 }
 
 // TXN: domain=OUT OF SCOPE tables=*
-async fn create(
-    pool: &SqlitePool,
-    table: &str,
-    mut data: Map<String, Value>,
-) -> Result<Value, sqlx::Error> {
+async fn create(pool: &SqlitePool, table: &str, mut data: Map<String, Value>) -> AppResult<Value> {
     let id = data
         .get("id")
         .and_then(|v| v.as_str())
@@ -133,7 +104,7 @@ async fn create(
         let v = data.get(c).unwrap();
         query = bind_value(query, v);
     }
-    query.execute(pool).await?;
+    query.execute(pool).await.map_err(AppError::from)?;
     Ok(Value::Object(data))
 }
 
@@ -144,7 +115,7 @@ async fn update(
     id: &str,
     mut data: Map<String, Value>,
     household_id: Option<&str>,
-) -> Result<(), sqlx::Error> {
+) -> AppResult<()> {
     data.remove("id");
     data.remove("created_at");
     let now = now_ms();
@@ -170,7 +141,7 @@ async fn update(
         let hh = household_id.unwrap_or("");
         query = query.bind(hh).bind(id);
     }
-    query.execute(pool).await?;
+    query.execute(pool).await.map_err(AppError::from)?;
     Ok(())
 }
 
@@ -202,12 +173,13 @@ pub async fn list_command(
     order_by: Option<&str>,
     limit: Option<i64>,
     offset: Option<i64>,
-) -> Result<Vec<Value>, DbErrorPayload> {
+) -> AppResult<Vec<Value>> {
     list(pool, table, household_id, order_by, limit, offset)
         .await
-        .map_err(|e| DbErrorPayload {
-            code: "Unknown".into(),
-            message: e.to_string(),
+        .map_err(|err| {
+            err.with_context("operation", "list")
+                .with_context("table", table.to_string())
+                .with_context("household_id", household_id.to_string())
         })
 }
 
@@ -216,13 +188,14 @@ pub async fn get_command(
     table: &str,
     household_id: Option<&str>,
     id: &str,
-) -> Result<Option<Value>, DbErrorPayload> {
-    get(pool, table, household_id, id)
-        .await
-        .map_err(|e| DbErrorPayload {
-            code: "Unknown".into(),
-            message: e.to_string(),
-        })
+) -> AppResult<Option<Value>> {
+    get(pool, table, household_id, id).await.map_err(|err| {
+        let household = household_id.unwrap_or("");
+        err.with_context("operation", "get")
+            .with_context("table", table.to_string())
+            .with_context("household_id", household.to_string())
+            .with_context("id", id.to_string())
+    })
 }
 
 // TXN: domain=OUT OF SCOPE tables=*
@@ -230,8 +203,11 @@ pub async fn create_command(
     pool: &SqlitePool,
     table: &str,
     data: Map<String, Value>,
-) -> Result<Value, DbErrorPayload> {
-    create(pool, table, data).await.map_err(map_sqlx_error)
+) -> AppResult<Value> {
+    create(pool, table, data).await.map_err(|err| {
+        err.with_context("operation", "create")
+            .with_context("table", table.to_string())
+    })
 }
 
 // TXN: domain=OUT OF SCOPE tables=*
@@ -241,10 +217,16 @@ pub async fn update_command(
     id: &str,
     data: Map<String, Value>,
     household_id: Option<&str>,
-) -> Result<(), DbErrorPayload> {
+) -> AppResult<()> {
     update(pool, table, id, data, household_id)
         .await
-        .map_err(map_sqlx_error)
+        .map_err(|err| {
+            let household = household_id.unwrap_or("");
+            err.with_context("operation", "update")
+                .with_context("table", table.to_string())
+                .with_context("household_id", household.to_string())
+                .with_context("id", id.to_string())
+        })
 }
 
 // TXN: domain=OUT OF SCOPE tables=*
@@ -253,20 +235,26 @@ pub async fn delete_command(
     table: &str,
     household_id: &str,
     id: &str,
-) -> Result<(), DbErrorPayload> {
+) -> AppResult<()> {
     if table == "inventory_items" || table == "shopping_items" {
         return repo::items::delete_item(pool, table, household_id, id)
             .await
-            .map_err(|e| DbErrorPayload {
-                code: "Unknown".into(),
-                message: e.to_string(),
+            .map_err(|err| {
+                AppError::from(err)
+                    .with_context("operation", "delete")
+                    .with_context("table", table.to_string())
+                    .with_context("household_id", household_id.to_string())
+                    .with_context("id", id.to_string())
             });
     }
     repo::set_deleted_at(pool, table, household_id, id)
         .await
-        .map_err(|e| DbErrorPayload {
-            code: "Unknown".into(),
-            message: e.to_string(),
+        .map_err(|err| {
+            AppError::from(err)
+                .with_context("operation", "delete")
+                .with_context("table", table.to_string())
+                .with_context("household_id", household_id.to_string())
+                .with_context("id", id.to_string())
         })
 }
 
@@ -276,20 +264,26 @@ pub async fn restore_command(
     table: &str,
     household_id: &str,
     id: &str,
-) -> Result<(), DbErrorPayload> {
+) -> AppResult<()> {
     if table == "inventory_items" || table == "shopping_items" {
         return repo::items::restore_item(pool, table, household_id, id)
             .await
-            .map_err(|e| DbErrorPayload {
-                code: "Unknown".into(),
-                message: e.to_string(),
+            .map_err(|err| {
+                AppError::from(err)
+                    .with_context("operation", "restore")
+                    .with_context("table", table.to_string())
+                    .with_context("household_id", household_id.to_string())
+                    .with_context("id", id.to_string())
             });
     }
     repo::clear_deleted_at(pool, table, household_id, id)
         .await
-        .map_err(|e| DbErrorPayload {
-            code: "Unknown".into(),
-            message: e.to_string(),
+        .map_err(|err| {
+            AppError::from(err)
+                .with_context("operation", "restore")
+                .with_context("table", table.to_string())
+                .with_context("household_id", household_id.to_string())
+                .with_context("id", id.to_string())
         })
 }
 
@@ -298,11 +292,9 @@ pub async fn events_list_range_command(
     household_id: &str,
     start: i64,
     end: i64,
-) -> Result<Vec<Event>, DbErrorPayload> {
-    let hh = repo::require_household(household_id).map_err(|e| DbErrorPayload {
-        code: "Unknown".into(),
-        message: e.to_string(),
-    })?;
+) -> AppResult<Vec<Event>> {
+    let hh = repo::require_household(household_id)
+        .map_err(|err| AppError::from(err).with_context("operation", "events_list_range"))?;
     let rows = sqlx::query_as::<_, Event>(
         r#"
         SELECT id, household_id, title, start_at, end_at, tz, start_at_utc, end_at_utc,
@@ -322,7 +314,13 @@ pub async fn events_list_range_command(
     .bind(end)
     .fetch_all(pool)
     .await
-    .map_err(|e| DbErrorPayload { code: "Unknown".into(), message: e.to_string() })?;
+    .map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "events_list_range")
+            .with_context("household_id", household_id.to_string())
+            .with_context("start", start.to_string())
+            .with_context("end", end.to_string())
+    })?;
 
     const TOTAL_LIMIT: usize = 10_000;
     let mut out = Vec::new();
