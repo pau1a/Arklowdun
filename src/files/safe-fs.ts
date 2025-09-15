@@ -105,14 +105,18 @@ export async function mkdir(
   await fs.mkdir(realPath, { recursive: opts?.recursive });
 }
 
-export async function removeFile(relPath: string, root: RootKey): Promise<void> {
+export async function remove(
+  relPath: string,
+  root: RootKey,
+  opts?: { recursive?: boolean },
+): Promise<void> {
   if (looksAbsolute(relPath)) {
     throw new PathError("OUTSIDE_ROOT", "Path outside allowlisted root");
   }
   const { realPath } = await canonicalizeAndVerifyImpl(relPath, root);
   await rejectSymlinksImpl(realPath, root);
   const fs = await getFs();
-  await fs.remove(realPath);
+  await fs.remove(realPath, { recursive: !!opts?.recursive });
 }
 
 export async function exists(relPath: string, root: RootKey): Promise<boolean> {
