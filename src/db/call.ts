@@ -1,4 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
 import type { AppError } from "../bindings/AppError";
 
 const FALLBACK_CODE = "APP/UNKNOWN";
@@ -20,7 +19,7 @@ function normalizeContext(value: unknown): Record<string, string> | undefined {
 
 export function normalizeError(error: unknown): AppError {
   if (typeof error === "string") {
-    return { code: FALLBACK_CODE, message: error };
+    return { code: FALLBACK_CODE, message: error, context: undefined };
   }
 
   if (isRecord(error)) {
@@ -32,7 +31,7 @@ export function normalizeError(error: unknown): AppError {
           ? error.name
           : JSON.stringify(error);
 
-    const normalized: AppError = { code, message };
+    const normalized: AppError = { code, message, context: undefined };
 
     const context = normalizeContext(error.context);
     if (context) normalized.context = context;
@@ -49,11 +48,12 @@ export function normalizeError(error: unknown): AppError {
     return normalized;
   }
 
-  return { code: FALLBACK_CODE, message: String(error) };
+  return { code: FALLBACK_CODE, message: String(error), context: undefined };
 }
 
 export async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   try {
+    const { invoke } = await import("@tauri-apps/api/core");
     return await invoke<T>(cmd, args);
   } catch (err) {
     throw normalizeError(err);
