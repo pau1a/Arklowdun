@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use tauri::Manager;
+use tauri::{Manager, Runtime};
 
 #[derive(Debug, Clone, Copy)]
 pub enum RootKey {
@@ -16,6 +16,7 @@ pub enum FsPolicyError {
     UncRejected,
     #[error("Parent traversal is not allowed")]
     DotDotRejected,
+    #[cfg(target_os = "windows")]
     #[error("Cross-volume paths are not allowed")]
     CrossVolume,
     #[error("Path is outside the allowed root")]
@@ -28,19 +29,16 @@ pub enum FsPolicyError {
     Io(#[from] std::io::Error),
 }
 
-// Several fields are only used in tests or structured logs; silence warnings
-// outside tests without removing useful debug context.
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug)]
 pub struct CanonResult {
-    pub input: String,
-    pub base: PathBuf,
     pub real_path: PathBuf,
-    pub root: RootKey,
 }
 
 /// Resolve the app's base directory for a given root.
-pub fn base_for(root: RootKey, app_handle: &tauri::AppHandle) -> Result<PathBuf, FsPolicyError> {
+pub fn base_for<R: Runtime>(
+    root: RootKey,
+    app_handle: &tauri::AppHandle<R>,
+) -> Result<PathBuf, FsPolicyError> {
     let base = if let Ok(fake) = std::env::var("ARK_FAKE_APPDATA") {
         PathBuf::from(fake)
     } else {
@@ -63,10 +61,10 @@ pub fn base_for(root: RootKey, app_handle: &tauri::AppHandle) -> Result<PathBuf,
 /// Canonicalize user/provided path against `root`, normalize separators,
 /// reject `..`, UNC, cross-volume, and ensure result is **within** base.
 /// Do **not** follow symlinks here.
-pub fn canonicalize_and_verify(
+pub fn canonicalize_and_verify<R: Runtime>(
     input: &str,
     root: RootKey,
-    app_handle: &tauri::AppHandle,
+    app_handle: &tauri::AppHandle<R>,
 ) -> Result<CanonResult, FsPolicyError> {
     let base = base_for(root, app_handle)?;
     let norm = input.replace('\\', "/");
@@ -101,12 +99,7 @@ pub fn canonicalize_and_verify(
     if !candidate.starts_with(&base) {
         return Err(FsPolicyError::OutsideRoot);
     }
-    Ok(CanonResult {
-        input: input.to_string(),
-        base,
-        real_path: candidate,
-        root,
-    })
+    Ok(CanonResult { real_path: candidate })
 }
 
 /// Walk each segment from base → target and deny if any segment is a symlink.

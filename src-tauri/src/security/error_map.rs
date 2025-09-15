@@ -13,9 +13,13 @@ impl From<FsPolicyError> for UiError {
         match e {
             FsPolicyError::UncRejected
             | FsPolicyError::DotDotRejected
-            | FsPolicyError::CrossVolume
             | FsPolicyError::OutsideRoot
             | FsPolicyError::Symlink => UiError {
+                code: "NOT_ALLOWED",
+                message: "That location isn't allowed.",
+            },
+            #[cfg(target_os = "windows")]
+            FsPolicyError::CrossVolume => UiError {
                 code: "NOT_ALLOWED",
                 message: "That location isn't allowed.",
             },
