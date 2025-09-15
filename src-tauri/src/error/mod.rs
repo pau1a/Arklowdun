@@ -116,10 +116,11 @@ impl AppError {
 
     fn from_io_ref(error: &IoError) -> Self {
         let code = format!("IO/{:?}", error.kind());
-        let mut app_error = AppError::new(code, error.to_string());
-        if let Some(os_code) = error.raw_os_error() {
-            app_error = app_error.with_context("os_code", os_code.to_string());
-        }
+        let base = AppError::new(code, error.to_string());
+        let app_error = match error.raw_os_error() {
+            Some(os_code) => base.with_context("os_code", os_code.to_string()),
+            None => base,
+        };
         app_error.with_error_source(error.source())
     }
 
@@ -136,20 +137,28 @@ impl AppError {
             "JSON/ERROR"
         };
 
-        let mut app_error = AppError::new(code, error.to_string());
-        let line = error.line();
-        if line > 0 {
-            app_error = app_error.with_context("line", line.to_string());
-        }
-        let column = error.column();
-        if column > 0 {
-            app_error = app_error.with_context("column", column.to_string());
-        }
-        app_error.with_error_source(error.source())
+        let base = AppError::new(code, error.to_string());
+        let with_line = {
+            let line = error.line();
+            if line > 0 {
+                base.with_context("line", line.to_string())
+            } else {
+                base
+            }
+        };
+        let with_col = {
+            let column = error.column();
+            if column > 0 {
+                with_line.with_context("column", column.to_string())
+            } else {
+                with_line
+            }
+        };
+        with_col.with_error_source(error.source())
     }
 
     fn from_sqlx_ref(error: &SqlxError) -> Self {
-        let mut app_error = match error {
+        let app_error = match error {
             SqlxError::RowNotFound => AppError::new("SQLX/ROW_NOT_FOUND", "Record not found"),
             SqlxError::ColumnNotFound(name) => {
                 AppError::new("SQLX/COLUMN_NOT_FOUND", format!("Column not found: {name}"))
@@ -167,11 +176,11 @@ impl AppError {
                     .code()
                     .map(|code| format!("Sqlite/{code}"))
                     .unwrap_or_else(|| "SQLX/DATABASE".to_string());
-                let mut app_error = AppError::new(code, db.message().to_string());
-                if let Some(constraint) = db.constraint() {
-                    app_error = app_error.with_context("constraint", constraint.to_string());
+                match db.constraint() {
+                    Some(constraint) => AppError::new(code, db.message().to_string())
+                        .with_context("constraint", constraint.to_string()),
+                    None => AppError::new(code, db.message().to_string()),
                 }
-                app_error
             }
             SqlxError::ColumnDecode { index, source } => {
                 AppError::new("SQLX/COLUMN_DECODE", source.to_string())
