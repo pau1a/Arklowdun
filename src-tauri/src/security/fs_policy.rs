@@ -25,6 +25,7 @@ pub enum FsPolicyError {
     Io(#[from] std::io::Error),
 }
 
+#[derive(Debug)]
 pub struct CanonResult {
     pub input: String,
     pub base: PathBuf,
@@ -40,7 +41,7 @@ pub fn base_for(root: RootKey, app_handle: &tauri::AppHandle) -> Result<PathBuf,
         app_handle
             .path()
             .app_data_dir()
-            .ok_or(FsPolicyError::Invalid)?
+            .map_err(|_| FsPolicyError::Invalid)?
     };
     let base = match root {
         RootKey::AppData => base,
