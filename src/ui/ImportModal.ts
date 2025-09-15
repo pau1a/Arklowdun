@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { call } from "../db/call";
 import { defaultHouseholdId } from "../db/household";
 import { showError } from "./errors";
+import { presentFsError } from "../lib/ipc";
 
 export function ImportModal(el: HTMLElement) {
   el.innerHTML = `
@@ -39,7 +40,13 @@ export function ImportModal(el: HTMLElement) {
         logLink.innerHTML = "";
         const btn = document.createElement("button");
         btn.textContent = "Open log";
-        btn.onclick = () => call("open_path", { path: lp });
+        btn.onclick = async () => {
+          try {
+            await call("open_path", { path: lp });
+          } catch (e) {
+            presentFsError(e);
+          }
+        };
         logLink.appendChild(btn);
       }
       line("Started");

@@ -1,6 +1,6 @@
 import { call } from "../db/call";
-import { showError } from "./errors";
 import { canonicalizeAndVerify, rejectSymlinks, PathError, RootKey } from "../files/path";
+import { presentFsError } from "../lib/ipc";
 
 const isMac = navigator.platform.includes("Mac");
 const isWin = navigator.platform.includes("Win");
@@ -13,7 +13,7 @@ export async function openAttachment(table: string, id: string) {
   try {
     await call("attachment_open", { table, id });
   } catch (e: any) {
-    showError(e);
+    presentFsError(e);
   }
 }
 
@@ -43,22 +43,25 @@ export async function revealAttachment(
           copied = false;
         }
         if (copied) {
-          showError({
-            code: "INFO",
-            message: "Reveal not supported — absolute path copied to clipboard.",
+          presentFsError({
+            code: "IO/GENERIC",
+            message: "Reveal not supported; path copied to clipboard.",
           });
         } else {
-          showError(`Reveal not supported — path: ${realPath}`);
+          presentFsError({
+            code: "IO/GENERIC",
+            message: "Reveal not supported.",
+          });
         }
       } catch (err: any) {
         if (err instanceof PathError) {
-          showError({ code: "INFO", message: "That location isn't allowed" });
+          presentFsError({ code: "NOT_ALLOWED", message: err.message });
         } else {
-          showError(err);
+          presentFsError(err);
         }
       }
     } else {
-      showError(e);
+      presentFsError(e);
     }
   }
 }
