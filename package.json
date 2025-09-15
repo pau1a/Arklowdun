@@ -33,7 +33,8 @@
     "schema:verify": "scripts/verify_schema.sh --db dev.sqlite --schema schema.sql --verbose",
     "schema:update": "scripts/verify_schema.sh --db dev.sqlite --schema schema.sql --update --verbose",
     "schema:verify:strict": "scripts/verify_schema.sh --db dev.sqlite --schema schema.sql --strict --include-migrations --verbose",
-    "schema:ci": "scripts/ci/verify-schema.sh"
+    "schema:ci": "scripts/ci/verify-schema.sh",
+      "release": "DB=dev.sqlite bash scripts/check_pending_migrations.sh && npm run tauri -- build"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^6.7.2",
