@@ -1,63 +1,80 @@
-#!/usr/bin/env node
-import { readdir, readFile } from 'node:fs/promises';
-import path from 'node:path';
-import process from 'node:process';
+// scripts/guards/check-plugin-fs-usage.mjs
+// Deny direct @tauri-apps/plugin-fs imports outside the sanctioned wrappers.
+// Allowed files: src/files/safe-fs.ts, src/files/path.ts
+import { promises as fs } from 'node:fs';
+import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const REPO_ROOT = path.resolve(__dirname, '..', '..');
-const SRC_DIR = path.join(REPO_ROOT, 'src');
+const projectRoot = fileURLToPath(new URL('../../', import.meta.url)); // repo root from scripts/guards/
+const SRC_DIR = join(projectRoot, 'src');
 
-// Resolve all allowlists to absolute paths
-const allowedDirs = [
-  path.join(SRC_DIR, 'fs'),
-  path.join(SRC_DIR, 'files'),
-].map((p) => path.resolve(p));
+const ALLOWED = new Set([
+  normalizePath('src/files/safe-fs.ts'),
+  normalizePath('src/files/path.ts'),
+]);
 
-const allowedFiles = [path.join(SRC_DIR, 'storage.ts')].map((p) => path.resolve(p));
+const EXT_OK = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs']);
 
-const CODE_EXT_RE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/i;
-const TARGET = '@tauri-apps/plugin-fs';
+const RE_PATTERNS = [
+  /from\s+['"]@tauri-apps\/plugin-fs(?:\/[^'"]*)?['"]/,
+  /import\s*\(\s*['"]@tauri-apps\/plugin-fs(?:\/[^'"]*)?['"]\s*\)/,
+  /require\s*\(\s*['"]@tauri-apps\/plugin-fs(?:\/[^'"]*)?['"]\s*\)/,
+];
 
-async function walk(dir, files = []) {
-  const entries = await readdir(dir, { withFileTypes: true });
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      await walk(fullPath, files);
-    } else if (entry.isFile() && CODE_EXT_RE.test(entry.name)) {
-      files.push(path.resolve(fullPath));
+function normalizePath(p) {
+  return p.replace(/\\/g, '/');
+}
+
+async function walk(dir, out = []) {
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  for (const e of entries) {
+    const full = join(dir, e.name);
+    if (e.isDirectory()) {
+      await walk(full, out);
+    } else {
+      out.push(full);
     }
   }
-  return files;
+  return out;
 }
 
-function isAllowed(file) {
-  const f = path.resolve(file);
-  if (allowedFiles.includes(f)) return true;
-  return allowedDirs.some((d) => f.startsWith(d + path.sep));
-}
+async function main() {
+  const files = (await walk(SRC_DIR))
+    .filter(f => EXT_OK.has(extname(f)));
 
-(async () => {
-  const files = await walk(SRC_DIR).catch((e) => {
-    console.error(`Failed to scan src/: ${e?.message || e}`);
-    process.exit(2);
-  });
-  const violations = [];
+  const offenders = [];
+
   for (const file of files) {
-    const content = await readFile(file, 'utf8').catch(() => '');
-    if (content.includes(TARGET) && !isAllowed(file)) {
-      violations.push(path.relative(REPO_ROOT, file));
-    }
+    const rel = normalizePath(file.slice(projectRoot.length));
+    if (ALLOWED.has(rel)) continue;
+
+    const txt = await fs.readFile(file, 'utf8');
+    const lines = txt.split(/\r?\n/);
+
+    lines.forEach((line, idx) => {
+      if (RE_PATTERNS.some(re => re.test(line))) {
+        offenders.push({
+          file: rel,
+          line: idx + 1,
+          text: line.trim(),
+        });
+      }
+    });
   }
-  if (violations.length) {
-    console.error('Forbidden @tauri-apps/plugin-fs usage in:');
-    for (const v of violations) {
-      console.error(' - ' + v);
+
+  if (offenders.length) {
+    console.error('ERROR: Raw @tauri-apps/plugin-fs imports are forbidden outside the wrapper.\n');
+    for (const o of offenders) {
+      console.error(` - ${o.file}:${o.line}: ${o.text}`);
     }
+    console.error('\nFix: Use src/files/safe-fs.ts (and path.ts) instead of importing the plugin directly.');
     process.exit(1);
   } else {
-    console.log('check-plugin-fs-usage: OK');
+    console.log('OK: No forbidden @tauri-apps/plugin-fs imports found.');
   }
-})();
+}
+
+main().catch(err => {
+  console.error('Guard failed to run:', err);
+  process.exit(1);
+});
