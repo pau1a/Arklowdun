@@ -19,11 +19,13 @@ mod id;
 mod importer;
 pub mod migrate;
 mod repo;
+mod security;
 mod state;
 mod time;
 
 use commands::{map_db_error, DbErrorPayload};
 use events_tz_backfill::events_backfill_timezone;
+use security::{error_map::UiError, fs_policy, fs_policy::RootKey, hash_path};
 use tracing_subscriber::{fmt, EnvFilter};
 
 pub fn init_logging() {
@@ -993,8 +995,32 @@ async fn attachment_open(
     id: String,
 ) -> Result<(), crate::commands::DbErrorPayload> {
     let (root_key, rel) = attachments::load_attachment_columns(&state.pool, &table, &id).await?;
-    let path = attachments::resolve_attachment_path(&app, &root_key, &rel)?;
-    attachments::open_with_os(&path)
+    let root = match root_key.as_str() {
+        "attachments" => RootKey::Attachments,
+        "appData" => RootKey::AppData,
+        _ => RootKey::AppData,
+    };
+    let res = match fs_policy::canonicalize_and_verify(&rel, root, &app) {
+        Ok(r) => r,
+        Err(e) => {
+            let ui: UiError = e.into();
+            tracing::warn!(target="arklowdun", event="fs_guard_check", ok=false, root=?root, code=%ui.code);
+            return Err(DbErrorPayload {
+                code: ui.code.into(),
+                message: ui.message.into(),
+            });
+        }
+    };
+    if let Err(e) = fs_policy::reject_symlinks(&res.real_path) {
+        let ui: UiError = e.into();
+        tracing::warn!(target="arklowdun", event="fs_guard_check", ok=false, root=?root, code=%ui.code);
+        return Err(DbErrorPayload {
+            code: ui.code.into(),
+            message: ui.message.into(),
+        });
+    }
+    tracing::info!(target="arklowdun", event="fs_guard_check", ok=true, root=?root, path_hash=%hash_path(&res.real_path));
+    attachments::open_with_os(&res.real_path)
 }
 
 #[tauri::command]
@@ -1005,8 +1031,32 @@ async fn attachment_reveal(
     id: String,
 ) -> Result<(), crate::commands::DbErrorPayload> {
     let (root_key, rel) = attachments::load_attachment_columns(&state.pool, &table, &id).await?;
-    let path = attachments::resolve_attachment_path(&app, &root_key, &rel)?;
-    attachments::reveal_with_os(&path)
+    let root = match root_key.as_str() {
+        "attachments" => RootKey::Attachments,
+        "appData" => RootKey::AppData,
+        _ => RootKey::AppData,
+    };
+    let res = match fs_policy::canonicalize_and_verify(&rel, root, &app) {
+        Ok(r) => r,
+        Err(e) => {
+            let ui: UiError = e.into();
+            tracing::warn!(target="arklowdun", event="fs_guard_check", ok=false, root=?root, code=%ui.code);
+            return Err(DbErrorPayload {
+                code: ui.code.into(),
+                message: ui.message.into(),
+            });
+        }
+    };
+    if let Err(e) = fs_policy::reject_symlinks(&res.real_path) {
+        let ui: UiError = e.into();
+        tracing::warn!(target="arklowdun", event="fs_guard_check", ok=false, root=?root, code=%ui.code);
+        return Err(DbErrorPayload {
+            code: ui.code.into(),
+            message: ui.message.into(),
+        });
+    }
+    tracing::info!(target="arklowdun", event="fs_guard_check", ok=true, root=?root, path_hash=%hash_path(&res.real_path));
+    attachments::reveal_with_os(&res.real_path)
 }
 
 #[tauri::command]
@@ -1014,9 +1064,28 @@ async fn open_path(
     app: tauri::AppHandle,
     path: String,
 ) -> Result<(), crate::commands::DbErrorPayload> {
-    use std::path::Path;
-    let _ = app;
-    crate::attachments::open_with_os(Path::new(&path))
+    let root = RootKey::AppData;
+    let res = match fs_policy::canonicalize_and_verify(&path, root, &app) {
+        Ok(r) => r,
+        Err(e) => {
+            let ui: UiError = e.into();
+            tracing::warn!(target="arklowdun", event="fs_guard_check", ok=false, root=?root, code=%ui.code);
+            return Err(DbErrorPayload {
+                code: ui.code.into(),
+                message: ui.message.into(),
+            });
+        }
+    };
+    if let Err(e) = fs_policy::reject_symlinks(&res.real_path) {
+        let ui: UiError = e.into();
+        tracing::warn!(target="arklowdun", event="fs_guard_check", ok=false, root=?root, code=%ui.code);
+        return Err(DbErrorPayload {
+            code: ui.code.into(),
+            message: ui.message.into(),
+        });
+    }
+    tracing::info!(target="arklowdun", event="fs_guard_check", ok=true, root=?root, path_hash=%hash_path(&res.real_path));
+    crate::attachments::open_with_os(&res.real_path)
 }
 
 macro_rules! app_commands {

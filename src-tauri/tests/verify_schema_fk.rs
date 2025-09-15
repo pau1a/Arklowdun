@@ -1,9 +1,10 @@
 use std::process::Command;
+use assert_cmd::prelude::*; // for Command::cargo_bin
 use tempfile::tempdir;
 
-fn bin(name: &str) -> String {
-    // CARGO_BIN_EXE_<name> is set by Cargo for integration tests
-    std::env::var(&format!("CARGO_BIN_EXE_{}", name)).expect("bin path env var")
+// Prefer Cargo-managed binary lookup; this builds/locates the target reliably
+fn bin_cmd(name: &str) -> Command {
+    Command::cargo_bin(name).expect("cargo_bin lookup")
 }
 
 fn tmpdb() -> std::path::PathBuf {
@@ -19,14 +20,14 @@ fn fk_audit_fails_before_0020() {
     let db = tmpdb();
 
     // migrate up to 0019
-    let status = Command::new(bin("migrate"))
+    let status = bin_cmd("migrate")
         .args(["--db", db.to_str().unwrap(), "up", "--to", "0019"])
         .status()
         .expect("spawn migrate up to 0019");
     assert!(status.success(), "migrate up to 0019 failed");
 
     // run verify_schema --strict-fk (should fail and print missing FKs)
-    let out = Command::new(bin("verify_schema"))
+    let out = bin_cmd("verify_schema")
         .args(["--db", db.to_str().unwrap(), "--strict-fk"])
         .output()
         .expect("spawn verify_schema");
@@ -47,14 +48,14 @@ fn fk_audit_passes_after_0020() {
     let db = tmpdb();
 
     // migrate all (through 0020)
-    let status = Command::new(bin("migrate"))
+    let status = bin_cmd("migrate")
         .args(["--db", db.to_str().unwrap(), "up"])
         .status()
         .expect("spawn migrate up");
     assert!(status.success(), "migrate up failed");
 
     // verify strict-fk should succeed (and print [] or nothing)
-    let out = Command::new(bin("verify_schema"))
+    let out = bin_cmd("verify_schema")
         .args(["--db", db.to_str().unwrap(), "--strict-fk"])
         .output()
         .expect("spawn verify_schema");
