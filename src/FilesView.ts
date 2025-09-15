@@ -1,8 +1,18 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { readDir, writeTextFile, remove, mkdir } from "./files/fs";
-import { join } from "@tauri-apps/api/path";
+import {
+  readDir,
+  writeText,
+  remove,
+  mkdir,
+  toUserMessage,
+  type RootKey,
+} from "./files/safe-fs";
+import { canonicalizeAndVerify, rejectSymlinks } from "./files/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { STR } from "./ui/strings";
+import { showError } from "./ui/errors";
+
+const ROOT: RootKey = "attachments";
 
 function renderBreadcrumb(path: string, el: HTMLElement) {
   el.innerHTML = "";
@@ -23,29 +33,30 @@ async function listDirectory(
   pathEl: HTMLElement,
   setDir: (d: string) => void,
 ) {
-  const entries = await readDir(dir); // entries expose isDirectory/isFile
-  renderBreadcrumb(dir, pathEl);
-  listEl.innerHTML = "";
-  if (entries.length === 0) {
-    const row = document.createElement("tr");
-    const cell = document.createElement("td");
-    cell.colSpan = 5;
-    const { createEmptyState } = await import("./ui/emptyState");
-    cell.appendChild(
-      createEmptyState({
-        title: STR.empty.filesTitle,
-        actionLabel: "New file",
-        onAction: () => setDir(dir),
-      }),
-    );
-    row.appendChild(cell);
-    listEl.appendChild(row);
-    return;
-  }
-  for (const entry of entries) {
-    const path = (entry as any).path as string;
-    const row = document.createElement("tr");
-    row.tabIndex = 0;
+  try {
+    const entries = await readDir(dir, ROOT); // entries expose isDirectory/isFile
+    renderBreadcrumb(dir, pathEl);
+    listEl.innerHTML = "";
+    if (entries.length === 0) {
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+      cell.colSpan = 5;
+      const { createEmptyState } = await import("./ui/emptyState");
+      cell.appendChild(
+        createEmptyState({
+          title: STR.empty.filesTitle,
+          actionLabel: "New file",
+          onAction: () => setDir(dir),
+        }),
+      );
+      row.appendChild(cell);
+      listEl.appendChild(row);
+      return;
+    }
+    for (const entry of entries) {
+      const relPath = dir === "." ? entry.name : `${dir}/${entry.name}`;
+      const row = document.createElement("tr");
+      row.tabIndex = 0;
 
     const nameTd = document.createElement("td");
     const icon = document.createElement("span");
@@ -65,51 +76,60 @@ async function listDirectory(
 
     const actionsTd = document.createElement("td");
     actionsTd.className = "files__actions-cell";
-    const del = document.createElement("button");
-    del.textContent = "Delete";
-    del.className = "files__action";
-    del.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      try {
-        await remove(path, { recursive: entry.isDirectory === true });
-        await listDirectory(dir, listEl, previewEl, pathEl, setDir);
-      } catch (err) {
-        console.error("Failed to delete", err);
-      }
-    });
-    actionsTd.appendChild(del);
-
-    row.addEventListener("click", async () => {
-      if (entry.isDirectory) {
-        setDir(path);
-        await listDirectory(path, listEl, previewEl, pathEl, setDir);
-      } else {
-        previewEl.innerHTML = "";
-        const ext = entry.name.split(".").pop()?.toLowerCase();
-        const url = convertFileSrc(path);
-        if (
-          ext &&
-          ["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg"].includes(ext)
-        ) {
-          const img = document.createElement("img");
-          img.src = url;
-          img.style.maxWidth = "100%";
-          previewEl.appendChild(img);
-        } else if (ext === "pdf") {
-          const embed = document.createElement("embed");
-          embed.src = url;
-          embed.type = "application/pdf";
-          embed.style.width = "100%";
-          embed.style.height = "600px";
-          previewEl.appendChild(embed);
-        } else {
-          previewEl.textContent = "No preview available";
+      const del = document.createElement("button");
+      del.textContent = "Delete";
+      del.className = "files__action";
+      del.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        try {
+          await remove(relPath, ROOT, { recursive: entry.isDirectory === true });
+          await listDirectory(dir, listEl, previewEl, pathEl, setDir);
+        } catch (err) {
+          showError({ code: "INFO", message: toUserMessage(err) });
         }
-      }
-    });
+      });
+      actionsTd.appendChild(del);
 
-    row.append(nameTd, typeTd, sizeTd, modTd, actionsTd);
-    listEl.appendChild(row);
+      row.addEventListener("click", async () => {
+        if (entry.isDirectory) {
+          setDir(relPath);
+          await listDirectory(relPath, listEl, previewEl, pathEl, setDir);
+        } else {
+          previewEl.innerHTML = "";
+          const ext = entry.name.split(".").pop()?.toLowerCase();
+          try {
+            const { realPath } = await canonicalizeAndVerify(relPath, ROOT);
+            await rejectSymlinks(realPath, ROOT);
+            const url = convertFileSrc(realPath);
+            if (
+              ext &&
+              ["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg"].includes(ext)
+            ) {
+              const img = document.createElement("img");
+              img.src = url;
+              img.style.maxWidth = "100%";
+              previewEl.appendChild(img);
+            } else if (ext === "pdf") {
+              const embed = document.createElement("embed");
+              embed.src = url;
+              embed.type = "application/pdf";
+              embed.style.width = "100%";
+              embed.style.height = "600px";
+              previewEl.appendChild(embed);
+            } else {
+              previewEl.textContent = "No preview available";
+            }
+          } catch (e) {
+            showError({ code: "INFO", message: toUserMessage(e) });
+          }
+        }
+      });
+
+      row.append(nameTd, typeTd, sizeTd, modTd, actionsTd);
+      listEl.appendChild(row);
+    }
+  } catch (e) {
+    showError({ code: "INFO", message: toUserMessage(e) });
   }
 }
 
@@ -177,33 +197,53 @@ export async function FilesView(container: HTMLElement) {
   selectBtn?.addEventListener("click", async () => {
     const dir = await open({ directory: true });
     if (typeof dir === "string") {
-      setDir(dir);
-      if (pathEl) renderBreadcrumb(dir, pathEl);
-      if (fileForm) fileForm.style.display = "block";
-      if (folderForm) folderForm.style.display = "block";
-      if (listEl && previewEl && pathEl)
-        await listDirectory(dir, listEl, previewEl, pathEl, setDir);
+      try {
+        const { base, realPath } = await canonicalizeAndVerify(dir, ROOT);
+        const rel = realPath.slice(base.length) || ".";
+        setDir(rel);
+        if (pathEl) renderBreadcrumb(rel, pathEl);
+        if (fileForm) fileForm.style.display = "block";
+        if (folderForm) folderForm.style.display = "block";
+        if (listEl && previewEl && pathEl)
+          await listDirectory(rel, listEl, previewEl, pathEl, setDir);
+      } catch (e) {
+        showError({ code: "INFO", message: toUserMessage(e) });
+      }
     }
   });
 
   fileForm?.addEventListener("submit", async (e) => {
     e.preventDefault();
-    if (!currentDir || !fileNameInput) return;
-    const path = await join(currentDir, fileNameInput.value);
-    await writeTextFile(path, "");
-    fileNameInput.value = "";
-    if (listEl && previewEl && pathEl)
-      await listDirectory(currentDir, listEl, previewEl, pathEl, setDir);
+    if (currentDir === null || !fileNameInput) return;
+    const relPath =
+      currentDir === "."
+        ? fileNameInput.value
+        : `${currentDir}/${fileNameInput.value}`;
+    try {
+      await writeText(relPath, ROOT, "");
+      fileNameInput.value = "";
+      if (listEl && previewEl && pathEl)
+        await listDirectory(currentDir, listEl, previewEl, pathEl, setDir);
+    } catch (err) {
+      showError({ code: "INFO", message: toUserMessage(err) });
+    }
   });
 
   folderForm?.addEventListener("submit", async (e) => {
     e.preventDefault();
-    if (!currentDir || !folderNameInput) return;
-    const path = await join(currentDir, folderNameInput.value);
-    await mkdir(path, { recursive: true });
-    folderNameInput.value = "";
-    if (listEl && previewEl && pathEl)
-      await listDirectory(currentDir, listEl, previewEl, pathEl, setDir);
+    if (currentDir === null || !folderNameInput) return;
+    const relPath =
+      currentDir === "."
+        ? folderNameInput.value
+        : `${currentDir}/${folderNameInput.value}`;
+    try {
+      await mkdir(relPath, ROOT, { recursive: true });
+      folderNameInput.value = "";
+      if (listEl && previewEl && pathEl)
+        await listDirectory(currentDir, listEl, previewEl, pathEl, setDir);
+    } catch (err) {
+      showError({ code: "INFO", message: toUserMessage(err) });
+    }
   });
 }
 

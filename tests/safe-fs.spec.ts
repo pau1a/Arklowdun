@@ -90,6 +90,19 @@ test("mkdir passes recursive option", async () => {
   assert.deepEqual(args, ["/app/attachments/newdir", { recursive: true }]);
 });
 
+test("remove passes recursive option", async () => {
+  let args: any[] | undefined;
+  safeFs.__setMocks({
+    fs: {
+      remove: (async (p: string, opts?: { recursive?: boolean }) => {
+        args = [p, opts];
+      }) as any,
+    },
+  });
+  await safeFs.remove("dir", "attachments", { recursive: true });
+  assert.deepEqual(args, ["/app/attachments/dir", { recursive: true }]);
+});
+
 test("sanitizers are invoked", async () => {
   let canonCalled = 0;
   let rejectCalled = 0;
