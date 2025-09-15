@@ -1,10 +1,14 @@
 // dev-only smoke check; no UI, no side effects outside tmp
 use std::fs;
-use tauri::Manager;
 
 fn main() -> anyhow::Result<()> {
     // Arrange a fake appdata under tmp and ensure attachments exists.
-    let tmp = std::env::temp_dir().join("ark_smoke");
+    // On macOS, `/var` is a symlink to `/private/var`. Canonicalize so our base
+    // doesn't include a symlinked ancestor that would trip reject_symlinks().
+    let tmp = std::env::temp_dir()
+        .canonicalize()
+        .unwrap_or_else(|_| std::env::temp_dir())
+        .join("ark_smoke");
     let _ = fs::remove_dir_all(&tmp);
     fs::create_dir_all(tmp.join("attachments"))?;
     std::env::set_var("ARK_FAKE_APPDATA", &tmp);
@@ -27,6 +31,8 @@ fn main() -> anyhow::Result<()> {
     {
         use arklowdun_lib::security::fs_policy as policy;
         let ok = policy::canonicalize_and_verify("file.txt", policy::RootKey::Attachments, &handle)?;
+        // Ensure the terminal path exists so symlink_metadata does not ENOENT.
+        std::fs::write(&ok.real_path, b"ok")?;
         // No symlink in segments, so reject_symlinks should be OK.
         policy::reject_symlinks(&ok.real_path)?;
     }
