@@ -1163,7 +1163,7 @@ pub fn run() {
             db_has_vehicle_columns,
             db_has_pet_columns
         ])
-        .run(tauri::generate_context!())
+        .run(tauri::generate_context!("tauri.conf.json5"))
         .expect("error while running tauri application");
 }
 

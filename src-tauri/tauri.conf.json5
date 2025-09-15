@@ -39,5 +39,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "@tauri-apps/plugin-fs": {
+      "scope": [
+        // App-owned data dir (DB, logs, settings). Required for normal operation.
+        "$APPDATA/**",
+        // Attachments staging area under app data. Prevents random user FS traversal.
+        "$APPDATA/attachments/**"
+        // NOTE: User-library roots are intentionally not listed here; see docs/security/fs-allowlist.md.
+      ]
+    }
   }
 }
