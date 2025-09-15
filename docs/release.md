@@ -39,3 +39,7 @@ npm run release
 ```
 
 The build aborts if any migrations are missing from the target database.
+
+## File system allowlist
+
+File system access is now limited to the application's data directory (DB, logs, settings) and its `attachments/` subfolder. Desktop, Downloads, and other home directories are no longer reachable via the FS plugin. External paths must use a future sanctioned mechanism; see `docs/security/fs-allowlist.md`.

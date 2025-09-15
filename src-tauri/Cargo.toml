@@ -20,7 +20,7 @@ default = ["legacy_deleted_at"]
 legacy_deleted_at = []
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2", features = ["config-json5"] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
