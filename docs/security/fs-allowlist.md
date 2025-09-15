@@ -28,3 +28,20 @@ Examples of the resolved `$APPDATA` base:
 3. Update `src-tauri/tauri.conf.json5` with a commented entry and mirror it in this document.
 4. Verify that paths outside the allowlist are denied at runtime.
 
+
+## Path sanitizer
+
+All UI file operations pass through a canonicalizer that resolves user input to an absolute path within an allowlisted root.
+
+- Separators are normalized and `.` segments collapsed.
+- `..` traversal, UNC paths, and cross-volume drive changes are rejected.
+- Only `$APPDATA` and `$APPDATA/attachments` are valid bases.
+- All symlinks are denied in v1 (may relax once real path resolution is available).
+- Path joins use `@tauri-apps/api/path.join` at runtime for cross-platform correctness.
+
+### Manual verification
+
+1. Attempt to open `../../etc/passwd` → denied.
+2. Try a UNC path like `\\server\share` → denied.
+3. Symlink inside `attachments` pointing outside → denied.
+4. Regular file within `attachments` → allowed.
