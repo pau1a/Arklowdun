@@ -70,3 +70,7 @@ path = "scripts/verify_schema.rs"
 [[bin]]
 name = "migrate"
 path = "scripts/migrate.rs"
+
+[[bin]]
+name = "sec_smoke"
+path = "scripts/sec_smoke.rs"
