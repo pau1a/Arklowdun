@@ -28,6 +28,21 @@ pub struct AppError {
     pub cause: Option<Box<AppError>>,
 }
 
+/// Serializable representation of [`AppError`] for clients.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ErrorDto {
+    /// Machine readable error code.
+    pub code: String,
+    /// Human friendly message that can be shown directly to the user.
+    pub message: String,
+    /// Arbitrary key/value pairs that provide additional context.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub context: HashMap<String, String>,
+    /// Optional nested cause that preserves the error chain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause: Option<Box<ErrorDto>>,
+}
+
 pub type AppResult<T> = std::result::Result<T, AppError>;
 
 impl AppError {
@@ -89,6 +104,116 @@ impl AppError {
         self.cause = Some(Box::new(cause.into()));
         self
     }
+
+    fn with_error_source(mut self, source: Option<&(dyn StdError + 'static)>) -> Self {
+        if self.cause.is_none() {
+            if let Some(source) = source {
+                self.cause = Some(Box::new(AppError::from_std_error(source)));
+            }
+        }
+        self
+    }
+
+    fn from_io_ref(error: &IoError) -> Self {
+        let code = format!("IO/{:?}", error.kind());
+        let mut app_error = AppError::new(code, error.to_string());
+        if let Some(os_code) = error.raw_os_error() {
+            app_error = app_error.with_context("os_code", os_code.to_string());
+        }
+        app_error.with_error_source(error.source())
+    }
+
+    fn from_serde_json_ref(error: &SerdeJsonError) -> Self {
+        let code = if error.is_data() {
+            "JSON/DATA"
+        } else if error.is_syntax() {
+            "JSON/SYNTAX"
+        } else if error.is_eof() {
+            "JSON/EOF"
+        } else if error.is_io() {
+            "JSON/IO"
+        } else {
+            "JSON/ERROR"
+        };
+
+        let mut app_error = AppError::new(code, error.to_string());
+        let line = error.line();
+        if line > 0 {
+            app_error = app_error.with_context("line", line.to_string());
+        }
+        let column = error.column();
+        if column > 0 {
+            app_error = app_error.with_context("column", column.to_string());
+        }
+        app_error.with_error_source(error.source())
+    }
+
+    fn from_sqlx_ref(error: &SqlxError) -> Self {
+        let mut app_error = match error {
+            SqlxError::RowNotFound => AppError::new("SQLX/ROW_NOT_FOUND", "Record not found"),
+            SqlxError::ColumnNotFound(name) => {
+                AppError::new("SQLX/COLUMN_NOT_FOUND", format!("Column not found: {name}"))
+            }
+            SqlxError::PoolTimedOut => AppError::new(
+                "SQLX/POOL_TIMEOUT",
+                "Timed out acquiring a database connection",
+            ),
+            SqlxError::PoolClosed => AppError::new("SQLX/POOL_CLOSED", "Database pool is closed"),
+            SqlxError::Io(err) => {
+                return AppError::from_io_ref(err).with_context("source", "sqlx");
+            }
+            SqlxError::Database(db) => {
+                let code = db
+                    .code()
+                    .map(|code| format!("Sqlite/{code}"))
+                    .unwrap_or_else(|| "SQLX/DATABASE".to_string());
+                let mut app_error = AppError::new(code, db.message().to_string());
+                if let Some(constraint) = db.constraint() {
+                    app_error = app_error.with_context("constraint", constraint.to_string());
+                }
+                app_error
+            }
+            SqlxError::ColumnDecode { index, source } => {
+                AppError::new("SQLX/COLUMN_DECODE", source.to_string())
+                    .with_context("column_index", index.to_string())
+            }
+            SqlxError::Decode(decode_err) => AppError::new("SQLX/DECODE", decode_err.to_string()),
+            other => AppError::new("SQLX/ERROR", other.to_string()),
+        };
+
+        app_error.with_error_source(error.source())
+    }
+
+    fn from_std_error(err: &(dyn StdError + 'static)) -> Self {
+        if let Some(app) = err.downcast_ref::<AppError>() {
+            return app.clone();
+        }
+        if let Some(sqlx) = err.downcast_ref::<SqlxError>() {
+            return AppError::from_sqlx_ref(sqlx);
+        }
+        if let Some(io) = err.downcast_ref::<IoError>() {
+            return AppError::from_io_ref(io);
+        }
+        if let Some(json) = err.downcast_ref::<SerdeJsonError>() {
+            return AppError::from_serde_json_ref(json);
+        }
+
+        let mut root = AppError::new(AppError::UNKNOWN_CODE, err.to_string());
+        if let Some(source) = err.source() {
+            root.cause = Some(Box::new(AppError::from_std_error(source)));
+        }
+        root
+    }
+
+    /// Convert the error into a serializable DTO, cloning as needed.
+    pub fn to_dto(&self) -> ErrorDto {
+        ErrorDto::from(self)
+    }
+
+    /// Convert the error into a serializable DTO, consuming the value.
+    pub fn into_dto(self) -> ErrorDto {
+        self.into()
+    }
 }
 
 impl fmt::Display for AppError {
@@ -125,97 +250,74 @@ impl From<String> for AppError {
 
 impl From<AnyhowError> for AppError {
     fn from(error: AnyhowError) -> Self {
-        fn convert(err: &(dyn StdError + 'static)) -> AppError {
-            if let Some(app) = err.downcast_ref::<AppError>() {
-                return app.clone();
-            }
-
-            let mut root = AppError::new(AppError::UNKNOWN_CODE, err.to_string());
-            if let Some(source) = err.source() {
-                root.cause = Some(Box::new(convert(source)));
-            }
-            root
-        }
-
-        convert(error.as_ref())
+        AppError::from_std_error(error.as_ref())
     }
 }
 
 impl From<IoError> for AppError {
     fn from(error: IoError) -> Self {
-        let code = format!("IO/{:?}", error.kind());
-        let mut app_error = AppError::new(code, error.to_string());
-        if let Some(os_code) = error.raw_os_error() {
-            app_error = app_error.with_context("os_code", os_code.to_string());
-        }
-        app_error
+        AppError::from_io_ref(&error)
+    }
+}
+
+impl From<&IoError> for AppError {
+    fn from(error: &IoError) -> Self {
+        AppError::from_io_ref(error)
     }
 }
 
 impl From<SerdeJsonError> for AppError {
     fn from(error: SerdeJsonError) -> Self {
-        let code = if error.is_data() {
-            "JSON/DATA"
-        } else if error.is_syntax() {
-            "JSON/SYNTAX"
-        } else if error.is_eof() {
-            "JSON/EOF"
-        } else if error.is_io() {
-            "JSON/IO"
-        } else {
-            "JSON/ERROR"
-        };
+        AppError::from_serde_json_ref(&error)
+    }
+}
 
-        let mut app_error = AppError::new(code, error.to_string());
-        let line = error.line();
-        if line > 0 {
-            app_error = app_error.with_context("line", line.to_string());
-        }
-        let column = error.column();
-        if column > 0 {
-            app_error = app_error.with_context("column", column.to_string());
-        }
-        app_error
+impl From<&SerdeJsonError> for AppError {
+    fn from(error: &SerdeJsonError) -> Self {
+        AppError::from_serde_json_ref(error)
     }
 }
 
 impl From<SqlxError> for AppError {
     fn from(error: SqlxError) -> Self {
-        match error {
-            SqlxError::RowNotFound => AppError::new("SQLX/ROW_NOT_FOUND", "Record not found"),
-            SqlxError::ColumnNotFound(name) => {
-                AppError::new("SQLX/COLUMN_NOT_FOUND", format!("Column not found: {name}"))
-            }
-            SqlxError::PoolTimedOut => AppError::new(
-                "SQLX/POOL_TIMEOUT",
-                "Timed out acquiring a database connection",
-            ),
-            SqlxError::PoolClosed => AppError::new("SQLX/POOL_CLOSED", "Database pool is closed"),
-            SqlxError::Io(err) => AppError::from(err).with_context("source", "sqlx"),
-            SqlxError::Database(db) => {
-                let code = db
-                    .code()
-                    .map(|code| format!("Sqlite/{code}"))
-                    .unwrap_or_else(|| "SQLX/DATABASE".to_string());
-                let mut app_error = AppError::new(code, db.message().to_string());
-                if let Some(constraint) = db.constraint() {
-                    app_error = app_error.with_context("constraint", constraint.to_string());
-                }
-                app_error
-            }
-            SqlxError::ColumnDecode { index, source } => {
-                AppError::new("SQLX/COLUMN_DECODE", source.to_string())
-                    .with_context("column_index", index.to_string())
-            }
-            SqlxError::Decode(decode_err) => AppError::new("SQLX/DECODE", decode_err.to_string()),
-            other => AppError::new("SQLX/ERROR", other.to_string()),
-        }
+        AppError::from_sqlx_ref(&error)
+    }
+}
+
+impl From<&SqlxError> for AppError {
+    fn from(error: &SqlxError) -> Self {
+        AppError::from_sqlx_ref(error)
     }
 }
 
 impl From<UiError> for AppError {
     fn from(error: UiError) -> Self {
         AppError::new(error.code, error.message)
+    }
+}
+
+impl From<&AppError> for ErrorDto {
+    fn from(error: &AppError) -> Self {
+        ErrorDto {
+            code: error.code.clone(),
+            message: error.message.clone(),
+            context: error.context.clone(),
+            cause: error
+                .cause
+                .as_ref()
+                .map(|cause| Box::new(ErrorDto::from(cause.as_ref()))),
+        }
+    }
+}
+
+impl From<AppError> for ErrorDto {
+    fn from(error: AppError) -> Self {
+        ErrorDto {
+            code: error.code,
+            message: error.message,
+            context: error.context,
+            cause: error.cause.map(|cause| Box::new(ErrorDto::from(*cause))),
+        }
     }
 }
 
@@ -253,7 +355,7 @@ mod tests {
         assert_eq!(app_error.message(), "failed to save file");
 
         let cause = app_error.cause().expect("io cause present");
-        assert_eq!(cause.code(), AppError::UNKNOWN_CODE);
+        assert_eq!(cause.code(), "IO/Other");
         assert!(cause.message().contains("disk full"));
     }
 
@@ -325,5 +427,21 @@ mod tests {
             Some("name")
         );
         assert!(value.get("cause").is_none());
+    }
+
+    #[test]
+    fn dto_conversion_clones_structure() {
+        let error = AppError::new("VALIDATION", "nope")
+            .with_context("field", "name")
+            .with_cause(AppError::new("DB/FAIL", "db fail"));
+
+        let dto = error.to_dto();
+        assert_eq!(dto.code, "VALIDATION");
+        assert_eq!(dto.message, "nope");
+        assert_eq!(dto.context.get("field"), Some(&"name".to_string()));
+
+        let cause = dto.cause.expect("cause present");
+        assert_eq!(cause.code, "DB/FAIL");
+        assert_eq!(cause.message, "db fail");
     }
 }

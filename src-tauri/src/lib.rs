@@ -24,7 +24,7 @@ pub mod security;
 mod state;
 mod time;
 
-pub use error::{AppError, AppResult};
+pub use error::{AppError, AppResult, ErrorDto};
 use events_tz_backfill::events_backfill_timezone;
 use security::{error_map::UiError, fs_policy, fs_policy::RootKey, hash_path};
 use tracing_subscriber::{fmt, EnvFilter};
@@ -434,13 +434,13 @@ async fn bills_list_due_between(
 }
 
 #[tauri::command]
-async fn get_default_household_id(
-    state: tauri::State<'_, state::AppState>,
-) -> Result<String, String> {
-    let guard = state
-        .default_household_id
-        .lock()
-        .map_err(|_| "lock poisoned".to_string())?;
+async fn get_default_household_id(state: tauri::State<'_, state::AppState>) -> AppResult<String> {
+    let guard = state.default_household_id.lock().map_err(|_| {
+        AppError::new(
+            "STATE/LOCK_POISONED",
+            "Failed to access default household id",
+        )
+    })?;
     Ok(guard.clone())
 }
 
@@ -589,25 +589,22 @@ async fn files_index_ready(pool: &sqlx::SqlitePool, household_id: &str) -> bool 
 }
 
 #[tauri::command]
-async fn db_table_exists(state: State<'_, AppState>, name: String) -> Result<bool, String> {
+async fn db_table_exists(state: State<'_, AppState>, name: String) -> AppResult<bool> {
     Ok(table_exists(&state.pool, &name).await)
 }
 
 #[tauri::command]
-async fn db_has_files_index(state: State<'_, AppState>) -> Result<bool, String> {
+async fn db_has_files_index(state: State<'_, AppState>) -> AppResult<bool> {
     Ok(table_exists(&state.pool, "files_index").await)
 }
 
 #[tauri::command]
-async fn db_files_index_ready(
-    state: State<'_, AppState>,
-    household_id: String,
-) -> Result<bool, String> {
+async fn db_files_index_ready(state: State<'_, AppState>, household_id: String) -> AppResult<bool> {
     Ok(files_index_ready(&state.pool, &household_id).await)
 }
 
 #[tauri::command]
-async fn db_has_vehicle_columns(state: State<'_, AppState>) -> Result<bool, String> {
+async fn db_has_vehicle_columns(state: State<'_, AppState>) -> AppResult<bool> {
     let pool = &state.pool;
     if !table_exists(pool, "vehicles").await {
         return Ok(false);
@@ -621,7 +618,7 @@ async fn db_has_vehicle_columns(state: State<'_, AppState>) -> Result<bool, Stri
 }
 
 #[tauri::command]
-async fn db_has_pet_columns(state: State<'_, AppState>) -> Result<bool, String> {
+async fn db_has_pet_columns(state: State<'_, AppState>) -> AppResult<bool> {
     let pool = &state.pool;
     if !table_exists(pool, "pets").await {
         return Ok(false);
@@ -691,11 +688,9 @@ async fn search_entities(
         return Err(AppError::new("BAD_REQUEST", "household_id is required"));
     }
     if !(1..=100).contains(&limit) || offset < 0 {
-        return Err(
-            AppError::new("BAD_REQUEST", "invalid limit/offset")
-                .with_context("limit", limit.to_string())
-                .with_context("offset", offset.to_string()),
-        );
+        return Err(AppError::new("BAD_REQUEST", "invalid limit/offset")
+            .with_context("limit", limit.to_string())
+            .with_context("offset", offset.to_string()));
     }
 
     let q = query.trim().to_string();
