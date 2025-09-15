@@ -7,6 +7,9 @@ pub enum RootKey {
     Attachments,
 }
 
+// Some variants are platform/usage-dependent; silence "never constructed"
+// warnings in non-test builds while keeping them available for tests.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(thiserror::Error, Debug)]
 pub enum FsPolicyError {
     #[error("UNC paths are not allowed")]
@@ -25,6 +28,9 @@ pub enum FsPolicyError {
     Io(#[from] std::io::Error),
 }
 
+// Several fields are only used in tests or structured logs; silence warnings
+// outside tests without removing useful debug context.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug)]
 pub struct CanonResult {
     pub input: String,
