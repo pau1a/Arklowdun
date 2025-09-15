@@ -1,62 +1,7 @@
 use crate::commands::DbErrorPayload;
 use crate::repo;
 use sqlx::Row;
-use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager};
-
-/// Map our string root_key to a base directory.
-fn resolve_root(app: &AppHandle, root_key: &str) -> Option<PathBuf> {
-    match root_key {
-        // app data is what you already use in the UI
-        "appData" => app.path().app_data_dir().ok(),
-        // useful extras if you ever emit them:
-        "home" => app.path().home_dir().ok(),
-        "temp" => app.path().temp_dir().ok(),
-        _ => None,
-    }
-}
-
-/// Resolve (root_key, relative_path) to an absolute path, or return a typed IO error.
-pub fn resolve_attachment_path(
-    app: &AppHandle,
-    root_key: &str,
-    relative_path: &str,
-) -> Result<PathBuf, DbErrorPayload> {
-    let base = resolve_root(app, root_key).ok_or(DbErrorPayload {
-        code: "IO/UNKNOWN".into(),
-        message: format!("Unknown root_key: {}", root_key),
-    })?;
-
-    let base = base.canonicalize().map_err(|e| DbErrorPayload {
-        code: "IO/UNKNOWN".into(),
-        message: e.to_string(),
-    })?;
-    let mut path = base.clone();
-    path.push(relative_path);
-
-    let path = path.canonicalize().map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            DbErrorPayload {
-                code: "IO/ENOENT".into(),
-                message: "File not found".into(),
-            }
-        } else {
-            DbErrorPayload {
-                code: "IO/UNKNOWN".into(),
-                message: e.to_string(),
-            }
-        }
-    })?;
-
-    if !path.starts_with(&base) {
-        return Err(DbErrorPayload {
-            code: "IO/INVALID_PATH".into(),
-            message: "Relative path escapes base directory".into(),
-        });
-    }
-
-    Ok(path)
-}
+use std::path::Path;
 
 /// Query a table for (root_key, relative_path).
 pub async fn load_attachment_columns(
