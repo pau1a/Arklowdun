@@ -26,6 +26,8 @@
     "check:plugin-fs": "node scripts/guards/check-plugin-fs-usage.mjs",
     "check:sqlx-macros": "bash scripts/guards/no-sqlx-macros.sh",
     "check-all": "npm run check:plugin-fs && npm run check:sqlx-macros",
+    "smoke:security": "bash ./scripts/security-smoke.sh",
+    "smoke:security:win": "powershell -ExecutionPolicy Bypass -File ./scripts/security-smoke.ps1",
     "migrate:new": "scripts/new_migration.sh",
     "migrations:check": "scripts/check_migrations.sh",
     "migrations:idempotency": "scripts/test_idempotency.sh",
