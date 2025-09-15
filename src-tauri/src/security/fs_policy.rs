@@ -29,6 +29,21 @@ pub enum FsPolicyError {
     Io(#[from] std::io::Error),
 }
 
+impl FsPolicyError {
+    pub fn name(&self) -> &'static str {
+        match self {
+            FsPolicyError::UncRejected => "UncRejected",
+            FsPolicyError::DotDotRejected => "DotDotRejected",
+            #[cfg(target_os = "windows")]
+            FsPolicyError::CrossVolume => "CrossVolume",
+            FsPolicyError::OutsideRoot => "OutsideRoot",
+            FsPolicyError::Symlink => "Symlink",
+            FsPolicyError::Invalid => "Invalid",
+            FsPolicyError::Io(_) => "Io",
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct CanonResult {
     pub real_path: PathBuf,

@@ -19,7 +19,7 @@ mod id;
 mod importer;
 pub mod migrate;
 mod repo;
-mod security;
+pub mod security;
 mod state;
 mod time;
 
@@ -46,6 +46,27 @@ pub fn init_logging() {
         .with_current_span(false)
         .with_span_list(false)
         .try_init();
+}
+
+pub fn log_fs_ok(root: RootKey, real: &std::path::Path) {
+    tracing::info!(
+        target = "arklowdun",
+        event = "fs_guard_check",
+        ok = true,
+        root = ?root,
+        path_hash = %hash_path(real),
+    );
+}
+
+pub fn log_fs_deny(root: RootKey, e: &UiError, reason: &'static str) {
+    tracing::warn!(
+        target = "arklowdun",
+        event = "fs_guard_check",
+        ok = false,
+        root = ?root,
+        code = %e.code,
+        reason = reason,
+    );
 }
 
 macro_rules! gen_domain_cmds {
@@ -1003,8 +1024,9 @@ async fn attachment_open(
     let res = match fs_policy::canonicalize_and_verify(&rel, root, &app) {
         Ok(r) => r,
         Err(e) => {
+            let reason = e.name();
             let ui: UiError = e.into();
-            tracing::warn!(target="arklowdun", event="fs_guard_check", ok=false, root=?root, code=%ui.code);
+            log_fs_deny(root, &ui, reason);
             return Err(DbErrorPayload {
                 code: ui.code.into(),
                 message: ui.message.into(),
@@ -1012,14 +1034,15 @@ async fn attachment_open(
         }
     };
     if let Err(e) = fs_policy::reject_symlinks(&res.real_path) {
+        let reason = e.name();
         let ui: UiError = e.into();
-        tracing::warn!(target="arklowdun", event="fs_guard_check", ok=false, root=?root, code=%ui.code);
+        log_fs_deny(root, &ui, reason);
         return Err(DbErrorPayload {
             code: ui.code.into(),
             message: ui.message.into(),
         });
     }
-    tracing::info!(target="arklowdun", event="fs_guard_check", ok=true, root=?root, path_hash=%hash_path(&res.real_path));
+    log_fs_ok(root, &res.real_path);
     attachments::open_with_os(&res.real_path)
 }
 
@@ -1039,8 +1062,9 @@ async fn attachment_reveal(
     let res = match fs_policy::canonicalize_and_verify(&rel, root, &app) {
         Ok(r) => r,
         Err(e) => {
+            let reason = e.name();
             let ui: UiError = e.into();
-            tracing::warn!(target="arklowdun", event="fs_guard_check", ok=false, root=?root, code=%ui.code);
+            log_fs_deny(root, &ui, reason);
             return Err(DbErrorPayload {
                 code: ui.code.into(),
                 message: ui.message.into(),
@@ -1048,14 +1072,15 @@ async fn attachment_reveal(
         }
     };
     if let Err(e) = fs_policy::reject_symlinks(&res.real_path) {
+        let reason = e.name();
         let ui: UiError = e.into();
-        tracing::warn!(target="arklowdun", event="fs_guard_check", ok=false, root=?root, code=%ui.code);
+        log_fs_deny(root, &ui, reason);
         return Err(DbErrorPayload {
             code: ui.code.into(),
             message: ui.message.into(),
         });
     }
-    tracing::info!(target="arklowdun", event="fs_guard_check", ok=true, root=?root, path_hash=%hash_path(&res.real_path));
+    log_fs_ok(root, &res.real_path);
     attachments::reveal_with_os(&res.real_path)
 }
 
@@ -1068,8 +1093,9 @@ async fn open_path(
     let res = match fs_policy::canonicalize_and_verify(&path, root, &app) {
         Ok(r) => r,
         Err(e) => {
+            let reason = e.name();
             let ui: UiError = e.into();
-            tracing::warn!(target="arklowdun", event="fs_guard_check", ok=false, root=?root, code=%ui.code);
+            log_fs_deny(root, &ui, reason);
             return Err(DbErrorPayload {
                 code: ui.code.into(),
                 message: ui.message.into(),
@@ -1077,17 +1103,19 @@ async fn open_path(
         }
     };
     if let Err(e) = fs_policy::reject_symlinks(&res.real_path) {
+        let reason = e.name();
         let ui: UiError = e.into();
-        tracing::warn!(target="arklowdun", event="fs_guard_check", ok=false, root=?root, code=%ui.code);
+        log_fs_deny(root, &ui, reason);
         return Err(DbErrorPayload {
             code: ui.code.into(),
             message: ui.message.into(),
         });
     }
-    tracing::info!(target="arklowdun", event="fs_guard_check", ok=true, root=?root, path_hash=%hash_path(&res.real_path));
+    log_fs_ok(root, &res.real_path);
     crate::attachments::open_with_os(&res.real_path)
 }
 
+#[macro_export]
 macro_rules! app_commands {
     ($($extra:ident),* $(,)?) => {
         tauri::generate_handler![
