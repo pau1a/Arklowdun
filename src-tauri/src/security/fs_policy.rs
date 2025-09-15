@@ -111,21 +111,13 @@ pub fn canonicalize_and_verify(
 
 /// Walk each segment from base → target and deny if any segment is a symlink.
 pub fn reject_symlinks(p: &Path) -> Result<(), FsPolicyError> {
-    #[cfg(feature = "strict_symlink_deny")]
-    {
-        let mut cur = PathBuf::new();
-        for comp in p.components() {
-            cur.push(comp.as_os_str());
-            let meta = std::fs::symlink_metadata(&cur)?;
-            if meta.file_type().is_symlink() {
-                return Err(FsPolicyError::Symlink);
-            }
+    let mut cur = PathBuf::new();
+    for comp in p.components() {
+        cur.push(comp.as_os_str());
+        let meta = std::fs::symlink_metadata(&cur)?;
+        if meta.file_type().is_symlink() {
+            return Err(FsPolicyError::Symlink);
         }
-        Ok(())
     }
-    #[cfg(not(feature = "strict_symlink_deny"))]
-    {
-        let _ = p;
-        Ok(())
-    }
+    Ok(())
 }

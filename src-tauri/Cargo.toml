@@ -16,9 +16,8 @@ name = "arklowdun_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
-default = ["legacy_deleted_at", "strict_symlink_deny"]
+default = ["legacy_deleted_at"]
 legacy_deleted_at = []
-strict_symlink_deny = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = ["config-json5"] }
