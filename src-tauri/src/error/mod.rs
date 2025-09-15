@@ -20,7 +20,7 @@ pub struct AppError {
     pub message: String,
     /// Arbitrary key/value pairs that provide additional context.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    #[ts(optional, type = "Record<string, string>")]
+    #[ts(type = "Record<string, string> | undefined")]
     pub context: HashMap<String, String>,
     /// Optional nested cause that preserves the error chain.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -29,7 +29,6 @@ pub struct AppError {
 }
 
 pub type AppResult<T> = std::result::Result<T, AppError>;
-pub type Result<T> = AppResult<T>;
 
 impl AppError {
     /// Default code used when an upstream error does not expose a specific code.
@@ -122,11 +121,7 @@ impl From<String> for AppError {
     }
 }
 
-impl From<AppError> for AnyhowError {
-    fn from(error: AppError) -> Self {
-        AnyhowError::new(error)
-    }
-}
+// Do not implement From<AppError> for anyhow::Error to avoid conflicting impls.
 
 impl From<AnyhowError> for AppError {
     fn from(error: AnyhowError) -> Self {
@@ -279,7 +274,7 @@ mod tests {
     #[test]
     fn into_anyhow_preserves_display() {
         let error = AppError::new("VALIDATION", "Missing field").with_context("field", "name");
-        let anyhow_error: AnyhowError = error.clone().into();
+        let anyhow_error: AnyhowError = AnyhowError::new(error.clone());
         assert_eq!(anyhow_error.to_string(), error.to_string());
     }
 

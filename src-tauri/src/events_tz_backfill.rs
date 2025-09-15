@@ -157,7 +157,7 @@ pub async fn events_backfill_timezone(
     use std::fs::{create_dir_all, File};
     use std::io::Write;
     let ts = now_ms();
-    if let Some(mut dir) = app.path().app_data_dir() {
+    if let Ok(mut dir) = app.path().app_data_dir() {
         dir.push("logs");
         let _ = create_dir_all(&dir);
         let path = dir.join(format!("events_tz_backfill_{}_{}.log", household_id, ts));

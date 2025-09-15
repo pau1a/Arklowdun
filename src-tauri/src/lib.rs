@@ -24,7 +24,7 @@ pub mod security;
 mod state;
 mod time;
 
-pub use error::{AppError, AppResult, Result};
+pub use error::{AppError, AppResult};
 use events_tz_backfill::events_backfill_timezone;
 use security::{error_map::UiError, fs_policy, fs_policy::RootKey, hash_path};
 use tracing_subscriber::{fmt, EnvFilter};
@@ -683,23 +683,19 @@ async fn search_entities(
     query: String,
     limit: i64,
     offset: i64,
-) -> Result<Vec<SearchResult>, SearchErrorPayload> {
+) -> AppResult<Vec<SearchResult>> {
     use sqlx::Row;
     let pool = &state.pool;
 
     if household_id.trim().is_empty() {
-        return Err(SearchErrorPayload {
-            code: "BAD_REQUEST".into(),
-            message: "household_id is required".into(),
-            details: serde_json::json!({}),
-        });
+        return Err(AppError::new("BAD_REQUEST", "household_id is required"));
     }
     if !(1..=100).contains(&limit) || offset < 0 {
-        return Err(SearchErrorPayload {
-            code: "BAD_REQUEST".into(),
-            message: "invalid limit/offset".into(),
-            details: serde_json::json!({ "limit": limit, "offset": offset }),
-        });
+        return Err(
+            AppError::new("BAD_REQUEST", "invalid limit/offset")
+                .with_context("limit", limit.to_string())
+                .with_context("offset", offset.to_string()),
+        );
     }
 
     let q = query.trim().to_string();
@@ -739,10 +735,10 @@ async fn search_entities(
         return Ok(vec![]);
     }
 
-    let mapq = |e: sqlx::Error| SearchErrorPayload {
-        code: "DB/QUERY_FAILED".into(),
-        message: "Search failed".into(),
-        details: serde_json::json!({ "error": e.to_string() }),
+    let mapq = |branch: &str, e: sqlx::Error| {
+        AppError::from(e)
+            .with_context("operation", "search_query")
+            .with_context("branch", branch.to_string())
     };
 
     let mut out: Vec<(i32, i64, usize, SearchResult)> = Vec::new();
@@ -768,7 +764,7 @@ async fn search_entities(
             .bind(0)
             .fetch_all(pool)
             .await
-            .map_err(mapq)?;
+            .map_err(|e| mapq(branch_name, e))?;
         let elapsed = start.elapsed().as_millis() as i64;
         tracing::debug!(target: "arklowdun", name = branch_name, rows = rows.len(), elapsed_ms = elapsed, "branch");
         for r in rows {
@@ -806,7 +802,7 @@ async fn search_entities(
             .bind(0)
             .fetch_all(pool)
             .await
-            .map_err(mapq)?;
+            .map_err(|e| mapq("events", e))?;
             let elapsed = start.elapsed().as_millis() as i64;
             tracing::debug!(target: "arklowdun", name = "events", rows = events.len(), elapsed_ms = elapsed, "branch");
             for r in events {
@@ -843,7 +839,7 @@ async fn search_entities(
             .bind(0)
             .fetch_all(pool)
             .await
-            .map_err(mapq)?;
+            .map_err(|e| mapq("notes", e))?;
             let elapsed = start.elapsed().as_millis() as i64;
             tracing::debug!(target: "arklowdun", name = "notes", rows = notes.len(), elapsed_ms = elapsed, "branch");
             for r in notes {
@@ -911,7 +907,7 @@ async fn search_entities(
                 .bind(0)
                 .fetch_all(pool)
                 .await
-                .map_err(mapq)?;
+                .map_err(|e| mapq("vehicles", e))?;
             let elapsed = start.elapsed().as_millis() as i64;
             tracing::debug!(target: "arklowdun", name = "vehicles", rows = rows.len(), elapsed_ms = elapsed, "branch");
             for r in rows {
@@ -975,7 +971,7 @@ async fn search_entities(
                 .bind(0)
                 .fetch_all(pool)
                 .await
-                .map_err(mapq)?;
+                .map_err(|e| mapq("pets", e))?;
             let elapsed = start.elapsed().as_millis() as i64;
             tracing::debug!(target: "arklowdun", name = "pets", rows = rows.len(), elapsed_ms = elapsed, "branch");
             for r in rows {
