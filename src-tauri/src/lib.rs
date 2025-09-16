@@ -99,6 +99,7 @@ mod events_tz_backfill;
 mod household; // declare module; avoid `use` to prevent name collision
 mod id;
 mod importer;
+pub mod logging;
 pub mod migrate;
 mod repo;
 pub mod security;
@@ -314,13 +315,22 @@ pub fn flush_file_logs() {
 }
 
 pub fn init_file_logging_standalone(bundle_id: &str) -> Result<PathBuf, FileLoggingError> {
-    // dirs::data_dir() already points to the platform-specific application data directory:
-    //   macOS:   ~/Library/Application Support
-    //   Windows: %APPDATA%
-    //   Linux:   $XDG_DATA_HOME (or fallback)
-    let mut base = dirs::data_dir().ok_or(FileLoggingError::MissingAppDataDir)?;
-    base.push(bundle_id);
-    base.push(LOG_DIR_NAME);
+    // Prefer a test/appdata override if present to keep behavior consistent
+    // with resolve_logs_dir() used by the Tauri app path resolver.
+    let base = if let Ok(fake) = std::env::var("ARK_FAKE_APPDATA") {
+        let mut p = PathBuf::from(fake);
+        p.push(LOG_DIR_NAME);
+        p
+    } else {
+        // dirs::data_dir() already points to the platform-specific application data directory:
+        //   macOS:   ~/Library/Application Support
+        //   Windows: %APPDATA%
+        //   Linux:   $XDG_DATA_HOME (or fallback)
+        let mut p = dirs::data_dir().ok_or(FileLoggingError::MissingAppDataDir)?;
+        p.push(bundle_id);
+        p.push(LOG_DIR_NAME);
+        p
+    };
 
     if FILE_LOG_WRITER.get().is_some() {
         return Ok(base.join(LOG_FILE_NAME));
