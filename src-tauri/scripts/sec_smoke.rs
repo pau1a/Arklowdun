@@ -20,7 +20,7 @@ fn main() -> anyhow::Result<()> {
     // 1) Deny traversal: ".." must be rejected.
     {
         use arklowdun_lib::security::fs_policy as fs;
-        let err = fs::canonicalize_and_verify("..", fs::RootKey::AppData, &handle).unwrap_err();
+        let err = fs::canonicalize_and_verify("..", fs::RootKey::AppData, handle).unwrap_err();
         let reason = err.name();
         let ui: arklowdun_lib::security::error_map::UiError = err.into();
         arklowdun_lib::log_fs_deny(fs::RootKey::AppData, &ui, reason);
@@ -30,7 +30,7 @@ fn main() -> anyhow::Result<()> {
     // 2) Allow in-root relative path under Attachments.
     {
         use arklowdun_lib::security::fs_policy as policy;
-        let ok = policy::canonicalize_and_verify("file.txt", policy::RootKey::Attachments, &handle)?;
+        let ok = policy::canonicalize_and_verify("file.txt", policy::RootKey::Attachments, handle)?;
         // Ensure the terminal path exists so symlink_metadata does not ENOENT.
         std::fs::write(&ok.real_path, b"ok")?;
         // No symlink in segments, so reject_symlinks should be OK.
@@ -49,7 +49,7 @@ fn main() -> anyhow::Result<()> {
         // If re-run, allow AlreadyExists.
         let _ = std::fs::remove_file(&link);
         unixfs::symlink(&outside, &link)?;
-        let ok = policy::canonicalize_and_verify("link/evil.txt", policy::RootKey::Attachments, &handle)?;
+        let ok = policy::canonicalize_and_verify("link/evil.txt", policy::RootKey::Attachments, handle)?;
         let err = policy::reject_symlinks(&ok.real_path).unwrap_err();
         let reason = err.name();
         let ui: arklowdun_lib::security::error_map::UiError = err.into();

@@ -13,7 +13,7 @@ interface PaletteItem {
 
 export function initCommandPalette() {
   const modalRoot = document.getElementById("modal-root");
-  const live = document.getElementById("search-live");
+  const live = document.querySelector<HTMLDivElement>("#search-live");
   const trigger = document.getElementById("sidebar-search");
   if (!modalRoot || !live) return;
 
@@ -29,7 +29,7 @@ export function initCommandPalette() {
   const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 
   function announce(text: string) {
-    live.textContent = text;
+    if (live) live.textContent = text;
   }
 
   function build() {
@@ -50,7 +50,7 @@ export function initCommandPalette() {
     palette.addEventListener("click", (e) => {
       if (e.target === palette) close();
     });
-    modalRoot.appendChild(palette);
+    if (modalRoot) modalRoot.appendChild(palette);
     input = palette.querySelector<HTMLInputElement>("#cp-input")!;
     list = palette.querySelector<HTMLUListElement>("#cp-list")!;
     input.setAttribute("aria-autocomplete", "list");
@@ -156,7 +156,7 @@ export function initCommandPalette() {
         announce(`No results for ${q}`);
         return;
       }
-      const items = results.map(mapResult);
+      const items: PaletteItem[] = results.map(mapResult);
       render(items, q);
       announce(`${results.length} results for ${q}`);
     } catch (err) {
@@ -176,7 +176,7 @@ export function initCommandPalette() {
 
   function render(items: PaletteItem[], q: string) {
     list.innerHTML = "";
-    items.forEach((item, i) => {
+    items.forEach((item) => {
       const li = document.createElement("li");
       li.setAttribute("role", "option");
       li.setAttribute("tabindex", "-1");
@@ -282,7 +282,7 @@ export function initCommandPalette() {
       };
     }
     return {
-      kind: it.kind,
+      kind: "Unknown",
       title: "Unknown",
       icon: "fa-solid fa-question",
       action: () => {},

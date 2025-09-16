@@ -5,7 +5,7 @@ import { test } from "node:test";
 const SAMPLE_CODE = "SQLX/ROW_NOT_FOUND";
 
 test("normalizeError preserves cause and coerces context values to strings", async () => {
-  const { normalizeError } = await import("../src/db/call.ts");
+  const { normalizeError } = await import("../src/api/call.ts");
   const rawError = {
     code: SAMPLE_CODE,
     message: "Record not found",
@@ -34,14 +34,14 @@ test("normalizeError preserves cause and coerces context values to strings", asy
 });
 
 test("normalizeError wraps bare strings with fallback code", async () => {
-  const { normalizeError } = await import("../src/db/call.ts");
+  const { normalizeError } = await import("../src/api/call.ts");
   const n = normalizeError("boom");
   assert.equal(n.code, "APP/UNKNOWN");
   assert.equal(n.message, "boom");
 });
 
 test("normalizeError handles { message } objects", async () => {
-  const { normalizeError } = await import("../src/db/call.ts");
+  const { normalizeError } = await import("../src/api/call.ts");
   const n = normalizeError({ message: "boom" });
   assert.equal(n.code, "APP/UNKNOWN");
   assert.equal(n.message, "boom");

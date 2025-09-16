@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import { call } from "../db/call";
+import { call } from "../api/call";
 import { defaultHouseholdId } from "../db/household";
 import { showError } from "./errors";
 import { presentFsError } from "../lib/ipc";

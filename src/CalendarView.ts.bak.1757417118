@@ -1,4 +1,4 @@
-import { call } from "./db/call.ts";
+import { call } from "./api/call";
 import {
   isPermissionGranted,
   requestPermission,

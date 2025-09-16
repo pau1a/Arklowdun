@@ -1,4 +1,4 @@
-import { call } from "./call.ts";
+import { call } from "../api/call";
 import type { Vehicle } from "../bindings/Vehicle";
 
 function normalize(v: Vehicle): Vehicle {

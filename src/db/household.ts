@@ -1,4 +1,4 @@
-import { call } from "./call";
+import { call } from "../api/call";
 import { log } from "../utils/logger";
 import { emit } from "../shared/events";
 
