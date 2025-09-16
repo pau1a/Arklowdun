@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used)]
 
-use std::process::Command;
 use assert_cmd::prelude::*; // for Command::cargo_bin
+use std::process::Command;
 use tempfile::tempdir;
 
 // Prefer Cargo-managed binary lookup; this builds/locates the target reliably

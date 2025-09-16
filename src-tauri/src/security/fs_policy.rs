@@ -114,7 +114,9 @@ pub fn canonicalize_and_verify<R: Runtime>(
     if !candidate.starts_with(&base) {
         return Err(FsPolicyError::OutsideRoot);
     }
-    Ok(CanonResult { real_path: candidate })
+    Ok(CanonResult {
+        real_path: candidate,
+    })
 }
 
 /// Walk each segment from base → target and deny if any segment is a symlink.

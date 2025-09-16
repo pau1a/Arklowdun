@@ -51,7 +51,8 @@ fn main() -> anyhow::Result<()> {
         // If re-run, allow AlreadyExists.
         let _ = std::fs::remove_file(&link);
         unixfs::symlink(&outside, &link)?;
-        let ok = policy::canonicalize_and_verify("link/evil.txt", policy::RootKey::Attachments, handle)?;
+        let ok =
+            policy::canonicalize_and_verify("link/evil.txt", policy::RootKey::Attachments, handle)?;
         let err = policy::reject_symlinks(&ok.real_path).unwrap_err();
         let reason = err.name();
         let ui: arklowdun_lib::security::error_map::UiError = err.into();
