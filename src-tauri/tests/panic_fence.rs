@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use arklowdun_lib::AppResult;
 use tracing_subscriber::{fmt, EnvFilter};
+use uuid::Uuid;
 
 #[tauri::command]
 async fn panic_command() -> AppResult<()> {
@@ -38,6 +39,8 @@ fn panic_is_converted_to_error() {
         .json()
         .try_init();
 
+    arklowdun_lib::error::install_panic_hook();
+
     let builder =
         tauri::test::mock_builder().invoke_handler(tauri::generate_handler![panic_command]);
     let app = builder
@@ -66,14 +69,24 @@ fn panic_is_converted_to_error() {
         obj.get("code").and_then(|v| v.as_str()),
         Some("RUNTIME/PANIC")
     );
+    let crash_id = obj
+        .get("crash_id")
+        .and_then(|v| v.as_str())
+        .expect("crash_id present");
+    assert!(Uuid::parse_str(crash_id).is_ok(), "invalid crash id");
+    let expected = format!("Something went wrong. Crash ID: {crash_id}.");
     assert_eq!(
         obj.get("message").and_then(|v| v.as_str()),
-        Some("A panic occurred")
+        Some(expected.as_str())
     );
 
     let logs = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
     assert!(
-        logs.contains("\"event\":\"panic_caught\""),
+        logs.contains(&format!("\"event\":\"panic_caught\"")),
         "panic log missing: {logs}"
+    );
+    assert!(
+        logs.contains(&format!("\"crash_id\":\"{crash_id}\"")),
+        "crash id missing in logs: {logs}"
     );
 }

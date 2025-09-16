@@ -9,4 +9,7 @@ test("AppError.ts uses context: Record<string, string> | undefined (optional or 
   // `context: Record<string,string> | undefined` (ts-rs may omit `?` when using a union type override).
   const re = /context\??\s*:\s*Record<string,\s*string>\s*\|\s*undefined/;
   assert.match(txt, re);
+
+  const crash = /crash_id\??\s*:\s*string(?:\s*\|\s*undefined)?/;
+  assert.match(txt, crash);
 });

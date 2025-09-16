@@ -32,7 +32,15 @@ export function normalizeError(error: unknown): AppError {
 
     const ctx = normalizeContext(error.context);
 
-    const out: AppError = { code, message, context: ctx };
+    const record = error as UnknownRecord;
+    let crashId: string | undefined;
+    if (typeof record.crash_id === "string") {
+      crashId = record.crash_id;
+    } else if (typeof record.crashId === "string") {
+      crashId = record.crashId;
+    }
+
+    const out: AppError = { code, message, context: ctx, crash_id: crashId };
 
     if (error.cause) out.cause = normalizeError(error.cause);
     else if (typeof error.stack === "string" && !out.context?.stack) {

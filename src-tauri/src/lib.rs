@@ -10,8 +10,8 @@ use std::{
 };
 use tauri::{Manager, State};
 use thiserror::Error;
-use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
 use tracing_appender::non_blocking::NonBlockingBuilder;
+use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
 use tracing_subscriber::{
     fmt::{self, time::UtcTime, MakeWriter},
     layer::SubscriberExt,
@@ -44,7 +44,10 @@ struct LineBuffered<W: Write + Send> {
 
 impl<W: Write + Send> LineBuffered<W> {
     fn new(inner: W) -> Self {
-        Self { inner, buf: Vec::with_capacity(1024) }
+        Self {
+            inner,
+            buf: Vec::with_capacity(1024),
+        }
     }
 }
 
@@ -121,9 +124,18 @@ struct CountRotator {
 
 impl CountRotator {
     fn new(path: PathBuf, max_bytes: usize, max_files: usize) -> io::Result<Self> {
-        let file = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
         let len = file.metadata().map(|m| m.len()).unwrap_or(0);
-        Ok(Self { path, max_bytes, max_files, file, len })
+        Ok(Self {
+            path,
+            max_bytes,
+            max_files,
+            file,
+            len,
+        })
     }
 
     fn rotate(&mut self) -> io::Result<()> {
@@ -138,7 +150,11 @@ impl CountRotator {
 
         // Shift files: .(n-1) -> .n, current -> .1
         for i in (1..=self.max_files).rev() {
-            let src = if i == 1 { self.path.clone() } else { self.suffixed(i - 1) };
+            let src = if i == 1 {
+                self.path.clone()
+            } else {
+                self.suffixed(i - 1)
+            };
             if src.exists() {
                 let dst = self.suffixed(i);
                 let _ = std::fs::rename(&src, &dst);
@@ -146,14 +162,22 @@ impl CountRotator {
         }
 
         // Create a new current file
-        self.file = std::fs::OpenOptions::new().create(true).write(true).truncate(true).open(&self.path)?;
+        self.file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&self.path)?;
         self.len = 0;
         Ok(())
     }
 
     fn suffixed(&self, idx: usize) -> PathBuf {
         let mut p = self.path.clone();
-        let file_name = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+        let file_name = p
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
         p.set_file_name(format!("{}.{}", file_name, idx));
         p
     }
@@ -170,7 +194,9 @@ impl Write for CountRotator {
         Ok(buf.len())
     }
 
-    fn flush(&mut self) -> io::Result<()> { self.file.flush() }
+    fn flush(&mut self) -> io::Result<()> {
+        self.file.flush()
+    }
 }
 
 pub fn init_logging() {
@@ -205,6 +231,7 @@ pub fn init_logging() {
         .with(file_layer);
 
     let _ = subscriber.try_init();
+    crate::error::install_panic_hook();
 }
 
 #[derive(Debug, Error)]
@@ -250,8 +277,12 @@ pub fn init_file_logging<R: tauri::Runtime>(
 
     let (max_bytes, max_files) = file_logging_limits();
     let byte_limit = usize::try_from(max_bytes).unwrap_or(usize::MAX);
-    let rotator = CountRotator::new(log_path.clone(), byte_limit, max_files)
-        .map_err(|source| FileLoggingError::CreateFile { path: log_path.clone(), source })?;
+    let rotator = CountRotator::new(log_path.clone(), byte_limit, max_files).map_err(|source| {
+        FileLoggingError::CreateFile {
+            path: log_path.clone(),
+            source,
+        }
+    })?;
 
     // Use a lossless, larger-buffer non-blocking writer so heavy bursts
     // (like stress tests) don't drop lines before rotation can trigger.
@@ -280,6 +311,48 @@ pub fn flush_file_logs() {
         let mut writer = writer.clone();
         let _ = writer.flush();
     }
+}
+
+pub fn init_file_logging_standalone(bundle_id: &str) -> Result<PathBuf, FileLoggingError> {
+    // dirs::data_dir() already points to the platform-specific application data directory:
+    //   macOS:   ~/Library/Application Support
+    //   Windows: %APPDATA%
+    //   Linux:   $XDG_DATA_HOME (or fallback)
+    let mut base = dirs::data_dir().ok_or(FileLoggingError::MissingAppDataDir)?;
+    base.push(bundle_id);
+    base.push(LOG_DIR_NAME);
+
+    if FILE_LOG_WRITER.get().is_some() {
+        return Ok(base.join(LOG_FILE_NAME));
+    }
+
+    std::fs::create_dir_all(&base).map_err(|source| FileLoggingError::CreateDir {
+        dir: base.clone(),
+        source,
+    })?;
+
+    let log_path = base.join(LOG_FILE_NAME);
+    let (max_bytes, max_files) = file_logging_limits();
+    let byte_limit = usize::try_from(max_bytes).unwrap_or(usize::MAX);
+    let rotator = CountRotator::new(log_path.clone(), byte_limit, max_files).map_err(|source| {
+        FileLoggingError::CreateFile {
+            path: log_path.clone(),
+            source,
+        }
+    })?;
+
+    let (writer, guard) = NonBlockingBuilder::default()
+        .lossy(false)
+        .buffered_lines_limit(50_000)
+        .finish(rotator);
+
+    FILE_LOG_WRITER.set(writer).ok();
+    FILE_LOG_GUARD.set(guard).ok();
+
+    tracing::info!(target: "arklowdun", event = "log_sink_initialized");
+    flush_file_logs();
+
+    Ok(log_path)
 }
 
 fn resolve_logs_dir<R: tauri::Runtime>(
