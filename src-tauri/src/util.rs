@@ -67,6 +67,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::panic::panic_any;
 
     #[test]
     fn dispatch_with_fence_passes_through() {
@@ -86,7 +87,7 @@ mod tests {
 
     #[test]
     fn dispatch_with_fence_catches_string_panic() {
-        let err = dispatch_with_fence(|| panic!(String::from("kaboom")))
+        let err = dispatch_with_fence(|| panic_any(String::from("kaboom")))
             .err()
             .expect("should convert panic into error");
         assert_eq!(err.code(), "RUNTIME/PANIC");
@@ -96,7 +97,7 @@ mod tests {
 
     #[test]
     fn dispatch_with_fence_catches_non_string_panic() {
-        let err = dispatch_with_fence(|| panic!(123_i32))
+        let err = dispatch_with_fence(|| panic_any(123_i32))
             .err()
             .expect("should convert panic into error");
         assert_eq!(err.code(), "RUNTIME/PANIC");

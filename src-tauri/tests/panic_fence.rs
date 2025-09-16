@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use std::io::Write as _;
 use std::sync::{Arc, Mutex};
 
 use arklowdun_lib::AppResult;
@@ -18,10 +19,23 @@ async fn panic_command() -> AppResult<()> {
 #[test]
 fn panic_is_converted_to_error() {
     let buf = Arc::new(Mutex::new(Vec::<u8>::new()));
+    #[derive(Clone)]
+    struct TestWriter(Arc<Mutex<Vec<u8>>>);
+    impl std::io::Write for TestWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
     let writer = buf.clone();
     let _ = fmt()
         .with_env_filter(EnvFilter::new("arklowdun=trace"))
-        .with_writer(move || writer.clone())
+        .with_writer(move || TestWriter(writer.clone()))
         .json()
         .try_init();
 
