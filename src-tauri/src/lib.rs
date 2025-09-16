@@ -313,34 +313,26 @@ pub fn flush_file_logs() {
     }
 }
 
-/// Initialize the rotating JSON file sink at an explicit path (for standalone tools).
-/// Uses the same writer/rotation settings as [`init_file_logging`].
-pub fn init_file_logging_at_path(
-    log_path: PathBuf,
-    max_bytes: u64,
-    max_files: usize,
-) -> Result<(), FileLoggingError> {
+pub fn init_file_logging_standalone(bundle_id: &str) -> Result<PathBuf, FileLoggingError> {
+    let mut base = dirs::data_dir().ok_or(FileLoggingError::MissingAppDataDir)?;
+    #[cfg(target_os = "macos")]
+    {
+        base.push("Application Support");
+    }
+    base.push(bundle_id);
+    base.push(LOG_DIR_NAME);
+
     if FILE_LOG_WRITER.get().is_some() {
-        return Ok(());
+        return Ok(base.join(LOG_FILE_NAME));
     }
 
-    let dir = log_path
-        .parent()
-        .ok_or(FileLoggingError::MissingAppDataDir)?
-        .to_path_buf();
-    std::fs::create_dir_all(&dir).map_err(|source| FileLoggingError::CreateDir {
-        dir: dir.clone(),
+    std::fs::create_dir_all(&base).map_err(|source| FileLoggingError::CreateDir {
+        dir: base.clone(),
         source,
     })?;
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
-        .map_err(|source| FileLoggingError::CreateFile {
-            path: log_path.clone(),
-            source,
-        })?;
 
+    let log_path = base.join(LOG_FILE_NAME);
+    let (max_bytes, max_files) = file_logging_limits();
     let byte_limit = usize::try_from(max_bytes).unwrap_or(usize::MAX);
     let rotator = CountRotator::new(log_path.clone(), byte_limit, max_files).map_err(|source| {
         FileLoggingError::CreateFile {
@@ -354,19 +346,13 @@ pub fn init_file_logging_at_path(
         .buffered_lines_limit(50_000)
         .finish(rotator);
 
-    match FILE_LOG_WRITER.set(writer) {
-        Ok(()) => {
-            let _ = FILE_LOG_GUARD.set(guard);
-            tracing::info!(target: "arklowdun", event = "log_sink_initialized");
-            flush_file_logs();
-            Ok(())
-        }
-        Err(writer) => {
-            drop(writer);
-            drop(guard);
-            Ok(())
-        }
-    }
+    FILE_LOG_WRITER.set(writer).ok();
+    FILE_LOG_GUARD.set(guard).ok();
+
+    tracing::info!(target: "arklowdun", event = "log_sink_initialized");
+    flush_file_logs();
+
+    Ok(log_path)
 }
 
 fn resolve_logs_dir<R: tauri::Runtime>(

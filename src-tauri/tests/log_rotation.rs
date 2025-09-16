@@ -77,11 +77,7 @@ fn run_stress(appdata: &Path, run_id: &str) {
         .env("ARK_STRESS_RUN_ID", run_id);
     eprintln!(
         "run_stress: appdata={:?} size_bytes={} max_files={} lines={} run_id={}",
-        appdata,
-        10240,
-        3,
-        20000,
-        run_id
+        appdata, 10240, 3, 20000, run_id
     );
     cmd.assert().success();
 }
@@ -195,7 +191,8 @@ fn wait_for_current_log(logs_dir: &Path) {
 }
 
 fn wait_for_rotated(logs_dir: &Path, min_rotated: usize) {
-    for _ in 0..200 { // up to ~10s
+    for _ in 0..200 {
+        // up to ~10s
         let files = collect_log_files(logs_dir);
         let rotated = files
             .iter()
@@ -211,7 +208,10 @@ fn wait_for_rotated(logs_dir: &Path, min_rotated: usize) {
     if let Ok(entries) = fs::read_dir(logs_dir) {
         for e in entries.flatten() {
             let p = e.path();
-            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("<non-utf8>");
+            let name = p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("<non-utf8>");
             let size = fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
             eprintln!("  {}  {} bytes", name, size);
             if let Ok(txt) = fs::read_to_string(&p) {
@@ -223,12 +223,16 @@ fn wait_for_rotated(logs_dir: &Path, min_rotated: usize) {
             }
         }
     }
-    panic!("rotation did not yield {} files in {:?}", min_rotated, logs_dir);
+    panic!(
+        "rotation did not yield {} files in {:?}",
+        min_rotated, logs_dir
+    );
 }
 
 fn wait_for_current_run(logs_dir: &Path, run: &str) {
     let current = logs_dir.join("arklowdun.log");
-    for _ in 0..200 { // up to ~10s
+    for _ in 0..200 {
+        // up to ~10s
         if let Ok(file) = fs::File::open(&current) {
             let reader = BufReader::new(file);
             let mut found = false;
@@ -237,7 +241,9 @@ fn wait_for_current_run(logs_dir: &Path, run: &str) {
                     found = true;
                 }
             }
-            if found { return; }
+            if found {
+                return;
+            }
         }
         sleep(Duration::from_millis(50));
     }

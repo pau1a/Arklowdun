@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::{thread::sleep, time::Duration};
 use std::io::Write as _;
+use std::{thread::sleep, time::Duration};
 use tauri::Manager;
 
 fn main() {
@@ -62,15 +62,22 @@ fn main() {
     // directly to the current file so tests observing the current file
     // always see the latest run id present.
     if let Ok(appdata) = std::env::var("ARK_FAKE_APPDATA") {
-        let path = std::path::Path::new(&appdata).join("logs").join("arklowdun.log");
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let path = std::path::Path::new(&appdata)
+            .join("logs")
+            .join("arklowdun.log");
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
             let line = serde_json::json!({
                 "timestamp": chrono::Utc::now().to_rfc3339(),
                 "level": "INFO",
                 "event": "tail_marker_direct",
                 "run": run_id,
                 "target": "arklowdun"
-            }).to_string();
+            })
+            .to_string();
             let _ = f.write_all(line.as_bytes());
             let _ = f.write_all(b"\n");
             let _ = f.flush();

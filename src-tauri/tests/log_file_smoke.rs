@@ -1,8 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::{fs, thread::sleep, time::Duration};
 use assert_cmd::prelude::*;
 use std::process::Command;
+use std::{fs, thread::sleep, time::Duration};
 use tauri::Manager;
 
 #[test]
@@ -89,10 +89,7 @@ fn file_sink_writes_json_lines() {
     assert!(get(&line, "event").is_some());
     assert_eq!(get(&line, "level").as_deref(), Some("INFO"));
     assert!(
-        line
-            .get("timestamp")
-            .and_then(|v| v.as_str())
-            .is_some(),
+        line.get("timestamp").and_then(|v| v.as_str()).is_some(),
         "timestamp must be present"
     );
     let target_binding = get(&line, "target");
