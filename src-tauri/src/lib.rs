@@ -1,14 +1,92 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+use once_cell::sync::OnceCell;
 use paste::paste;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
-use std::sync::{Arc, Mutex};
+use std::{
+    io::{self, Write},
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use tauri::{Manager, State};
+use thiserror::Error;
+use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
+use tracing_appender::non_blocking::NonBlockingBuilder;
+use tracing_subscriber::{
+    fmt::{self, time::UtcTime, MakeWriter},
+    layer::SubscriberExt,
+    util::SubscriberInitExt,
+    EnvFilter,
+};
 use ts_rs::TS;
 
 use crate::state::AppState;
 
 const FILES_INDEX_VERSION: i64 = 1;
+
+const DEFAULT_LOG_MAX_SIZE_BYTES: u64 = 5_000_000;
+const DEFAULT_LOG_MAX_FILES: usize = 5;
+const LOG_DIR_NAME: &str = "logs";
+const LOG_FILE_NAME: &str = "arklowdun.log";
+
+static FILE_LOG_WRITER: OnceCell<NonBlocking> = OnceCell::new();
+static FILE_LOG_GUARD: OnceCell<WorkerGuard> = OnceCell::new();
+
+#[derive(Clone, Default)]
+struct RotatingFileWriter;
+
+// Ensure each JSON event is written as a whole line to the rotating
+// file writer to avoid partial lines across rotation boundaries.
+struct LineBuffered<W: Write + Send> {
+    inner: W,
+    buf: Vec<u8>,
+}
+
+impl<W: Write + Send> LineBuffered<W> {
+    fn new(inner: W) -> Self {
+        Self { inner, buf: Vec::with_capacity(1024) }
+    }
+}
+
+impl<W: Write + Send> Write for LineBuffered<W> {
+    fn write(&mut self, mut data: &[u8]) -> io::Result<usize> {
+        // Append all bytes, flushing complete lines to the inner writer.
+        let total = data.len();
+        while !data.is_empty() {
+            if let Some(pos) = data.iter().position(|&b| b == b'\n') {
+                // up to and including newline
+                self.buf.extend_from_slice(&data[..=pos]);
+                self.inner.write_all(&self.buf)?;
+                self.buf.clear();
+                data = &data[pos + 1..];
+            } else {
+                self.buf.extend_from_slice(data);
+                break;
+            }
+        }
+        Ok(total)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        if !self.buf.is_empty() {
+            self.inner.write_all(&self.buf)?;
+            self.buf.clear();
+        }
+        self.inner.flush()
+    }
+}
+
+impl<'a> MakeWriter<'a> for RotatingFileWriter {
+    type Writer = Box<dyn Write + Send>;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        if let Some(writer) = FILE_LOG_WRITER.get() {
+            Box::new(LineBuffered::new(writer.clone()))
+        } else {
+            Box::new(io::sink())
+        }
+    }
+}
 
 mod attachments;
 pub mod commands;
@@ -28,8 +106,72 @@ pub mod util;
 pub use error::{AppError, AppResult, ErrorDto};
 use events_tz_backfill::events_backfill_timezone;
 use security::{error_map::UiError, fs_policy, fs_policy::RootKey, hash_path};
-use tracing_subscriber::{fmt, EnvFilter};
 use util::{dispatch_app_result, dispatch_async_app_result};
+
+// Simple count-based rotating writer that rotates before writing
+// when the next write would exceed the size limit, ensuring whole-line writes
+// go fully into either the old or the new file.
+struct CountRotator {
+    path: PathBuf,
+    max_bytes: usize,
+    max_files: usize,
+    file: std::fs::File,
+    len: u64,
+}
+
+impl CountRotator {
+    fn new(path: PathBuf, max_bytes: usize, max_files: usize) -> io::Result<Self> {
+        let file = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+        let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+        Ok(Self { path, max_bytes, max_files, file, len })
+    }
+
+    fn rotate(&mut self) -> io::Result<()> {
+        // Flush current file before rotating
+        let _ = self.file.flush();
+
+        // Remove oldest if exists
+        let oldest = self.suffixed(self.max_files);
+        if oldest.exists() {
+            let _ = std::fs::remove_file(&oldest);
+        }
+
+        // Shift files: .(n-1) -> .n, current -> .1
+        for i in (1..=self.max_files).rev() {
+            let src = if i == 1 { self.path.clone() } else { self.suffixed(i - 1) };
+            if src.exists() {
+                let dst = self.suffixed(i);
+                let _ = std::fs::rename(&src, &dst);
+            }
+        }
+
+        // Create a new current file
+        self.file = std::fs::OpenOptions::new().create(true).write(true).truncate(true).open(&self.path)?;
+        self.len = 0;
+        Ok(())
+    }
+
+    fn suffixed(&self, idx: usize) -> PathBuf {
+        let mut p = self.path.clone();
+        let file_name = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+        p.set_file_name(format!("{}.{}", file_name, idx));
+        p
+    }
+}
+
+impl Write for CountRotator {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        // Rotate first if needed, so the whole buffer goes into one file.
+        if (self.len as usize) + buf.len() > self.max_bytes.max(1) {
+            self.rotate()?;
+        }
+        self.file.write_all(buf)?;
+        self.len += buf.len() as u64;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> { self.file.flush() }
+}
 
 pub fn init_logging() {
     let filter = std::env::var("TAURI_ARKLOWDUN_LOG")
@@ -41,19 +183,138 @@ pub fn init_logging() {
     // log directory.
     let _ = tracing_log::LogTracer::init();
 
-    let _ = fmt()
-        .with_env_filter(EnvFilter::new(filter))
+    let stdout_layer = fmt::layer()
+        .with_writer(io::stdout)
         .json()
         .with_target(true)
-        .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
+        .with_timer(UtcTime::rfc_3339())
         .with_current_span(false)
-        .with_span_list(false)
-        .try_init();
+        .with_span_list(false);
+
+    let file_layer = fmt::layer()
+        .with_writer(RotatingFileWriter::default())
+        .json()
+        .with_target(true)
+        .with_timer(UtcTime::rfc_3339())
+        .with_current_span(false)
+        .with_span_list(false);
+
+    let subscriber = tracing_subscriber::registry()
+        .with(EnvFilter::new(filter))
+        .with(stdout_layer)
+        .with(file_layer);
+
+    let _ = subscriber.try_init();
+}
+
+#[derive(Debug, Error)]
+pub enum FileLoggingError {
+    #[error("app data directory unavailable")]
+    MissingAppDataDir,
+    #[error("failed to create log directory at {dir:?}: {source}")]
+    CreateDir {
+        dir: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[error("failed to create log file at {path:?}: {source}")]
+    CreateFile {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+}
+
+pub fn init_file_logging<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<(), FileLoggingError> {
+    if FILE_LOG_WRITER.get().is_some() {
+        return Ok(());
+    }
+
+    let logs_dir = resolve_logs_dir(app)?;
+    std::fs::create_dir_all(&logs_dir).map_err(|source| FileLoggingError::CreateDir {
+        dir: logs_dir.clone(),
+        source,
+    })?;
+
+    let log_path = logs_dir.join(LOG_FILE_NAME);
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|source| FileLoggingError::CreateFile {
+            path: log_path.clone(),
+            source,
+        })?;
+
+    let (max_bytes, max_files) = file_logging_limits();
+    let byte_limit = usize::try_from(max_bytes).unwrap_or(usize::MAX);
+    let rotator = CountRotator::new(log_path.clone(), byte_limit, max_files)
+        .map_err(|source| FileLoggingError::CreateFile { path: log_path.clone(), source })?;
+
+    // Use a lossless, larger-buffer non-blocking writer so heavy bursts
+    // (like stress tests) don't drop lines before rotation can trigger.
+    let (writer, guard) = NonBlockingBuilder::default()
+        .lossy(false)
+        .buffered_lines_limit(50_000)
+        .finish(rotator);
+    match FILE_LOG_WRITER.set(writer) {
+        Ok(()) => {
+            let _ = FILE_LOG_GUARD.set(guard);
+            // Emit a bootstrap line so the log file has content immediately
+            tracing::info!(target: "arklowdun", event = "log_sink_initialized");
+            flush_file_logs();
+            Ok(())
+        }
+        Err(writer) => {
+            drop(writer);
+            drop(guard);
+            Ok(())
+        }
+    }
+}
+
+pub fn flush_file_logs() {
+    if let Some(writer) = FILE_LOG_WRITER.get() {
+        let mut writer = writer.clone();
+        let _ = writer.flush();
+    }
+}
+
+fn resolve_logs_dir<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<PathBuf, FileLoggingError> {
+    if let Ok(fake) = std::env::var("ARK_FAKE_APPDATA") {
+        return Ok(PathBuf::from(fake).join(LOG_DIR_NAME));
+    }
+
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| FileLoggingError::MissingAppDataDir)?;
+    Ok(base.join(LOG_DIR_NAME))
+}
+
+fn file_logging_limits() -> (u64, usize) {
+    let max_bytes = std::env::var("TAURI_ARKLOWDUN_LOG_MAX_SIZE_BYTES")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(|bytes| bytes.max(1))
+        .unwrap_or(DEFAULT_LOG_MAX_SIZE_BYTES);
+
+    let max_files = std::env::var("TAURI_ARKLOWDUN_LOG_MAX_FILES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .map(|count| count.max(1))
+        .unwrap_or(DEFAULT_LOG_MAX_FILES);
+
+    (max_bytes, max_files)
 }
 
 pub fn log_fs_ok(root: RootKey, real: &std::path::Path) {
     tracing::info!(
-        target = "arklowdun",
+        target: "arklowdun",
         event = "fs_guard_check",
         ok = true,
         root = ?root,
@@ -63,7 +324,7 @@ pub fn log_fs_ok(root: RootKey, real: &std::path::Path) {
 
 pub fn log_fs_deny(root: RootKey, e: &UiError, reason: &'static str) {
     tracing::warn!(
-        target = "arklowdun",
+        target: "arklowdun",
         event = "fs_guard_check",
         ok = false,
         root = ?root,
@@ -1409,6 +1670,13 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .setup(|app| {
             let handle = app.handle();
+            if let Err(err) = crate::init_file_logging(&handle) {
+                tracing::warn!(
+                    target: "arklowdun",
+                    event = "file_logging_disabled",
+                    error = %err
+                );
+            }
             #[allow(clippy::needless_borrow)]
             let pool = tauri::async_runtime::block_on(crate::db::open_sqlite_pool(&handle))?;
             tauri::async_runtime::block_on(crate::db::apply_migrations(&pool))?;
@@ -1420,7 +1688,7 @@ pub fn run() {
                         .collect();
                     let has_start = names.iter().any(|n| n == "start_at");
                     let has_end = names.iter().any(|n| n == "end_at");
-                    tracing::info!(target="arklowdun", event="events_table_columns", has_start_at=%has_start, has_end_at=%has_end);
+                    tracing::info!(target: "arklowdun", event = "events_table_columns", has_start_at=%has_start, has_end_at=%has_end);
                 }
             });
             let hh = tauri::async_runtime::block_on(crate::household::default_household_id(&pool))?;
@@ -1445,7 +1713,7 @@ pub fn run() {
         .run(tauri::generate_context!("tauri.conf.json5"))
         .unwrap_or_else(|e| {
             tracing::error!(
-                target = "arklowdun",
+                target: "arklowdun",
                 event = "tauri_run_failed",
                 error = %e
             );

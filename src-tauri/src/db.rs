@@ -111,7 +111,7 @@ pub async fn open_sqlite_pool(app: &AppHandle) -> Result<Pool<Sqlite>> {
         .unwrap_or_else(|_| std::env::temp_dir());
     std::fs::create_dir_all(&app_dir).map_err(|e| {
         tracing::error!(
-            target = "arklowdun",
+            target: "arklowdun",
             error = %e,
             event = "app_data_dir_create_failed",
             path = %app_dir.display()
@@ -119,7 +119,7 @@ pub async fn open_sqlite_pool(app: &AppHandle) -> Result<Pool<Sqlite>> {
         e
     })?;
     let db_path = app_dir.join("arklowdun.sqlite3");
-    tracing::info!(target = "arklowdun", event = "db_path", path = %db_path.display());
+    tracing::info!(target: "arklowdun", event = "db_path", path = %db_path.display());
 
     let db_path_str = db_path.to_str().ok_or_else(|| {
         anyhow!(
@@ -244,7 +244,7 @@ pub async fn apply_migrations(pool: &SqlitePool) -> Result<()> {
             } else {
                 "unknown panic".to_string()
             };
-            error!(target = "arklowdun", event = "migration_panic", error = %msg);
+            error!(target: "arklowdun", event = "migration_panic", error = %msg);
             log::error!("migrations panicked: {msg}");
             Err(MigrationPanic(msg).into())
         }
