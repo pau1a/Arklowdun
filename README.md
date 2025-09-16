@@ -57,6 +57,25 @@ Dev tools:
   plumbing end-to-end.
 - See [docs/ops/runbooks.md](docs/ops/runbooks.md) for the triage checklist.
 
+## 🚨 DIAGNOSTICS TODO — PRIMETIME BLOCKER
+
+> This release depends on `python3` for log redaction on macOS/Linux.
+> Before any paid/“primetime” release, replace it with a bundled helper binary (e.g. `ark-diag`) or Rust integration.
+> Tracking: PR-Diag-01..04. This MUST be closed before charging users.
+> Until then, the Unix script fails if `python3` is missing (unless `--raw --yes` is used, which skips redaction and warns).
+
+Override the diagnostics size cap with `ARK_MAX_FILE_MB=10` (default 10).
+
+## Diagnostics bundles
+
+- Use `scripts/collect-diagnostics.sh` (macOS/Linux) or
+  `scripts/collect-diagnostics.ps1` (PowerShell) to produce a redacted support
+  archive.
+- The scripts gather logs, config metadata, crash reports and optional database
+  hashes into `diagnostics-<timestamp>-<hash>.zip`.
+- Redaction rules, platform paths and CLI usage are documented in
+  [docs/diagnostics.md](docs/diagnostics.md).
+
 ## Database integrity
 
 Schema constraint guidelines live in [docs/integrity-rules.md](docs/integrity-rules.md).
