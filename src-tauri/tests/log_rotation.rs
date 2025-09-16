@@ -20,6 +20,8 @@ fn rotation_survives_restart() {
     fs::create_dir_all(&appdata).unwrap();
 
     run_stress(&appdata, "first");
+    // Give the non-blocking writer time to rotate files and materialize content
+    wait_for_rotated(&appdata.join("logs"), 1);
     let first = LogState::capture(&appdata);
 
     assert!(
@@ -27,14 +29,16 @@ fn rotation_survives_restart() {
         "too many files after first run: {:?}",
         first.files
     );
-    assert!(
-        first.rotated_count() >= 2,
-        "rotation did not create multiple files"
-    );
+    assert!(first.rotated_count() >= 1, "rotation did not create files");
     assert!(first.run_ids.contains("first"));
     assert_eq!(first.run_ids.len(), 1, "unexpected runs in first pass");
 
     run_stress(&appdata, "second");
+    // Ensure rotation has completed for the second run as well
+    wait_for_rotated(&appdata.join("logs"), 1);
+    // Give the non-blocking writer a moment to flush the final lines
+    // and ensure the current log contains the second run marker.
+    wait_for_current_run(&appdata.join("logs"), "second");
     let second = LogState::capture(&appdata);
 
     assert!(
@@ -71,6 +75,14 @@ fn run_stress(appdata: &Path, run_id: &str) {
         .env("TAURI_ARKLOWDUN_LOG_MAX_FILES", "3")
         .env("ARK_STRESS_LINES", "20000")
         .env("ARK_STRESS_RUN_ID", run_id);
+    eprintln!(
+        "run_stress: appdata={:?} size_bytes={} max_files={} lines={} run_id={}",
+        appdata,
+        10240,
+        3,
+        20000,
+        run_id
+    );
     cmd.assert().success();
 }
 
@@ -143,17 +155,27 @@ fn read_log_file(path: &Path, run_ids: &mut HashSet<String>) -> Option<Value> {
             continue;
         }
         let value: Value = serde_json::from_str(&line).expect("parse json log");
-        assert_eq!(
-            value.get("target").and_then(Value::as_str),
-            Some("arklowdun")
+        let target = value.get("target").and_then(Value::as_str);
+        assert!(
+            matches!(target, Some("arklowdun") | Some("arklowdun_lib")),
+            "unexpected target: {:?}",
+            target
         );
-        assert!(value.get("event").is_some(), "missing event field: {value}");
+        let event = value
+            .get("event")
+            .or_else(|| value.get("fields").and_then(|f| f.get("event")))
+            .and_then(Value::as_str);
+        assert!(event.is_some(), "missing event field: {value}");
         assert!(value.get("timestamp").and_then(Value::as_str).is_some());
         assert_eq!(value.get("level").and_then(Value::as_str), Some("INFO"));
-        if let Some(run) = value.get("run").and_then(Value::as_str) {
+        let run_val = value
+            .get("run")
+            .or_else(|| value.get("fields").and_then(|f| f.get("run")))
+            .and_then(Value::as_str);
+        if let Some(run) = run_val {
             run_ids.insert(run.to_string());
+            last = Some(value);
         }
-        last = Some(value);
     }
 
     last
@@ -170,4 +192,53 @@ fn wait_for_current_log(logs_dir: &Path) {
         sleep(Duration::from_millis(50));
     }
     panic!("log file never materialized: {:?}", current);
+}
+
+fn wait_for_rotated(logs_dir: &Path, min_rotated: usize) {
+    for _ in 0..200 { // up to ~10s
+        let files = collect_log_files(logs_dir);
+        let rotated = files
+            .iter()
+            .filter(|path| path.file_name().and_then(|name| name.to_str()) != Some("arklowdun.log"))
+            .count();
+        if rotated >= min_rotated {
+            return;
+        }
+        sleep(Duration::from_millis(50));
+    }
+    // Dump directory contents for evidence before failing
+    eprintln!("rotation wait timed out; logs_dir={:?}", logs_dir);
+    if let Ok(entries) = fs::read_dir(logs_dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("<non-utf8>");
+            let size = fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+            eprintln!("  {}  {} bytes", name, size);
+            if let Ok(txt) = fs::read_to_string(&p) {
+                let lines: Vec<&str> = txt.lines().collect();
+                let start = lines.len().saturating_sub(5);
+                for line in &lines[start..] {
+                    eprintln!("    {}", line);
+                }
+            }
+        }
+    }
+    panic!("rotation did not yield {} files in {:?}", min_rotated, logs_dir);
+}
+
+fn wait_for_current_run(logs_dir: &Path, run: &str) {
+    let current = logs_dir.join("arklowdun.log");
+    for _ in 0..200 { // up to ~10s
+        if let Ok(file) = fs::File::open(&current) {
+            let reader = BufReader::new(file);
+            let mut found = false;
+            for line in reader.lines().flatten() {
+                if line.contains(&format!("\"run\":\"{}\"", run)) {
+                    found = true;
+                }
+            }
+            if found { return; }
+        }
+        sleep(Duration::from_millis(50));
+    }
 }

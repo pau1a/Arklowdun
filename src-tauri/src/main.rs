@@ -3,6 +3,6 @@
 
 fn main() {
     arklowdun_lib::init_logging();
-    tracing::debug!(target = "arklowdun", "app booted");
+    tracing::debug!(target: "arklowdun", "app booted");
     arklowdun_lib::run()
 }

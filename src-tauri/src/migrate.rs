@@ -276,7 +276,7 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
 
     for (filename, raw_sql, _) in load_migrations()? {
         if applied.contains(&filename) {
-            info!(target = "arklowdun", event = "migration_skip_file", file = %filename);
+            info!(target: "arklowdun", event = "migration_skip_file", file = %filename);
             continue;
         }
 
@@ -301,10 +301,10 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             .execute(&mut *tx)
             .await?;
         let start = Instant::now();
-        info!(target = "arklowdun", event = "migration_tx_begin", file = %filename);
+        info!(target: "arklowdun", event = "migration_tx_begin", file = %filename);
         for stmt in split_statements(&cleaned) {
             if should_skip_stmt(tx.as_mut(), &stmt).await? {
-                debug!(target = "arklowdun", event = "migration_stmt_skip", sql = %preview(&stmt));
+                debug!(target: "arklowdun", event = "migration_stmt_skip", sql = %preview(&stmt));
                 continue;
             }
 
@@ -340,21 +340,21 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
                     src = src_col
                 );
                 debug!(
-                    target = "arklowdun",
+                    target: "arklowdun",
                     event = "migration_stmt_rewrite",
                     sql = %preview(&stmt_to_run)
                 );
             }
 
             debug!(
-                target = "arklowdun",
+                target: "arklowdun",
                 event = "migration_stmt",
                 sql = %preview(&stmt_to_run)
             );
             if let Err(e) = sqlx::query(stmt_to_run.as_str()).execute(&mut *tx).await {
                 log::error!("migration failed {name} {version}: {e}");
-                error!(target = "arklowdun", event = "migration_stmt_error", file = %filename, sql = %preview(&stmt_to_run), error = %e);
-                warn!(target = "arklowdun", event = "migration_tx_rollback", file = %filename);
+                error!(target: "arklowdun", event = "migration_stmt_error", file = %filename, sql = %preview(&stmt_to_run), error = %e);
+                warn!(target: "arklowdun", event = "migration_tx_rollback", file = %filename);
                 return Err(e.into());
             }
         }
@@ -363,11 +363,11 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             .await?;
         if !fk_rows.is_empty() {
             log::error!("migration failed {name} {version}: foreign key violations");
-            warn!(target = "arklowdun", event = "migration_tx_rollback", file = %filename);
+            warn!(target: "arklowdun", event = "migration_tx_rollback", file = %filename);
             bail!("foreign key violations inside transaction for {}", filename);
         }
         debug!(
-            target = "arklowdun",
+            target: "arklowdun",
             event = "migration_stmt",
             sql = "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)"
         );
@@ -378,7 +378,7 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             .await?;
         if let Err(e) = tx.commit().await {
             log::error!("migration failed {name} {version}: {e}");
-            warn!(target = "arklowdun", event = "migration_tx_rollback", file = %filename);
+            warn!(target: "arklowdun", event = "migration_tx_rollback", file = %filename);
             return Err(e.into());
         }
         log::info!("migration success {name} {version}");
@@ -398,7 +398,7 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     .is_some()
     {
         let sql = "UPDATE vehicles SET next_mot_due = mot_date WHERE next_mot_due IS NULL AND mot_date IS NOT NULL";
-        info!(target = "arklowdun", event = "migration_stmt", sql = %preview(sql));
+        info!(target: "arklowdun", event = "migration_stmt", sql = %preview(sql));
         sqlx::query(sql).execute(pool).await?;
     }
     if sqlx::query_scalar::<_, i64>(
@@ -409,7 +409,7 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     .is_some()
     {
         let sql = "UPDATE vehicles SET next_service_due = service_date WHERE next_service_due IS NULL AND service_date IS NOT NULL";
-        info!(target = "arklowdun", event = "migration_stmt", sql = %preview(sql));
+        info!(target: "arklowdun", event = "migration_stmt", sql = %preview(sql));
         sqlx::query(sql).execute(pool).await?;
     }
 
@@ -450,16 +450,16 @@ pub async fn revert_last_migration(pool: &SqlitePool) -> anyhow::Result<()> {
             .execute(&mut *tx)
             .await?;
         let start = Instant::now();
-        info!(target = "arklowdun", event = "migration_tx_begin", file = %version);
+        info!(target: "arklowdun", event = "migration_tx_begin", file = %version);
         for stmt in split_statements(&cleaned) {
             if should_skip_stmt(tx.as_mut(), &stmt).await? {
-                debug!(target = "arklowdun", event = "migration_stmt_skip", sql = %preview(&stmt));
+                debug!(target: "arklowdun", event = "migration_stmt_skip", sql = %preview(&stmt));
                 continue;
             }
-            debug!(target = "arklowdun", event = "migration_stmt", sql = %preview(&stmt));
+            debug!(target: "arklowdun", event = "migration_stmt", sql = %preview(&stmt));
             if let Err(e) = sqlx::query(stmt.as_str()).execute(&mut *tx).await {
-                error!(target = "arklowdun", event = "migration_stmt_error", file = %version, sql = %preview(&stmt), error = %e);
-                warn!(target = "arklowdun", event = "migration_tx_rollback", file = %version);
+                error!(target: "arklowdun", event = "migration_stmt_error", file = %version, sql = %preview(&stmt), error = %e);
+                warn!(target: "arklowdun", event = "migration_tx_rollback", file = %version);
                 return Err(e.into());
             }
         }
@@ -467,11 +467,11 @@ pub async fn revert_last_migration(pool: &SqlitePool) -> anyhow::Result<()> {
             .fetch_all(&mut *tx)
             .await?;
         if !fk_rows.is_empty() {
-            warn!(target = "arklowdun", event = "migration_tx_rollback", file = %version);
+            warn!(target: "arklowdun", event = "migration_tx_rollback", file = %version);
             bail!("foreign key violations inside transaction for {}", version);
         }
         debug!(
-            target = "arklowdun",
+            target: "arklowdun",
             event = "migration_stmt",
             sql = "DELETE FROM schema_migrations WHERE version = ?"
         );
@@ -480,10 +480,10 @@ pub async fn revert_last_migration(pool: &SqlitePool) -> anyhow::Result<()> {
             .execute(&mut *tx)
             .await?;
         if let Err(e) = tx.commit().await {
-            warn!(target = "arklowdun", event = "migration_tx_rollback", file = %version);
+            warn!(target: "arklowdun", event = "migration_tx_rollback", file = %version);
             return Err(e.into());
         }
-        info!(target = "arklowdun", event = "migration_tx_commit", file = %version, elapsed = ?start.elapsed());
+        info!(target: "arklowdun", event = "migration_tx_commit", file = %version, elapsed = ?start.elapsed());
     }
     Ok(())
 }
