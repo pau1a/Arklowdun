@@ -313,6 +313,62 @@ pub fn flush_file_logs() {
     }
 }
 
+/// Initialize the rotating JSON file sink at an explicit path (for standalone tools).
+/// Uses the same writer/rotation settings as [`init_file_logging`].
+pub fn init_file_logging_at_path(
+    log_path: PathBuf,
+    max_bytes: u64,
+    max_files: usize,
+) -> Result<(), FileLoggingError> {
+    if FILE_LOG_WRITER.get().is_some() {
+        return Ok(());
+    }
+
+    let dir = log_path
+        .parent()
+        .ok_or(FileLoggingError::MissingAppDataDir)?
+        .to_path_buf();
+    std::fs::create_dir_all(&dir).map_err(|source| FileLoggingError::CreateDir {
+        dir: dir.clone(),
+        source,
+    })?;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|source| FileLoggingError::CreateFile {
+            path: log_path.clone(),
+            source,
+        })?;
+
+    let byte_limit = usize::try_from(max_bytes).unwrap_or(usize::MAX);
+    let rotator = CountRotator::new(log_path.clone(), byte_limit, max_files).map_err(|source| {
+        FileLoggingError::CreateFile {
+            path: log_path.clone(),
+            source,
+        }
+    })?;
+
+    let (writer, guard) = NonBlockingBuilder::default()
+        .lossy(false)
+        .buffered_lines_limit(50_000)
+        .finish(rotator);
+
+    match FILE_LOG_WRITER.set(writer) {
+        Ok(()) => {
+            let _ = FILE_LOG_GUARD.set(guard);
+            tracing::info!(target: "arklowdun", event = "log_sink_initialized");
+            flush_file_logs();
+            Ok(())
+        }
+        Err(writer) => {
+            drop(writer);
+            drop(guard);
+            Ok(())
+        }
+    }
+}
+
 fn resolve_logs_dir<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> Result<PathBuf, FileLoggingError> {
