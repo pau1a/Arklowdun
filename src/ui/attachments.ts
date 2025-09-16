@@ -20,17 +20,23 @@ export async function openAttachment(table: string, id: string) {
 export async function revealAttachment(
   table: string,
   id: string,
-  rootKey?: RootKey,
+  rootKey?: RootKey | string,
   relPath?: string,
 ) {
+  const rk: RootKey | undefined =
+    typeof rootKey === "string"
+      ? (["appData", "attachments"].includes(rootKey)
+          ? (rootKey as RootKey)
+          : undefined)
+      : rootKey;
   try {
     await call("attachment_reveal", { table, id });
   } catch (e: any) {
     if (e?.code === "IO/UNSUPPORTED_REVEAL") {
       try {
-        if (!rootKey || !relPath) throw new Error("Path unavailable");
-        const { realPath } = await canonicalizeAndVerify(relPath, rootKey);
-        await rejectSymlinks(realPath, rootKey);
+        if (!rk || !relPath) throw new Error("Path unavailable");
+        const { realPath } = await canonicalizeAndVerify(relPath, rk);
+        await rejectSymlinks(realPath, rk);
         // Try web clipboard first; if it fails, fall back to showing the path.
         let copied = false;
         try {
