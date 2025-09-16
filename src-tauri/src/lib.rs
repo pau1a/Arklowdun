@@ -178,6 +178,10 @@ pub fn flush_file_logs() {
 fn resolve_logs_dir<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> Result<PathBuf, FileLoggingError> {
+    if let Ok(fake) = std::env::var("ARK_FAKE_APPDATA") {
+        return Ok(PathBuf::from(fake).join(LOG_DIR_NAME));
+    }
+
     let base = app
         .path()
         .app_data_dir()

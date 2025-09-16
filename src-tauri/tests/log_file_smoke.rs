@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::{fs, thread::sleep, time::Duration};
+use tauri::Manager;
 
 #[test]
 fn file_sink_writes_json_lines() {

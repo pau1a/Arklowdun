@@ -32,6 +32,21 @@ Recommended IDE: VS Code with Tauri and rust-analyzer extensions.
   `VITE_LOG_LEVEL=debug npm run tauri dev`
   (allowed: `debug|info|warn|error`)
 
+### Logging & Rotation
+
+- Stdout: JSON logs (RFC3339) controlled by `TAURI_ARKLOWDUN_LOG`.
+- File logs: `<appDataDir>/logs/arklowdun.log` (rotates by size, keeps N files).
+
+Env:
+  TAURI_ARKLOWDUN_LOG=arklowdun=debug,sqlx=warn
+  TAURI_ARKLOWDUN_LOG_MAX_SIZE_BYTES=1048576
+  TAURI_ARKLOWDUN_LOG_MAX_FILES=3
+
+Dev tools:
+  cargo run --bin log_stress        # flood logs (respects env caps)
+  cargo test --test log_file_smoke  # checks file JSON sink
+  cargo test --test log_rotation    # rotation across restarts
+
 ## Database integrity
 
 Schema constraint guidelines live in [docs/integrity-rules.md](docs/integrity-rules.md).

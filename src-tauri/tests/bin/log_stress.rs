@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::{thread::sleep, time::Duration};
+use tauri::Manager;
 
 fn main() {
     arklowdun_lib::init_logging();
