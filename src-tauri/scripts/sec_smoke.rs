@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 // dev-only smoke check; no UI, no side effects outside tmp
 use std::fs;
 
