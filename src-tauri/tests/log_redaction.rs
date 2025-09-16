@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::sync::{Arc, Mutex};
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -24,7 +26,7 @@ fn fs_deny_logs_no_path() {
     let err = arklowdun_lib::security::fs_policy::canonicalize_and_verify(
         "..",
         arklowdun_lib::security::fs_policy::RootKey::AppData,
-        &handle,
+        handle,
     )
     .unwrap_err();
     let reason = err.name();

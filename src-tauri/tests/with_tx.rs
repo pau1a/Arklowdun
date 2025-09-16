@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use anyhow::Result;
 
 // When including `db.rs` directly, provide a `crate::migrate` shim that

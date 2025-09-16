@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use futures::FutureExt;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::Executor;
@@ -121,8 +121,15 @@ pub async fn open_sqlite_pool(app: &AppHandle) -> Result<Pool<Sqlite>> {
     let db_path = app_dir.join("arklowdun.sqlite3");
     tracing::info!(target = "arklowdun", event = "db_path", path = %db_path.display());
 
-    let opts = SqliteConnectOptions::from_str(db_path.to_str().unwrap())
-        .expect("valid DB path")
+    let db_path_str = db_path.to_str().ok_or_else(|| {
+        anyhow!(
+            "Database path is not valid UTF-8: {}",
+            db_path.to_string_lossy()
+        )
+    })?;
+
+    let opts = SqliteConnectOptions::from_str(db_path_str)
+        .with_context(|| format!("db_path={db_path_str}"))?
         .create_if_missing(true)
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Full)

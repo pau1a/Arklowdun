@@ -6,10 +6,13 @@ use chrono::{DateTime, Duration, LocalResult, NaiveDateTime, Offset, TimeZone, U
 use chrono_tz::Tz as ChronoTz;
 use rrule::{RRule, RRuleSet, Tz, Unvalidated};
 
-fn from_local_ms(ms: i64, tz: Tz) -> DateTime<Tz> {
+fn from_local_ms(ms: i64, tz: Tz) -> AppResult<DateTime<Tz>> {
     #[allow(deprecated)]
-    let naive = NaiveDateTime::from_timestamp_millis(ms).expect("valid ms");
-    match tz.from_local_datetime(&naive) {
+    let naive = NaiveDateTime::from_timestamp_millis(ms).ok_or_else(|| {
+        AppError::new("TIME/INVALID_TIMESTAMP", "Invalid local timestamp")
+            .with_context("local_ms", ms.to_string())
+    })?;
+    let local = match tz.from_local_datetime(&naive) {
         LocalResult::Single(dt) => dt,
         LocalResult::Ambiguous(a, _b) => a,
         LocalResult::None => tz
@@ -17,7 +20,8 @@ fn from_local_ms(ms: i64, tz: Tz) -> DateTime<Tz> {
             .fix()
             .from_utc_datetime(&naive)
             .with_timezone(&tz),
-    }
+    };
+    Ok(local)
 }
 
 fn row_to_value(row: SqliteRow) -> Value {
@@ -101,8 +105,11 @@ async fn create(pool: &SqlitePool, table: &str, mut data: Map<String, Value>) ->
     );
     let mut query = sqlx::query(&sql);
     for c in &cols {
-        let v = data.get(c).unwrap();
-        query = bind_value(query, v);
+        let value = data.get(c).ok_or_else(|| {
+            AppError::new("COMMANDS/MISSING_FIELD", "Payload missing value for column")
+                .with_context("column", c.clone())
+        })?;
+        query = bind_value(query, value);
     }
     query.execute(pool).await.map_err(AppError::from)?;
     Ok(Value::Object(data))
@@ -132,8 +139,11 @@ async fn update(
     };
     let mut query = sqlx::query(&sql);
     for c in &cols {
-        let v = data.get(c).unwrap();
-        query = bind_value(query, v);
+        let value = data.get(c).ok_or_else(|| {
+            AppError::new("COMMANDS/MISSING_FIELD", "Payload missing value for column")
+                .with_context("column", c.clone())
+        })?;
+        query = bind_value(query, value);
     }
     if table == "household" {
         query = query.bind(id);
@@ -323,6 +333,18 @@ pub async fn events_list_range_command(
     })?;
 
     const TOTAL_LIMIT: usize = 10_000;
+    let range_start_utc = DateTime::<Utc>::from_timestamp_millis(start).ok_or_else(|| {
+        AppError::new("TIME/INVALID_TIMESTAMP", "Invalid range start timestamp")
+            .with_context("operation", "events_list_range")
+            .with_context("household_id", household_id.to_string())
+            .with_context("start", start.to_string())
+    })?;
+    let range_end_utc = DateTime::<Utc>::from_timestamp_millis(end).ok_or_else(|| {
+        AppError::new("TIME/INVALID_TIMESTAMP", "Invalid range end timestamp")
+            .with_context("operation", "events_list_range")
+            .with_context("household_id", household_id.to_string())
+            .with_context("end", end.to_string())
+    })?;
     let mut out = Vec::new();
     'rows: for row in rows {
         if let Some(rrule_str) = row.rrule.clone() {
@@ -330,7 +352,12 @@ pub async fn events_list_range_command(
             let tz_chrono: ChronoTz = tz_str.parse().unwrap_or(chrono_tz::UTC);
             let tz_name = tz_chrono.name().to_string();
             let tz: Tz = tz_chrono.into();
-            let start_local = from_local_ms(row.start_at, tz);
+            let event_id = row.id.clone();
+            let start_local = from_local_ms(row.start_at, tz).map_err(|err| {
+                err.with_context("operation", "events_list_range")
+                    .with_context("household_id", household_id.to_string())
+                    .with_context("event_id", event_id.clone())
+            })?;
             let duration = row
                 .end_at
                 .unwrap_or(row.start_at)
@@ -352,12 +379,8 @@ pub async fn events_list_range_command(
                                 }
                             }
                         }
-                        let after = DateTime::<Utc>::from_timestamp_millis(start)
-                            .unwrap()
-                            .with_timezone(&tz);
-                        let before = DateTime::<Utc>::from_timestamp_millis(end)
-                            .unwrap()
-                            .with_timezone(&tz);
+                        let after = range_start_utc.with_timezone(&tz);
+                        let before = range_end_utc.with_timezone(&tz);
                         set = set.after(after).before(before);
                         for occ in set.all(500).dates {
                             let start_utc_ms = occ.with_timezone(&Utc).timestamp_millis();

@@ -1,15 +1,18 @@
 use chrono::{DateTime, Utc};
 
+use crate::{AppError, AppResult};
+
 pub fn now_ms() -> i64 {
     Utc::now().timestamp_millis()
 }
 
 // Keep for parity with TS docs; we don’t call it in Rust paths (yet).
 #[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn to_date(ms: i64) -> DateTime<Utc> {
-    // from_timestamp_millis returns Option<DateTime<Utc>>
-    DateTime::<Utc>::from_timestamp_millis(ms)
-        .unwrap_or_else(|| DateTime::<Utc>::from_timestamp_millis(0).unwrap())
+pub(crate) fn to_date(ms: i64) -> AppResult<DateTime<Utc>> {
+    DateTime::<Utc>::from_timestamp_millis(ms).ok_or_else(|| {
+        AppError::new("TIME/INVALID_TIMESTAMP", "Timestamp is out of range")
+            .with_context("timestamp", ms.to_string())
+    })
 }
 
 #[cfg(test)]
@@ -25,7 +28,7 @@ mod tests {
 
     #[test]
     fn to_date_epoch() {
-        let d = to_date(0);
+        let d = to_date(0).expect("epoch timestamp is valid");
         assert_eq!(d.timestamp_millis(), 0);
     }
 }

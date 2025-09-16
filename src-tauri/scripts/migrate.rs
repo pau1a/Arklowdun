@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
 use sqlx::{

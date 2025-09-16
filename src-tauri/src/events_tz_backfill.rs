@@ -1,10 +1,10 @@
 use chrono::{LocalResult, NaiveDateTime, Offset, TimeZone, Utc};
 use chrono_tz::Tz;
 use serde::Serialize;
-use sqlx::Row;
+use sqlx::{Error as SqlxError, Row};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::{state::AppState, time::now_ms, AppError};
+use crate::{state::AppState, time::now_ms, AppError, AppResult};
 
 #[derive(Serialize)]
 pub struct BackfillReport {
@@ -25,9 +25,12 @@ struct Progress {
 /// timezone. Interpret `local_ms` using `tz` and return the corresponding UTC
 /// instant. Ambiguous times during a DST fall-back choose the earlier
 /// occurrence; gaps choose the earliest valid instant after the gap.
-fn to_utc_ms(local_ms: i64, tz: Tz) -> i64 {
+fn to_utc_ms(local_ms: i64, tz: Tz) -> AppResult<i64> {
     #[allow(deprecated)]
-    let naive = NaiveDateTime::from_timestamp_millis(local_ms).expect("valid ms");
+    let naive = NaiveDateTime::from_timestamp_millis(local_ms).ok_or_else(|| {
+        AppError::new("TIME/INVALID_TIMESTAMP", "Invalid local timestamp")
+            .with_context("local_ms", local_ms.to_string())
+    })?;
     let local = match tz.from_local_datetime(&naive) {
         LocalResult::Single(dt) => dt,
         LocalResult::Ambiguous(a, _b) => a,
@@ -37,7 +40,7 @@ fn to_utc_ms(local_ms: i64, tz: Tz) -> i64 {
             .from_utc_datetime(&naive)
             .with_timezone(&tz),
     };
-    local.with_timezone(&Utc).timestamp_millis()
+    Ok(local.with_timezone(&Utc).timestamp_millis())
 }
 
 #[tauri::command]
@@ -47,7 +50,7 @@ pub async fn events_backfill_timezone(
     household_id: String,
     default_tz: Option<String>,
     dry_run: bool,
-) -> Result<BackfillReport, AppError> {
+) -> AppResult<BackfillReport> {
     let pool = {
         let state: State<AppState> = app.state();
         state.pool.clone()
@@ -58,8 +61,19 @@ pub async fn events_backfill_timezone(
         .fetch_one(&pool)
         .await
     {
-        Ok(row) => row.try_get::<String, _>("tz").unwrap_or_default(),
-        Err(_) => String::new(),
+        Ok(row) => row.try_get::<String, _>("tz").map_err(|err| {
+            AppError::from(err)
+                .with_context("operation", "events_backfill_timezone")
+                .with_context("step", "read_household_tz")
+                .with_context("household_id", household_id.clone())
+        })?,
+        Err(SqlxError::RowNotFound) => String::new(),
+        Err(err) => {
+            return Err(AppError::from(err)
+                .with_context("operation", "events_backfill_timezone")
+                .with_context("step", "fetch_household_tz")
+                .with_context("household_id", household_id.clone()));
+        }
     };
     let tz_str = if !tz_used.is_empty() {
         tz_used
@@ -113,12 +127,35 @@ pub async fn events_backfill_timezone(
     let total_u = total as u64;
     let mut processed = 0u64;
     for row in rows {
-        let id: String = row.try_get("id").unwrap();
-        let start_at: i64 = row.try_get("start_at").unwrap_or(0);
-        let end_at: Option<i64> = row.try_get("end_at").ok();
+        let id: String = row.try_get("id").map_err(|err| {
+            AppError::from(err)
+                .with_context("operation", "events_backfill_timezone")
+                .with_context("step", "load_event_row")
+                .with_context("column", "id")
+                .with_context("household_id", household_id.clone())
+        })?;
+        let start_at: i64 = row.try_get("start_at").map_err(|err| {
+            AppError::from(err)
+                .with_context("operation", "events_backfill_timezone")
+                .with_context("step", "load_event_row")
+                .with_context("column", "start_at")
+                .with_context("event_id", id.clone())
+                .with_context("household_id", household_id.clone())
+        })?;
+        let end_at: Option<i64> = row.try_get("end_at").map_err(|err| {
+            AppError::from(err)
+                .with_context("operation", "events_backfill_timezone")
+                .with_context("step", "load_event_row")
+                .with_context("column", "end_at")
+                .with_context("event_id", id.clone())
+                .with_context("household_id", household_id.clone())
+        })?;
 
-        let start_at_utc = to_utc_ms(start_at, tz);
-        let end_at_utc = end_at.map(|e| to_utc_ms(e, tz));
+        let start_at_utc = to_utc_ms(start_at, tz)?;
+        let end_at_utc = match end_at {
+            Some(value) => Some(to_utc_ms(value, tz)?),
+            None => None,
+        };
 
         sqlx::query("UPDATE events SET tz = ?, start_at_utc = ?, end_at_utc = ? WHERE id = ?")
             .bind(tz.name())
@@ -197,7 +234,8 @@ mod tests {
             .unwrap()
             .with_timezone(&Utc)
             .timestamp_millis();
-        assert_eq!(to_utc_ms(local_ms, tz), expected);
+        let actual = to_utc_ms(local_ms, tz).expect("tz conversion succeeds");
+        assert_eq!(actual, expected);
     }
 
     #[test]
@@ -214,7 +252,8 @@ mod tests {
             .unwrap()
             .with_timezone(&Utc)
             .timestamp_millis();
-        assert_eq!(to_utc_ms(local_ms, tz), expected);
+        let actual = to_utc_ms(local_ms, tz).expect("tz conversion succeeds");
+        assert_eq!(actual, expected);
     }
 
     #[test]
@@ -231,6 +270,7 @@ mod tests {
             .unwrap()
             .with_timezone(&Utc)
             .timestamp_millis();
-        assert_eq!(to_utc_ms(local_ms, tz), expected);
+        let actual = to_utc_ms(local_ms, tz).expect("tz conversion succeeds");
+        assert_eq!(actual, expected);
     }
 }

@@ -353,11 +353,9 @@ mod tests {
 
     #[test]
     fn converts_anyhow_error_chain_into_nested_causes() {
-        let err = (|| -> anyhow::Result<()> {
-            Err(std::io::Error::new(std::io::ErrorKind::Other, "disk full"))
-                .context("failed to save file")
-        })()
-        .unwrap_err();
+        let err = Err::<(), _>(std::io::Error::other("disk full"))
+            .context("failed to save file")
+            .unwrap_err();
 
         let app_error = AppError::from(err);
         assert_eq!(app_error.code(), AppError::UNKNOWN_CODE);
