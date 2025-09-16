@@ -314,11 +314,11 @@ pub fn flush_file_logs() {
 }
 
 pub fn init_file_logging_standalone(bundle_id: &str) -> Result<PathBuf, FileLoggingError> {
+    // dirs::data_dir() already points to the platform-specific application data directory:
+    //   macOS:   ~/Library/Application Support
+    //   Windows: %APPDATA%
+    //   Linux:   $XDG_DATA_HOME (or fallback)
     let mut base = dirs::data_dir().ok_or(FileLoggingError::MissingAppDataDir)?;
-    #[cfg(target_os = "macos")]
-    {
-        base.push("Application Support");
-    }
     base.push(bundle_id);
     base.push(LOG_DIR_NAME);
 
