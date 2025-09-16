@@ -10,6 +10,7 @@ test("normalizeError preserves cause and coerces context values to strings", asy
     code: SAMPLE_CODE,
     message: "Record not found",
     context: { id: 42, stale: false },
+    crash_id: "01890123-aaaa-bbbb-cccc-abcdefabcdef",
     cause: {
       message: "sql row missing",
       context: { reason: ["missing"] },
@@ -24,6 +25,7 @@ test("normalizeError preserves cause and coerces context values to strings", asy
   assert.ok(n.context);
   assert.equal(n.context!.id, "42");
   assert.equal(n.context!.stale, "false");
+  assert.equal(n.crash_id, "01890123-aaaa-bbbb-cccc-abcdefabcdef");
 
   // cause
   assert.ok(n.cause);

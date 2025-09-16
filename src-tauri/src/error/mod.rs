@@ -1,17 +1,76 @@
+mod crash_id;
+
+use std::any::Any;
+use std::borrow::Cow;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::fmt;
+use std::panic::PanicInfo;
 
 use crate::security::error_map::UiError;
 use anyhow::Error as AnyhowError;
+use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use serde_json::Error as SerdeJsonError;
 use sqlx::Error as SqlxError;
 use std::io::Error as IoError;
 use ts_rs::TS;
 
+pub use crash_id::CrashId;
+
+const CRASH_MESSAGE_PREFIX: &str = "Something went wrong. Crash ID: ";
+
+thread_local! {
+    static HOOK_CRASH_ID: RefCell<Option<CrashId>> = RefCell::new(None);
+}
+
+static PANIC_HOOK: OnceCell<()> = OnceCell::new();
+
+pub fn install_panic_hook() {
+    PANIC_HOOK.get_or_init(|| {
+        let _ = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|info| {
+            let crash_id = CrashId::new();
+            HOOK_CRASH_ID.with(|slot| {
+                *slot.borrow_mut() = Some(crash_id.clone());
+            });
+            let message = panic_message(info);
+            let location = info
+                .location()
+                .map(|loc| format!("{}:{}", loc.file(), loc.line()))
+                .unwrap_or_else(|| "unknown".to_string());
+            tracing::error!(
+                target = "arklowdun",
+                event = "panic_hook",
+                crash_id = %crash_id,
+                location = %location,
+                panic = %message
+            );
+        }));
+    });
+}
+
+pub(crate) fn take_panic_crash_id() -> Option<CrashId> {
+    HOOK_CRASH_ID.with(|slot| slot.borrow_mut().take())
+}
+
+pub(crate) fn panic_payload(payload: &(dyn Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic payload".to_string()
+    }
+}
+
+fn panic_message(info: &PanicInfo) -> String {
+    panic_payload(info.payload())
+}
+
 /// A structured application error that can be serialized and surfaced to the UI.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct AppError {
     /// Machine readable error code.
@@ -26,6 +85,11 @@ pub struct AppError {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub cause: Option<Box<AppError>>,
+    /// Crash identifier associated with critical failures.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    #[ts(type = "string | undefined")]
+    pub crash_id: Option<CrashId>,
 }
 
 /// Serializable representation of [`AppError`] for clients.
@@ -41,6 +105,9 @@ pub struct ErrorDto {
     /// Optional nested cause that preserves the error chain.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cause: Option<Box<ErrorDto>>,
+    /// Crash identifier associated with critical failures.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crash_id: Option<CrashId>,
 }
 
 pub type AppResult<T> = std::result::Result<T, AppError>;
@@ -58,7 +125,41 @@ impl AppError {
             message: message.into(),
             context: HashMap::new(),
             cause: None,
+            crash_id: None,
         }
+    }
+
+    /// Construct a critical error carrying a Crash ID.
+    pub fn critical(code: impl Into<String>, message: impl Into<String>) -> Self {
+        AppError::new(code, message).into_critical()
+    }
+
+    /// Returns the crash identifier when this is a critical error.
+    pub fn crash_id(&self) -> Option<&CrashId> {
+        self.crash_id.as_ref()
+    }
+
+    /// True when the error represents a critical failure.
+    pub fn is_critical(&self) -> bool {
+        self.crash_id.is_some()
+    }
+
+    /// Attach a specific crash identifier to the error.
+    pub fn with_crash_id(mut self, crash_id: CrashId) -> Self {
+        self.crash_id = Some(crash_id);
+        self
+    }
+
+    /// Ensure the error is marked as critical, allocating a new Crash ID if needed.
+    pub fn into_critical(mut self) -> Self {
+        if self.crash_id.is_none() {
+            self.crash_id = Some(CrashId::new());
+        }
+        self
+    }
+
+    pub(crate) fn set_crash_id(&mut self, crash_id: CrashId) {
+        self.crash_id = Some(crash_id);
     }
 
     /// Returns the error code.
@@ -103,6 +204,27 @@ impl AppError {
     pub fn with_cause(mut self, cause: impl Into<AppError>) -> Self {
         self.cause = Some(Box::new(cause.into()));
         self
+    }
+
+    fn sanitized_message(&self) -> Cow<'_, str> {
+        match &self.crash_id {
+            Some(id) => Cow::Owned(format!("{CRASH_MESSAGE_PREFIX}{id}.")),
+            None => Cow::Borrowed(self.message.as_str()),
+        }
+    }
+
+    pub(crate) fn log_with_event(&self, event: &'static str) {
+        if let Some(id) = &self.crash_id {
+            tracing::error!(
+                target = "arklowdun",
+                event = event,
+                code = %self.code,
+                crash_id = %id,
+                message = %self.message,
+                has_context = !self.context.is_empty(),
+                has_cause = self.cause.is_some()
+            );
+        }
     }
 
     fn with_error_source(mut self, source: Option<&(dyn StdError + 'static)>) -> Self {
@@ -309,12 +431,13 @@ impl From<&AppError> for ErrorDto {
     fn from(error: &AppError) -> Self {
         ErrorDto {
             code: error.code.clone(),
-            message: error.message.clone(),
+            message: error.sanitized_message().into_owned(),
             context: error.context.clone(),
             cause: error
                 .cause
                 .as_ref()
                 .map(|cause| Box::new(ErrorDto::from(cause.as_ref()))),
+            crash_id: error.crash_id.clone(),
         }
     }
 }
@@ -323,10 +446,24 @@ impl From<AppError> for ErrorDto {
     fn from(error: AppError) -> Self {
         ErrorDto {
             code: error.code,
-            message: error.message,
+            message: error.sanitized_message().into_owned(),
             context: error.context,
             cause: error.cause.map(|cause| Box::new(ErrorDto::from(*cause))),
+            crash_id: error.crash_id,
         }
+    }
+}
+
+impl serde::Serialize for AppError {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        if self.is_critical() {
+            self.log_with_event("critical_failure");
+        }
+        let dto = ErrorDto::from(self);
+        <ErrorDto as serde::Serialize>::serialize(&dto, serializer)
     }
 }
 

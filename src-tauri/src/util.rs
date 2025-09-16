@@ -4,27 +4,19 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use futures::Future;
 use futures::FutureExt;
 
-use crate::{AppError, AppResult};
+use crate::{
+    error::{panic_payload, take_panic_crash_id, CrashId},
+    AppError, AppResult,
+};
 
 fn app_error_from_panic(payload: Box<dyn Any + Send>) -> AppError {
     let message = panic_payload(payload.as_ref());
-    tracing::error!(
-        target = "arklowdun",
-        event = "panic_caught",
-        error = %message
-    );
+    let crash_id = take_panic_crash_id().unwrap_or_else(CrashId::new);
 
-    AppError::new("RUNTIME/PANIC", "A panic occurred").with_context("panic", message)
-}
-
-fn panic_payload(payload: &(dyn Any + Send)) -> String {
-    if let Some(s) = payload.downcast_ref::<&str>() {
-        (*s).to_string()
-    } else if let Some(s) = payload.downcast_ref::<String>() {
-        s.clone()
-    } else {
-        "unknown panic payload".to_string()
-    }
+    let mut error = AppError::new("RUNTIME/PANIC", message);
+    error.set_crash_id(crash_id);
+    error.log_with_event("panic_caught");
+    error
 }
 
 pub fn dispatch_with_fence<T, F>(f: F) -> Result<T, AppError>
@@ -81,8 +73,9 @@ mod tests {
             .err()
             .expect("should convert panic into error");
         assert_eq!(err.code(), "RUNTIME/PANIC");
-        assert_eq!(err.message(), "A panic occurred");
-        assert_eq!(err.context().get("panic"), Some(&"boom".to_string()));
+        assert_eq!(err.message(), "boom");
+        assert!(err.crash_id().is_some());
+        assert!(err.context().is_empty());
     }
 
     #[test]
@@ -91,8 +84,9 @@ mod tests {
             .err()
             .expect("should convert panic into error");
         assert_eq!(err.code(), "RUNTIME/PANIC");
-        assert_eq!(err.message(), "A panic occurred");
-        assert_eq!(err.context().get("panic"), Some(&"kaboom".to_string()));
+        assert_eq!(err.message(), "kaboom");
+        assert!(err.crash_id().is_some());
+        assert!(err.context().is_empty());
     }
 
     #[test]
@@ -101,10 +95,8 @@ mod tests {
             .err()
             .expect("should convert panic into error");
         assert_eq!(err.code(), "RUNTIME/PANIC");
-        assert_eq!(err.message(), "A panic occurred");
-        assert_eq!(
-            err.context().get("panic"),
-            Some(&"unknown panic payload".to_string())
-        );
+        assert_eq!(err.message(), "unknown panic payload");
+        assert!(err.crash_id().is_some());
+        assert!(err.context().is_empty());
     }
 }

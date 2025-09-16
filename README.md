@@ -47,6 +47,16 @@ Dev tools:
   cargo test --test log_file_smoke  # checks file JSON sink
   cargo test --test log_rotation    # rotation across restarts
 
+### Crash IDs & Support
+
+- Critical backend failures return a Crash ID to the UI with the banner:
+  `Something went wrong. Crash ID: <ID>.`
+- The same identifier is emitted in every `level=ERROR` log as `crash_id=...` so
+  support can search rotated files: `rg "crash_id=<ID>" logs/arklowdun.log*`.
+- Run `cargo run --bin crash_probe` to generate a sample Crash ID and verify log
+  plumbing end-to-end.
+- See [docs/ops/runbooks.md](docs/ops/runbooks.md) for the triage checklist.
+
 ## Database integrity
 
 Schema constraint guidelines live in [docs/integrity-rules.md](docs/integrity-rules.md).

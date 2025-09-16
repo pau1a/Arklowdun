@@ -7,7 +7,11 @@ export function showError(err: unknown) {
 
   const container = document.querySelector("#errors");
   if (container) {
-    container.textContent = `${error.message} (${error.code})`;
+    if (error.crash_id) {
+      container.textContent = `Something went wrong. Crash ID: ${error.crash_id}.`;
+    } else {
+      container.textContent = `${error.message} (${error.code})`;
+    }
   }
   log.error("error", error);
 }
