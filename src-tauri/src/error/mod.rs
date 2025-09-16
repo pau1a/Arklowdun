@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::fmt;
-use std::panic::PanicInfo;
+use std::panic::PanicHookInfo;
 
 use crate::security::error_map::UiError;
 use anyhow::Error as AnyhowError;
@@ -65,7 +65,7 @@ pub(crate) fn panic_payload(payload: &(dyn Any + Send)) -> String {
     }
 }
 
-fn panic_message(info: &PanicInfo) -> String {
+fn panic_message(info: &PanicHookInfo) -> String {
     panic_payload(info.payload())
 }
 
@@ -444,9 +444,11 @@ impl From<&AppError> for ErrorDto {
 
 impl From<AppError> for ErrorDto {
     fn from(error: AppError) -> Self {
+        let message = error.sanitized_message().into_owned();
+
         ErrorDto {
             code: error.code,
-            message: error.sanitized_message().into_owned(),
+            message,
             context: error.context,
             cause: error.cause.map(|cause| Box::new(ErrorDto::from(*cause))),
             crash_id: error.crash_id,
