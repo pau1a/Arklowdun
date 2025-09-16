@@ -144,10 +144,11 @@ pub fn init_file_logging<R: tauri::Runtime>(
 
     let (max_bytes, max_files) = file_logging_limits();
     let suffix = AppendCount::new(max_files);
+    let byte_limit = usize::try_from(max_bytes).unwrap_or(usize::MAX);
     let rotator = FileRotate::new(
         &log_path,
         suffix,
-        ContentLimit::Bytes(max_bytes),
+        ContentLimit::Bytes(byte_limit),
         Compression::None,
         #[cfg(unix)]
         None,
@@ -180,7 +181,7 @@ fn resolve_logs_dir<R: tauri::Runtime>(
     let base = app
         .path()
         .app_data_dir()
-        .ok_or(FileLoggingError::MissingAppDataDir)?;
+        .map_err(|_| FileLoggingError::MissingAppDataDir)?;
     Ok(base.join(LOG_DIR_NAME))
 }
 
