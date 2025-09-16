@@ -1,8 +1,11 @@
-use tauri::Manager;
 use super::fs_policy::{canonicalize_and_verify, reject_symlinks, FsPolicyError, RootKey};
+use tauri::Manager;
 use tempfile::tempdir;
 
-fn setup() -> (tauri::AppHandle<tauri::test::MockRuntime>, tempfile::TempDir) {
+fn setup() -> (
+    tauri::AppHandle<tauri::test::MockRuntime>,
+    tempfile::TempDir,
+) {
     let app = tauri::test::mock_app();
     let handle = app.app_handle();
     // Ensure attachments dir exists under the mock app_data_dir

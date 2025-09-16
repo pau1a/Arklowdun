@@ -4,7 +4,7 @@ use serde::Serialize;
 use sqlx::{Error as SqlxError, Row};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::{state::AppState, time::now_ms, AppError, AppResult};
+use crate::{state::AppState, time::now_ms, util::dispatch_async_app_result, AppError, AppResult};
 
 #[derive(Serialize)]
 pub struct BackfillReport {
@@ -51,167 +51,179 @@ pub async fn events_backfill_timezone(
     default_tz: Option<String>,
     dry_run: bool,
 ) -> AppResult<BackfillReport> {
-    let pool = {
-        let state: State<AppState> = app.state();
-        state.pool.clone()
-    };
+    let app = app.clone();
+    dispatch_async_app_result(move || {
+        let app = app.clone();
+        let household_id = household_id.clone();
+        let default_tz = default_tz.clone();
+        async move {
+            let pool = {
+                let state: State<AppState> = app.state();
+                state.pool.clone()
+            };
 
-    let tz_used = match sqlx::query("SELECT tz FROM household WHERE id = ?")
-        .bind(&household_id)
-        .fetch_one(&pool)
-        .await
-    {
-        Ok(row) => row.try_get::<String, _>("tz").map_err(|err| {
-            AppError::from(err)
-                .with_context("operation", "events_backfill_timezone")
-                .with_context("step", "read_household_tz")
-                .with_context("household_id", household_id.clone())
-        })?,
-        Err(SqlxError::RowNotFound) => String::new(),
-        Err(err) => {
-            return Err(AppError::from(err)
-                .with_context("operation", "events_backfill_timezone")
-                .with_context("step", "fetch_household_tz")
-                .with_context("household_id", household_id.clone()));
-        }
-    };
-    let tz_str = if !tz_used.is_empty() {
-        tz_used
-    } else {
-        default_tz.unwrap_or_else(|| "Europe/London".into())
-    };
-    let tz: Tz = tz_str.parse().unwrap_or(chrono_tz::Europe::London);
+            let tz_used = match sqlx::query("SELECT tz FROM household WHERE id = ?")
+                .bind(&household_id)
+                .fetch_one(&pool)
+                .await
+            {
+                Ok(row) => row.try_get::<String, _>("tz").map_err(|err| {
+                    AppError::from(err)
+                        .with_context("operation", "events_backfill_timezone")
+                        .with_context("step", "read_household_tz")
+                        .with_context("household_id", household_id.clone())
+                })?,
+                Err(SqlxError::RowNotFound) => String::new(),
+                Err(err) => {
+                    return Err(AppError::from(err)
+                        .with_context("operation", "events_backfill_timezone")
+                        .with_context("step", "fetch_household_tz")
+                        .with_context("household_id", household_id.clone()));
+                }
+            };
+            let tz_str = if !tz_used.is_empty() {
+                tz_used
+            } else {
+                default_tz.unwrap_or_else(|| "Europe/London".into())
+            };
+            let tz: Tz = tz_str.parse().unwrap_or(chrono_tz::Europe::London);
 
-    let total: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM events WHERE household_id = ? AND (tz IS NULL OR start_at_utc IS NULL)",
-    )
-    .bind(&household_id)
-    .fetch_one(&pool)
-    .await
-    .map_err(|err| {
-        AppError::from(err)
-            .with_context("operation", "events_backfill_timezone")
-            .with_context("step", "count")
-            .with_context("household_id", household_id.clone())
-    })?;
-
-    if dry_run {
-        return Ok(BackfillReport {
-            household_id,
-            tz_used: tz.name().to_string(),
-            to_update: total as u64,
-            updated: 0,
-            dry_run: true,
-        });
-    }
-
-    let mut tx = pool.begin().await.map_err(|err| {
-        AppError::from(err)
-            .with_context("operation", "events_backfill_timezone")
-            .with_context("step", "begin_tx")
-            .with_context("household_id", household_id.clone())
-    })?;
-
-    // Legacy rows store `start_at` as wall-clock ms in `tz`; derive UTC values.
-    let rows = sqlx::query("SELECT id, start_at, end_at FROM events WHERE household_id = ? AND (tz IS NULL OR start_at_utc IS NULL)")
-        .bind(&household_id)
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(|err| {
-            AppError::from(err)
-                .with_context("operation", "events_backfill_timezone")
-                .with_context("step", "load_events")
-                .with_context("household_id", household_id.clone())
-        })?;
-
-    let total_u = total as u64;
-    let mut processed = 0u64;
-    for row in rows {
-        let id: String = row.try_get("id").map_err(|err| {
-            AppError::from(err)
-                .with_context("operation", "events_backfill_timezone")
-                .with_context("step", "load_event_row")
-                .with_context("column", "id")
-                .with_context("household_id", household_id.clone())
-        })?;
-        let start_at: i64 = row.try_get("start_at").map_err(|err| {
-            AppError::from(err)
-                .with_context("operation", "events_backfill_timezone")
-                .with_context("step", "load_event_row")
-                .with_context("column", "start_at")
-                .with_context("event_id", id.clone())
-                .with_context("household_id", household_id.clone())
-        })?;
-        let end_at: Option<i64> = row.try_get("end_at").map_err(|err| {
-            AppError::from(err)
-                .with_context("operation", "events_backfill_timezone")
-                .with_context("step", "load_event_row")
-                .with_context("column", "end_at")
-                .with_context("event_id", id.clone())
-                .with_context("household_id", household_id.clone())
-        })?;
-
-        let start_at_utc = to_utc_ms(start_at, tz)?;
-        let end_at_utc = match end_at {
-            Some(value) => Some(to_utc_ms(value, tz)?),
-            None => None,
-        };
-
-        sqlx::query("UPDATE events SET tz = ?, start_at_utc = ?, end_at_utc = ? WHERE id = ?")
-            .bind(tz.name())
-            .bind(start_at_utc)
-            .bind(end_at_utc)
-            .bind(&id)
-            .execute(&mut *tx)
+            let total: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM events WHERE household_id = ? AND (tz IS NULL OR start_at_utc IS NULL)",
+            )
+            .bind(&household_id)
+            .fetch_one(&pool)
             .await
             .map_err(|err| {
                 AppError::from(err)
                     .with_context("operation", "events_backfill_timezone")
-                    .with_context("step", "update_event")
-                    .with_context("event_id", id.clone())
+                    .with_context("step", "count")
                     .with_context("household_id", household_id.clone())
             })?;
 
-        processed += 1;
-        if processed % 50 == 0 || processed == total_u {
-            let _ = app.emit(
-                "events_tz_backfill_progress",
-                Progress {
-                    processed,
-                    total: total_u,
-                },
-            );
+            if dry_run {
+                return Ok(BackfillReport {
+                    household_id,
+                    tz_used: tz.name().to_string(),
+                    to_update: total as u64,
+                    updated: 0,
+                    dry_run: true,
+                });
+            }
+
+            let mut tx = pool.begin().await.map_err(|err| {
+                AppError::from(err)
+                    .with_context("operation", "events_backfill_timezone")
+                    .with_context("step", "begin_tx")
+                    .with_context("household_id", household_id.clone())
+            })?;
+
+            let rows = sqlx::query(
+                "SELECT id, start_at, end_at FROM events WHERE household_id = ? AND (tz IS NULL OR start_at_utc IS NULL)"
+            )
+            .bind(&household_id)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|err| {
+                AppError::from(err)
+                    .with_context("operation", "events_backfill_timezone")
+                    .with_context("step", "load_events")
+                    .with_context("household_id", household_id.clone())
+            })?;
+
+            let total_u = total as u64;
+            let mut processed = 0u64;
+            for row in rows {
+                let id: String = row.try_get("id").map_err(|err| {
+                    AppError::from(err)
+                        .with_context("operation", "events_backfill_timezone")
+                        .with_context("step", "load_event_row")
+                        .with_context("column", "id")
+                        .with_context("household_id", household_id.clone())
+                })?;
+                let start_at: i64 = row.try_get("start_at").map_err(|err| {
+                    AppError::from(err)
+                        .with_context("operation", "events_backfill_timezone")
+                        .with_context("step", "load_event_row")
+                        .with_context("column", "start_at")
+                        .with_context("event_id", id.clone())
+                        .with_context("household_id", household_id.clone())
+                })?;
+                let end_at: Option<i64> = row.try_get("end_at").map_err(|err| {
+                    AppError::from(err)
+                        .with_context("operation", "events_backfill_timezone")
+                        .with_context("step", "load_event_row")
+                        .with_context("column", "end_at")
+                        .with_context("event_id", id.clone())
+                        .with_context("household_id", household_id.clone())
+                })?;
+
+                let start_at_utc = to_utc_ms(start_at, tz)?;
+                let end_at_utc = match end_at {
+                    Some(value) => Some(to_utc_ms(value, tz)?),
+                    None => None,
+                };
+
+                sqlx::query("UPDATE events SET tz = ?, start_at_utc = ?, end_at_utc = ? WHERE id = ?")
+                    .bind(tz.name())
+                    .bind(start_at_utc)
+                    .bind(end_at_utc)
+                    .bind(&id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|err| {
+                        AppError::from(err)
+                            .with_context("operation", "events_backfill_timezone")
+                            .with_context("step", "update_event")
+                            .with_context("event_id", id.clone())
+                            .with_context("household_id", household_id.clone())
+                    })?;
+
+                processed += 1;
+                if processed % 50 == 0 || processed == total_u {
+                    let _ = app.emit(
+                        "events_tz_backfill_progress",
+                        Progress {
+                            processed,
+                            total: total_u,
+                        },
+                    );
+                }
+            }
+
+            tx.commit().await.map_err(|err| {
+                AppError::from(err)
+                    .with_context("operation", "events_backfill_timezone")
+                    .with_context("step", "commit_tx")
+                    .with_context("household_id", household_id.clone())
+            })?;
+
+            use std::fs::{create_dir_all, File};
+            use std::io::Write;
+            let ts = now_ms();
+            if let Ok(mut dir) = app.path().app_data_dir() {
+                dir.push("logs");
+                let _ = create_dir_all(&dir);
+                let path = dir.join(format!("events_tz_backfill_{}_{}.log", household_id, ts));
+                if let Ok(mut file) = File::create(path) {
+                    let _ = writeln!(file, "household_id={}", household_id);
+                    let _ = writeln!(file, "tz_used={}", tz.name());
+                    let _ = writeln!(file, "processed={}", processed);
+                    let _ = writeln!(file, "total={}", total_u);
+                    let _ = writeln!(file, "dry_run={}", dry_run);
+                }
+            }
+
+            Ok(BackfillReport {
+                household_id,
+                tz_used: tz.name().to_string(),
+                to_update: total_u,
+                updated: processed,
+                dry_run: false,
+            })
         }
-    }
-
-    tx.commit().await.map_err(|err| {
-        AppError::from(err)
-            .with_context("operation", "events_backfill_timezone")
-            .with_context("step", "commit_tx")
-            .with_context("household_id", household_id.clone())
-    })?;
-
-    use std::fs::{create_dir_all, File};
-    use std::io::Write;
-    let ts = now_ms();
-    if let Ok(mut dir) = app.path().app_data_dir() {
-        dir.push("logs");
-        let _ = create_dir_all(&dir);
-        let path = dir.join(format!("events_tz_backfill_{}_{}.log", household_id, ts));
-        if let Ok(mut f) = File::create(&path) {
-            let _ = writeln!(f, "tz_used={}", tz.name());
-            let _ = writeln!(f, "to_update={}", total_u);
-            let _ = writeln!(f, "updated={}", processed);
-        }
-    }
-
-    Ok(BackfillReport {
-        household_id,
-        tz_used: tz.name().to_string(),
-        to_update: total_u,
-        updated: processed,
-        dry_run: false,
     })
+    .await
 }
 
 #[cfg(test)]

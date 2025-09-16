@@ -23,11 +23,13 @@ mod repo;
 pub mod security;
 mod state;
 mod time;
+pub mod util;
 
 pub use error::{AppError, AppResult, ErrorDto};
 use events_tz_backfill::events_backfill_timezone;
 use security::{error_map::UiError, fs_policy, fs_policy::RootKey, hash_path};
 use tracing_subscriber::{fmt, EnvFilter};
+use util::{dispatch_app_result, dispatch_async_app_result};
 
 pub fn init_logging() {
     let filter = std::env::var("TAURI_ARKLOWDUN_LOG")
@@ -82,14 +84,23 @@ macro_rules! gen_domain_cmds {
                     limit: Option<i64>,
                     offset: Option<i64>,
                 ) -> AppResult<Vec<serde_json::Value>> {
-                    commands::list_command(
-                        &state.pool,
-                        stringify!($table),
-                        &household_id,
-                        order_by.as_deref(),
-                        limit,
-                        offset,
-                    ).await
+                    let pool = state.pool.clone();
+                    dispatch_async_app_result(move || {
+                        let order_by = order_by;
+                        let household_id = household_id;
+                        async move {
+                            commands::list_command(
+                                &pool,
+                                stringify!($table),
+                                &household_id,
+                                order_by.as_deref(),
+                                limit,
+                                offset,
+                            )
+                            .await
+                        }
+                    })
+                    .await
                 }
 
                 #[tauri::command]
@@ -98,13 +109,22 @@ macro_rules! gen_domain_cmds {
                     household_id: Option<String>,
                     id: String,
                 ) -> AppResult<Option<serde_json::Value>> {
-                    let hh = household_id.as_deref();
-                    commands::get_command(
-                        &state.pool,
-                        stringify!($table),
-                        hh,
-                        &id,
-                    ).await
+                    let pool = state.pool.clone();
+                    dispatch_async_app_result(move || {
+                        let household_id = household_id;
+                        let id = id;
+                        async move {
+                            let hh = household_id.as_deref();
+                            commands::get_command(
+                                &pool,
+                                stringify!($table),
+                                hh,
+                                &id,
+                            )
+                            .await
+                        }
+                    })
+                    .await
                 }
 
                 #[tauri::command]
@@ -112,11 +132,19 @@ macro_rules! gen_domain_cmds {
                     state: State<'_, AppState>,
                     data: serde_json::Map<String, serde_json::Value>,
                 ) -> AppResult<serde_json::Value> {
-                    commands::create_command(
-                        &state.pool,
-                        stringify!($table),
-                        data,
-                    ).await
+                    let pool = state.pool.clone();
+                    dispatch_async_app_result(move || {
+                        let data = data;
+                        async move {
+                            commands::create_command(
+                                &pool,
+                                stringify!($table),
+                                data,
+                            )
+                            .await
+                        }
+                    })
+                    .await
                 }
 
                 #[tauri::command]
@@ -126,14 +154,24 @@ macro_rules! gen_domain_cmds {
                     data: serde_json::Map<String, serde_json::Value>,
                     household_id: Option<String>,
                 ) -> AppResult<()> {
-                    let hh = household_id.as_deref();
-                    commands::update_command(
-                        &state.pool,
-                        stringify!($table),
-                        &id,
-                        data,
-                        hh,
-                    ).await
+                    let pool = state.pool.clone();
+                    dispatch_async_app_result(move || {
+                        let household_id = household_id;
+                        let id = id;
+                        let data = data;
+                        async move {
+                            let hh = household_id.as_deref();
+                            commands::update_command(
+                                &pool,
+                                stringify!($table),
+                                &id,
+                                data,
+                                hh,
+                            )
+                            .await
+                        }
+                    })
+                    .await
                 }
 
                 #[tauri::command]
@@ -142,12 +180,21 @@ macro_rules! gen_domain_cmds {
                     household_id: String,
                     id: String,
                 ) -> AppResult<()> {
-                    commands::delete_command(
-                        &state.pool,
-                        stringify!($table),
-                        &household_id,
-                        &id,
-                    ).await
+                    let pool = state.pool.clone();
+                    dispatch_async_app_result(move || {
+                        let household_id = household_id;
+                        let id = id;
+                        async move {
+                            commands::delete_command(
+                                &pool,
+                                stringify!($table),
+                                &household_id,
+                                &id,
+                            )
+                            .await
+                        }
+                    })
+                    .await
                 }
 
                 #[tauri::command]
@@ -156,12 +203,21 @@ macro_rules! gen_domain_cmds {
                     household_id: String,
                     id: String,
                 ) -> AppResult<()> {
-                    commands::restore_command(
-                        &state.pool,
-                        stringify!($table),
-                        &household_id,
-                        &id,
-                    ).await
+                    let pool = state.pool.clone();
+                    dispatch_async_app_result(move || {
+                        let household_id = household_id;
+                        let id = id;
+                        async move {
+                            commands::restore_command(
+                                &pool,
+                                stringify!($table),
+                                &household_id,
+                                &id,
+                            )
+                            .await
+                        }
+                    })
+                    .await
                 }
             )+
         }
@@ -232,17 +288,24 @@ async fn vehicles_list(
     state: State<'_, AppState>,
     household_id: String,
 ) -> AppResult<Vec<Vehicle>> {
-    sqlx::query_as::<_, Vehicle>(
-        "SELECT id, household_id, name, make, model, reg, vin,\n         COALESCE(next_mot_due, mot_date)         AS next_mot_due,\n         COALESCE(next_service_due, service_date) AS next_service_due,\n         created_at, updated_at, deleted_at, position\n    FROM vehicles\n   WHERE household_id = ? AND deleted_at IS NULL\n   ORDER BY position, created_at, id",
-    )
-    .bind(household_id.clone())
-    .fetch_all(&state.pool)
-    .await
-    .map_err(|err| {
-        AppError::from(err)
-            .with_context("operation", "vehicles_list")
-            .with_context("household_id", household_id)
+    let pool = state.pool.clone();
+    dispatch_async_app_result(move || {
+        let household_id = household_id;
+        async move {
+            sqlx::query_as::<_, Vehicle>(
+                "SELECT id, household_id, name, make, model, reg, vin,\n         COALESCE(next_mot_due, mot_date)         AS next_mot_due,\n         COALESCE(next_service_due, service_date) AS next_service_due,\n         created_at, updated_at, deleted_at, position\n    FROM vehicles\n   WHERE household_id = ? AND deleted_at IS NULL\n   ORDER BY position, created_at, id",
+            )
+            .bind(household_id.clone())
+            .fetch_all(&pool)
+            .await
+            .map_err(|err| {
+                AppError::from(err)
+                    .with_context("operation", "vehicles_list")
+                    .with_context("household_id", household_id)
+            })
+        }
     })
+    .await
 }
 
 // Generic CRUD wrappers so legacy UI continues to work
@@ -252,7 +315,13 @@ async fn vehicles_get(
     household_id: Option<String>,
     id: String,
 ) -> AppResult<Option<serde_json::Value>> {
-    commands::get_command(&state.pool, "vehicles", household_id.as_deref(), &id).await
+    let pool = state.pool.clone();
+    dispatch_async_app_result(move || {
+        let household_id = household_id;
+        let id = id;
+        async move { commands::get_command(&pool, "vehicles", household_id.as_deref(), &id).await }
+    })
+    .await
 }
 
 #[tauri::command]
@@ -260,7 +329,12 @@ async fn vehicles_create(
     state: State<'_, AppState>,
     data: serde_json::Map<String, serde_json::Value>,
 ) -> AppResult<serde_json::Value> {
-    commands::create_command(&state.pool, "vehicles", data).await
+    let pool = state.pool.clone();
+    dispatch_async_app_result(move || {
+        let data = data;
+        async move { commands::create_command(&pool, "vehicles", data).await }
+    })
+    .await
 }
 
 #[tauri::command]
@@ -270,7 +344,16 @@ async fn vehicles_update(
     data: serde_json::Map<String, serde_json::Value>,
     household_id: Option<String>,
 ) -> AppResult<()> {
-    commands::update_command(&state.pool, "vehicles", &id, data, household_id.as_deref()).await
+    let pool = state.pool.clone();
+    dispatch_async_app_result(move || {
+        let id = id;
+        let data = data;
+        let household_id = household_id;
+        async move {
+            commands::update_command(&pool, "vehicles", &id, data, household_id.as_deref()).await
+        }
+    })
+    .await
 }
 
 #[tauri::command]
@@ -279,7 +362,13 @@ async fn vehicles_delete(
     household_id: String,
     id: String,
 ) -> AppResult<()> {
-    commands::delete_command(&state.pool, "vehicles", &household_id, &id).await
+    let pool = state.pool.clone();
+    dispatch_async_app_result(move || {
+        let household_id = household_id;
+        let id = id;
+        async move { commands::delete_command(&pool, "vehicles", &household_id, &id).await }
+    })
+    .await
 }
 
 #[tauri::command]
@@ -288,7 +377,13 @@ async fn vehicles_restore(
     household_id: String,
     id: String,
 ) -> AppResult<()> {
-    commands::restore_command(&state.pool, "vehicles", &household_id, &id).await
+    let pool = state.pool.clone();
+    dispatch_async_app_result(move || {
+        let household_id = household_id;
+        let id = id;
+        async move { commands::restore_command(&pool, "vehicles", &household_id, &id).await }
+    })
+    .await
 }
 
 #[derive(Serialize, Deserialize, Clone, TS, sqlx::FromRow)]
@@ -346,7 +441,12 @@ async fn events_list_range(
     start: i64,
     end: i64,
 ) -> AppResult<Vec<Event>> {
-    commands::events_list_range_command(&state.pool, &household_id, start, end).await
+    let pool = state.pool.clone();
+    dispatch_async_app_result(move || {
+        let household_id = household_id;
+        async move { commands::events_list_range_command(&pool, &household_id, start, end).await }
+    })
+    .await
 }
 
 #[tauri::command]
@@ -354,7 +454,12 @@ async fn event_create(
     state: State<'_, AppState>,
     data: serde_json::Map<String, serde_json::Value>,
 ) -> AppResult<serde_json::Value> {
-    commands::create_command(&state.pool, "events", data).await
+    let pool = state.pool.clone();
+    dispatch_async_app_result(move || {
+        let data = data;
+        async move { commands::create_command(&pool, "events", data).await }
+    })
+    .await
 }
 
 #[tauri::command]
@@ -364,7 +469,14 @@ async fn event_update(
     data: serde_json::Map<String, serde_json::Value>,
     household_id: String,
 ) -> AppResult<()> {
-    commands::update_command(&state.pool, "events", &id, data, Some(&household_id)).await
+    let pool = state.pool.clone();
+    dispatch_async_app_result(move || {
+        let id = id;
+        let data = data;
+        let household_id = household_id;
+        async move { commands::update_command(&pool, "events", &id, data, Some(&household_id)).await }
+    })
+    .await
 }
 
 #[tauri::command]
@@ -373,7 +485,13 @@ async fn event_delete(
     household_id: String,
     id: String,
 ) -> AppResult<()> {
-    commands::delete_command(&state.pool, "events", &household_id, &id).await
+    let pool = state.pool.clone();
+    dispatch_async_app_result(move || {
+        let household_id = household_id;
+        let id = id;
+        async move { commands::delete_command(&pool, "events", &household_id, &id).await }
+    })
+    .await
 }
 
 #[tauri::command]
@@ -382,7 +500,13 @@ async fn event_restore(
     household_id: String,
     id: String,
 ) -> AppResult<()> {
-    commands::restore_command(&state.pool, "events", &household_id, &id).await
+    let pool = state.pool.clone();
+    dispatch_async_app_result(move || {
+        let household_id = household_id;
+        let id = id;
+        async move { commands::restore_command(&pool, "events", &household_id, &id).await }
+    })
+    .await
 }
 
 #[tauri::command]
@@ -395,8 +519,11 @@ async fn bills_list_due_between(
     offset: Option<i64>,
 ) -> AppResult<Vec<serde_json::Value>> {
     use sqlx::query;
-
-    let base_sql = r#"
+    let pool = state.pool.clone();
+    dispatch_async_app_result(move || {
+        let household_id = household_id;
+        async move {
+            let base_sql = r#"
         SELECT * FROM bills
         WHERE household_id = ?1
           AND deleted_at IS NULL
@@ -405,57 +532,66 @@ async fn bills_list_due_between(
         ORDER BY due_date ASC, created_at ASC, id ASC
     "#;
 
-    let mut sql = base_sql.to_string();
-    let limit_value = limit.filter(|value| *value > 0);
-    let offset_value = offset.filter(|value| *value > 0);
-    if limit_value.is_some() {
-        sql.push_str(" LIMIT ?4");
-    }
-    if offset_value.is_some() {
-        sql.push_str(" OFFSET ?5");
-    }
+            let mut sql = base_sql.to_string();
+            let limit_value = limit.filter(|value| *value > 0);
+            let offset_value = offset.filter(|value| *value > 0);
+            if limit_value.is_some() {
+                sql.push_str(" LIMIT ?4");
+            }
+            if offset_value.is_some() {
+                sql.push_str(" OFFSET ?5");
+            }
 
-    let mut q = query(&sql).bind(&household_id).bind(from_ms).bind(to_ms);
+            let mut q = query(&sql).bind(&household_id).bind(from_ms).bind(to_ms);
 
-    if let Some(value) = limit_value {
-        q = q.bind(value);
-    }
-    if let Some(value) = offset_value {
-        q = q.bind(value);
-    }
+            if let Some(value) = limit_value {
+                q = q.bind(value);
+            }
+            if let Some(value) = offset_value {
+                q = q.bind(value);
+            }
 
-    let rows = q.fetch_all(&state.pool).await.map_err(|err| {
-        AppError::from(err)
-            .with_context("operation", "bills_list_due_between")
-            .with_context("household_id", household_id.clone())
-    })?;
+            let rows = q.fetch_all(&pool).await.map_err(|err| {
+                AppError::from(err)
+                    .with_context("operation", "bills_list_due_between")
+                    .with_context("household_id", household_id.clone())
+            })?;
 
-    Ok(rows.into_iter().map(crate::repo::row_to_json).collect())
+            Ok(rows.into_iter().map(crate::repo::row_to_json).collect())
+        }
+    })
+    .await
 }
 
 #[tauri::command]
 async fn get_default_household_id(state: tauri::State<'_, state::AppState>) -> AppResult<String> {
-    let guard = state.default_household_id.lock().map_err(|_| {
-        AppError::new(
-            "STATE/LOCK_POISONED",
-            "Failed to access default household id",
-        )
-    })?;
-    Ok(guard.clone())
+    let state = state.clone();
+    dispatch_async_app_result(move || async move {
+        let guard = state.default_household_id.lock().map_err(|_| {
+            AppError::new(
+                "STATE/LOCK_POISONED",
+                "Failed to access default household id",
+            )
+        })?;
+        Ok(guard.clone())
+    })
+    .await
 }
 
 #[tauri::command]
 fn set_default_household_id(state: tauri::State<state::AppState>, id: String) -> AppResult<()> {
-    let requested_id = id.clone();
-    let mut guard = state.default_household_id.lock().map_err(|_| {
-        AppError::new(
-            "STATE/LOCK_POISONED",
-            "Failed to update default household id",
-        )
-        .with_context("requested_id", requested_id)
-    })?;
-    *guard = id;
-    Ok(())
+    dispatch_app_result(move || {
+        let requested_id = id.clone();
+        let mut guard = state.default_household_id.lock().map_err(|_| {
+            AppError::new(
+                "STATE/LOCK_POISONED",
+                "Failed to update default household id",
+            )
+            .with_context("requested_id", requested_id)
+        })?;
+        *guard = id;
+        Ok(())
+    })
 }
 
 #[derive(Deserialize)]
@@ -473,16 +609,20 @@ async fn import_run_legacy(
     _state: State<'_, AppState>,
     args: ImportArgs,
 ) -> AppResult<()> {
-    let household_id = args.household_id;
-    let dry_run = args.dry_run;
-    importer::run_import(&app, household_id.clone(), dry_run)
-        .await
-        .map_err(|err| {
-            AppError::from(err)
-                .with_context("operation", "import_run_legacy")
-                .with_context("household_id", household_id)
-                .with_context("dry_run", dry_run.to_string())
-        })
+    let app = app.clone();
+    dispatch_async_app_result(move || async move {
+        let household_id = args.household_id;
+        let dry_run = args.dry_run;
+        importer::run_import(&app, household_id.clone(), dry_run)
+            .await
+            .map_err(|err| {
+                AppError::from(err)
+                    .with_context("operation", "import_run_legacy")
+                    .with_context("household_id", household_id)
+                    .with_context("dry_run", dry_run.to_string())
+            })
+    })
+    .await
 }
 
 #[derive(Serialize, Deserialize, Clone, TS)]
@@ -599,41 +739,54 @@ async fn files_index_ready(pool: &sqlx::SqlitePool, household_id: &str) -> bool 
 
 #[tauri::command]
 async fn db_table_exists(state: State<'_, AppState>, name: String) -> AppResult<bool> {
-    Ok(table_exists(&state.pool, &name).await)
+    let pool = state.pool.clone();
+    dispatch_async_app_result(move || async move { Ok(table_exists(&pool, &name).await) }).await
 }
 
 #[tauri::command]
 async fn db_has_files_index(state: State<'_, AppState>) -> AppResult<bool> {
-    Ok(table_exists(&state.pool, "files_index").await)
+    let pool = state.pool.clone();
+    dispatch_async_app_result(move || async move { Ok(table_exists(&pool, "files_index").await) })
+        .await
 }
 
 #[tauri::command]
 async fn db_files_index_ready(state: State<'_, AppState>, household_id: String) -> AppResult<bool> {
-    Ok(files_index_ready(&state.pool, &household_id).await)
+    let pool = state.pool.clone();
+    dispatch_async_app_result(
+        move || async move { Ok(files_index_ready(&pool, &household_id).await) },
+    )
+    .await
 }
 
 #[tauri::command]
 async fn db_has_vehicle_columns(state: State<'_, AppState>) -> AppResult<bool> {
-    let pool = &state.pool;
-    if !table_exists(pool, "vehicles").await {
-        return Ok(false);
-    }
-    let cols = table_columns(pool, "vehicles").await;
-    Ok(cols.contains("reg")
-        || cols.contains("registration")
-        || cols.contains("plate")
-        || cols.contains("nickname")
-        || cols.contains("name"))
+    let pool = state.pool.clone();
+    dispatch_async_app_result(move || async move {
+        if !table_exists(&pool, "vehicles").await {
+            return Ok(false);
+        }
+        let cols = table_columns(&pool, "vehicles").await;
+        Ok(cols.contains("reg")
+            || cols.contains("registration")
+            || cols.contains("plate")
+            || cols.contains("nickname")
+            || cols.contains("name"))
+    })
+    .await
 }
 
 #[tauri::command]
 async fn db_has_pet_columns(state: State<'_, AppState>) -> AppResult<bool> {
-    let pool = &state.pool;
-    if !table_exists(pool, "pets").await {
-        return Ok(false);
-    }
-    let cols = table_columns(pool, "pets").await;
-    Ok(cols.contains("name") || cols.contains("species") || cols.contains("type"))
+    let pool = state.pool.clone();
+    dispatch_async_app_result(move || async move {
+        if !table_exists(&pool, "pets").await {
+            return Ok(false);
+        }
+        let cols = table_columns(&pool, "pets").await;
+        Ok(cols.contains("name") || cols.contains("species") || cols.contains("type"))
+    })
+    .await
 }
 
 /// Return the set of column names for a given table.
@@ -691,204 +844,202 @@ async fn search_entities(
     offset: i64,
 ) -> AppResult<Vec<SearchResult>> {
     use sqlx::Row;
-    let pool = &state.pool;
+    let pool = state.pool.clone();
+    dispatch_async_app_result(move || {
+        let household_id = household_id;
+        let query = query;
+        let pool = pool.clone();
+        async move {
+            let pool = &pool;
 
-    if household_id.trim().is_empty() {
-        return Err(AppError::new("BAD_REQUEST", "household_id is required"));
-    }
-    if !(1..=100).contains(&limit) || offset < 0 {
-        return Err(AppError::new("BAD_REQUEST", "invalid limit/offset")
-            .with_context("limit", limit.to_string())
-            .with_context("offset", offset.to_string()));
-    }
-
-    let q = query.trim().to_string();
-    tracing::debug!(target: "arklowdun", household_id = %household_id, q = %q, limit, offset, "search_invoke");
-    if q.is_empty() {
-        return Ok(vec![]);
-    }
-    let esc = like_escape(&q);
-    let prefix = format!("{esc}%");
-    let sub = format!("%{esc}%");
-    let branch_limit = (limit + offset).min(200);
-
-    let index_ready = files_index_ready(pool, &household_id).await;
-    let has_files_table = table_exists(pool, "files").await;
-
-    let has_events = table_exists(pool, "events").await;
-    if !has_events {
-        tracing::debug!(target: "arklowdun", name = "events", "missing_table");
-    }
-    let has_notes = table_exists(pool, "notes").await;
-    if !has_notes {
-        tracing::debug!(target: "arklowdun", name = "notes", "missing_table");
-    }
-    let has_vehicles = table_exists(pool, "vehicles").await;
-    if !has_vehicles {
-        tracing::debug!(target: "arklowdun", name = "vehicles", "missing_table");
-    }
-    let has_pets = table_exists(pool, "pets").await;
-    if !has_pets {
-        tracing::debug!(target: "arklowdun", name = "pets", "missing_table");
-    }
-
-    let short = q.len() < 2;
-    // allow short prefix via base table when index isn't ready
-    if short && !(index_ready || has_files_table) {
-        tracing::debug!(target: "arklowdun", q = %q, len = q.len(), "short_query_bypass");
-        return Ok(vec![]);
-    }
-
-    let mapq = |branch: &str, e: sqlx::Error| {
-        AppError::from(e)
-            .with_context("operation", "search_query")
-            .with_context("branch", branch.to_string())
-    };
-
-    let mut out: Vec<(i32, i64, usize, SearchResult)> = Vec::new();
-    let mut ord: usize = 0;
-
-    if index_ready || has_files_table {
-        let (sql, branch_name) = if index_ready {
-            (
-                "SELECT file_id AS id, filename, strftime('%s', updated_at_utc) AS ts, ordinal AS ord FROM files_index\n             WHERE household_id=?1 AND filename LIKE ?2 ESCAPE '\\' COLLATE NOCASE LIMIT ?3 OFFSET ?4",
-                "files_index",
-            )
-        } else {
-            (
-                "SELECT id, filename, updated_at AS ts, rowid AS ord FROM files\n             WHERE household_id=?1 AND filename LIKE ?2 ESCAPE '\\' COLLATE NOCASE ORDER BY rowid ASC LIMIT ?3 OFFSET ?4",
-                "files",
-            )
-        };
-        let start = std::time::Instant::now();
-        let rows = sqlx::query(sql)
-            .bind(&household_id)
-            .bind(&prefix)
-            .bind(branch_limit)
-            .bind(0)
-            .fetch_all(pool)
-            .await
-            .map_err(|e| mapq(branch_name, e))?;
-        let elapsed = start.elapsed().as_millis() as i64;
-        tracing::debug!(target: "arklowdun", name = branch_name, rows = rows.len(), elapsed_ms = elapsed, "branch");
-        for r in rows {
-            let filename: String = r.try_get("filename").unwrap_or_default();
-            let ts: i64 = r.try_get("ts").unwrap_or_default();
-            let ord_val: i64 = r.try_get("ord").unwrap_or_default();
-            let score = if filename.eq_ignore_ascii_case(&q) {
-                2
-            } else {
-                1
-            };
-            let id: String = r.try_get("id").unwrap_or_default();
-            out.push((
-                score,
-                ts,
-                ord_val as usize,
-                SearchResult::File {
-                    id,
-                    filename,
-                    updated_at: ts,
-                },
-            ));
-        }
-    }
-
-    if !short {
-        if has_events {
-            let start = std::time::Instant::now();
-            let events = sqlx::query(
-                "SELECT id, title, start_at_utc AS ts, COALESCE(tz,'Europe/London') AS tz\n         FROM events\n         WHERE household_id=?1 AND title LIKE ?2 ESCAPE '\\' COLLATE NOCASE\n         ORDER BY title ASC LIMIT ?3 OFFSET ?4",
-            )
-            .bind(&household_id)
-            .bind(&sub)
-            .bind(branch_limit)
-            .bind(0)
-            .fetch_all(pool)
-            .await
-            .map_err(|e| mapq("events", e))?;
-            let elapsed = start.elapsed().as_millis() as i64;
-            tracing::debug!(target: "arklowdun", name = "events", rows = events.len(), elapsed_ms = elapsed, "branch");
-            for r in events {
-                let title: String = r.try_get("title").unwrap_or_default();
-                let ts: i64 = r.try_get("ts").unwrap_or_default();
-                let tz: String = r
-                    .try_get("tz")
-                    .unwrap_or_else(|_| "Europe/London".to_string());
-                let score = if title.eq_ignore_ascii_case(&q) { 2 } else { 1 };
-                let id: String = r.try_get("id").unwrap_or_default();
-                out.push((
-                    score,
-                    ts,
-                    ord,
-                    SearchResult::Event {
-                        id,
-                        title,
-                        start_at_utc: ts,
-                        tz,
-                    },
-                ));
-                ord += 1;
+            if household_id.trim().is_empty() {
+                return Err(AppError::new("BAD_REQUEST", "household_id is required"));
             }
-        }
-
-        if has_notes {
-            let start = std::time::Instant::now();
-            let notes = sqlx::query(
-                "SELECT id, text, updated_at AS ts, COALESCE(color,'') AS color\n         FROM notes\n         WHERE household_id=?1 AND text LIKE ?2 ESCAPE '\\' COLLATE NOCASE\n         ORDER BY ts DESC LIMIT ?3 OFFSET ?4",
-            )
-            .bind(&household_id)
-            .bind(&sub)
-            .bind(branch_limit)
-            .bind(0)
-            .fetch_all(pool)
-            .await
-            .map_err(|e| mapq("notes", e))?;
-            let elapsed = start.elapsed().as_millis() as i64;
-            tracing::debug!(target: "arklowdun", name = "notes", rows = notes.len(), elapsed_ms = elapsed, "branch");
-            for r in notes {
-                let text: String = r.try_get("text").unwrap_or_default();
-                let ts: i64 = r.try_get("ts").unwrap_or_default();
-                let color: String = r.try_get("color").unwrap_or_default();
-                let score = if text.eq_ignore_ascii_case(&q) { 2 } else { 1 };
-                let snippet: String = text.chars().take(80).collect();
-                let id: String = r.try_get("id").unwrap_or_default();
-                out.push((
-                    score,
-                    ts,
-                    ord,
-                    SearchResult::Note {
-                        id,
-                        snippet,
-                        updated_at: ts,
-                        color,
-                    },
-                ));
-                ord += 1;
+            if !(1..=100).contains(&limit) || offset < 0 {
+                return Err(AppError::new("BAD_REQUEST", "invalid limit/offset")
+                    .with_context("limit", limit.to_string())
+                    .with_context("offset", offset.to_string()));
             }
-        }
 
-        if has_vehicles {
-            let start = std::time::Instant::now();
-            // Discover available columns to avoid "no such column" at parse time.
-            let vcols = table_columns(pool, "vehicles").await;
-            let reg_expr = coalesce_expr(&vcols, &["reg", "registration", "plate"], "''");
-            let nick_expr = coalesce_expr(&vcols, &["nickname", "name"], "''");
-            let ts_expr = coalesce_expr(&vcols, &["updated_at", "created_at"], "0");
+            let q = query.trim().to_string();
+            tracing::debug!(target: "arklowdun", household_id = %household_id, q = %q, limit, offset, "search_invoke");
+            if q.is_empty() {
+                return Ok(vec![]);
+            }
+            let esc = like_escape(&q);
+            let prefix = format!("{esc}%");
+            let sub = format!("%{esc}%");
+            let branch_limit = (limit + offset).min(200);
 
-            let make_expr = if vcols.contains("make") {
-                "COALESCE(make,'')"
-            } else {
-                "''"
+            let index_ready = files_index_ready(pool, &household_id).await;
+            let has_files_table = table_exists(pool, "files").await;
+
+            let has_events = table_exists(pool, "events").await;
+            if !has_events {
+                tracing::debug!(target: "arklowdun", name = "events", "missing_table");
+            }
+            let has_notes = table_exists(pool, "notes").await;
+            if !has_notes {
+                tracing::debug!(target: "arklowdun", name = "notes", "missing_table");
+            }
+            let has_vehicles = table_exists(pool, "vehicles").await;
+            if !has_vehicles {
+                tracing::debug!(target: "arklowdun", name = "vehicles", "missing_table");
+            }
+            let has_pets = table_exists(pool, "pets").await;
+            if !has_pets {
+                tracing::debug!(target: "arklowdun", name = "pets", "missing_table");
+            }
+
+            let short = q.len() < 2;
+            if short && !(index_ready || has_files_table) {
+                tracing::debug!(target: "arklowdun", q = %q, len = q.len(), "short_query_bypass");
+                return Ok(vec![]);
+            }
+
+            let mapq = |branch: &str, e: sqlx::Error| {
+                AppError::from(e)
+                    .with_context("operation", "search_query")
+                    .with_context("branch", branch.to_string())
             };
-            let model_expr = if vcols.contains("model") {
-                "COALESCE(model,'')"
-            } else {
-                "''"
-            };
 
-            let sql = format!(
-                "SELECT id, {make_expr} AS make, {model_expr} AS model, {reg_expr} AS reg, {nick_expr} AS nickname, {ts_expr} AS ts \
+            let mut out: Vec<(i32, i64, usize, SearchResult)> = Vec::new();
+            let mut ord: usize = 0;
+
+            if index_ready || has_files_table {
+                let (sql, branch_name) = if index_ready {
+                    (
+                        "SELECT file_id AS id, filename, strftime('%s', updated_at_utc) AS ts, ordinal AS ord FROM files_index\n     WHERE household_id=?1 AND filename LIKE ?2 ESCAPE '\\' COLLATE NOCASE LIMIT ?3 OFFSET ?4",
+                        "files_index",
+                    )
+                } else {
+                    (
+                        "SELECT id, filename, updated_at AS ts, rowid AS ord FROM files\n             WHERE household_id=?1 AND filename LIKE ?2 ESCAPE '\\' COLLATE NOCASE ORDER BY rowid ASC LIMIT ?3 OFFSET ?4",
+                        "files",
+                    )
+                };
+                let start = std::time::Instant::now();
+                let rows = sqlx::query(sql)
+                    .bind(&household_id)
+                    .bind(&prefix)
+                    .bind(branch_limit)
+                    .bind(0)
+                    .fetch_all(pool)
+                    .await
+                    .map_err(|e| mapq(branch_name, e))?;
+                let elapsed = start.elapsed().as_millis() as i64;
+                tracing::debug!(target: "arklowdun", name = branch_name, rows = rows.len(), elapsed_ms = elapsed, "branch");
+                for r in rows {
+                    let filename: String = r.try_get("filename").unwrap_or_default();
+                    let ts: i64 = r.try_get("ts").unwrap_or_default();
+                    let ord_val: i64 = r.try_get("ord").unwrap_or_default();
+                    let score = if filename.eq_ignore_ascii_case(&q) { 2 } else { 1 };
+                    let id: String = r.try_get("id").unwrap_or_default();
+                    out.push((
+                        score,
+                        ts,
+                        ord_val as usize,
+                        SearchResult::File {
+                            id,
+                            filename,
+                            updated_at: ts,
+                        },
+                    ));
+                }
+            }
+
+            if !short {
+                if has_events {
+                    let start = std::time::Instant::now();
+                    let events = sqlx::query(
+                        "SELECT id, title, start_at_utc AS ts, COALESCE(tz,'Europe/London') AS tz\n         FROM events\n         WHERE household_id=?1 AND title LIKE ?2 ESCAPE '\\' COLLATE NOCASE\n         ORDER BY title ASC LIMIT ?3 OFFSET ?4",
+                    )
+                    .bind(&household_id)
+                    .bind(&sub)
+                    .bind(branch_limit)
+                    .bind(0)
+                    .fetch_all(pool)
+                    .await
+                    .map_err(|e| mapq("events", e))?;
+                    let elapsed = start.elapsed().as_millis() as i64;
+                    tracing::debug!(target: "arklowdun", name = "events", rows = events.len(), elapsed_ms = elapsed, "branch");
+                    for r in events {
+                        let title: String = r.try_get("title").unwrap_or_default();
+                        let ts: i64 = r.try_get("ts").unwrap_or_default();
+                        let tz: String = r.try_get("tz").unwrap_or_else(|_| "Europe/London".to_string());
+                        let score = if title.eq_ignore_ascii_case(&q) { 2 } else { 1 };
+                        let id: String = r.try_get("id").unwrap_or_default();
+                        out.push((
+                            score,
+                            ts,
+                            ord,
+                            SearchResult::Event {
+                                id,
+                                title,
+                                start_at_utc: ts,
+                                tz,
+                            },
+                        ));
+                        ord += 1;
+                    }
+                }
+
+                if has_notes {
+                    let start = std::time::Instant::now();
+                    let notes = sqlx::query(
+                        "SELECT id, text, updated_at AS ts, COALESCE(color,'') AS color\n         FROM notes\n         WHERE household_id=?1 AND text LIKE ?2 ESCAPE '\\' COLLATE NOCASE\n         ORDER BY ts DESC LIMIT ?3 OFFSET ?4",
+                    )
+                    .bind(&household_id)
+                    .bind(&sub)
+                    .bind(branch_limit)
+                    .bind(0)
+                    .fetch_all(pool)
+                    .await
+                    .map_err(|e| mapq("notes", e))?;
+                    let elapsed = start.elapsed().as_millis() as i64;
+                    tracing::debug!(target: "arklowdun", name = "notes", rows = notes.len(), elapsed_ms = elapsed, "branch");
+                    for r in notes {
+                        let text: String = r.try_get("text").unwrap_or_default();
+                        let ts: i64 = r.try_get("ts").unwrap_or_default();
+                        let color: String = r.try_get("color").unwrap_or_default();
+                        let score = if text.eq_ignore_ascii_case(&q) { 2 } else { 1 };
+                        let snippet: String = text.chars().take(80).collect();
+                        let id: String = r.try_get("id").unwrap_or_default();
+                        out.push((
+                            score,
+                            ts,
+                            ord,
+                            SearchResult::Note {
+                                id,
+                                snippet,
+                                updated_at: ts,
+                                color,
+                            },
+                        ));
+                        ord += 1;
+                    }
+                }
+
+                if has_vehicles {
+                    let start = std::time::Instant::now();
+                    let vcols = table_columns(pool, "vehicles").await;
+                    let reg_expr = coalesce_expr(&vcols, &["reg", "registration", "plate"], "''");
+                    let nick_expr = coalesce_expr(&vcols, &["nickname", "name"], "''");
+                    let ts_expr = coalesce_expr(&vcols, &["updated_at", "created_at"], "0");
+
+                    let make_expr = if vcols.contains("make") {
+                        "COALESCE(make,'')"
+                    } else {
+                        "''"
+                    };
+                    let model_expr = if vcols.contains("model") {
+                        "COALESCE(model,'')"
+                    } else {
+                        "''"
+                    };
+
+                    let sql = format!(
+                        "SELECT id, {make_expr} AS make, {model_expr} AS model, {reg_expr} AS reg, {nick_expr} AS nickname, {ts_expr} AS ts \
                  FROM vehicles \
                  WHERE household_id=?1 AND ( \
                      {make_expr} LIKE ?2 ESCAPE '\\' COLLATE NOCASE OR \
@@ -897,123 +1048,126 @@ async fn search_entities(
                      {nick_expr}  LIKE ?2 ESCAPE '\\' COLLATE NOCASE \
                  ) \
                  ORDER BY ts DESC LIMIT ?3 OFFSET ?4",
-                make_expr = make_expr,
-                model_expr = model_expr,
-                reg_expr = reg_expr,
-                nick_expr = nick_expr,
-                ts_expr = ts_expr,
-            );
+                        make_expr = make_expr,
+                        model_expr = model_expr,
+                        reg_expr = reg_expr,
+                        nick_expr = nick_expr,
+                        ts_expr = ts_expr,
+                    );
 
-            let rows = sqlx::query(&sql)
-                .bind(&household_id)
-                .bind(&sub)
-                .bind(branch_limit)
-                .bind(0)
-                .fetch_all(pool)
-                .await
-                .map_err(|e| mapq("vehicles", e))?;
-            let elapsed = start.elapsed().as_millis() as i64;
-            tracing::debug!(target: "arklowdun", name = "vehicles", rows = rows.len(), elapsed_ms = elapsed, "branch");
-            for r in rows {
-                let make: String = r.try_get("make").unwrap_or_default();
-                let model: String = r.try_get("model").unwrap_or_default();
-                let reg: String = r.try_get("reg").unwrap_or_default();
-                let nickname: String = r.try_get("nickname").unwrap_or_default();
-                let ts: i64 = r.try_get("ts").unwrap_or_default();
-                let exact = |s: &str| !s.is_empty() && s.eq_ignore_ascii_case(&q);
-                let score = if exact(&make) || exact(&model) || exact(&reg) || exact(&nickname) {
-                    2
-                } else {
-                    1
-                };
-                let id: String = r.try_get("id").unwrap_or_default();
-                out.push((
-                    score,
-                    ts,
-                    ord,
-                    SearchResult::Vehicle {
-                        id,
-                        make,
-                        model,
-                        reg,
-                        updated_at: ts,
-                        nickname,
-                    },
-                ));
-                ord += 1;
-            }
-        }
+                    let rows = sqlx::query(&sql)
+                        .bind(&household_id)
+                        .bind(&sub)
+                        .bind(branch_limit)
+                        .bind(0)
+                        .fetch_all(pool)
+                        .await
+                        .map_err(|e| mapq("vehicles", e))?;
+                    let elapsed = start.elapsed().as_millis() as i64;
+                    tracing::debug!(target: "arklowdun", name = "vehicles", rows = rows.len(), elapsed_ms = elapsed, "branch");
+                    for r in rows {
+                        let make: String = r.try_get("make").unwrap_or_default();
+                        let model: String = r.try_get("model").unwrap_or_default();
+                        let reg: String = r.try_get("reg").unwrap_or_default();
+                        let nickname: String = r.try_get("nickname").unwrap_or_default();
+                        let ts: i64 = r.try_get("ts").unwrap_or_default();
+                        let exact = |s: &str| !s.is_empty() && s.eq_ignore_ascii_case(&q);
+                        let score = if exact(&make) || exact(&model) || exact(&reg) || exact(&nickname) {
+                            2
+                        } else {
+                            1
+                        };
+                        let id: String = r.try_get("id").unwrap_or_default();
+                        out.push((
+                            score,
+                            ts,
+                            ord,
+                            SearchResult::Vehicle {
+                                id,
+                                make,
+                                model,
+                                reg,
+                                updated_at: ts,
+                                nickname,
+                            },
+                        ));
+                        ord += 1;
+                    }
+                }
 
-        if has_pets {
-            let start = std::time::Instant::now();
-            let pcols = table_columns(pool, "pets").await;
-            let name_expr = if pcols.contains("name") {
-                "COALESCE(name,'')"
-            } else {
-                "''"
-            };
-            let species_expr = coalesce_expr(&pcols, &["species", "type"], "''");
-            let ts_expr = coalesce_expr(&pcols, &["updated_at", "created_at"], "0");
+                if has_pets {
+                    let start = std::time::Instant::now();
+                    let pcols = table_columns(pool, "pets").await;
+                    let name_expr = if pcols.contains("name") {
+                        "COALESCE(name,'')"
+                    } else {
+                        "''"
+                    };
+                    let species_expr = coalesce_expr(&pcols, &["species", "type"], "''");
+                    let ts_expr = coalesce_expr(&pcols, &["updated_at", "created_at"], "0");
 
-            let sql = format!(
-                "SELECT id, {name_expr} AS name, {species_expr} AS species, {ts_expr} AS ts \
+                    let sql = format!(
+                        "SELECT id, {name_expr} AS name, {species_expr} AS species, {ts_expr} AS ts \
                  FROM pets \
                  WHERE household_id=?1 AND ( \
                      {name_expr}   LIKE ?2 ESCAPE '\\' COLLATE NOCASE OR \
                      {species_expr} LIKE ?2 ESCAPE '\\' COLLATE NOCASE \
                  ) \
                  ORDER BY ts DESC LIMIT ?3 OFFSET ?4",
-                name_expr = name_expr,
-                species_expr = species_expr,
-                ts_expr = ts_expr,
-            );
+                        name_expr = name_expr,
+                        species_expr = species_expr,
+                        ts_expr = ts_expr,
+                    );
 
-            let rows = sqlx::query(&sql)
-                .bind(&household_id)
-                .bind(&sub)
-                .bind(branch_limit)
-                .bind(0)
-                .fetch_all(pool)
-                .await
-                .map_err(|e| mapq("pets", e))?;
-            let elapsed = start.elapsed().as_millis() as i64;
-            tracing::debug!(target: "arklowdun", name = "pets", rows = rows.len(), elapsed_ms = elapsed, "branch");
-            for r in rows {
-                let name: String = r.try_get("name").unwrap_or_default();
-                let species: String = r.try_get("species").unwrap_or_default();
-                let ts: i64 = r.try_get("ts").unwrap_or_default();
-                let score = if name.eq_ignore_ascii_case(&q) || species.eq_ignore_ascii_case(&q) {
-                    2
-                } else {
-                    1
-                };
-                let id: String = r.try_get("id").unwrap_or_default();
-                out.push((
-                    score,
-                    ts,
-                    ord,
-                    SearchResult::Pet {
-                        id,
-                        name,
-                        species,
-                        updated_at: ts,
-                    },
-                ));
-                ord += 1;
+                    let rows = sqlx::query(&sql)
+                        .bind(&household_id)
+                        .bind(&sub)
+                        .bind(branch_limit)
+                        .bind(0)
+                        .fetch_all(pool)
+                        .await
+                        .map_err(|e| mapq("pets", e))?;
+                    let elapsed = start.elapsed().as_millis() as i64;
+                    tracing::debug!(target: "arklowdun", name = "pets", rows = rows.len(), elapsed_ms = elapsed, "branch");
+                    for r in rows {
+                        let name: String = r.try_get("name").unwrap_or_default();
+                        let species: String = r.try_get("species").unwrap_or_default();
+                        let ts: i64 = r.try_get("ts").unwrap_or_default();
+                        let score = if name.eq_ignore_ascii_case(&q) || species.eq_ignore_ascii_case(&q) {
+                            2
+                        } else {
+                            1
+                        };
+                        let id: String = r.try_get("id").unwrap_or_default();
+                        out.push((
+                            score,
+                            ts,
+                            ord,
+                            SearchResult::Pet {
+                                id,
+                                name,
+                                species,
+                                updated_at: ts,
+                            },
+                        ));
+                        ord += 1;
+                    }
+                }
             }
+
+            out.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
+            let total_before = out.len();
+            let out = out
+                .into_iter()
+                .skip(offset as usize)
+                .take(limit as usize)
+                .collect::<Vec<_>>();
+            tracing::debug!(target: "arklowdun", total_before, returned = out.len(), "result_summary");
+
+            Ok(out.into_iter().map(|(_, _, _, v)| v).collect())
         }
-    }
-
-    out.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
-    let total_before = out.len();
-    let out = out
-        .into_iter()
-        .skip(offset as usize)
-        .take(limit as usize)
-        .collect::<Vec<_>>();
-    tracing::debug!(target: "arklowdun", total_before, returned = out.len(), "result_summary");
-
-    Ok(out.into_iter().map(|(_, _, _, v)| v).collect())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1023,35 +1177,44 @@ async fn attachment_open(
     table: String,
     id: String,
 ) -> AppResult<()> {
-    let (root_key, rel) = attachments::load_attachment_columns(&state.pool, &table, &id).await?;
-    let root = match root_key.as_str() {
-        "attachments" => RootKey::Attachments,
-        "appData" => RootKey::AppData,
-        _ => RootKey::AppData,
-    };
-    let res = match fs_policy::canonicalize_and_verify(&rel, root, &app) {
-        Ok(r) => r,
-        Err(e) => {
-            let reason = e.name();
-            let ui: UiError = e.into();
-            log_fs_deny(root, &ui, reason);
-            return Err(AppError::from(ui)
-                .with_context("operation", "attachment_open")
-                .with_context("table", table.clone())
-                .with_context("id", id.clone()));
+    let pool = state.pool.clone();
+    let app = app.clone();
+    dispatch_async_app_result(move || {
+        let table = table;
+        let id = id;
+        async move {
+            let (root_key, rel) = attachments::load_attachment_columns(&pool, &table, &id).await?;
+            let root = match root_key.as_str() {
+                "attachments" => RootKey::Attachments,
+                "appData" => RootKey::AppData,
+                _ => RootKey::AppData,
+            };
+            let res = match fs_policy::canonicalize_and_verify(&rel, root, &app) {
+                Ok(r) => r,
+                Err(e) => {
+                    let reason = e.name();
+                    let ui: UiError = e.into();
+                    log_fs_deny(root, &ui, reason);
+                    return Err(AppError::from(ui)
+                        .with_context("operation", "attachment_open")
+                        .with_context("table", table.clone())
+                        .with_context("id", id.clone()));
+                }
+            };
+            if let Err(e) = fs_policy::reject_symlinks(&res.real_path) {
+                let reason = e.name();
+                let ui: UiError = e.into();
+                log_fs_deny(root, &ui, reason);
+                return Err(AppError::from(ui)
+                    .with_context("operation", "attachment_open")
+                    .with_context("table", table.clone())
+                    .with_context("id", id.clone()));
+            }
+            log_fs_ok(root, &res.real_path);
+            attachments::open_with_os(&res.real_path)
         }
-    };
-    if let Err(e) = fs_policy::reject_symlinks(&res.real_path) {
-        let reason = e.name();
-        let ui: UiError = e.into();
-        log_fs_deny(root, &ui, reason);
-        return Err(AppError::from(ui)
-            .with_context("operation", "attachment_open")
-            .with_context("table", table.clone())
-            .with_context("id", id.clone()));
-    }
-    log_fs_ok(root, &res.real_path);
-    attachments::open_with_os(&res.real_path)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1061,61 +1224,77 @@ async fn attachment_reveal(
     table: String,
     id: String,
 ) -> AppResult<()> {
-    let (root_key, rel) = attachments::load_attachment_columns(&state.pool, &table, &id).await?;
-    let root = match root_key.as_str() {
-        "attachments" => RootKey::Attachments,
-        "appData" => RootKey::AppData,
-        _ => RootKey::AppData,
-    };
-    let res = match fs_policy::canonicalize_and_verify(&rel, root, &app) {
-        Ok(r) => r,
-        Err(e) => {
-            let reason = e.name();
-            let ui: UiError = e.into();
-            log_fs_deny(root, &ui, reason);
-            return Err(AppError::from(ui)
-                .with_context("operation", "attachment_reveal")
-                .with_context("table", table.clone())
-                .with_context("id", id.clone()));
+    let pool = state.pool.clone();
+    let app = app.clone();
+    dispatch_async_app_result(move || {
+        let table = table;
+        let id = id;
+        async move {
+            let (root_key, rel) = attachments::load_attachment_columns(&pool, &table, &id).await?;
+            let root = match root_key.as_str() {
+                "attachments" => RootKey::Attachments,
+                "appData" => RootKey::AppData,
+                _ => RootKey::AppData,
+            };
+            let res = match fs_policy::canonicalize_and_verify(&rel, root, &app) {
+                Ok(r) => r,
+                Err(e) => {
+                    let reason = e.name();
+                    let ui: UiError = e.into();
+                    log_fs_deny(root, &ui, reason);
+                    return Err(AppError::from(ui)
+                        .with_context("operation", "attachment_reveal")
+                        .with_context("table", table.clone())
+                        .with_context("id", id.clone()));
+                }
+            };
+            if let Err(e) = fs_policy::reject_symlinks(&res.real_path) {
+                let reason = e.name();
+                let ui: UiError = e.into();
+                log_fs_deny(root, &ui, reason);
+                return Err(AppError::from(ui)
+                    .with_context("operation", "attachment_reveal")
+                    .with_context("table", table.clone())
+                    .with_context("id", id.clone()));
+            }
+            log_fs_ok(root, &res.real_path);
+            attachments::reveal_with_os(&res.real_path)
         }
-    };
-    if let Err(e) = fs_policy::reject_symlinks(&res.real_path) {
-        let reason = e.name();
-        let ui: UiError = e.into();
-        log_fs_deny(root, &ui, reason);
-        return Err(AppError::from(ui)
-            .with_context("operation", "attachment_reveal")
-            .with_context("table", table.clone())
-            .with_context("id", id.clone()));
-    }
-    log_fs_ok(root, &res.real_path);
-    attachments::reveal_with_os(&res.real_path)
+    })
+    .await
 }
 
 #[tauri::command]
 async fn open_path(app: tauri::AppHandle, path: String) -> AppResult<()> {
-    let root = RootKey::AppData;
-    let res = match fs_policy::canonicalize_and_verify(&path, root, &app) {
-        Ok(r) => r,
-        Err(e) => {
-            let reason = e.name();
-            let ui: UiError = e.into();
-            log_fs_deny(root, &ui, reason);
-            return Err(AppError::from(ui)
-                .with_context("operation", "open_path")
-                .with_context("path", path.clone()));
+    let app = app.clone();
+    dispatch_async_app_result(move || {
+        let path = path;
+        async move {
+            let root = RootKey::AppData;
+            let res = match fs_policy::canonicalize_and_verify(&path, root, &app) {
+                Ok(r) => r,
+                Err(e) => {
+                    let reason = e.name();
+                    let ui: UiError = e.into();
+                    log_fs_deny(root, &ui, reason);
+                    return Err(AppError::from(ui)
+                        .with_context("operation", "open_path")
+                        .with_context("path", path.clone()));
+                }
+            };
+            if let Err(e) = fs_policy::reject_symlinks(&res.real_path) {
+                let reason = e.name();
+                let ui: UiError = e.into();
+                log_fs_deny(root, &ui, reason);
+                return Err(AppError::from(ui)
+                    .with_context("operation", "open_path")
+                    .with_context("path", path.clone()));
+            }
+            log_fs_ok(root, &res.real_path);
+            crate::attachments::open_with_os(&res.real_path)
         }
-    };
-    if let Err(e) = fs_policy::reject_symlinks(&res.real_path) {
-        let reason = e.name();
-        let ui: UiError = e.into();
-        log_fs_deny(root, &ui, reason);
-        return Err(AppError::from(ui)
-            .with_context("operation", "open_path")
-            .with_context("path", path.clone()));
-    }
-    log_fs_ok(root, &res.real_path);
-    crate::attachments::open_with_os(&res.real_path)
+    })
+    .await
 }
 
 #[macro_export]
