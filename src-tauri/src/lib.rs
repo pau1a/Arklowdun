@@ -1,14 +1,51 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+use file_rotate::{compression::Compression, suffix::AppendCount, ContentLimit, FileRotate};
+use once_cell::sync::OnceCell;
 use paste::paste;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
-use std::sync::{Arc, Mutex};
+use std::{
+    io::{self, Write},
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use tauri::{Manager, State};
+use thiserror::Error;
+use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
+use tracing_subscriber::{
+    fmt::{self, time::UtcTime, MakeWriter},
+    layer::SubscriberExt,
+    util::SubscriberInitExt,
+    EnvFilter,
+};
 use ts_rs::TS;
 
 use crate::state::AppState;
 
 const FILES_INDEX_VERSION: i64 = 1;
+
+const DEFAULT_LOG_MAX_SIZE_BYTES: u64 = 5_000_000;
+const DEFAULT_LOG_MAX_FILES: usize = 5;
+const LOG_DIR_NAME: &str = "logs";
+const LOG_FILE_NAME: &str = "arklowdun.log";
+
+static FILE_LOG_WRITER: OnceCell<NonBlocking> = OnceCell::new();
+static FILE_LOG_GUARD: OnceCell<WorkerGuard> = OnceCell::new();
+
+#[derive(Clone, Default)]
+struct RotatingFileWriter;
+
+impl<'a> MakeWriter<'a> for RotatingFileWriter {
+    type Writer = Box<dyn Write + Send>;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        if let Some(writer) = FILE_LOG_WRITER.get() {
+            Box::new(writer.clone())
+        } else {
+            Box::new(io::sink())
+        }
+    }
+}
 
 mod attachments;
 pub mod commands;
@@ -28,7 +65,6 @@ pub mod util;
 pub use error::{AppError, AppResult, ErrorDto};
 use events_tz_backfill::events_backfill_timezone;
 use security::{error_map::UiError, fs_policy, fs_policy::RootKey, hash_path};
-use tracing_subscriber::{fmt, EnvFilter};
 use util::{dispatch_app_result, dispatch_async_app_result};
 
 pub fn init_logging() {
@@ -41,14 +77,127 @@ pub fn init_logging() {
     // log directory.
     let _ = tracing_log::LogTracer::init();
 
-    let _ = fmt()
-        .with_env_filter(EnvFilter::new(filter))
+    let stdout_layer = fmt::layer()
+        .with_writer(io::stdout)
         .json()
         .with_target(true)
-        .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
+        .with_timer(UtcTime::rfc_3339())
         .with_current_span(false)
-        .with_span_list(false)
-        .try_init();
+        .with_span_list(false);
+
+    let file_layer = fmt::layer()
+        .with_writer(RotatingFileWriter::default())
+        .json()
+        .with_target(true)
+        .with_timer(UtcTime::rfc_3339())
+        .with_current_span(false)
+        .with_span_list(false);
+
+    let subscriber = tracing_subscriber::registry()
+        .with(EnvFilter::new(filter))
+        .with(stdout_layer)
+        .with(file_layer);
+
+    let _ = subscriber.try_init();
+}
+
+#[derive(Debug, Error)]
+pub enum FileLoggingError {
+    #[error("app data directory unavailable")]
+    MissingAppDataDir,
+    #[error("failed to create log directory at {dir:?}: {source}")]
+    CreateDir {
+        dir: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[error("failed to create log file at {path:?}: {source}")]
+    CreateFile {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+}
+
+pub fn init_file_logging<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<(), FileLoggingError> {
+    if FILE_LOG_WRITER.get().is_some() {
+        return Ok(());
+    }
+
+    let logs_dir = resolve_logs_dir(app)?;
+    std::fs::create_dir_all(&logs_dir).map_err(|source| FileLoggingError::CreateDir {
+        dir: logs_dir.clone(),
+        source,
+    })?;
+
+    let log_path = logs_dir.join(LOG_FILE_NAME);
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|source| FileLoggingError::CreateFile {
+            path: log_path.clone(),
+            source,
+        })?;
+
+    let (max_bytes, max_files) = file_logging_limits();
+    let suffix = AppendCount::new(max_files);
+    let rotator = FileRotate::new(
+        &log_path,
+        suffix,
+        ContentLimit::Bytes(max_bytes),
+        Compression::None,
+        #[cfg(unix)]
+        None,
+    );
+
+    let (writer, guard) = tracing_appender::non_blocking(rotator);
+    match FILE_LOG_WRITER.set(writer) {
+        Ok(()) => {
+            let _ = FILE_LOG_GUARD.set(guard);
+            Ok(())
+        }
+        Err(writer) => {
+            drop(writer);
+            drop(guard);
+            Ok(())
+        }
+    }
+}
+
+pub fn flush_file_logs() {
+    if let Some(writer) = FILE_LOG_WRITER.get() {
+        let mut writer = writer.clone();
+        let _ = writer.flush();
+    }
+}
+
+fn resolve_logs_dir<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<PathBuf, FileLoggingError> {
+    let base = app
+        .path()
+        .app_data_dir()
+        .ok_or(FileLoggingError::MissingAppDataDir)?;
+    Ok(base.join(LOG_DIR_NAME))
+}
+
+fn file_logging_limits() -> (u64, usize) {
+    let max_bytes = std::env::var("TAURI_ARKLOWDUN_LOG_MAX_SIZE_BYTES")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(|bytes| bytes.max(1))
+        .unwrap_or(DEFAULT_LOG_MAX_SIZE_BYTES);
+
+    let max_files = std::env::var("TAURI_ARKLOWDUN_LOG_MAX_FILES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .map(|count| count.max(1))
+        .unwrap_or(DEFAULT_LOG_MAX_FILES);
+
+    (max_bytes, max_files)
 }
 
 pub fn log_fs_ok(root: RootKey, real: &std::path::Path) {
@@ -1409,6 +1558,13 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .setup(|app| {
             let handle = app.handle();
+            if let Err(err) = crate::init_file_logging(&handle) {
+                tracing::warn!(
+                    target = "arklowdun",
+                    event = "file_logging_disabled",
+                    error = %err
+                );
+            }
             #[allow(clippy::needless_borrow)]
             let pool = tauri::async_runtime::block_on(crate::db::open_sqlite_pool(&handle))?;
             tauri::async_runtime::block_on(crate::db::apply_migrations(&pool))?;
