@@ -406,22 +406,22 @@ async fn bills_list_due_between(
     "#;
 
     let mut sql = base_sql.to_string();
-    let has_limit = limit.unwrap_or(0) > 0;
-    let has_offset = offset.unwrap_or(0) > 0;
-    if has_limit {
+    let limit_value = limit.filter(|value| *value > 0);
+    let offset_value = offset.filter(|value| *value > 0);
+    if limit_value.is_some() {
         sql.push_str(" LIMIT ?4");
     }
-    if has_offset {
+    if offset_value.is_some() {
         sql.push_str(" OFFSET ?5");
     }
 
     let mut q = query(&sql).bind(&household_id).bind(from_ms).bind(to_ms);
 
-    if has_limit {
-        q = q.bind(limit.unwrap());
+    if let Some(value) = limit_value {
+        q = q.bind(value);
     }
-    if has_offset {
-        q = q.bind(offset.unwrap());
+    if let Some(value) = offset_value {
+        q = q.bind(value);
     }
 
     let rows = q.fetch_all(&state.pool).await.map_err(|err| {
@@ -445,8 +445,17 @@ async fn get_default_household_id(state: tauri::State<'_, state::AppState>) -> A
 }
 
 #[tauri::command]
-fn set_default_household_id(state: tauri::State<state::AppState>, id: String) {
-    *state.default_household_id.lock().unwrap() = id;
+fn set_default_household_id(state: tauri::State<state::AppState>, id: String) -> AppResult<()> {
+    let requested_id = id.clone();
+    let mut guard = state.default_household_id.lock().map_err(|_| {
+        AppError::new(
+            "STATE/LOCK_POISONED",
+            "Failed to update default household id",
+        )
+        .with_context("requested_id", requested_id)
+    })?;
+    *guard = id;
+    Ok(())
 }
 
 #[derive(Deserialize)]
