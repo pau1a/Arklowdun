@@ -15,8 +15,9 @@ fn file_sink_writes_json_lines() {
 
     arklowdun_lib::init_file_logging(&handle).expect("file logging to initialize");
 
-    let base = handle.path().app_data_dir().expect("app data dir");
-    let logs_dir = base.join("logs");
+    // resolve_logs_dir() uses ARK_FAKE_APPDATA in the library, so mirror that here
+    let fake = std::env::var("ARK_FAKE_APPDATA").expect("ARK_FAKE_APPDATA set");
+    let logs_dir = std::path::PathBuf::from(fake).join("logs");
 
     assert!(logs_dir.is_dir(), "logs dir missing: {:?}", logs_dir);
 
