@@ -7,7 +7,7 @@ use futures::FutureExt;
 use crate::{AppError, AppResult};
 
 fn app_error_from_panic(payload: Box<dyn Any + Send>) -> AppError {
-    let message = panic_payload(&payload);
+    let message = panic_payload(payload.as_ref());
     tracing::error!(
         target = "arklowdun",
         event = "panic_caught",
