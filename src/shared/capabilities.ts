@@ -1,4 +1,4 @@
-import { call } from "../db/call";
+import { call } from "../api/call";
 import { defaultHouseholdId } from "../db/household";
 import { log } from "../utils/logger";
 

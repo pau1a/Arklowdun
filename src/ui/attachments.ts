@@ -1,4 +1,4 @@
-import { call } from "../db/call";
+import { call } from "../api/call";
 import { canonicalizeAndVerify, rejectSymlinks, PathError, RootKey } from "../files/path";
 import { presentFsError } from "../lib/ipc";
 

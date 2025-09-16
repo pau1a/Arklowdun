@@ -112,7 +112,7 @@ The generated binding exposes the JSON shape for the UI:
 ```ts
 import { invoke } from "@tauri-apps/api/core";
 import type { AppError } from "../bindings/AppError";
-import { normalizeError } from "../db/call";
+import { normalizeError } from "../api/call";
 
 export async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   try {

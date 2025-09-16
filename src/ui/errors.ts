@@ -1,5 +1,5 @@
 import type { AppError } from "../bindings/AppError";
-import { normalizeError } from "../db/call";
+import { normalizeError } from "../api/call";
 import { log } from "../utils/logger";
 
 export function showError(err: unknown) {
