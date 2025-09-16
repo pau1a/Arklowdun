@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail};
 use include_dir::{include_dir, Dir};
-use once_cell::sync::Lazy;
+use once_cell::sync::OnceCell;
 use regex::Regex;
 use sqlx::sqlite::SqliteConnection;
 use sqlx::{Executor, Row, SqlitePool};
@@ -12,6 +12,37 @@ use tracing::{debug, error, info, warn};
 // The `log` crate macros are used via fully-qualified paths for persistence.
 
 static MIGRATIONS_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../migrations");
+
+fn add_column_regex() -> anyhow::Result<&'static Regex> {
+    static ADD_RE: OnceCell<Regex> = OnceCell::new();
+    ADD_RE
+        .get_or_try_init(|| {
+            Regex::new(r"(?i)^\s*ALTER\s+TABLE\s+([^\s]+)\s+ADD\s+COLUMN\s+([^\s(]+)")
+        })
+        .map_err(|err| anyhow!("invalid add column regex: {err}"))
+}
+
+fn rename_column_regex() -> anyhow::Result<&'static Regex> {
+    static RENAME_RE: OnceCell<Regex> = OnceCell::new();
+    RENAME_RE
+        .get_or_try_init(|| {
+            Regex::new(
+                r"(?i)^\s*ALTER\s+TABLE\s+([^\s]+)\s+RENAME\s+COLUMN\s+([^\s]+)\s+TO\s+([^\s]+)",
+            )
+        })
+        .map_err(|err| anyhow!("invalid rename column regex: {err}"))
+}
+
+fn create_index_regex() -> anyhow::Result<&'static Regex> {
+    static CREATE_INDEX_RE: OnceCell<Regex> = OnceCell::new();
+    CREATE_INDEX_RE
+        .get_or_try_init(|| {
+            Regex::new(
+                r"(?i)^\s*CREATE\s+(?:UNIQUE\s+)?INDEX(?:\s+IF\s+NOT\s+EXISTS)?\s+[^\s]+\s+ON\s+([^\s(]+)",
+            )
+        })
+        .map_err(|err| anyhow!("invalid create index regex: {err}"))
+}
 
 fn preview(sql: &str) -> String {
     let one_line = sql.replace(['\n', '\t'], " ");
@@ -139,34 +170,48 @@ async fn column_exists(
 }
 
 async fn should_skip_stmt(conn: &mut SqliteConnection, stmt: &str) -> anyhow::Result<bool> {
-    static ADD_RE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"(?i)^\s*ALTER\s+TABLE\s+([^\s]+)\s+ADD\s+COLUMN\s+([^\s(]+)").unwrap()
-    });
-    if let Some(c) = ADD_RE.captures(stmt) {
-        let table = c.get(1).unwrap().as_str().trim_matches('"');
-        let col = c.get(2).unwrap().as_str().trim_matches('"');
-        return column_exists(conn, table, col).await;
+    if let Some(caps) = add_column_regex()?.captures(stmt) {
+        let table = caps
+            .get(1)
+            .ok_or_else(|| anyhow!("missing table capture in ADD COLUMN statement"))?
+            .as_str()
+            .trim_matches('"')
+            .to_string();
+        let col = caps
+            .get(2)
+            .ok_or_else(|| anyhow!("missing column capture in ADD COLUMN statement"))?
+            .as_str()
+            .trim_matches('"')
+            .to_string();
+        return column_exists(conn, &table, &col).await;
     }
 
-    static RENAME_RE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"(?i)^\s*ALTER\s+TABLE\s+([^\s]+)\s+RENAME\s+COLUMN\s+([^\s]+)\s+TO\s+([^\s]+)")
-            .unwrap()
-    });
-    if let Some(c) = RENAME_RE.captures(stmt) {
-        let table = c.get(1).unwrap().as_str().trim_matches('"');
-        let from = c.get(2).unwrap().as_str().trim_matches('"');
-        return Ok(!column_exists(conn, table, from).await?);
+    if let Some(caps) = rename_column_regex()?.captures(stmt) {
+        let table = caps
+            .get(1)
+            .ok_or_else(|| anyhow!("missing table capture in RENAME COLUMN statement"))?
+            .as_str()
+            .trim_matches('"')
+            .to_string();
+        let from = caps
+            .get(2)
+            .ok_or_else(|| anyhow!("missing source column capture in RENAME COLUMN statement"))?
+            .as_str()
+            .trim_matches('"')
+            .to_string();
+        return Ok(!column_exists(conn, &table, &from).await?);
     }
 
-    static CREATE_INDEX_RE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"(?i)^\s*CREATE\s+(?:UNIQUE\s+)?INDEX(?:\s+IF\s+NOT\s+EXISTS)?\s+[^\s]+\s+ON\s+([^\s(]+)")
-            .unwrap()
-    });
-    if let Some(c) = CREATE_INDEX_RE.captures(stmt) {
-        let table = c.get(1).unwrap().as_str().trim_matches('"');
+    if let Some(caps) = create_index_regex()?.captures(stmt) {
+        let table = caps
+            .get(1)
+            .ok_or_else(|| anyhow!("missing table capture in CREATE INDEX statement"))?
+            .as_str()
+            .trim_matches('"')
+            .to_string();
         let exists: Option<i64> =
             sqlx::query_scalar("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?")
-                .bind(table)
+                .bind(&table)
                 .fetch_optional(&mut *conn)
                 .await?;
         if exists.is_none() {
