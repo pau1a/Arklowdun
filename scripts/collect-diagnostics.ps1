@@ -261,8 +261,8 @@ function Get-RedactedText {
     $patterns = @(
         @{ Pattern = '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'; Replacement = '<redacted:email>' },
         @{ Pattern = '\b(?:\d{1,3}\.){3}\d{1,3}\b'; Replacement = '<redacted:ip>' },
-        @{ Pattern = '\b(?:[A-Fa-f0-9]{1,4}:){2,7}[A-Fa-f0-9]{1,4}\b'; Replacement = '<redacted:ip>' },
-        @{ Pattern = '\b[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}\b'; Replacement = '<redacted:mac>' }
+        @{ Pattern = '\b[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}\b'; Replacement = '<redacted:mac>' },
+        @{ Pattern = '\b(?:[A-Fa-f0-9]{1,4}:){2,7}[A-Fa-f0-9]{1,4}\b'; Replacement = '<redacted:ip>' }
     )
     foreach ($rule in $patterns) {
         $text = [regex]::Replace($text, $rule.Pattern, $rule.Replacement)

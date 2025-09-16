@@ -235,8 +235,8 @@ text = replace_home(text)
 patterns = [
     (re.compile(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'), '<redacted:email>'),
     (re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b'), '<redacted:ip>'),
-    (re.compile(r'\b(?:[A-Fa-f0-9]{1,4}:){2,7}[A-Fa-f0-9]{1,4}\b'), '<redacted:ip>'),
     (re.compile(r'\b[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}\b'), '<redacted:mac>'),
+    (re.compile(r'\b(?:[A-Fa-f0-9]{1,4}:){2,7}[A-Fa-f0-9]{1,4}\b'), '<redacted:ip>'),
 ]
 for pattern, repl in patterns:
     text = pattern.sub(repl, text)

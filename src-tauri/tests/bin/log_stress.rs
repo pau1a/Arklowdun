@@ -2,22 +2,8 @@
 
 use std::io::Write as _;
 use std::{thread::sleep, time::Duration};
-use tauri::Manager;
-
-fn main() {
-    arklowdun_lib::init_logging();
-
-    let app = tauri::test::mock_app();
-    let handle = app.app_handle();
-
-    if let Err(err) = arklowdun_lib::init_file_logging(&handle) {
-        tracing::warn!(
-            target: "arklowdun",
-            event = "file_logging_disabled",
-            error = %err
-        );
-        std::process::exit(1);
-    }
+fn main() -> anyhow::Result<()> {
+    arklowdun_lib::logging::init()?;
 
     let run_id = std::env::var("ARK_STRESS_RUN_ID").unwrap_or_else(|_| "stress".to_string());
     let lines = std::env::var("ARK_STRESS_LINES")
@@ -83,4 +69,5 @@ fn main() {
             let _ = f.flush();
         }
     }
+    Ok(())
 }
