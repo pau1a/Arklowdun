@@ -1264,7 +1264,14 @@ pub fn run() {
             db_has_pet_columns
         ])
         .run(tauri::generate_context!("tauri.conf.json5"))
-        .expect("error while running tauri application");
+        .unwrap_or_else(|e| {
+            tracing::error!(
+                target = "arklowdun",
+                event = "tauri_run_failed",
+                error = %e
+            );
+            std::process::exit(1);
+        });
 }
 
 #[cfg(all(test, feature = "legacy_deleted_at"))]
