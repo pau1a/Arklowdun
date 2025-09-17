@@ -22,6 +22,8 @@ See the [Arklowdun Master Plan](docs/master-plan.md) for the high-level strategi
 
 Recommended IDE: VS Code with Tauri and rust-analyzer extensions.
 
+> Build note: the Tauri build script runs `git rev-parse HEAD` to embed the current commit hash. When building from a source archive without the `.git` directory, the About pane and diagnostics summary will display `unknown`.
+
 ## Logging & Verbosity
 
 - Backend (Rust):
@@ -73,7 +75,7 @@ Override the diagnostics size cap with `ARK_MAX_FILE_MB=10` (default 10).
   archive.
 - The scripts gather logs, config metadata, crash reports and optional database
   hashes into `diagnostics-<timestamp>-<hash>.zip`.
-- Redaction rules, platform paths and CLI usage are documented in
+- The full diagnostics guide (UI summary, CLI collectors, redaction policy, and sample bundles) lives in
   [docs/diagnostics.md](docs/diagnostics.md).
 
 ## Database integrity
