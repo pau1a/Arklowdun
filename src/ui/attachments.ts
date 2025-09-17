@@ -1,6 +1,6 @@
 import { call } from "../api/call";
 import { canonicalizeAndVerify, rejectSymlinks, PathError, RootKey } from "../files/path";
-import { presentFsError } from "../lib/ipc";
+import { presentFsError } from "@lib/ipc";
 
 const isMac = navigator.platform.includes("Mac");
 const isWin = navigator.platform.includes("Win");

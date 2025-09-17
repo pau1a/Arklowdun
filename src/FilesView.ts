@@ -9,8 +9,8 @@ import {
 } from "./files/safe-fs";
 import { canonicalizeAndVerify, rejectSymlinks } from "./files/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { STR } from "./ui/strings";
-import { showError } from "./ui/errors";
+import { STR } from "@ui/strings";
+import { showError } from "@ui/errors";
 
 const ROOT: RootKey = "attachments";
 
@@ -41,7 +41,7 @@ async function listDirectory(
       const row = document.createElement("tr");
       const cell = document.createElement("td");
       cell.colSpan = 5;
-      const { createEmptyState } = await import("./ui/emptyState");
+      const { createEmptyState } = await import("@ui/emptyState");
       cell.appendChild(
         createEmptyState({
           title: STR.empty.filesTitle,

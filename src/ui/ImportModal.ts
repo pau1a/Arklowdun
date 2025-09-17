@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { call } from "../api/call";
 import { defaultHouseholdId } from "../db/household";
 import { showError } from "./errors";
-import { presentFsError } from "../lib/ipc";
+import { presentFsError } from "@lib/ipc";
 
 export function ImportModal(el: HTMLElement) {
   el.innerHTML = `

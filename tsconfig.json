@@ -10,6 +10,14 @@
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@features/*": ["src/features/*"],
+      "@ui/*": ["src/ui/*"],
+      "@layout/*": ["src/layout/*"],
+      "@lib/*": ["src/lib/*"],
+      "@store/*": ["src/store/*"]
+    },
     "isolatedModules": true,
     "noEmit": true,
 

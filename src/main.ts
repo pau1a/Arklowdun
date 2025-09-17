@@ -19,11 +19,11 @@ import { BudgetView } from "./BudgetView";
 import { NotesView } from "./NotesView";
 import { DashboardView } from "./DashboardView";
 import { ManageView } from "./ManageView";
-import { ImportModal } from "./ui/ImportModal";
+import { ImportModal } from "@ui/ImportModal";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { defaultHouseholdId } from "./db/household";
 import { log } from "./utils/logger";
-import { initCommandPalette } from "./ui/CommandPalette";
+import { initCommandPalette } from "@ui/CommandPalette";
 const appWindow = getCurrentWindow();
 
 type View =
