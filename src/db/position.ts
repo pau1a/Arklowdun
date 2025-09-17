@@ -1,4 +1,4 @@
-import type Database from "@tauri-apps/plugin-sql";
+import type { SqlDatabase } from "@lib/ipc/sql";
 import { openDb } from "./open";
 import { nowMs } from "./time";
 import { requireHousehold } from "./household";
@@ -6,7 +6,7 @@ import { requireHousehold } from "./household";
 export async function renumberPositions(
   table: string,
   householdId: string,
-  db?: Database,
+  db?: SqlDatabase,
 ): Promise<void> {
   const hh = requireHousehold(householdId);
   const conn = db ?? (await openDb());

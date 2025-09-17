@@ -1,5 +1,5 @@
 // src/PropertyView.ts
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog } from "@lib/ipc/dialog";
 import { sanitizeRelativePath } from "./files/path";
 import { isPermissionGranted, requestPermission, sendNotification } from "./notification";
 import type { PropertyDocument } from "./models";

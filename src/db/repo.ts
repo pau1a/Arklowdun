@@ -50,7 +50,7 @@ export interface ListOptions {
   offset?: number;
 }
 
-import type Database from "@tauri-apps/plugin-sql";
+import type { SqlDatabase } from "@lib/ipc/sql";
 import { openDb } from "./open";
 import { requireHousehold } from "./household";
 
@@ -61,7 +61,7 @@ export async function listActive<T = any>(
 ): Promise<T[]> {
   ensureTable(table);
   const hh = requireHousehold(householdId);
-  const db: Database = await openDb();
+  const db: SqlDatabase = await openDb();
   const order =
     opts.orderBy && ALLOWED_ORDERS.has(opts.orderBy)
       ? opts.orderBy

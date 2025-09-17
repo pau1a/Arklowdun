@@ -6,6 +6,7 @@ const resolveAlias = {
   "@ui": fileURLToPath(new URL("./src/ui", import.meta.url)),
   "@layout": fileURLToPath(new URL("./src/layout", import.meta.url)),
   "@lib": fileURLToPath(new URL("./src/lib", import.meta.url)),
+  "@bindings": fileURLToPath(new URL("./src/bindings", import.meta.url)),
   "@store": fileURLToPath(new URL("./src/store", import.meta.url)),
 };
 

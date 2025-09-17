@@ -17,8 +17,9 @@
     "check:models": "npm run gen:models && git diff --exit-code -- src/bindings",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "guard:invoke": "bash scripts/guards/no-direct-invoke.sh",
+    "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
     "lint:structure": "node scripts/guards/structure-lint.mjs",
-    "check": "npm run typecheck && echo TS OK && npm run lint:structure",
+    "check": "npm run typecheck && echo TS OK && npm run lint && npm run guard:invoke && npm run lint:structure",
     "dev:seed": "VITE_ENV=development node --loader ts-node/esm scripts/dev/seed.ts",
     "dev:profile": "VITE_ENV=development node --loader ts-node/esm scripts/dev/seed.ts --profile",
     "test:coverage": "vitest run --coverage",
@@ -59,6 +60,12 @@
     "ts-node": "^10.9.2",
     "typescript": "~5.6.2",
     "vite": "^6.0.3",
-    "vitest": "^1.6.0"
+    "vitest": "^1.6.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^8.57.1",
+    "eslint-plugin-import": "^2.31.0",
+    "eslint-plugin-jsx-a11y": "^6.10.0",
+    "eslint-plugin-security": "^2.1.1",
+    "eslint-plugin-unused-imports": "^4.2.0"
   }
 }

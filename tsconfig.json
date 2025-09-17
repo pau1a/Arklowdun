@@ -16,6 +16,7 @@
       "@ui/*": ["src/ui/*"],
       "@layout/*": ["src/layout/*"],
       "@lib/*": ["src/lib/*"],
+      "@bindings/*": ["src/bindings/*"],
       "@store/*": ["src/store/*"]
     },
     "isolatedModules": true,

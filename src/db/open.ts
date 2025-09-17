@@ -1,14 +1,14 @@
-import Database from "@tauri-apps/plugin-sql";
+import { loadDatabase, type SqlDatabase } from "@lib/ipc/sql";
 
 // Open once (singleton)
-let dbPromise: Promise<Database> | null = null;
+let dbPromise: Promise<SqlDatabase> | null = null;
 
-export function openDb(): Promise<Database> {
+export function openDb(): Promise<SqlDatabase> {
   if (!dbPromise) {
     dbPromise = (async () => {
       // This path is relative to the app’s data dir, e.g.
       // ~/Library/Application Support/com.paula.arklowdun/arklowdun.sqlite3
-      const db = await Database.load("sqlite:arklowdun.sqlite3");
+      const db = await loadDatabase("sqlite:arklowdun.sqlite3");
 
       // Apply durability-focused PRAGMAs on this connection as well
       await db.execute("PRAGMA journal_mode=WAL;");
