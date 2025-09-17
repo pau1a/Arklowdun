@@ -31,3 +31,6 @@ sample.json
 arklowdun@0.1.0
 tauri
 *.sqlite-*
+src-tauri/resources/docs/diagnostics.md
+
+docs/samples/*.zip

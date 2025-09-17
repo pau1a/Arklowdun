@@ -27,7 +27,7 @@ const FILES_INDEX_VERSION: i64 = 1;
 const DEFAULT_LOG_MAX_SIZE_BYTES: u64 = 5_000_000;
 const DEFAULT_LOG_MAX_FILES: usize = 5;
 const LOG_DIR_NAME: &str = "logs";
-const LOG_FILE_NAME: &str = "arklowdun.log";
+pub(crate) const LOG_FILE_NAME: &str = "arklowdun.log";
 
 static FILE_LOG_WRITER: OnceCell<NonBlocking> = OnceCell::new();
 static FILE_LOG_GUARD: OnceCell<WorkerGuard> = OnceCell::new();
@@ -94,6 +94,7 @@ impl<'a> MakeWriter<'a> for RotatingFileWriter {
 mod attachments;
 pub mod commands;
 pub mod db;
+mod diagnostics;
 pub mod error;
 mod events_tz_backfill;
 mod household; // declare module; avoid `use` to prevent name collision
@@ -235,6 +236,10 @@ pub fn init_logging() {
     crate::error::install_panic_hook();
 }
 
+pub(crate) fn git_commit_hash() -> &'static str {
+    option_env!("ARK_GIT_HASH").unwrap_or("unknown")
+}
+
 #[derive(Debug, Error)]
 pub enum FileLoggingError {
     #[error("app data directory unavailable")]
@@ -365,7 +370,7 @@ pub fn init_file_logging_standalone(bundle_id: &str) -> Result<PathBuf, FileLogg
     Ok(log_path)
 }
 
-fn resolve_logs_dir<R: tauri::Runtime>(
+pub(crate) fn resolve_logs_dir<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> Result<PathBuf, FileLoggingError> {
     if let Ok(fake) = std::env::var("ARK_FAKE_APPDATA") {
@@ -1641,6 +1646,48 @@ async fn open_path(app: tauri::AppHandle, path: String) -> AppResult<()> {
     .await
 }
 
+#[tauri::command]
+async fn diagnostics_summary(app: tauri::AppHandle) -> AppResult<diagnostics::Summary> {
+    let app = app.clone();
+    dispatch_async_app_result(move || {
+        let app = app;
+        async move {
+            crate::flush_file_logs();
+            diagnostics::gather_summary(&app)
+        }
+    })
+    .await
+}
+
+#[tauri::command]
+fn about_metadata(app: tauri::AppHandle) -> AppResult<diagnostics::AboutInfo> {
+    Ok(diagnostics::about_info(&app))
+}
+
+#[tauri::command]
+async fn diagnostics_doc_path(app: tauri::AppHandle) -> AppResult<String> {
+    let app = app.clone();
+    dispatch_async_app_result(move || {
+        let app = app;
+        async move { diagnostics::resolve_doc_path(&app) }
+    })
+    .await
+}
+
+#[tauri::command]
+async fn open_diagnostics_doc(app: tauri::AppHandle) -> AppResult<()> {
+    let app = app.clone();
+    dispatch_async_app_result(move || {
+        let app = app;
+        async move {
+            let p = crate::diagnostics::resolve_doc_path(&app)?;
+            let pb = std::path::PathBuf::from(p);
+            crate::attachments::open_with_os(&pb)
+        }
+    })
+    .await
+}
+
 #[macro_export]
 macro_rules! app_commands {
     ($($extra:ident),* $(,)?) => {
@@ -1739,6 +1786,10 @@ macro_rules! app_commands {
             shopping_items_restore,
             attachment_open,
             attachment_reveal,
+            diagnostics_summary,
+            diagnostics_doc_path,
+            open_diagnostics_doc,
+            about_metadata,
             $($extra),*
         ]
     };
@@ -1751,6 +1802,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let handle = app.handle();
             if let Err(err) = crate::init_file_logging(&handle) {

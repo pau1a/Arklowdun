@@ -1,0 +1,16 @@
+{
+  "identifier": "open-diagnostics-doc",
+  "description": "Allow opening the bundled diagnostics guide",
+  "windows": ["main"],
+  "permissions": [
+    "opener:default",
+    {
+      "identifier": "opener:allow-open-path",
+      "paths": [
+        "$RESOURCE/**",
+        "$CWD/src-tauri/target/**",
+        "$CWD/target/**"
+      ]
+    }
+  ]
+}
