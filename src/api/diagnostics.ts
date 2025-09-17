@@ -30,3 +30,7 @@ export function fetchAboutMetadata(): Promise<AboutMetadata> {
 export function resolveDiagnosticsDocPath(): Promise<string> {
   return call<string>("diagnostics_doc_path");
 }
+
+export function openDiagnosticsDoc(): Promise<void> {
+  return call<void>("open_diagnostics_doc");
+}

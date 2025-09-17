@@ -1,0 +1,6 @@
+{
+  "identifier": "clipboard",
+  "description": "Allow copying diagnostics to the system clipboard",
+  "windows": ["main"],
+  "permissions": ["clipboard-manager:allow-write-text"]
+}

@@ -1,6 +1,5 @@
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { openPath } from "@tauri-apps/plugin-opener";
-import { fetchAboutMetadata, fetchDiagnosticsSummary, resolveDiagnosticsDocPath } from "./api/diagnostics";
+import { fetchAboutMetadata, fetchDiagnosticsSummary, openDiagnosticsDoc } from "./api/diagnostics";
 import { createEmptyState } from "./ui/emptyState";
 import { STR } from "./ui/strings";
 
@@ -52,7 +51,7 @@ export function SettingsView(container: HTMLElement) {
           <button type="button" class="settings__button" data-copy-diagnostics>
             Copy diagnostics summary
           </button>
-          <a href="#" class="settings__link" data-open-diagnostics-doc>Help → Diagnostics guide</a>
+          <button type="button" class="settings__link" data-open-diagnostics-doc>Help → Diagnostics guide</button>
         </div>
         <div class="settings__status" data-settings-status role="status" aria-live="polite"></div>
         <pre class="settings__preview" data-diagnostics-preview hidden aria-label="Latest copied diagnostics summary"></pre>
@@ -151,7 +150,7 @@ async function setupAboutAndDiagnostics(root: HTMLElement) {
   const statusEl = container.querySelector<HTMLElement>("[data-settings-status]");
   const previewEl = container.querySelector<HTMLPreElement>("[data-diagnostics-preview]");
   const copyButton = container.querySelector<HTMLButtonElement>("[data-copy-diagnostics]");
-  const helpLink = container.querySelector<HTMLAnchorElement>("[data-open-diagnostics-doc]");
+  const helpLink = container.querySelector<HTMLElement>("[data-open-diagnostics-doc]");
 
   try {
     const meta = await fetchAboutMetadata();
@@ -191,12 +190,10 @@ async function setupAboutAndDiagnostics(root: HTMLElement) {
     if (!statusEl) return;
     statusEl.textContent = "Opening diagnostics guide…";
     try {
-      const path = await resolveDiagnosticsDocPath();
-      await openPath(path);
+      await openDiagnosticsDoc();
       statusEl.textContent = "Diagnostics guide opened in your default viewer.";
     } catch (error) {
       statusEl.textContent = `Failed to open diagnostics guide: ${describeError(error)}`;
     }
   });
 }
-

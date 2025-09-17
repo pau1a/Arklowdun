@@ -3,12 +3,14 @@
   "productName": "Arklowdun",
   "version": "0.1.0",
   "identifier": "com.paula.arklowdun",
+
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
+
   "app": {
     "withGlobalTauri": true,
     "windows": [
@@ -25,10 +27,13 @@
       "capabilities": [
         "default",
         "window-management",
-        "sql"
+        "sql",
+        "clipboard",
+        "open-diagnostics-doc"
       ]
     }
   },
+
   "bundle": {
     "active": true,
     "targets": "all",
@@ -43,6 +48,7 @@
       "resources/docs/diagnostics.md"
     ]
   },
+
   "plugins": {
     "@tauri-apps/plugin-fs": {
       "scope": [
@@ -51,6 +57,16 @@
         // Attachments staging area under app data. Prevents random user FS traversal.
         "$APPDATA/attachments/**"
         // NOTE: User-library roots are intentionally not listed here; see docs/security/fs-allowlist.md.
+      ]
+    },
+
+    // Needed so "Help → Diagnostics guide" can open from both release bundle ($RESOURCE)
+    // and dev build output (target/debug/resources/...).
+    "@tauri-apps/plugin-opener": {
+      "scope": [
+        "$RESOURCE/**",              // release bundles
+        "$CWD/src-tauri/target/**",  // dev: when CWD is project root
+        "$CWD/target/**"             // dev: when CWD is src-tauri
       ]
     }
   }

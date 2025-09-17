@@ -1674,6 +1674,20 @@ async fn diagnostics_doc_path(app: tauri::AppHandle) -> AppResult<String> {
     .await
 }
 
+#[tauri::command]
+async fn open_diagnostics_doc(app: tauri::AppHandle) -> AppResult<()> {
+    let app = app.clone();
+    dispatch_async_app_result(move || {
+        let app = app;
+        async move {
+            let p = crate::diagnostics::resolve_doc_path(&app)?;
+            let pb = std::path::PathBuf::from(p);
+            crate::attachments::open_with_os(&pb)
+        }
+    })
+    .await
+}
+
 #[macro_export]
 macro_rules! app_commands {
     ($($extra:ident),* $(,)?) => {
@@ -1774,6 +1788,7 @@ macro_rules! app_commands {
             attachment_reveal,
             diagnostics_summary,
             diagnostics_doc_path,
+            open_diagnostics_doc,
             about_metadata,
             $($extra),*
         ]
