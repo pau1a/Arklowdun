@@ -20,7 +20,7 @@ async function renderInventory(listEl: HTMLUListElement, items: InventoryItem[])
   listEl.innerHTML = "";
   if (items.length === 0) {
     const li = document.createElement("li");
-    const { createEmptyState } = await import("./ui/emptyState");
+    const { createEmptyState } = await import("./ui/EmptyState");
     li.appendChild(
       createEmptyState({
         title: STR.empty.inventoryTitle,

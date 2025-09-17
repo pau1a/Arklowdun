@@ -1,4 +1,4 @@
-import { open } from "@lib/ipc/dialog";
+import { open } from '@lib/ipc/dialog';
 import {
   readDir,
   writeText,
@@ -6,141 +6,63 @@ import {
   mkdir,
   toUserMessage,
   type RootKey,
-} from "./files/safe-fs";
-import { canonicalizeAndVerify, rejectSymlinks } from "./files/path";
-import { convertFileSrc } from "@lib/ipc/core";
-import { STR } from "@ui/strings";
-import { showError } from "@ui/errors";
-import { actions, selectors, subscribe, getState, type FileSnapshot } from "./store";
-import { emit, on } from "./store/events";
-import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
+} from './files/safe-fs';
+import { canonicalizeAndVerify, rejectSymlinks } from './files/path';
+import { convertFileSrc } from '@lib/ipc/core';
+import { STR } from '@ui/strings';
+import { showError } from '@ui/errors';
+import {
+  actions,
+  selectors,
+  subscribe,
+  getState,
+  type FileSnapshot,
+} from './store';
+import { emit, on } from './store/events';
+import { runViewCleanups, registerViewCleanup } from './utils/viewLifecycle';
+import createFilesList, {
+  type FilesListItem,
+  type FilesListRowAction,
+} from '@features/files/components/FilesList';
+import createFilesToolbar from '@features/files/components/FilesToolbar';
+import createButton from '@ui/Button';
 
-const ROOT: RootKey = "attachments";
+const ROOT: RootKey = 'attachments';
 
-function renderBreadcrumb(path: string, el: HTMLElement) {
-  el.innerHTML = "";
-  const parts = path.split(/[/\\]/).filter(Boolean);
-  for (let i = 0; i < parts.length; i++) {
-    const span = document.createElement("span");
-    span.textContent = parts[i];
-    span.className = "breadcrumb__segment" + (i === parts.length - 1 ? " current" : "");
-    span.tabIndex = 0;
-    el.appendChild(span);
-  }
-}
+function renderBreadcrumb(
+  path: string,
+  container: HTMLElement,
+  onNavigate: (nextPath: string) => void,
+): void {
+  container.innerHTML = '';
+  container.setAttribute('aria-label', 'Current path');
+  const segments = path.split(/[/\\]/).filter(Boolean);
+  if (segments.length === 0) return;
 
-let renderToken = 0;
-
-async function renderFromSnapshot(
-  snapshot: FileSnapshot | null,
-  listEl: HTMLTableSectionElement,
-  previewEl: HTMLElement,
-  pathEl: HTMLElement,
-  setDir: (dir: string | null) => void,
-): Promise<void> {
-  const token = ++renderToken;
-  if (!snapshot) {
-    setDir(null);
-    pathEl.innerHTML = "";
-    listEl.innerHTML = "";
-    return;
-  }
-  setDir(snapshot.path);
-  renderBreadcrumb(snapshot.path, pathEl);
-  listEl.innerHTML = "";
-  if (snapshot.items.length === 0) {
-    const row = document.createElement("tr");
-    const cell = document.createElement("td");
-    cell.colSpan = 5;
-    const { createEmptyState } = await import("@ui/emptyState");
-    if (token !== renderToken) return;
-    cell.appendChild(
-      createEmptyState({
-        title: STR.empty.filesTitle,
-        actionLabel: "New file",
-        onAction: () => setDir(snapshot.path),
-      }),
-    );
-    row.appendChild(cell);
-    listEl.appendChild(row);
-    return;
-  }
-
-  for (const entry of snapshot.items) {
-    if (token !== renderToken) return;
-    const relPath = snapshot.path === "." ? entry.name : `${snapshot.path}/${entry.name}`;
-    const row = document.createElement("tr");
-    row.tabIndex = 0;
-
-    const nameTd = document.createElement("td");
-    const icon = document.createElement("span");
-    icon.textContent = entry.isDirectory ? "📁" : "📄";
-    icon.className = "files__icon";
-    const nameSpan = document.createElement("span");
-    nameSpan.textContent = entry.name;
-    nameSpan.className = "files__name";
-    nameSpan.title = entry.name;
-    nameTd.append(icon, nameSpan);
-
-    const typeTd = document.createElement("td");
-    typeTd.textContent = entry.isDirectory ? "Folder" : "File";
-
-    const sizeTd = document.createElement("td");
-    const modTd = document.createElement("td");
-
-    const actionsTd = document.createElement("td");
-    actionsTd.className = "files__actions-cell";
-    const del = document.createElement("button");
-    del.textContent = "Delete";
-    del.className = "files__action";
-    del.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      try {
-        await remove(relPath, ROOT, { recursive: entry.isDirectory === true });
-        await refreshDirectory(snapshot.path, "delete");
-      } catch (err) {
-        showError({ code: "INFO", message: toUserMessage(err) });
-      }
-    });
-    actionsTd.appendChild(del);
-
-    row.addEventListener("click", async () => {
-      if (entry.isDirectory) {
-        await refreshDirectory(relPath, "open-directory");
-        return;
-      }
-      previewEl.innerHTML = "";
-      const ext = entry.name.split(".").pop()?.toLowerCase();
-      try {
-        const { realPath } = await canonicalizeAndVerify(relPath, ROOT);
-        await rejectSymlinks(realPath, ROOT);
-        const url = convertFileSrc(realPath);
-        if (
-          ext &&
-          ["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg"].includes(ext)
-        ) {
-          const img = document.createElement("img");
-          img.src = url;
-          img.style.maxWidth = "100%";
-          previewEl.appendChild(img);
-        } else if (ext === "pdf") {
-          const embed = document.createElement("embed");
-          embed.src = url;
-          embed.type = "application/pdf";
-          embed.style.width = "100%";
-          embed.style.height = "600px";
-          previewEl.appendChild(embed);
-        } else {
-          previewEl.textContent = "No preview available";
-        }
-      } catch (e) {
-        showError({ code: "INFO", message: toUserMessage(e) });
-      }
-    });
-
-    row.append(nameTd, typeTd, sizeTd, modTd, actionsTd);
-    listEl.appendChild(row);
-  }
+  let accumulated = '';
+  segments.forEach((segment, index) => {
+    accumulated = index === 0 ? segment : `${accumulated}/${segment}`;
+    const span = document.createElement('span');
+    span.className = 'breadcrumb__segment';
+    if (index === segments.length - 1) {
+      span.classList.add('current');
+      span.textContent = segment;
+      span.setAttribute('aria-current', 'page');
+    } else {
+      const button = createButton({
+        label: segment,
+        variant: 'ghost',
+        size: 'sm',
+        className: 'breadcrumb__button',
+        onClick: (event) => {
+          event.preventDefault();
+          onNavigate(accumulated);
+        },
+      });
+      span.appendChild(button);
+    }
+    container.appendChild(span);
+  });
 }
 
 async function refreshDirectory(dir: string, source: string): Promise<void> {
@@ -153,138 +75,192 @@ async function refreshDirectory(dir: string, source: string): Promise<void> {
       path: dir,
       source,
     });
-    emit("files:updated", payload);
+    emit('files:updated', payload);
   } catch (e) {
-    showError({ code: "INFO", message: toUserMessage(e) });
+    showError({ code: 'INFO', message: toUserMessage(e) });
   }
 }
 
 export async function FilesView(container: HTMLElement) {
   runViewCleanups(container);
 
-  const section = document.createElement("section");
-  section.className = "files";
-  section.innerHTML = `
-    <header class="files__header">
-      <div>
-        <h2>Files</h2>
-        <nav id="current-path" class="breadcrumb"></nav>
-      </div>
-      <div class="files__actions">
-        <button id="select-dir" class="btn">Select Directory</button>
-        <button class="btn">New Folder</button>
-        <button class="btn">New File</button>
-      </div>
-    </header>
-    <div class="card files__panel">
-      <table class="files__table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Type</th>
-            <th>Size</th>
-            <th>Modified</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="file-list"></tbody>
-      </table>
-    </div>
-    <form id="new-file-form" style="display:none">
-      <input id="new-file-name" type="text" placeholder="New file name" required />
-      <button type="submit">Create File</button>
-    </form>
-    <form id="new-folder-form" style="display:none">
-      <input id="new-folder-name" type="text" placeholder="New folder name" required />
-      <button type="submit">Create Folder</button>
-    </form>
-    <div id="preview"></div>
-  `;
-  container.innerHTML = "";
-  container.appendChild(section);
+  const section = document.createElement('section');
+  section.className = 'files';
 
-  const selectBtn = section.querySelector<HTMLButtonElement>("#select-dir");
-  const listEl = section.querySelector<HTMLTableSectionElement>("#file-list");
-  const previewEl = section.querySelector<HTMLElement>("#preview");
-  const pathEl = section.querySelector<HTMLElement>("#current-path");
-  const fileForm = section.querySelector<HTMLFormElement>("#new-file-form");
-  const folderForm = section.querySelector<HTMLFormElement>("#new-folder-form");
-  const fileNameInput = section.querySelector<HTMLInputElement>("#new-file-name");
-  const folderNameInput = section.querySelector<HTMLInputElement>("#new-folder-name");
+  const header = document.createElement('header');
+  header.className = 'files__header';
 
-  if (!listEl || !previewEl || !pathEl) {
-    return;
-  }
+  const headerInfo = document.createElement('div');
+  const title = document.createElement('h2');
+  title.textContent = 'Files';
+  const breadcrumbNav = document.createElement('nav');
+  breadcrumbNav.className = 'breadcrumb';
+  breadcrumbNav.setAttribute('aria-label', 'Current path');
+  headerInfo.append(title, breadcrumbNav);
+
+  const preview = document.createElement('div');
+  preview.id = 'preview';
 
   let currentDir: string | null = selectors.files.path(getState());
+  let previewToken = 0;
 
-  const setDir = (dir: string | null) => {
-    currentDir = dir;
-    const display = dir ? "block" : "none";
-    if (fileForm) fileForm.style.display = display;
-    if (folderForm) folderForm.style.display = display;
+  const toolbar = createFilesToolbar({
+    onSelectDirectory: async () => {
+      const dir = await open({ directory: true });
+      if (typeof dir !== 'string') return;
+      try {
+        const { base, realPath } = await canonicalizeAndVerify(dir, ROOT);
+        const rel = realPath.slice(base.length) || '.';
+        setDir(rel);
+        await refreshDirectory(rel, 'dialog-select');
+      } catch (error) {
+        showError({ code: 'INFO', message: toUserMessage(error) });
+      }
+    },
+    onCreateFile: async (name: string) => {
+      if (!currentDir) return;
+      const relPath = currentDir === '.' ? name : `${currentDir}/${name}`;
+      try {
+        await writeText(relPath, ROOT, '');
+        await refreshDirectory(currentDir, 'create-file');
+      } catch (error) {
+        showError({ code: 'INFO', message: toUserMessage(error) });
+        throw error;
+      }
+    },
+    onCreateFolder: async (name: string) => {
+      if (!currentDir) return;
+      const relPath = currentDir === '.' ? name : `${currentDir}/${name}`;
+      try {
+        await mkdir(relPath, ROOT, { recursive: true });
+        await refreshDirectory(currentDir, 'create-folder');
+      } catch (error) {
+        showError({ code: 'INFO', message: toUserMessage(error) });
+        throw error;
+      }
+    },
+  });
+
+  const handleNavigate = async (nextPath: string) => {
+    setDir(nextPath);
+    await refreshDirectory(nextPath, 'breadcrumb');
   };
+
+  const filesList = createFilesList({
+    onActivate: (item) => {
+      void handleActivate(item);
+    },
+    getRowActions: (): FilesListRowAction[] => [
+      {
+        label: 'Delete',
+        className: 'files__action',
+        onSelect: (current) => {
+          void handleDelete(current);
+        },
+      },
+    ],
+    emptyState: {
+      title: STR.empty.filesTitle,
+      actionLabel: 'New file',
+    },
+    onEmptyAction: () => toolbar.openCreateFile(),
+  });
+
+  header.append(headerInfo, toolbar.element);
+
+  const panel = document.createElement('div');
+  panel.className = 'card files__panel';
+  panel.appendChild(filesList.element);
+
+  section.append(header, panel, preview);
+  container.innerHTML = '';
+  container.appendChild(section);
+
+  function setDir(dir: string | null) {
+    currentDir = dir;
+    toolbar.setDirectoryAvailable(Boolean(dir));
+  }
+
+  async function handleDelete(item: FilesListItem) {
+    try {
+      await remove(item.relativePath, ROOT, {
+        recursive: item.entry.isDirectory === true,
+      });
+      if (currentDir) {
+        await refreshDirectory(currentDir, 'delete');
+      }
+    } catch (error) {
+      showError({ code: 'INFO', message: toUserMessage(error) });
+    }
+  }
+
+  async function handleActivate(item: FilesListItem) {
+    if (item.entry.isDirectory) {
+      await handleNavigate(item.relativePath);
+      return;
+    }
+    const token = ++previewToken;
+    preview.innerHTML = '';
+    const ext = item.entry.name.split('.').pop()?.toLowerCase();
+    try {
+      const { realPath } = await canonicalizeAndVerify(item.relativePath, ROOT);
+      await rejectSymlinks(realPath, ROOT);
+      if (token !== previewToken) return;
+      const url = convertFileSrc(realPath);
+      if (
+        ext &&
+        ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg'].includes(ext)
+      ) {
+        const img = document.createElement('img');
+        img.src = url;
+        img.style.maxWidth = '100%';
+        if (token === previewToken) preview.appendChild(img);
+      } else if (ext === 'pdf') {
+        const embed = document.createElement('embed');
+        embed.src = url;
+        embed.type = 'application/pdf';
+        embed.style.width = '100%';
+        embed.style.height = '600px';
+        if (token === previewToken) preview.appendChild(embed);
+      } else {
+        preview.textContent = 'No preview available';
+      }
+    } catch (error) {
+      showError({ code: 'INFO', message: toUserMessage(error) });
+    }
+  }
+
+  async function applySnapshot(snapshot: FileSnapshot | null) {
+    if (!snapshot) {
+      setDir(null);
+      filesList.clear();
+      breadcrumbNav.innerHTML = '';
+      preview.innerHTML = '';
+      return;
+    }
+    setDir(snapshot.path);
+    renderBreadcrumb(snapshot.path, breadcrumbNav, handleNavigate);
+    const items: FilesListItem[] = snapshot.items.map((entry) => ({
+      entry,
+      relativePath:
+        snapshot.path === '.' ? entry.name : `${snapshot.path}/${entry.name}`,
+      typeLabel: entry.isDirectory ? 'Folder' : 'File',
+      sizeLabel: '',
+      modifiedLabel: '',
+    }));
+    filesList.setItems(items);
+  }
 
   setDir(currentDir);
 
   const unsubscribe = subscribe(selectors.files.snapshot, (snapshot) => {
-    void renderFromSnapshot(snapshot, listEl, previewEl, pathEl, setDir);
+    void applySnapshot(snapshot);
   });
   registerViewCleanup(container, unsubscribe);
 
-  const stopHousehold = on("household:changed", async () => {
+  const stopHousehold = on('household:changed', async () => {
     const dir = selectors.files.path(getState()) ?? currentDir;
-    if (dir) await refreshDirectory(dir, "household-change");
+    if (dir) await refreshDirectory(dir, 'household-change');
   });
   registerViewCleanup(container, stopHousehold);
-
-  const initialSnapshot = selectors.files.snapshot(getState());
-  if (initialSnapshot) {
-    void renderFromSnapshot(initialSnapshot, listEl, previewEl, pathEl, setDir);
-  }
-
-  selectBtn?.addEventListener("click", async () => {
-    const dir = await open({ directory: true });
-    if (typeof dir === "string") {
-      try {
-        const { base, realPath } = await canonicalizeAndVerify(dir, ROOT);
-        const rel = realPath.slice(base.length) || ".";
-        setDir(rel);
-        await refreshDirectory(rel, "dialog-select");
-      } catch (e) {
-        showError({ code: "INFO", message: toUserMessage(e) });
-      }
-    }
-  });
-
-  fileForm?.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    if (!currentDir || !fileNameInput) return;
-    const relPath =
-      currentDir === "." ? fileNameInput.value : `${currentDir}/${fileNameInput.value}`;
-    try {
-      await writeText(relPath, ROOT, "");
-      fileNameInput.value = "";
-      await refreshDirectory(currentDir, "create-file");
-    } catch (err) {
-      showError({ code: "INFO", message: toUserMessage(err) });
-    }
-  });
-
-  folderForm?.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    if (!currentDir || !folderNameInput) return;
-    const relPath =
-      currentDir === "."
-        ? folderNameInput.value
-        : `${currentDir}/${folderNameInput.value}`;
-    try {
-      await mkdir(relPath, ROOT, { recursive: true });
-      folderNameInput.value = "";
-      await refreshDirectory(currentDir, "create-folder");
-    } catch (err) {
-      showError({ code: "INFO", message: toUserMessage(err) });
-    }
-  });
 }
-

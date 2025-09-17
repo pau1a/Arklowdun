@@ -96,11 +96,24 @@ function lintComponentsIpc(content, relativePath) {
   }
 }
 
+function lintFilesBannedTags(content, relativePath) {
+  if (!relativePath.startsWith(path.join('src', 'features', 'files'))) return;
+  const banned = /<\s*(button|input|select)\b/i;
+  if (banned.test(content)) {
+    trackWarning(
+      'no-raw-controls',
+      relativePath,
+      'Avoid raw <button>/<input>/<select> in Files feature; use @ui primitives.',
+    );
+  }
+}
+
 async function lintFile(fullPath) {
   const content = await readFile(fullPath, "utf8");
   const relativePath = path.relative(repoRoot, fullPath);
   lintDeepRelative(content, relativePath);
   lintComponentsIpc(content, relativePath);
+  lintFilesBannedTags(content, relativePath);
 }
 
 async function main() {

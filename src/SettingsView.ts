@@ -1,6 +1,6 @@
 import { writeText } from "@lib/ipc/clipboard";
 import { fetchAboutMetadata, fetchDiagnosticsSummary, openDiagnosticsDoc } from "./api/diagnostics";
-import { createEmptyState } from "./ui/emptyState";
+import { createEmptyState } from "./ui/EmptyState";
 import { STR } from "./ui/strings";
 
 export function SettingsView(container: HTMLElement) {
