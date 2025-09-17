@@ -1,12 +1,27 @@
+// scripts/test-preload.mjs
 import { register, createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
-import { resolve } from 'node:path';
+import { pathToFileURL, fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
-process.env.TS_NODE_PROJECT ??= resolve('tsconfig.json');
-process.env.TS_NODE_EXPERIMENTAL_SPECIFIER_RESOLUTION ??= 'node';
+// Resolve project root + tsconfig explicitly
+const ROOT = dirname(fileURLToPath(import.meta.url));          // .../scripts
+const PROJECT = join(ROOT, '..');                              // repo root
+const TSCONFIG = join(PROJECT, 'tsconfig.json');
 
-const loaderUrl = new URL('./test-loader.mjs', import.meta.url);
-register(loaderUrl.href, pathToFileURL('./'));   // enable ts-node ESM via custom loader
+// Make ts-node fast & deterministic under Node 22
+process.env.TS_NODE_TRANSPILE_ONLY = '1';
+process.env.TS_NODE_PROJECT = TSCONFIG;
 
-const require = createRequire(import.meta.url);  // allow requiring CJS from ESM
-require('tsconfig-paths/register');              // hook TS path aliases (@lib, @ui, …)
+// Avoid double registration across worker threads
+if (!globalThis.__TS_NODE_REGISTERED__) {
+  // Resolve the ts-node ESM loader file explicitly (Node 22 friendly)
+  const require = createRequire(import.meta.url);
+  const TS_NODE_ESM = require.resolve('ts-node/esm.mjs');
+  register(pathToFileURL(TS_NODE_ESM).href, pathToFileURL(PROJECT)); // 1) register ts-node first
+  globalThis.__TS_NODE_REGISTERED__ = true;
+}
+
+// Then enable TS path aliases (@lib, @ui, …) via a lightweight loader wrapper.
+// Important: register AFTER ts-node so it can delegate to ts-node's hooks.
+const aliasLoaderUrl = new URL('./test-loader.mjs', import.meta.url);
+register(aliasLoaderUrl.href, pathToFileURL(PROJECT));

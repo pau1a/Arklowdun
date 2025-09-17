@@ -1,4 +1,4 @@
-import type { FsEntry } from "@lib/ipc/files/safe-fs";
+import type { FsEntryLite as FsEntry } from "./types";
 import type { Event, Note } from "../models";
 import type {
   FilesUpdatedPayload,
