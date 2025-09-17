@@ -6,8 +6,8 @@ import {
   selectors,
   subscribe,
   __resetStore,
-} from "../src/store";
-import { emit, on, __resetListeners } from "../src/store/events";
+} from "../src/store/index.ts";
+import { emit, on, __resetListeners } from "../src/store/events.ts";
 
 test.beforeEach(() => {
   __resetStore();
