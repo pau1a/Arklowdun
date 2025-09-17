@@ -80,6 +80,8 @@ fi
 
 manifest_entries=()
 warnings=()
+manifest_data_root=""
+manifest_logs_root=""
 
 json_escape() {
   local s="$1"
@@ -93,10 +95,81 @@ json_escape() {
   printf '%s' "$s"
 }
 
+normalise_manifest_path() {
+  local input="$1"
+  if [ -z "$input" ] || [ "$input" = "N/A" ]; then
+    printf '%s' "$input"
+    return
+  fi
+
+  local resolved=""
+
+  if [ "${PYTHON_AVAILABLE:-1}" = "1" ]; then
+    resolved=$(ARK_DATA_ROOT="$manifest_data_root" ARK_LOGS_ROOT="$manifest_logs_root" python3 - "$input" <<'PY' || printf ''
+import os
+import sys
+
+path = sys.argv[1]
+if not path or path == "N/A":
+    print(path, end="")
+    raise SystemExit(0)
+
+home = os.path.expanduser("~") or ""
+
+def expand(value: str) -> str:
+    return os.path.abspath(os.path.expanduser(value))
+
+abs_path = expand(path)
+data_root = os.environ.get("ARK_DATA_ROOT", "")
+logs_root = os.environ.get("ARK_LOGS_ROOT", "")
+
+if data_root:
+    data_abs = expand(data_root)
+    if abs_path.startswith(data_abs):
+        print("<app-data>" + abs_path[len(data_abs):], end="")
+        raise SystemExit(0)
+
+if logs_root:
+    logs_abs = expand(logs_root)
+    if abs_path.startswith(logs_abs):
+        print("<app-logs>" + abs_path[len(logs_abs):], end="")
+        raise SystemExit(0)
+
+if home and abs_path.startswith(home):
+    print("<home>" + abs_path[len(home):], end="")
+    raise SystemExit(0)
+
+print("<path>", end="")
+PY
+)
+  fi
+
+  if [ -z "$resolved" ]; then
+    local absolute
+    absolute=$(abs_path "$input")
+    if [ -n "$manifest_data_root" ] && [[ "$absolute" == "$manifest_data_root"* ]]; then
+      resolved="<app-data>${absolute#"$manifest_data_root"}"
+    elif [ -n "$manifest_logs_root" ] && [[ "$absolute" == "$manifest_logs_root"* ]]; then
+      resolved="<app-logs>${absolute#"$manifest_logs_root"}"
+    else
+      local home="${HOME:-}"
+      if [ -n "$home" ] && [[ "$absolute" == "$home"* ]]; then
+        resolved="<home>${absolute#"$home"}"
+      else
+        resolved="<path>"
+      fi
+    fi
+  fi
+
+  printf '%s' "$resolved"
+}
+
 add_manifest_entry() {
   local path="$1" category="$2" included="$3" reason="$4" size="$5" mtime="$6" redacted="$7" sha="$8" sha_raw="$9" limit_mb
   limit_mb="${10:-}"
-  local json="{\"path\":\"$(json_escape "$path")\",\"category\":\"$(json_escape "$category")\",\"included\":$included"
+  local display_path
+  display_path=$(normalise_manifest_path "$path")
+  local json="{\"path\":\"$(json_escape "$display_path")\",\"category\":\"$(json_escape "$category")\",\"included\":$included"
   if [ -n "$reason" ]; then
     json="$json,\"reason\":\"$(json_escape "$reason")\""
   fi
@@ -487,6 +560,9 @@ if [ ! -d "$out_dir" ]; then
 fi
 data_dir=$(abs_path "$data_dir")
 logs_dir=$(abs_path "$logs_dir")
+
+manifest_data_root="$data_dir"
+manifest_logs_root="$logs_dir"
 
 mkdir -p "$out_dir"
 

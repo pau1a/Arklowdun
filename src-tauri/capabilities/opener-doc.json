@@ -1,0 +1,14 @@
+{
+  "identifier": "open-diagnostics-doc",
+  "description": "Allow opening the bundled diagnostics guide",
+  "permissions": [
+    "opener:allow-open"
+  ],
+  "windows": [
+    {
+      "label": "main",
+      "urls": ["*"],
+      "scope": ["$RESOURCE/**"]
+    }
+  ]
+}
