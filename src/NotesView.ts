@@ -3,20 +3,16 @@ import { openDb } from "./db/open";
 import { newUuidV7 } from "./db/id";
 import { defaultHouseholdId } from "./db/household";
 import { showError } from "./ui/errors";
-
-type Note = {
-  id: string;
-  text: string;
-  color: string;
-  x: number;
-  y: number;
-  z?: number;
-  position: number;
-  household_id?: string;
-  created_at?: number;
-  updated_at?: number;
-  deleted_at?: number | null;
-};
+import type { Note } from "./models";
+import {
+  actions,
+  selectors,
+  subscribe,
+  getState,
+  type NotesSnapshot,
+} from "./store";
+import { emit, on } from "./store/events";
+import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
 
 const NOTE_PALETTE: Record<string, { base: string; text: string }> = {
   "#FFFF88": { base: "#FFF4B8", text: "#2b2b2b" },
@@ -132,6 +128,8 @@ async function updateNote(
 }
 
 export async function NotesView(container: HTMLElement) {
+  runViewCleanups(container);
+
   const section = document.createElement("section");
   section.innerHTML = `
     <h2>Notes</h2>
@@ -150,8 +148,12 @@ export async function NotesView(container: HTMLElement) {
   const colorInput = section.querySelector<HTMLInputElement>("#note-color")!;
   const canvas = section.querySelector<HTMLDivElement>("#notes-canvas")!;
 
-  const householdId = await defaultHouseholdId();
-  let notes: Note[] = await loadNotes(householdId);
+  let householdId = await defaultHouseholdId();
+
+  const cloneNotes = (items: Note[]): Note[] => items.map((note) => ({ ...note }));
+  let notesLocal: Note[] = cloneNotes(selectors.notes.items(getState()));
+
+  let suppressNextRender = false;
 
   const saveSoon = (() => {
     let t: number | undefined;
@@ -161,11 +163,40 @@ export async function NotesView(container: HTMLElement) {
     };
   })();
 
+  const commitSnapshot = (
+    source: string,
+    emitEvent: boolean,
+    suppressRender = false,
+  ): void => {
+    if (suppressRender) suppressNextRender = true;
+    const payload = actions.notes.updateSnapshot({
+      items: cloneNotes(notesLocal),
+      ts: Date.now(),
+      source,
+    });
+    if (emitEvent) emit("notes:updated", payload);
+  };
+
+  async function reload(source: string): Promise<void> {
+    try {
+      const loaded = await loadNotes(householdId);
+      notesLocal = cloneNotes(loaded);
+      commitSnapshot(source, true, true);
+      render();
+    } catch (err) {
+      showError(err);
+    }
+  }
+
   function render() {
     canvas.innerHTML = "";
-    notes
+    notesLocal
       .filter((n) => !n.deleted_at)
-      .sort((a, b) => (b.z ?? 0) - (a.z ?? 0) || a.position - b.position || (a.created_at ?? 0) - (b.created_at ?? 0))
+      .sort((a, b) =>
+        (b.z ?? 0) - (a.z ?? 0) ||
+        a.position - b.position ||
+        (a.created_at ?? 0) - (b.created_at ?? 0)
+      )
       .forEach((note) => {
         const el = document.createElement("div");
         el.className = "note";
@@ -182,8 +213,12 @@ export async function NotesView(container: HTMLElement) {
         textarea.value = note.text;
         textarea.addEventListener("input", () => {
           note.text = textarea.value;
+          commitSnapshot("notes:text-change", false, true);
           saveSoon(async () => {
-            try { await updateNote(householdId, note.id, { text: note.text }); } catch {}
+            try {
+              await updateNote(householdId, note.id, { text: note.text });
+              commitSnapshot("notes:text-change", true, true);
+            } catch {}
           });
         });
         el.appendChild(textarea);
@@ -195,7 +230,8 @@ export async function NotesView(container: HTMLElement) {
           note.deleted_at = Date.now();
           try {
             await updateNote(householdId, note.id, { deleted_at: note.deleted_at });
-            notes = notes.filter((n) => n.id !== note.id);
+            notesLocal = notesLocal.filter((n) => n.id !== note.id);
+            commitSnapshot("notes:delete", true, true);
             render();
           } catch (err: any) {
             showError(err);
@@ -207,10 +243,12 @@ export async function NotesView(container: HTMLElement) {
         bring.className = "bring";
         bring.textContent = "\u2191";
         bring.addEventListener("click", async () => {
-          const maxZ = Math.max(0, ...notes.filter((n) => !n.deleted_at).map((n) => n.z ?? 0));
+          const maxZ = Math.max(0, ...notesLocal.filter((n) => !n.deleted_at).map((n) => n.z ?? 0));
           note.z = maxZ + 1;
+          commitSnapshot("notes:bring", false, true);
           try {
             await updateNote(householdId, note.id, { z: note.z });
+            commitSnapshot("notes:bring", true, true);
             render();
           } catch (err: any) {
             showError(err);
@@ -225,11 +263,15 @@ export async function NotesView(container: HTMLElement) {
           const startY = e.clientY;
           const origX = note.x;
           const origY = note.y;
-          const maxZ = Math.max(0, ...notes.filter((n) => !n.deleted_at).map((n) => n.z ?? 0));
+          const maxZ = Math.max(0, ...notesLocal.filter((n) => !n.deleted_at).map((n) => n.z ?? 0));
           note.z = maxZ + 1;
           el.style.zIndex = String(note.z);
+          commitSnapshot("notes:drag", false, true);
           saveSoon(async () => {
-            try { await updateNote(householdId, note.id, { z: note.z }); } catch {}
+            try {
+              await updateNote(householdId, note.id, { z: note.z });
+              commitSnapshot("notes:drag", true, true);
+            } catch {}
           });
           el.classList.add("dragging");
           el.setPointerCapture(e.pointerId);
@@ -245,7 +287,10 @@ export async function NotesView(container: HTMLElement) {
             el.removeEventListener("pointermove", onMove);
             el.removeEventListener("pointerup", onUp);
             el.classList.remove("dragging");
-            try { await updateNote(householdId, note.id, { x: note.x, y: note.y }); } catch {}
+            try {
+              await updateNote(householdId, note.id, { x: note.x, y: note.y });
+              commitSnapshot("notes:drag", true, true);
+            } catch {}
           }
           el.addEventListener("pointermove", onMove);
           el.addEventListener("pointerup", onUp);
@@ -255,7 +300,30 @@ export async function NotesView(container: HTMLElement) {
       });
   }
 
-  render();
+  const unsubscribe = subscribe(selectors.notes.snapshot, (snapshot) => {
+    if (suppressNextRender) {
+      suppressNextRender = false;
+      return;
+    }
+    const items = snapshot?.items ?? [];
+    notesLocal = cloneNotes(items);
+    render();
+  });
+  registerViewCleanup(container, unsubscribe);
+
+  const stopHousehold = on("household:changed", async ({ householdId: next }) => {
+    householdId = next;
+    await reload("notes:household");
+  });
+  registerViewCleanup(container, stopHousehold);
+
+  const initialSnapshot: NotesSnapshot | null = selectors.notes.snapshot(getState());
+  if (initialSnapshot) {
+    notesLocal = cloneNotes(initialSnapshot.items);
+    render();
+  } else {
+    await reload("notes:init");
+  }
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -265,10 +333,11 @@ export async function NotesView(container: HTMLElement) {
         color: colorInput.value,
         x: 10,
         y: 10,
-        z: 0,          // will be overridden by SQL-computed z inside insertNote
-        position: 0,   // not used (kept to satisfy the type in Omit<>)
+        z: 0,
+        position: 0,
       } as any);
-      notes.push(created);
+      notesLocal.push(created);
+      commitSnapshot("notes:create", true, true);
       render();
       form.reset();
       colorInput.value = "#FFF4B8";

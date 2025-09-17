@@ -2,7 +2,7 @@ import { call } from "../api/call";
 import { defaultHouseholdId } from "../db/household";
 import type { SearchResult } from "../bindings/SearchResult";
 import { log } from "../utils/logger";
-import { on } from "../shared/events";
+import { on } from "../store/events";
 import { probeCaps } from "../shared/capabilities";
 
 probeCaps().catch(() => {});
@@ -32,8 +32,9 @@ function bust() {
   loggedMisses.clear();
 }
 
-on("householdChanged", bust);
-on("searchInvalidated", bust);
+on("household:changed", () => bust());
+on("notes:updated", () => bust());
+on("events:updated", () => bust());
 
 export async function search(
   query: string,

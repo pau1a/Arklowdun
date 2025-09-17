@@ -24,6 +24,9 @@ import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { defaultHouseholdId } from "./db/household";
 import { log } from "./utils/logger";
 import { initCommandPalette } from "@ui/CommandPalette";
+import { actions } from "./store";
+import { emit } from "./store/events";
+import { runViewCleanups } from "./utils/viewLifecycle";
 const appWindow = getCurrentWindow();
 
 type View =
@@ -287,6 +290,8 @@ function navigate(to: View) {
   setActive(to);
   const el = viewEl();
   if (!el) return;
+  actions.setActivePane(to);
+  runViewCleanups(el);
 
   if (to === "dashboard") {
     DashboardView(el);
@@ -386,7 +391,9 @@ window.addEventListener("DOMContentLoaded", () => {
       navigate("settings");
     });
   // Load the route from the URL fragment or fall back to the dashboard view.
-  navigate(routeFromHashOrDefault());
+  const initialRoute = routeFromHashOrDefault();
+  navigate(initialRoute);
+  emit("app:ready", { ts: Date.now() });
   window.addEventListener("hashchange", () =>
     navigate(routeFromHashOrDefault())
   );

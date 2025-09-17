@@ -7,15 +7,34 @@ import {
 import { nowMs } from "./db/time";
 import { defaultHouseholdId } from "./db/household";
 import type { Event } from "./models";
+import {
+  actions,
+  selectors,
+  subscribe,
+  getState,
+  type EventsSnapshot,
+} from "./store";
+import { emit, on } from "./store/events";
+import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
 
-async function fetchEvents(): Promise<Event[]> {
+const WINDOW_SPAN_MS = 365 * 24 * 60 * 60 * 1000;
+
+function defaultWindow(): { start: number; end: number } {
+  const now = Date.now();
+  return { start: now - WINDOW_SPAN_MS, end: now + WINDOW_SPAN_MS };
+}
+
+async function fetchEvents(
+  windowRange: { start: number; end: number } = defaultWindow(),
+): Promise<{ items: Event[]; window: { start: number; end: number } }> {
   const hh = await defaultHouseholdId();
-  console.log("events_list_range window", { start: 0, end: Date.now() + 90*24*60*60*1000 });
-  return await call<Event[]>("events_list_range", {
+  console.log("events_list_range window", windowRange);
+  const items = await call<Event[]>("events_list_range", {
     householdId: hh,
-    start: Date.now()-365*24*60*60*1000,
-    end: Date.now()+365*24*60*60*1000,
+    start: windowRange.start,
+    end: windowRange.end,
   });
+  return { items, window: windowRange };
 }
 
 async function saveEvent(
@@ -124,6 +143,8 @@ async function scheduleNotifications(events: Event[]) {
 }
 
 export async function CalendarView(container: HTMLElement) {
+  runViewCleanups(container);
+
   const section = document.createElement("section");
   section.className = "calendar";
   section.innerHTML = `
@@ -150,9 +171,47 @@ export async function CalendarView(container: HTMLElement) {
   const titleInput = section.querySelector<HTMLInputElement>("#event-title");
   const dateInput = section.querySelector<HTMLInputElement>("#event-start");
 
-  let events = await fetchEvents();
-  if (calendarEl) renderMonth(calendarEl, events);
-  scheduleNotifications(events);
+  let currentSnapshot: EventsSnapshot | null = selectors.events.snapshot(getState());
+  let currentWindow = currentSnapshot?.window ?? defaultWindow();
+
+  const unsubscribe = subscribe(selectors.events.snapshot, (snapshot) => {
+    currentSnapshot = snapshot ?? null;
+    if (snapshot?.window) currentWindow = snapshot.window;
+    const items = snapshot?.items ?? [];
+    if (calendarEl) renderMonth(calendarEl, items);
+  });
+  registerViewCleanup(container, unsubscribe);
+
+  const stopHousehold = on("household:changed", async () => {
+    await loadEvents("household-change");
+  });
+  registerViewCleanup(container, stopHousehold);
+
+  async function loadEvents(source: string): Promise<void> {
+    try {
+      const range = defaultWindow();
+      const { items, window } = await fetchEvents(range);
+      currentWindow = window;
+      const payload = actions.events.updateSnapshot({
+        items,
+        ts: Date.now(),
+        window,
+        source,
+      });
+      emit("events:updated", payload);
+      scheduleNotifications(items);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  if (currentSnapshot) {
+    const items = currentSnapshot.items;
+    if (calendarEl) renderMonth(calendarEl, items);
+    if (items.length) scheduleNotifications(items);
+  } else {
+    await loadEvents("initial");
+  }
 
   form?.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -169,8 +228,18 @@ export async function CalendarView(container: HTMLElement) {
       tz,
       reminder: ms,
     });
-    events.push(ev);
-    if (calendarEl) renderMonth(calendarEl, events);
+    const snapshot = selectors.events.snapshot(getState());
+    const baseItems = snapshot?.items ?? [];
+    const nextItems = [...baseItems, ev];
+    const window = snapshot?.window ?? currentWindow ?? defaultWindow();
+    currentWindow = window;
+    const payload = actions.events.updateSnapshot({
+      items: nextItems,
+      ts: Date.now(),
+      window,
+      source: "create",
+    });
+    emit("events:updated", payload);
     scheduleNotifications([ev]);
     form.reset();
   });
