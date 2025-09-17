@@ -151,7 +151,7 @@ function setSnapshot<S>(current: S | null, next: S | null): S | null {
   if (current === null && next === null) return current;
   if (current === null || next === null) return next;
   const sameKeys = Object.keys(next as object).every((key) =>
-    Object.is((next as any)[key], (current as any)[key]),
+    Object.is(getSafe(next as any, key), getSafe(current as any, key)),
   );
   return sameKeys ? current : next;
 }
@@ -274,3 +274,4 @@ export function __resetStore(): void {
   state = initialState;
   subscriptions.clear();
 }
+import { getSafe } from "@utils/object";

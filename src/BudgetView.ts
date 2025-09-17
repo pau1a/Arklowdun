@@ -49,7 +49,7 @@ async function renderSummary(
     const tr = document.createElement("tr");
     const td = document.createElement("td");
     td.colSpan = 4;
-    const { createEmptyState } = await import("./ui/emptyState");
+    const { createEmptyState } = await import("./ui/EmptyState");
     td.appendChild(
       createEmptyState({
         title: STR.empty.budgetTitle,

@@ -17,7 +17,8 @@
       "@layout/*": ["src/layout/*"],
       "@lib/*": ["src/lib/*"],
       "@bindings/*": ["src/bindings/*"],
-      "@store/*": ["src/store/*"]
+      "@store/*": ["src/store/*"],
+      "@utils/*": ["src/utils/*"]
     },
     "isolatedModules": true,
     "noEmit": true,

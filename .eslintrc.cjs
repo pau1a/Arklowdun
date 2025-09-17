@@ -109,5 +109,39 @@ module.exports = {
         "no-restricted-imports": ["error", componentImportRestriction],
       },
     },
+    {
+      files: ["src/features/files/**/*.{ts,tsx,js,jsx}"],
+      rules: {
+        'no-restricted-syntax': [
+          'error',
+          {
+            selector:
+              "CallExpression[callee.object.name='document'][callee.property.name='createElement'][arguments.0.value='button']",
+            message: 'Use @ui/Button instead of native <button> in Files feature files.',
+          },
+          {
+            selector:
+              "CallExpression[callee.object.name='document'][callee.property.name='createElement'][arguments.0.value='input']",
+            message: 'Use @ui/Input instead of native <input> in Files feature files.',
+          },
+          {
+            selector:
+              "CallExpression[callee.object.name='document'][callee.property.name='createElement'][arguments.0.value='select']",
+            message: 'Use @ui/Select instead of native <select> in Files feature files.',
+          },
+        ],
+      },
+    },
+    {
+      files: [
+        "scripts/**/*.{ts,js}",
+        "tests/**/*.{ts,js}",
+        "src/tools/**/*.{ts,js}"
+      ],
+      rules: {
+        "import/no-relative-parent-imports": "off",
+        "security/detect-object-injection": "off",
+      },
+    },
   ],
 };

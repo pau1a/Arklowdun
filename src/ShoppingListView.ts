@@ -34,7 +34,7 @@ export async function ShoppingListView(container: HTMLElement) {
     if (live.length === 0) {
       const wrap = document.createElement("li");
       wrap.className = "list empty";
-      const { createEmptyState } = await import("./ui/emptyState");
+      const { createEmptyState } = await import("./ui/EmptyState");
       wrap.appendChild(
         createEmptyState({
           title: STR.empty.shoppingTitle,

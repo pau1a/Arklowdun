@@ -238,6 +238,8 @@ function addImportButtonToSettings(container: HTMLElement) {
   about.appendChild(row);
 }
 
+import { getSafe } from "@utils/object";
+
 function setActive(tab: View) {
   const tabs: Record<View, HTMLAnchorElement | null> = {
     dashboard: linkDashboard(),
@@ -260,7 +262,7 @@ function setActive(tab: View) {
     settings: null,
   };
   (Object.keys(tabs) as View[]).forEach((name) => {
-    const el = tabs[name];
+    const el = getSafe(tabs, name) ?? null;
     const active = name === tab;
     el?.classList.toggle("active", active);
     if (active) el?.setAttribute("aria-current", "page");

@@ -18,7 +18,7 @@ export async function VehiclesView(container: HTMLElement) {
         const listEl = section.querySelector<HTMLUListElement>("#veh-list");
         if (!vehicles.length) {
           const li = document.createElement("li");
-          const { createEmptyState } = await import("./ui/emptyState");
+          const { createEmptyState } = await import("./ui/EmptyState");
           li.appendChild(
             createEmptyState({
               title: STR.empty.vehiclesTitle,

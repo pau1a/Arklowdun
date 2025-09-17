@@ -109,7 +109,7 @@ export async function DashboardView(container: HTMLElement) {
   items.sort((a, b) => a.date - b.date);
   if (!items.length) {
     if (listEl) {
-      const { createEmptyState } = await import("./ui/emptyState");
+      const { createEmptyState } = await import("./ui/EmptyState");
       listEl.appendChild(
         createEmptyState({
           title: STR.empty.dashboardTitle,

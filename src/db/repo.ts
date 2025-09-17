@@ -53,6 +53,7 @@ export interface ListOptions {
 import type { SqlDatabase } from "@lib/ipc/sql";
 import { openDb } from "./open";
 import { requireHousehold } from "./household";
+import { getSafe } from "@utils/object";
 
 export async function listActive<T = any>(
   table: DomainTable,
@@ -65,7 +66,7 @@ export async function listActive<T = any>(
   const order =
     opts.orderBy && ALLOWED_ORDERS.has(opts.orderBy)
       ? opts.orderBy
-      : ORDER_MAP[table];
+      : (getSafe(ORDER_MAP, table) ?? "created_at, id");
 
   const where =
     table === "household"

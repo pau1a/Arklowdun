@@ -209,9 +209,13 @@ export function initCommandPalette() {
         }
       });
     } else if (e.key === "Enter") {
-      if (activeIndex >= 0 && opts[activeIndex]) {
-        e.preventDefault();
-        opts[activeIndex].click();
+      if (activeIndex >= 0) {
+        // eslint-disable-next-line security/detect-object-injection
+        const active = (opts as any)[activeIndex] as HTMLLIElement | undefined;
+        if (active) {
+          e.preventDefault();
+          active.click();
+        }
       }
     }
   }
