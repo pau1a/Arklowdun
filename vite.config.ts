@@ -1,10 +1,22 @@
 import { defineConfig } from "vite";
+import { fileURLToPath, URL } from "node:url";
+
+const resolveAlias = {
+  "@features": fileURLToPath(new URL("./src/features", import.meta.url)),
+  "@ui": fileURLToPath(new URL("./src/ui", import.meta.url)),
+  "@layout": fileURLToPath(new URL("./src/layout", import.meta.url)),
+  "@lib": fileURLToPath(new URL("./src/lib", import.meta.url)),
+  "@store": fileURLToPath(new URL("./src/store", import.meta.url)),
+};
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
+  resolve: {
+    alias: resolveAlias,
+  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
