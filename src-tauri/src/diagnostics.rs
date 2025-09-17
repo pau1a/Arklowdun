@@ -105,35 +105,60 @@ pub fn resolve_doc_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResu
 
     let path_manager = app.path();
 
-    match path_manager.resolve("docs/diagnostics.md", BaseDirectory::Resource) {
-        Ok(path) => Ok(path.to_string_lossy().to_string()),
-        Err(primary_err) => {
-            if let Ok(mut resource_dir) = path_manager.resource_dir() {
-                let mut nested = resource_dir.clone();
-                nested.push("docs");
-                nested.push("diagnostics.md");
-                if nested.exists() {
-                    return Ok(nested.to_string_lossy().to_string());
-                }
+    let candidates = [
+        "resources/docs/diagnostics.md",
+        "docs/diagnostics.md",
+    ];
 
-                resource_dir.push("diagnostics.md");
-                if resource_dir.exists() {
-                    return Ok(resource_dir.to_string_lossy().to_string());
+    for relative in candidates {
+        match path_manager.resolve(relative, BaseDirectory::Resource) {
+            Ok(path) => {
+                if path.exists() {
+                    return Ok(path.to_string_lossy().to_string());
                 }
             }
-
-            let fallback = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../docs/diagnostics.md");
-            if fallback.exists() {
-                return Ok(fallback.to_string_lossy().to_string());
+            Err(err) => {
+                tracing::debug!(
+                    target: "arklowdun",
+                    event = "diagnostics_doc_resolve_failed",
+                    candidate = relative,
+                    error = %err
+                );
             }
-
-            Err(
-                AppError::new(
-                    "DIAGNOSTICS/DOC_MISSING",
-                    "Diagnostics guide is not bundled",
-                )
-                .with_context("error", primary_err.to_string()),
-            )
         }
     }
+
+    if let Ok(mut resource_dir) = path_manager.resource_dir() {
+        let mut nested = resource_dir.clone();
+        nested.push("docs");
+        nested.push("diagnostics.md");
+        if nested.exists() {
+            return Ok(nested.to_string_lossy().to_string());
+        }
+
+        resource_dir.push("diagnostics.md");
+        if resource_dir.exists() {
+            return Ok(resource_dir.to_string_lossy().to_string());
+        }
+    }
+
+    let fallback = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../docs/diagnostics.md");
+    let fallback_display = fallback.to_string_lossy().to_string();
+    if fallback.exists() {
+        return Ok(fallback.to_string_lossy().to_string());
+    }
+
+    Err(
+        AppError::new(
+            "DIAGNOSTICS/DOC_MISSING",
+            "Diagnostics guide is not bundled",
+        )
+        .with_context(
+            "searched",
+            format!(
+                "resources/docs/diagnostics.md, docs/diagnostics.md, resource_dir/docs/diagnostics.md, resource_dir/diagnostics.md, {}",
+                fallback_display
+            ),
+        ),
+    )
 }

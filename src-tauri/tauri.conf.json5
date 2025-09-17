@@ -40,7 +40,6 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "../docs/diagnostics.md",
       "resources/docs/diagnostics.md"
     ]
   },

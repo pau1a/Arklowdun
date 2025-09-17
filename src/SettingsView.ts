@@ -1,3 +1,4 @@
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { fetchAboutMetadata, fetchDiagnosticsSummary, resolveDiagnosticsDocPath } from "./api/diagnostics";
 import { createEmptyState } from "./ui/emptyState";
@@ -112,10 +113,18 @@ function formatSummary(summary: Awaited<ReturnType<typeof fetchDiagnosticsSummar
 
 async function copyToClipboard(text: string) {
   try {
+    await writeText(text);
+    return;
+  } catch (_) {
+    // fall back to the Web Clipboard API and, if needed, a hidden textarea for environments
+    // (like unit tests) where the plugin is not available.
+  }
+
+  try {
     await navigator?.clipboard?.writeText?.(text);
     return;
   } catch (_) {
-    // fall back to a hidden textarea for environments without Clipboard API access
+    // fall through to the hidden textarea approach.
   }
 
   const textarea = document.createElement("textarea");
