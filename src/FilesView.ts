@@ -11,6 +11,9 @@ import { canonicalizeAndVerify, rejectSymlinks } from "./files/path";
 import { convertFileSrc } from "@lib/ipc/core";
 import { STR } from "@ui/strings";
 import { showError } from "@ui/errors";
+import { actions, selectors, subscribe, getState, type FileSnapshot } from "./store";
+import { emit, on } from "./store/events";
+import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
 
 const ROOT: RootKey = "attachments";
 
@@ -26,37 +29,48 @@ function renderBreadcrumb(path: string, el: HTMLElement) {
   }
 }
 
-async function listDirectory(
-  dir: string,
+let renderToken = 0;
+
+async function renderFromSnapshot(
+  snapshot: FileSnapshot | null,
   listEl: HTMLTableSectionElement,
   previewEl: HTMLElement,
   pathEl: HTMLElement,
-  setDir: (d: string) => void,
-) {
-  try {
-    const entries = await readDir(dir, ROOT); // entries expose isDirectory/isFile
-    renderBreadcrumb(dir, pathEl);
+  setDir: (dir: string | null) => void,
+): Promise<void> {
+  const token = ++renderToken;
+  if (!snapshot) {
+    setDir(null);
+    pathEl.innerHTML = "";
     listEl.innerHTML = "";
-    if (entries.length === 0) {
-      const row = document.createElement("tr");
-      const cell = document.createElement("td");
-      cell.colSpan = 5;
-      const { createEmptyState } = await import("@ui/emptyState");
-      cell.appendChild(
-        createEmptyState({
-          title: STR.empty.filesTitle,
-          actionLabel: "New file",
-          onAction: () => setDir(dir),
-        }),
-      );
-      row.appendChild(cell);
-      listEl.appendChild(row);
-      return;
-    }
-    for (const entry of entries) {
-      const relPath = dir === "." ? entry.name : `${dir}/${entry.name}`;
-      const row = document.createElement("tr");
-      row.tabIndex = 0;
+    return;
+  }
+  setDir(snapshot.path);
+  renderBreadcrumb(snapshot.path, pathEl);
+  listEl.innerHTML = "";
+  if (snapshot.items.length === 0) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 5;
+    const { createEmptyState } = await import("@ui/emptyState");
+    if (token !== renderToken) return;
+    cell.appendChild(
+      createEmptyState({
+        title: STR.empty.filesTitle,
+        actionLabel: "New file",
+        onAction: () => setDir(snapshot.path),
+      }),
+    );
+    row.appendChild(cell);
+    listEl.appendChild(row);
+    return;
+  }
+
+  for (const entry of snapshot.items) {
+    if (token !== renderToken) return;
+    const relPath = snapshot.path === "." ? entry.name : `${snapshot.path}/${entry.name}`;
+    const row = document.createElement("tr");
+    row.tabIndex = 0;
 
     const nameTd = document.createElement("td");
     const icon = document.createElement("span");
@@ -76,64 +90,78 @@ async function listDirectory(
 
     const actionsTd = document.createElement("td");
     actionsTd.className = "files__actions-cell";
-      const del = document.createElement("button");
-      del.textContent = "Delete";
-      del.className = "files__action";
-      del.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        try {
-          await remove(relPath, ROOT, { recursive: entry.isDirectory === true });
-          await listDirectory(dir, listEl, previewEl, pathEl, setDir);
-        } catch (err) {
-          showError({ code: "INFO", message: toUserMessage(err) });
-        }
-      });
-      actionsTd.appendChild(del);
+    const del = document.createElement("button");
+    del.textContent = "Delete";
+    del.className = "files__action";
+    del.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      try {
+        await remove(relPath, ROOT, { recursive: entry.isDirectory === true });
+        await refreshDirectory(snapshot.path, "delete");
+      } catch (err) {
+        showError({ code: "INFO", message: toUserMessage(err) });
+      }
+    });
+    actionsTd.appendChild(del);
 
-      row.addEventListener("click", async () => {
-        if (entry.isDirectory) {
-          setDir(relPath);
-          await listDirectory(relPath, listEl, previewEl, pathEl, setDir);
+    row.addEventListener("click", async () => {
+      if (entry.isDirectory) {
+        await refreshDirectory(relPath, "open-directory");
+        return;
+      }
+      previewEl.innerHTML = "";
+      const ext = entry.name.split(".").pop()?.toLowerCase();
+      try {
+        const { realPath } = await canonicalizeAndVerify(relPath, ROOT);
+        await rejectSymlinks(realPath, ROOT);
+        const url = convertFileSrc(realPath);
+        if (
+          ext &&
+          ["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg"].includes(ext)
+        ) {
+          const img = document.createElement("img");
+          img.src = url;
+          img.style.maxWidth = "100%";
+          previewEl.appendChild(img);
+        } else if (ext === "pdf") {
+          const embed = document.createElement("embed");
+          embed.src = url;
+          embed.type = "application/pdf";
+          embed.style.width = "100%";
+          embed.style.height = "600px";
+          previewEl.appendChild(embed);
         } else {
-          previewEl.innerHTML = "";
-          const ext = entry.name.split(".").pop()?.toLowerCase();
-          try {
-            const { realPath } = await canonicalizeAndVerify(relPath, ROOT);
-            await rejectSymlinks(realPath, ROOT);
-            const url = convertFileSrc(realPath);
-            if (
-              ext &&
-              ["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg"].includes(ext)
-            ) {
-              const img = document.createElement("img");
-              img.src = url;
-              img.style.maxWidth = "100%";
-              previewEl.appendChild(img);
-            } else if (ext === "pdf") {
-              const embed = document.createElement("embed");
-              embed.src = url;
-              embed.type = "application/pdf";
-              embed.style.width = "100%";
-              embed.style.height = "600px";
-              previewEl.appendChild(embed);
-            } else {
-              previewEl.textContent = "No preview available";
-            }
-          } catch (e) {
-            showError({ code: "INFO", message: toUserMessage(e) });
-          }
+          previewEl.textContent = "No preview available";
         }
-      });
+      } catch (e) {
+        showError({ code: "INFO", message: toUserMessage(e) });
+      }
+    });
 
-      row.append(nameTd, typeTd, sizeTd, modTd, actionsTd);
-      listEl.appendChild(row);
-    }
+    row.append(nameTd, typeTd, sizeTd, modTd, actionsTd);
+    listEl.appendChild(row);
+  }
+}
+
+async function refreshDirectory(dir: string, source: string): Promise<void> {
+  try {
+    const entries = await readDir(dir, ROOT);
+    const ts = Date.now();
+    const payload = actions.files.updateSnapshot({
+      items: entries,
+      ts,
+      path: dir,
+      source,
+    });
+    emit("files:updated", payload);
   } catch (e) {
     showError({ code: "INFO", message: toUserMessage(e) });
   }
 }
 
 export async function FilesView(container: HTMLElement) {
+  runViewCleanups(container);
+
   const section = document.createElement("section");
   section.className = "files";
   section.innerHTML = `
@@ -181,18 +209,39 @@ export async function FilesView(container: HTMLElement) {
   const pathEl = section.querySelector<HTMLElement>("#current-path");
   const fileForm = section.querySelector<HTMLFormElement>("#new-file-form");
   const folderForm = section.querySelector<HTMLFormElement>("#new-folder-form");
-  const fileNameInput = section.querySelector<HTMLInputElement>(
-    "#new-file-name",
-  );
-  const folderNameInput = section.querySelector<HTMLInputElement>(
-    "#new-folder-name",
-  );
+  const fileNameInput = section.querySelector<HTMLInputElement>("#new-file-name");
+  const folderNameInput = section.querySelector<HTMLInputElement>("#new-folder-name");
 
-  let currentDir: string | null = null;
+  if (!listEl || !previewEl || !pathEl) {
+    return;
+  }
 
-  const setDir = (d: string) => {
-    currentDir = d;
+  let currentDir: string | null = selectors.files.path(getState());
+
+  const setDir = (dir: string | null) => {
+    currentDir = dir;
+    const display = dir ? "block" : "none";
+    if (fileForm) fileForm.style.display = display;
+    if (folderForm) folderForm.style.display = display;
   };
+
+  setDir(currentDir);
+
+  const unsubscribe = subscribe(selectors.files.snapshot, (snapshot) => {
+    void renderFromSnapshot(snapshot, listEl, previewEl, pathEl, setDir);
+  });
+  registerViewCleanup(container, unsubscribe);
+
+  const stopHousehold = on("household:changed", async () => {
+    const dir = selectors.files.path(getState()) ?? currentDir;
+    if (dir) await refreshDirectory(dir, "household-change");
+  });
+  registerViewCleanup(container, stopHousehold);
+
+  const initialSnapshot = selectors.files.snapshot(getState());
+  if (initialSnapshot) {
+    void renderFromSnapshot(initialSnapshot, listEl, previewEl, pathEl, setDir);
+  }
 
   selectBtn?.addEventListener("click", async () => {
     const dir = await open({ directory: true });
@@ -201,11 +250,7 @@ export async function FilesView(container: HTMLElement) {
         const { base, realPath } = await canonicalizeAndVerify(dir, ROOT);
         const rel = realPath.slice(base.length) || ".";
         setDir(rel);
-        if (pathEl) renderBreadcrumb(rel, pathEl);
-        if (fileForm) fileForm.style.display = "block";
-        if (folderForm) folderForm.style.display = "block";
-        if (listEl && previewEl && pathEl)
-          await listDirectory(rel, listEl, previewEl, pathEl, setDir);
+        await refreshDirectory(rel, "dialog-select");
       } catch (e) {
         showError({ code: "INFO", message: toUserMessage(e) });
       }
@@ -214,16 +259,13 @@ export async function FilesView(container: HTMLElement) {
 
   fileForm?.addEventListener("submit", async (e) => {
     e.preventDefault();
-    if (currentDir === null || !fileNameInput) return;
+    if (!currentDir || !fileNameInput) return;
     const relPath =
-      currentDir === "."
-        ? fileNameInput.value
-        : `${currentDir}/${fileNameInput.value}`;
+      currentDir === "." ? fileNameInput.value : `${currentDir}/${fileNameInput.value}`;
     try {
       await writeText(relPath, ROOT, "");
       fileNameInput.value = "";
-      if (listEl && previewEl && pathEl)
-        await listDirectory(currentDir, listEl, previewEl, pathEl, setDir);
+      await refreshDirectory(currentDir, "create-file");
     } catch (err) {
       showError({ code: "INFO", message: toUserMessage(err) });
     }
@@ -231,7 +273,7 @@ export async function FilesView(container: HTMLElement) {
 
   folderForm?.addEventListener("submit", async (e) => {
     e.preventDefault();
-    if (currentDir === null || !folderNameInput) return;
+    if (!currentDir || !folderNameInput) return;
     const relPath =
       currentDir === "."
         ? folderNameInput.value
@@ -239,8 +281,7 @@ export async function FilesView(container: HTMLElement) {
     try {
       await mkdir(relPath, ROOT, { recursive: true });
       folderNameInput.value = "";
-      if (listEl && previewEl && pathEl)
-        await listDirectory(currentDir, listEl, previewEl, pathEl, setDir);
+      await refreshDirectory(currentDir, "create-folder");
     } catch (err) {
       showError({ code: "INFO", message: toUserMessage(err) });
     }

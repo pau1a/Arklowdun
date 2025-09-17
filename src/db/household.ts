@@ -1,6 +1,6 @@
 import { call } from "../api/call";
 import { log } from "../utils/logger";
-import { emit } from "../shared/events";
+import { emit } from "../store/events";
 
 export async function defaultHouseholdId(): Promise<string> {
   try {
@@ -18,5 +18,5 @@ export function requireHousehold(householdId: string): string {
 
 export async function setDefaultHouseholdId(id: string): Promise<void> {
   await call("set_default_household_id", { id });
-  emit("householdChanged");
+  emit("household:changed", { householdId: id });
 }

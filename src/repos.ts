@@ -1,6 +1,6 @@
 // src/repos.ts
 import { call } from "./api/call";
-import { emit } from "./shared/events";
+import { clearSearchCache } from "./services/searchRepo";
 
 import type {
   Bill,
@@ -51,7 +51,7 @@ function domainRepo<T extends object>(table: string, defaultOrderBy: string) {
         data: { ...data, household_id: householdId },
       });
       // after successful write (post-await) by design
-      if (SEARCH_TABLES.has(table)) emit("searchInvalidated");
+      if (SEARCH_TABLES.has(table)) clearSearchCache();
       return out;
     },
 
@@ -61,7 +61,7 @@ function domainRepo<T extends object>(table: string, defaultOrderBy: string) {
       }
       await call(`${table}_update`, { id, data, householdId });
       // after successful write (post-await) by design
-      if (SEARCH_TABLES.has(table)) emit("searchInvalidated");
+      if (SEARCH_TABLES.has(table)) clearSearchCache();
     },
 
     async delete(householdId: string, id: string): Promise<void> {
@@ -70,7 +70,7 @@ function domainRepo<T extends object>(table: string, defaultOrderBy: string) {
       }
       await call(`${table}_delete`, { householdId, id });
       // after successful write (post-await) by design
-      if (SEARCH_TABLES.has(table)) emit("searchInvalidated");
+      if (SEARCH_TABLES.has(table)) clearSearchCache();
     },
 
     async restore(householdId: string, id: string): Promise<void> {
@@ -79,7 +79,7 @@ function domainRepo<T extends object>(table: string, defaultOrderBy: string) {
       }
       await call(`${table}_restore`, { householdId, id });
       // after successful write (post-await) by design
-      if (SEARCH_TABLES.has(table)) emit("searchInvalidated");
+      if (SEARCH_TABLES.has(table)) clearSearchCache();
     },
   };
 }
@@ -126,22 +126,22 @@ export const eventsApi = {
   async create(householdId: string, data: Partial<Event>): Promise<Event> {
     const out = await call<Event>("event_create", { data: { ...data, household_id: householdId } });
     // after successful write (post-await) by design
-    emit("searchInvalidated");
+    clearSearchCache();
     return out;
   },
   async update(householdId: string, id: string, data: Partial<Event>): Promise<void> {
     await call("event_update", { id, data, householdId });
     // after successful write (post-await) by design
-    emit("searchInvalidated");
+    clearSearchCache();
   },
   async delete(householdId: string, id: string): Promise<void> {
     await call("event_delete", { householdId, id });
     // after successful write (post-await) by design
-    emit("searchInvalidated");
+    clearSearchCache();
   },
   async restore(householdId: string, id: string): Promise<void> {
     await call("event_restore", { householdId, id });
     // after successful write (post-await) by design
-    emit("searchInvalidated");
+    clearSearchCache();
   },
 };
