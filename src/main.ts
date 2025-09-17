@@ -4,118 +4,144 @@ import "@fortawesome/fontawesome-free/css/all.min.css";
 import "./debug";
 import "./theme.scss";
 import "./styles.scss";
-import { CalendarView } from "./CalendarView";
-import { FilesView } from "./FilesView";
-import { ShoppingListView } from "./ShoppingListView";
-import { BillsView } from "./BillsView";
-import { InsuranceView } from "./InsuranceView";
-import { VehiclesView } from "./VehiclesView";
-import { PetsView } from "./PetsView";
-import { FamilyView } from "./FamilyView";
-import { PropertyView } from "./PropertyView";
-import { SettingsView } from "./SettingsView";
-import { InventoryView } from "./InventoryView";
-import { BudgetView } from "./BudgetView";
-import { NotesView } from "./NotesView";
-import { DashboardView } from "./DashboardView";
-import { ManageView } from "./ManageView";
-import { ImportModal } from "@ui/ImportModal";
+import { Page, type PageInstance } from "@layout/Page";
+import {
+  Sidebar,
+  type SidebarInstance,
+  type SidebarItemConfig,
+} from "@layout/Sidebar";
+import { Content, type ContentInstance } from "@layout/Content";
+import { Toolbar, type ToolbarInstance } from "@layout/Toolbar";
+import { Footer, type FooterInstance, type FooterItemConfig } from "@layout/Footer";
+import {
+  resolveRouteFromHash,
+  getHubRoutes,
+  getSidebarRoutes,
+  getFooterRoutes,
+  type RouteDefinition,
+} from "./routes";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { defaultHouseholdId } from "./db/household";
 import { log } from "./utils/logger";
 import { initCommandPalette } from "@ui/CommandPalette";
-import { actions } from "./store";
+import { actions, type AppPane } from "./store";
 import { emit } from "./store/events";
 import { runViewCleanups } from "./utils/viewLifecycle";
+
 const appWindow = getCurrentWindow();
 
-type View =
-  | "dashboard"
-  | "primary"
-  | "secondary"
-  | "tasks"
-  | "calendar"
-  | "files"
-  | "shopping"
-  | "bills"
-  | "insurance"
-  | "property"
-  | "vehicles"
-  | "pets"
-  | "family"
-  | "inventory"
-  | "budget"
-  | "notes"
-  | "settings"
-  | "manage";
-
-const viewEl = () => document.querySelector<HTMLElement>("#view");
-const linkDashboard = () =>
-  document.querySelector<HTMLAnchorElement>("#nav-dashboard");
-const linkPrimary = () =>
-  document.querySelector<HTMLAnchorElement>("#nav-primary");
-const linkSecondary = () =>
-  document.querySelector<HTMLAnchorElement>("#nav-secondary");
-const linkTasks = () =>
-  document.querySelector<HTMLAnchorElement>("#nav-tasks");
-const linkCalendar = () =>
-  document.querySelector<HTMLAnchorElement>("#nav-calendar");
-const linkFiles = () =>
-  document.querySelector<HTMLAnchorElement>("#nav-files");
-const linkShopping = () =>
-  document.querySelector<HTMLAnchorElement>("#nav-shopping");
-const linkBills = () =>
-  document.querySelector<HTMLAnchorElement>("#nav-bills");
-const linkInsurance = () =>
-  document.querySelector<HTMLAnchorElement>("#nav-insurance");
-const linkProperty = () =>
-  document.querySelector<HTMLAnchorElement>("#nav-property");
-const linkVehicles = () =>
-  document.querySelector<HTMLAnchorElement>("#nav-vehicles");
-const linkPets = () => document.querySelector<HTMLAnchorElement>("#nav-pets");
-const linkFamily = () =>
-  document.querySelector<HTMLAnchorElement>("#nav-family");
-const linkInventory = () =>
-  document.querySelector<HTMLAnchorElement>("#nav-inventory");
-const linkBudget = () =>
-  document.querySelector<HTMLAnchorElement>("#nav-budget");
-const linkNotes = () =>
-  document.querySelector<HTMLAnchorElement>("#nav-notes");
-const linkManage = () =>
-  document.querySelector<HTMLAnchorElement>("#nav-manage");
-
-/**
- * Determine the initial view based on the current location fragment.
- * Falls back to "dashboard" when the hash is missing or unrecognized.
- */
-function routeFromHashOrDefault(): View {
-  const fragment = window.location.hash.replace(/^#/, "");
-  const valid: View[] = [
-    "dashboard",
-    "primary",
-    "secondary",
-    "tasks",
-    "calendar",
-    "files",
-    "shopping",
-    "bills",
-    "insurance",
-    "property",
-    "vehicles",
-    "pets",
-    "family",
-    "inventory",
-    "budget",
-    "notes",
-    "settings",
-    "manage",
-  ];
-  if (valid.includes(fragment as View)) return fragment as View;
-
-  location.replace("#dashboard");
-  return "dashboard";
+interface LayoutContext {
+  page: PageInstance;
+  sidebar: SidebarInstance;
+  content: ContentInstance;
+  footer: FooterInstance;
+  toolbar: ToolbarInstance;
 }
 
+let layoutContext: LayoutContext | null = null;
+let layoutMounted = false;
+let currentRouteId: AppPane | null = null;
+let renderSequence = 0;
+
+function toSidebarItem(route: RouteDefinition, section: "hub" | "primary"): SidebarItemConfig {
+  const display = route.display;
+  const icon = display?.icon;
+  return {
+    id: route.id,
+    label: display?.label ?? route.id,
+    ariaLabel: display?.ariaLabel,
+    className: display?.className,
+    href: route.hash,
+    section,
+    icon: {
+      name: icon?.name ?? "fa-circle",
+      defaultVariant: icon?.defaultVariant ?? "regular",
+      activeVariant: icon?.activeVariant,
+      fixed: icon?.fixed ?? false,
+    },
+  };
+}
+
+function toFooterItem(route: RouteDefinition): FooterItemConfig {
+  const display = route.display;
+  const icon = display?.icon;
+  return {
+    id: route.id,
+    label: display?.label ?? route.id,
+    ariaLabel: display?.ariaLabel,
+    className: display?.className,
+    title: display?.label ?? route.id,
+    href: route.hash,
+    icon: {
+      name: icon?.name ?? "fa-gear",
+      variant: icon?.defaultVariant ?? "solid",
+    },
+  };
+}
+
+function ensureLayout(): LayoutContext {
+  if (!layoutContext) {
+    const sidebar = Sidebar({
+      hubItems: getHubRoutes().map((route) => toSidebarItem(route, "hub")),
+      primaryItems: getSidebarRoutes().map((route) => toSidebarItem(route, "primary")),
+    });
+    const content = Content();
+    const toolbar = Toolbar();
+    const footer = Footer(getFooterRoutes().map((route) => toFooterItem(route)));
+    const page = Page({ sidebar, content, footer, toolbar });
+    layoutContext = { page, sidebar, content, footer, toolbar };
+  }
+
+  const ctx = layoutContext;
+  if (!ctx) {
+    throw new Error("Layout failed to initialise");
+  }
+
+  if (!layoutMounted) {
+    ctx.page.mount();
+    layoutMounted = true;
+  }
+
+  return ctx;
+}
+
+function ensureCanonicalHash(route: RouteDefinition) {
+  if (window.location.hash === route.hash) return;
+  history.replaceState(null, "", route.hash);
+}
+
+async function renderApp({ route }: { route: RouteDefinition }) {
+  const context = ensureLayout();
+  const reusedLayout = layoutMounted;
+
+  context.sidebar.setActive(route.id);
+  context.footer.setActive(route.id);
+  ensureCanonicalHash(route);
+
+  if (currentRouteId === route.id) {
+    log.debug("renderApp: route unchanged", { route: route.id, reusedLayout });
+    return;
+  }
+
+  const sequence = ++renderSequence;
+  const container = context.content.element;
+
+  actions.setActivePane(route.id);
+  runViewCleanups(container);
+
+  log.debug("renderApp: mount route", { route: route.id, reusedLayout });
+
+  try {
+    await route.mount(container);
+  } catch (error) {
+    log.error("renderApp: mount failed", error);
+    return;
+  }
+
+  if (sequence === renderSequence) {
+    currentRouteId = route.id;
+  }
+}
 
 // --- HEIGHT-ONLY floor: ensure full sidebar is visible ---
 // Width is not constrained here.
@@ -155,7 +181,7 @@ function requiredLogicalFloor(): { w: number; h: number } {
 
   const neededH = Math.max(
     MIN_APP_HEIGHT,
-    headerH + footerH + Math.max(MIN_CONTENT_HEIGHT, intrinsic)
+    headerH + footerH + Math.max(MIN_CONTENT_HEIGHT, intrinsic),
   );
   return { w: MIN_WIDTH, h: neededH };
 }
@@ -176,7 +202,7 @@ async function enforceMinNow(growOnly = true) {
     const curH = current.height / sf;
     if (curW < nextW || curH < nextH) {
       await appWindow.setSize(
-        new LogicalSize(Math.max(curW, nextW), Math.max(curH, nextH))
+        new LogicalSize(Math.max(curW, nextW), Math.max(curH, nextH)),
       );
     }
   } catch (e) {
@@ -210,199 +236,33 @@ function setupDynamicMinSize() {
   calibrateMinHeight(1000);
 }
 
-function addImportButtonToSettings(container: HTMLElement) {
-  const about =
-    container.querySelector<HTMLElement>(
-      'section[aria-labelledby="settings-about"]'
-    ) ?? container;
-  if (about.querySelector('[data-testid="open-import-btn"]')) return;
-
-  const row = document.createElement("div");
-  row.style.display = "flex";
-  row.style.justifyContent = "flex-start";
-  row.style.gap = "8px";
-  row.style.marginTop = "12px";
-
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.dataset.testid = "open-import-btn";
-  btn.textContent = "Import legacy data…";
-  btn.onclick = () => {
-    const host = document.createElement("div");
-    host.className = "modal-overlay";
-    document.body.appendChild(host);
-    ImportModal(host);
-  };
-
-  row.appendChild(btn);
-  about.appendChild(row);
-}
-
-import { getSafe } from "@utils/object";
-
-function setActive(tab: View) {
-  const tabs: Record<View, HTMLAnchorElement | null> = {
-    dashboard: linkDashboard(),
-    manage: linkManage(),
-    primary: linkPrimary(),
-    secondary: linkSecondary(),
-    tasks: linkTasks(),
-    calendar: linkCalendar(),
-    files: linkFiles(),
-    shopping: linkShopping(),
-    bills: linkBills(),
-    insurance: linkInsurance(),
-    property: linkProperty(),
-    vehicles: linkVehicles(),
-    pets: linkPets(),
-    family: linkFamily(),
-    inventory: linkInventory(),
-    budget: linkBudget(),
-    notes: linkNotes(),
-    settings: null,
-  };
-  (Object.keys(tabs) as View[]).forEach((name) => {
-    const el = getSafe(tabs, name) ?? null;
-    const active = name === tab;
-    el?.classList.toggle("active", active);
-    if (active) el?.setAttribute("aria-current", "page");
-    else el?.removeAttribute("aria-current");
-    const icon = el?.querySelector<HTMLElement>(".nav__icon");
-    if (icon && !icon.dataset.fixed) {
-      icon.classList.toggle("fa-solid", active);
-      icon.classList.toggle("fa-regular", !active);
-    }
-  });
-  const manageEl = linkManage();
-  if (manageEl) {
-    const isCurrent = tab === "manage";
-    manageEl.classList.toggle("is-current", isCurrent);
-    if (isCurrent) manageEl.setAttribute("aria-current", "page");
-    else manageEl.removeAttribute("aria-current");
+async function handleRouteChange() {
+  const route = resolveRouteFromHash(window.location.hash);
+  try {
+    await renderApp({ route });
+  } catch (error) {
+    log.error("handleRouteChange failed", error);
   }
-}
-
-function renderBlank(title: string) {
-  const el = viewEl();
-  if (!el) return;
-  el.innerHTML = `<section><h2>${title}</h2></section>`;
-}
-
-function navigate(to: View) {
-  setActive(to);
-  const el = viewEl();
-  if (!el) return;
-  actions.setActivePane(to);
-  runViewCleanups(el);
-
-  if (to === "dashboard") {
-    DashboardView(el);
-    return;
-  }
-  if (to === "calendar") {
-    CalendarView(el);
-    return;
-  }
-  if (to === "files") {
-    FilesView(el);
-    return;
-  }
-  if (to === "shopping") {
-    ShoppingListView(el);
-    return;
-  }
-  if (to === "bills") {
-    BillsView(el);
-    return;
-  }
-  if (to === "insurance") {
-    InsuranceView(el);
-    return;
-  }
-  if (to === "property") {
-    PropertyView(el);
-    return;
-  }
-  if (to === "vehicles") {
-    VehiclesView(el);
-    return;
-  }
-  if (to === "pets") {
-    PetsView(el);
-    return;
-  }
-  if (to === "family") {
-    FamilyView(el);
-    return;
-  }
-  if (to === "inventory") {
-    InventoryView(el);
-    return;
-  }
-  if (to === "budget") {
-    BudgetView(el);
-    return;
-  }
-  if (to === "notes") {
-    NotesView(el);
-    return;
-  }
-  if (to === "settings") {
-    SettingsView(el);
-    const settingsContainer = el.querySelector<HTMLElement>(".settings");
-    if (settingsContainer) addImportButtonToSettings(settingsContainer);
-    return;
-  }
-  if (to === "manage") {
-    ManageView(el);
-    return;
-  }
-  const title = to.charAt(0).toUpperCase() + to.slice(1);
-  renderBlank(title);
 }
 
 window.addEventListener("DOMContentLoaded", () => {
   log.debug("app booted");
   defaultHouseholdId().catch((e) => console.error("DB init failed:", e));
 
-  initCommandPalette();
-  linkDashboard()?.addEventListener("click", (e) => {
-    e.preventDefault();
-    navigate("dashboard");
-  });
-  linkCalendar()?.addEventListener("click", (e) => {
-    e.preventDefault();
-    navigate("calendar");
-  });
-  linkFiles()?.addEventListener("click", (e) => {
-    e.preventDefault();
-    navigate("files");
-  });
-  linkNotes()?.addEventListener("click", (e) => {
-    e.preventDefault();
-    navigate("notes");
-  });
-  linkManage()?.addEventListener("click", (e) => {
-    e.preventDefault();
-    navigate("manage");
-  });
-  document
-    .querySelector<HTMLAnchorElement>("#footer-settings")
-    ?.addEventListener("click", (e) => {
-      e.preventDefault();
-      navigate("settings");
+  void (async () => {
+    await handleRouteChange();
+    initCommandPalette();
+    emit("app:ready", { ts: Date.now() });
+
+    window.addEventListener("hashchange", () => {
+      void handleRouteChange();
     });
-  // Load the route from the URL fragment or fall back to the dashboard view.
-  const initialRoute = routeFromHashOrDefault();
-  navigate(initialRoute);
-  emit("app:ready", { ts: Date.now() });
-  window.addEventListener("hashchange", () =>
-    navigate(routeFromHashOrDefault())
-  );
-  requestAnimationFrame(() => {
-    console.log("Runtime window label:", appWindow.label);
-    setupDynamicMinSize();
-  });
+
+    requestAnimationFrame(() => {
+      console.log("Runtime window label:", appWindow.label);
+      setupDynamicMinSize();
+    });
+  })();
 });
 
 // minimal debug handle without ts-expect-error
