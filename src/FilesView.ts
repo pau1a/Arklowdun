@@ -1,4 +1,4 @@
-import { open } from "@tauri-apps/plugin-dialog";
+import { open } from "@lib/ipc/dialog";
 import {
   readDir,
   writeText,
@@ -8,7 +8,7 @@ import {
   type RootKey,
 } from "./files/safe-fs";
 import { canonicalizeAndVerify, rejectSymlinks } from "./files/path";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc } from "@lib/ipc/core";
 import { STR } from "@ui/strings";
 import { showError } from "@ui/errors";
 

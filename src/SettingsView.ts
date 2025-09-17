@@ -1,4 +1,4 @@
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { writeText } from "@lib/ipc/clipboard";
 import { fetchAboutMetadata, fetchDiagnosticsSummary, openDiagnosticsDoc } from "./api/diagnostics";
 import { createEmptyState } from "./ui/emptyState";
 import { STR } from "./ui/strings";
