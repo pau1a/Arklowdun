@@ -26,16 +26,25 @@ export type AppEventListener<C extends AppEventChannel> = (
 const listeners: Partial<
   Record<AppEventChannel, Set<AppEventListener<AppEventChannel>>>
 > = {};
+import { getSafe } from "@utils/object";
 
 export function on<C extends AppEventChannel>(
   channel: C,
   listener: AppEventListener<C>,
 ): () => void {
-  const bucket = (listeners[channel] ??= new Set());
+  const existing = getSafe(listeners, channel);
+  const bucket = existing ?? new Set<AppEventListener<AppEventChannel>>();
+  if (!existing) {
+    // eslint-disable-next-line security/detect-object-injection
+    (listeners as Record<string, Set<AppEventListener<AppEventChannel>>>)[channel] =
+      bucket as Set<AppEventListener<AppEventChannel>>;
+  }
   bucket.add(listener as AppEventListener<AppEventChannel>);
   return () => {
     bucket.delete(listener as AppEventListener<AppEventChannel>);
-    if (bucket.size === 0) delete listeners[channel];
+    if (bucket.size === 0)
+      // eslint-disable-next-line security/detect-object-injection
+      delete (listeners as Record<string, unknown>)[channel];
   };
 }
 
@@ -43,16 +52,18 @@ export function off<C extends AppEventChannel>(
   channel: C,
   listener: AppEventListener<C>,
 ): void {
-  const bucket = listeners[channel];
+  const bucket = getSafe(listeners, channel);
   bucket?.delete(listener as AppEventListener<AppEventChannel>);
-  if (bucket && bucket.size === 0) delete listeners[channel];
+  if (bucket && bucket.size === 0)
+    // eslint-disable-next-line security/detect-object-injection
+    delete (listeners as Record<string, unknown>)[channel];
 }
 
 export function emit<C extends AppEventChannel>(
   channel: C,
   payload: AppEventMap[C],
 ): void {
-  const bucket = listeners[channel] as
+  const bucket = getSafe(listeners, channel) as
     | Set<AppEventListener<AppEventChannel>>
     | undefined;
   if (!bucket || bucket.size === 0) return;
@@ -68,8 +79,11 @@ export function emit<C extends AppEventChannel>(
 /** @internal test hook */
 export function __resetListeners(): void {
   (Object.keys(listeners) as AppEventChannel[]).forEach((channel) => {
-    const bucket = listeners[channel];
+    const bucket = getSafe(listeners as any, channel) as
+      | Set<AppEventListener<AppEventChannel>>
+      | undefined;
     if (bucket) bucket.clear();
-    delete listeners[channel];
+    // eslint-disable-next-line security/detect-object-injection
+    delete (listeners as Record<string, unknown>)[channel];
   });
 }

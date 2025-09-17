@@ -2,6 +2,7 @@ import { call } from "../api/call";
 import { defaultHouseholdId } from "../db/household";
 import type { SearchResult } from "../bindings/SearchResult";
 import { log } from "../utils/logger";
+import { getSafe } from "@utils/object";
 import { on } from "../store/events";
 import { probeCaps } from "../shared/capabilities";
 
@@ -22,7 +23,7 @@ function stableKey(obj: Record<string, unknown>): string {
   return JSON.stringify(
     Object.keys(obj)
       .sort()
-      .map((k) => [k, (obj as any)[k]])
+      .map((k) => [k, getSafe(obj as any, k)])
   );
 }
 

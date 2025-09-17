@@ -6,12 +6,15 @@ const ENTITY_MAP: Record<string, string> = {
   "'": '&#39;',
 };
 
+import { getSafe } from "./object.ts";
+
 function escapeHtml(input: string): string {
   // TODO: this scans forward with indexOf for every '&'. If profiling ever
   // shows it hot, replace with a small state machine to avoid potential
   // quadratic behaviour on pathological strings.
   let out = '';
   for (let i = 0; i < input.length; i++) {
+    // eslint-disable-next-line security/detect-object-injection
     const ch = input[i];
     if (ch === '&') {
       const semi = input.indexOf(';', i + 1);
@@ -24,7 +27,7 @@ function escapeHtml(input: string): string {
         }
       }
     }
-    const replacement = ENTITY_MAP[ch];
+    const replacement = getSafe(ENTITY_MAP as any, ch);
     out += replacement ? replacement : ch;
   }
   return out;

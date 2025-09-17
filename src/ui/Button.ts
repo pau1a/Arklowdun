@@ -15,17 +15,18 @@ export interface ButtonProps {
   id?: string;
   children?: Array<Node | string> | Node | string;
 }
+import { getSafe } from "@utils/object";
 
-const variantClass: Record<ButtonVariant, string | undefined> = {
+const variantClass = {
   primary: 'btn--accent',
   ghost: undefined,
   danger: 'btn--danger',
-};
+} as const satisfies Record<ButtonVariant, string | undefined>;
 
-const sizeClass: Record<ButtonSize, string | undefined> = {
+const sizeClass = {
   md: undefined,
   sm: 'btn--sm',
-};
+} as const satisfies Record<ButtonSize, string | undefined>;
 
 function applyContent(
   el: HTMLButtonElement,
@@ -97,9 +98,9 @@ export function createButton(props: ButtonProps = {}): ButtonElement {
   if (props.ariaLabel) button.setAttribute('aria-label', props.ariaLabel);
 
   const baseClass = ['btn'];
-  const variantToken = variantClass[currentVariant];
+  const variantToken = getSafe(variantClass, currentVariant);
   if (variantToken) baseClass.push(variantToken);
-  const sizeToken = sizeClass[currentSize];
+  const sizeToken = getSafe(sizeClass, currentSize);
   if (sizeToken) baseClass.push(sizeToken);
 
   applyClassName(button, baseClass.join(' '), currentClassName);
@@ -126,9 +127,9 @@ export function createButton(props: ButtonProps = {}): ButtonElement {
     if (next.ariaPressed !== undefined) currentAriaPressed = next.ariaPressed;
 
     const classes = ['btn'];
-    const newVariantToken = variantClass[currentVariant];
+    const newVariantToken = getSafe(variantClass, currentVariant);
     if (newVariantToken) classes.push(newVariantToken);
-    const newSizeToken = sizeClass[currentSize];
+    const newSizeToken = getSafe(sizeClass, currentSize);
     if (newSizeToken) classes.push(newSizeToken);
     applyClassName(button, classes.join(' '), currentClassName);
     applyContent(button, currentChildren, currentLabel);

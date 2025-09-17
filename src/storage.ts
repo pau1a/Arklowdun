@@ -26,8 +26,10 @@ export const storage: StorageFlags = {
   events: "sqlite",
 };
 
+import { getSafe } from "./utils/object.ts";
+
 export function assertJsonWritable(domain: keyof StorageFlags): void {
-  if (storage[domain] !== "json") {
+  if (getSafe(storage, domain) !== "json") {
     throw new Error(`JSON write disabled for ${domain}`);
   }
 }

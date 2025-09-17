@@ -132,5 +132,16 @@ module.exports = {
         ],
       },
     },
+    {
+      files: [
+        "scripts/**/*.{ts,js}",
+        "tests/**/*.{ts,js}",
+        "src/tools/**/*.{ts,js}"
+      ],
+      rules: {
+        "import/no-relative-parent-imports": "off",
+        "security/detect-object-injection": "off",
+      },
+    },
   ],
 };

@@ -4,6 +4,7 @@ import { newUuidV7 } from "./id";
 import { nowMs } from "./time";
 import type { DomainTable } from "./repo";
 import { ORDER_MAP } from "./repo";
+import { getSafe } from "@utils/object";
 
 export type RepoErrorCode =
   | "Constraint"
@@ -44,7 +45,7 @@ export function createCrudRepo<
     async list({ householdId, includeDeleted, limit, offset }) {
       const hh = requireHousehold(householdId);
       const db = await openDb();
-      const order = ORDER_MAP[table];
+      const order = getSafe(ORDER_MAP, table) ?? "created_at, id";
       const where = includeDeleted
         ? "household_id = ?"
         : "deleted_at IS NULL AND household_id = ?";
@@ -98,7 +99,7 @@ export function createCrudRepo<
       const set = keys.map((k) => `${k} = ?`).join(", ");
       const sql = `UPDATE ${table} SET ${set} WHERE id = ? AND household_id = ?`;
       try {
-        await db.execute(sql, [...keys.map((k) => fields[k]), id, hh]);
+        await db.execute(sql, [...keys.map((k) => getSafe(fields, k)), id, hh]);
       } catch (e: any) {
         if (/UNIQUE constraint failed/.test(String(e))) {
           throw new RepoError("Constraint", String(e));
