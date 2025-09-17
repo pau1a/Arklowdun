@@ -1,6 +1,7 @@
 use serde::Serialize;
 use std::{env, fs, path::PathBuf};
 
+use tauri::Manager;
 use crate::{git_commit_hash, resolve_logs_dir, AppError, AppResult, LOG_FILE_NAME};
 
 #[derive(Serialize)]
