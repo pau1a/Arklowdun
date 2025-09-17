@@ -1,4 +1,4 @@
-# {Area Name}
+# Frontend UX
 
 ## Goal
 One paragraph that states the intent in user terms.
