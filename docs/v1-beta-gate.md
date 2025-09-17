@@ -1,4 +1,3 @@
-```markdown
 # V1 Beta Gate
 
 This document defines the **line in the sand** for the Arklowdun app.  
