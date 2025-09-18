@@ -958,6 +958,14 @@ footer a.footer__settings {
 
 .files__panel { overflow-x: auto; }
 
+.files__error-region {
+  margin-bottom: var(--space-2);
+}
+
+.files__loading {
+  margin-bottom: var(--space-2);
+}
+
 .files__table { width: 100%; border-collapse: collapse; }
 
 .files__field {
@@ -1144,16 +1152,27 @@ footer a.footer__settings {
 
 .empty-state__icon { font-size: 1.8rem; opacity: .8; }
 .empty-state__title { margin: 0; color: var(--es-title); font-size: 1.1rem; }
-.empty-state__desc { margin: 0; max-width: 34ch; }
-.empty-state__action {
+.empty-state__body { margin: 0; max-width: 34ch; }
+.empty-state__cta {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-2);
   margin-top: calc(var(--space-2) * 4 / 5);
+}
+.empty-state__cta:empty { display: none; }
+.empty-state__cta-button {
   padding: calc(var(--space-2) * 4 / 5) calc(var(--space-3) * 4 / 5);
   border-radius: calc(var(--radius-base) - 2px);
   border: 1px solid var(--es-border);
   background: var(--color-panel);
-  cursor: pointer;
 }
-.empty-state__action:hover { filter: brightness(0.98); }
+.empty-state__cta-button:hover { filter: brightness(0.98); }
+.empty-state__link {
+  color: var(--color-accent);
+  text-decoration: underline;
+  font-weight: 500;
+}
+.empty-state__link:hover { opacity: 0.85; }
 
 /* Modal */
 .modal-overlay {
@@ -1315,8 +1334,7 @@ mark.search-hit {
 
 .error-banner {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-danger);
@@ -1325,66 +1343,99 @@ mark.search-hit {
   border-radius: var(--radius-base);
 }
 
+.error-banner__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
 .error-banner__message {
   flex: 1;
+  min-width: 200px;
 }
 
 .error-banner__actions {
   display: flex;
   gap: var(--space-1);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.error-banner__detail {
+  margin: 0;
+  padding: var(--space-2);
+  border-radius: calc(var(--radius-base) - 2px);
+  background: rgba(185, 28, 28, 0.12);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace);
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  overflow-x: auto;
 }
 
 .loading {
-  display: inline-flex;
-  align-items: center;
+  display: flex;
+  flex-direction: column;
   gap: var(--space-2);
   color: var(--color-text-muted);
+  width: 100%;
 }
 
-.loading--block {
+.loading__surface {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  gap: var(--space-2);
   width: 100%;
-  padding: var(--space-3);
 }
 
-.loading__spinner {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 2px solid var(--color-border);
-  border-top-color: var(--color-accent);
-  animation: loading-spin 1s linear infinite;
-}
-
-.loading__label {
-  font-size: 0.875rem;
-}
-
-.loading--skeleton {
-  width: 100%;
-  background: linear-gradient(
+.loading__block,
+.loading__inline,
+.loading__bar {
+  background-color: var(--color-border);
+  background-image: linear-gradient(
     90deg,
     rgba(255, 255, 255, 0),
-    rgba(255, 255, 255, 0.7),
+    rgba(255, 255, 255, 0.6),
     rgba(255, 255, 255, 0)
   );
   background-size: 200% 100%;
   animation: loading-skeleton 1.2s ease-in-out infinite;
   border-radius: var(--radius-base);
-  min-height: 1.25rem;
-  padding: 0;
 }
 
-.loading--skeleton .loading__spinner,
-.loading--skeleton .loading__label {
-  visibility: hidden;
+.loading__block {
+  width: 100%;
+  min-height: 6rem;
 }
 
-@keyframes loading-spin {
-  to {
-    transform: rotate(360deg);
-  }
+.loading--list .loading__surface {
+  gap: var(--space-2);
+}
+
+.loading__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.loading__bar {
+  height: 0.75rem;
+  flex: 1;
+}
+
+.loading__bar--secondary {
+  flex: 0 0 auto;
+  max-width: 160px;
+}
+
+.loading__inline {
+  height: 0.75rem;
+  width: var(--loading-inline-width, 8rem);
+}
+
+.loading__label {
+  font-size: 0.875rem;
 }
 
 @keyframes loading-skeleton {

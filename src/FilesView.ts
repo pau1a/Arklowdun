@@ -11,6 +11,8 @@ import { canonicalizeAndVerify, rejectSymlinks } from './files/path';
 import { convertFileSrc } from '@lib/ipc/core';
 import { STR } from '@ui/strings';
 import { showError } from '@ui/errors';
+import createLoading from '@ui/Loading';
+import createErrorBanner from '@ui/ErrorBanner';
 import {
   actions,
   selectors,
@@ -63,22 +65,6 @@ function renderBreadcrumb(
     }
     container.appendChild(span);
   });
-}
-
-async function refreshDirectory(dir: string, source: string): Promise<void> {
-  try {
-    const entries = await readDir(dir, ROOT);
-    const ts = Date.now();
-    const payload = actions.files.updateSnapshot({
-      items: entries,
-      ts,
-      path: dir,
-      source,
-    });
-    emit('files:updated', payload);
-  } catch (e) {
-    showError({ code: 'INFO', message: toUserMessage(e) });
-  }
 }
 
 export async function FilesView(container: HTMLElement) {
@@ -160,25 +146,110 @@ export async function FilesView(container: HTMLElement) {
       },
     ],
     emptyState: {
+      icon: '📁',
       title: STR.empty.filesTitle,
+      body: 'Create a file or connect a folder to see it here.',
       actionLabel: 'New file',
     },
     onEmptyAction: () => toolbar.openCreateFile(),
   });
 
+  const loadingIndicator = createLoading({
+    variant: 'list',
+    label: 'Loading files…',
+    rows: 6,
+  });
+  loadingIndicator.classList.add('files__loading');
+
   header.append(headerInfo, toolbar.element);
 
   const panel = document.createElement('div');
   panel.className = 'card files__panel';
-  panel.appendChild(filesList.element);
+  const errorRegion = document.createElement('div');
+  errorRegion.className = 'files__error-region';
+  errorRegion.setAttribute('aria-live', 'polite');
+  errorRegion.setAttribute('aria-atomic', 'true');
+  errorRegion.hidden = true;
+  panel.append(errorRegion, loadingIndicator, filesList.element);
 
   section.append(header, panel, preview);
   container.innerHTML = '';
   container.appendChild(section);
 
+  const initialSnapshot = selectors.files.snapshot(getState());
+  let inlineError: ReturnType<typeof createErrorBanner> | null = null;
+  let isLoading = false;
+
+  const clearInlineError = () => {
+    if (inlineError) {
+      inlineError.remove();
+      inlineError = null;
+    }
+    errorRegion.hidden = true;
+  };
+
+  const setLoading = (active: boolean) => {
+    if (isLoading === active) return;
+    isLoading = active;
+    loadingIndicator.hidden = !active;
+    if (active) {
+      filesList.element.hidden = true;
+      filesList.element.setAttribute('aria-hidden', 'true');
+    } else {
+      filesList.element.hidden = false;
+      filesList.element.removeAttribute('aria-hidden');
+    }
+  };
+
+  const showInlineError = (message: string, detail?: string) => {
+    setLoading(false);
+    if (!inlineError) {
+      inlineError = createErrorBanner({
+        message,
+        detail,
+        onDismiss: () => {
+          clearInlineError();
+        },
+      });
+      errorRegion.appendChild(inlineError);
+    } else {
+      inlineError.update({ message, detail });
+    }
+    errorRegion.hidden = false;
+  };
+
+  if (initialSnapshot) {
+    setLoading(false);
+  } else {
+    setLoading(true);
+  }
+
   function setDir(dir: string | null) {
     currentDir = dir;
     toolbar.setDirectoryAvailable(Boolean(dir));
+  }
+
+  async function refreshDirectory(dir: string, source: string): Promise<void> {
+    setLoading(true);
+    clearInlineError();
+    try {
+      const entries = await readDir(dir, ROOT);
+      const ts = Date.now();
+      const payload = actions.files.updateSnapshot({
+        items: entries,
+        ts,
+        path: dir,
+        source,
+      });
+      emit('files:updated', payload);
+    } catch (error) {
+      emit('files:load-error', {
+        message: 'Unable to load files',
+        detail: toUserMessage(error),
+      });
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleDelete(item: FilesListItem) {
@@ -238,6 +309,8 @@ export async function FilesView(container: HTMLElement) {
       preview.innerHTML = '';
       return;
     }
+    setLoading(false);
+    clearInlineError();
     setDir(snapshot.path);
     renderBreadcrumb(snapshot.path, breadcrumbNav, handleNavigate);
     const items: FilesListItem[] = snapshot.items.map((entry) => ({
@@ -257,6 +330,11 @@ export async function FilesView(container: HTMLElement) {
     void applySnapshot(snapshot);
   });
   registerViewCleanup(container, unsubscribe);
+
+  const stopLoadError = on('files:load-error', ({ message, detail }) => {
+    showInlineError(message, detail);
+  });
+  registerViewCleanup(container, stopLoadError);
 
   const stopHousehold = on('household:changed', async () => {
     const dir = selectors.files.path(getState()) ?? currentDir;

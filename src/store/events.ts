@@ -1,4 +1,5 @@
 export type FilesUpdatedPayload = { count: number; ts: number };
+export type FilesLoadErrorPayload = { message: string; detail?: string };
 export type EventsUpdatedPayload = {
   count: number;
   ts: number;
@@ -11,6 +12,7 @@ export type AppReadyPayload = { ts: number };
 
 export interface AppEventMap {
   "files:updated": FilesUpdatedPayload;
+  "files:load-error": FilesLoadErrorPayload;
   "events:updated": EventsUpdatedPayload;
   "notes:updated": NotesUpdatedPayload;
   "household:changed": HouseholdChangedPayload;

@@ -3,7 +3,7 @@ import createButton, {
   type ButtonSize,
   type ButtonVariant,
 } from '@ui/Button';
-import createEmptyState from '@ui/EmptyState';
+import createEmptyState, { type EmptyStateIcon } from '@ui/EmptyState';
 
 export interface FilesListItem {
   entry: FsEntryLite;
@@ -26,8 +26,10 @@ export interface FilesListProps {
   onActivate: (item: FilesListItem, event: Event) => void;
   getRowActions?: (item: FilesListItem) => FilesListRowAction[];
   emptyState?: {
+    icon?: EmptyStateIcon;
     title: string;
     description?: string;
+    body?: string;
     actionLabel?: string;
   };
   onEmptyAction?: () => void;
@@ -49,9 +51,20 @@ function renderEmptyState(props: FilesListProps): HTMLTableRowElement {
   const cell = document.createElement('td');
   cell.colSpan = 5;
   if (props.emptyState) {
+    const body =
+      props.emptyState.body ?? props.emptyState.description ?? undefined;
     const empty = createEmptyState({
-      ...props.emptyState,
-      onAction: props.onEmptyAction,
+      icon: props.emptyState.icon,
+      title: props.emptyState.title,
+      body,
+      cta:
+        props.emptyState.actionLabel && props.onEmptyAction
+          ? {
+              kind: 'button' as const,
+              label: props.emptyState.actionLabel,
+              onClick: props.onEmptyAction,
+            }
+          : undefined,
     });
     cell.appendChild(empty);
   }
