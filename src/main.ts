@@ -24,11 +24,13 @@ import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { defaultHouseholdId } from "./db/household";
 import { log } from "./utils/logger";
 import { initCommandPalette } from "@ui/CommandPalette";
+import { initKeyboardMap } from "@ui/keys";
 import { actions, type AppPane } from "./store";
 import { emit } from "./store/events";
 import { runViewCleanups } from "./utils/viewLifecycle";
 
-const appWindow = getCurrentWindow();
+const isTauri = !!import.meta.env.TAURI;
+const appWindow = isTauri ? getCurrentWindow() : null;
 
 interface LayoutContext {
   page: PageInstance;
@@ -189,6 +191,7 @@ function requiredLogicalFloor(): { w: number; h: number } {
 let raf: number | null = null;
 let lastMin = { w: 0, h: 0 };
 async function enforceMinNow(growOnly = true) {
+  if (!appWindow) return;
   const { w, h } = requiredLogicalFloor();
   const nextW = lastMin.w ? Math.max(w, lastMin.w) : w;
   const nextH = lastMin.h && growOnly ? Math.max(h, lastMin.h) : h;
@@ -226,6 +229,7 @@ function calibrateMinHeight(durationMs = 1000) {
 }
 
 function setupDynamicMinSize() {
+  if (!appWindow) return;
   const sidebarEl = document.querySelector<HTMLElement>(".sidebar");
   if (!sidebarEl) return;
   const mo = new MutationObserver(() => {
@@ -256,10 +260,16 @@ window.addEventListener("DOMContentLoaded", () => {
 
   void (async () => {
     await handleRouteChange();
-    initCommandPalette();
+    const palette = initCommandPalette();
+    initKeyboardMap({
+      openCommandPalette: () => {
+        palette?.open();
+      },
+    });
     emit("app:ready", { ts: Date.now() });
 
     requestAnimationFrame(() => {
+      if (!appWindow) return;
       console.log("Runtime window label:", appWindow.label);
       setupDynamicMinSize();
     });
@@ -268,7 +278,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
 // minimal debug handle without ts-expect-error
 const DEV = import.meta.env.DEV ?? false;
-if (DEV) {
+if (DEV && appWindow) {
   (window as any).__win = {
     label: (appWindow as any).label,
     setMin: (w = 1200, h = 800) => appWindow.setMinSize(new LogicalSize(w, h)),

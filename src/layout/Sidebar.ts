@@ -1,4 +1,5 @@
 import type { AppPane } from "../store";
+import { formatShortcut } from "@ui/keys";
 
 type IconVariant = "solid" | "regular";
 
@@ -122,8 +123,9 @@ export function Sidebar(props: SidebarProps): SidebarInstance {
   searchButton.id = "sidebar-search";
   searchButton.type = "button";
   searchButton.className = "sidebar__cmd-button";
-  searchButton.title = "Search (Ctrl+K)";
-  searchButton.setAttribute("aria-label", "Search (Ctrl+K)");
+  const shortcut = formatShortcut("K");
+  searchButton.title = `Search (${shortcut})`;
+  searchButton.setAttribute("aria-label", `Search (${shortcut})`);
   const searchIcon = document.createElement("i");
   searchIcon.className = "fa-solid fa-magnifying-glass";
   searchIcon.setAttribute("aria-hidden", "true");

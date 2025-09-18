@@ -1,3 +1,5 @@
+import { registerOverlay } from './keys';
+
 const FOCUSABLE_SELECTORS =
   [
     'a[href]',
@@ -67,6 +69,7 @@ export function createModal(props: ModalProps): ModalInstance {
   let onOpenChange = props.onOpenChange;
   let lastFocusedElement: HTMLElement | null = null;
   let restoreScroll = '';
+  let releaseOverlay: (() => void) | null = null;
 
   const applyAria = () => {
     dialog.setAttribute('aria-labelledby', currentTitleId);
@@ -120,12 +123,14 @@ export function createModal(props: ModalProps): ModalInstance {
   const applyOpen = () => {
     if (isOpen) {
       if (!root.isConnected) {
-        document.body.appendChild(root);
+        const host = document.getElementById('modal-root');
+        (host ?? document.body).appendChild(root);
       }
       root.removeAttribute('hidden');
       restoreScroll = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
       lastFocusedElement = document.activeElement as HTMLElement | null;
+      releaseOverlay = registerOverlay('modal', () => onOpenChange(false));
       const desired = resolveInitialFocus(currentInitialFocus) ?? getFocusableElements(dialog)[0];
       window.setTimeout(() => {
         if (!isOpen) return;
@@ -139,6 +144,8 @@ export function createModal(props: ModalProps): ModalInstance {
       if (root.isConnected) {
         root.remove();
       }
+      releaseOverlay?.();
+      releaseOverlay = null;
       document.body.style.overflow = restoreScroll;
       if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
         window.setTimeout(() => {

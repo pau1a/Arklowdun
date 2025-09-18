@@ -1,8 +1,8 @@
 import { resolve as tsResolve, load as tsLoad, getFormat as tsGetFormat, transformSource as tsTransformSource } from 'ts-node/esm';
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
-import { resolve as resolvePath } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { dirname, resolve as resolvePath } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { loadConfig, createMatchPath } = require('tsconfig-paths');
@@ -47,7 +47,20 @@ export async function resolve(specifier, context, defaultResolve) {
     }
   }
 
-  return tsResolve(nextSpecifier, context, defaultResolve);
+  try {
+    return await tsResolve(nextSpecifier, context, defaultResolve);
+  } catch (error) {
+    if (specifier.startsWith('.') && context.parentURL) {
+      const parentPath = fileURLToPath(context.parentURL);
+      const candidateBase = resolvePath(dirname(parentPath), specifier);
+      const resolvedExt = extensions.find((ext) => existsSync(`${candidateBase}${ext}`));
+      if (resolvedExt) {
+        const candidateUrl = pathToFileURL(`${candidateBase}${resolvedExt}`).href;
+        return tsResolve(candidateUrl, context, defaultResolve);
+      }
+    }
+    throw error;
+  }
 }
 
 export const load = tsLoad;

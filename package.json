@@ -12,6 +12,7 @@
     "migrate:batch1": "node --loader ts-node/esm src/tools/migrate-batch1.ts",
     "check:household": "bash scripts/check-household-scope.sh",
     "test": "node --import ./scripts/test-preload.mjs --test tests/*.ts tests/*.js",
+    "test:a11y": "playwright test tests/a11y/*.spec.ts",
     "lint:rs": "cargo clippy --manifest-path src-tauri/Cargo.toml --lib --bins --examples --all-features -- -D clippy::unwrap_used -D clippy::expect_used && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features",
     "gen:models": "cargo test --no-default-features --manifest-path src-tauri/Cargo.toml",
     "check:models": "npm run gen:models && git diff --exit-code -- src/bindings",
@@ -53,6 +54,8 @@
     "better-sqlite3": "^12.2.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.0",
+    "@playwright/test": "^1.49.0",
     "@tauri-apps/cli": "^2.8.3",
     "@types/better-sqlite3": "^7.6.13",
     "@types/jsdom": "^21.1.7",
