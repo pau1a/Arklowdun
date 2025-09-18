@@ -104,6 +104,19 @@ module.exports = {
       },
     },
     {
+      files: ["src/{Calendar,Notes,Settings}View.ts"],
+      rules: {
+        "no-restricted-syntax": [
+          "error",
+          {
+            selector:
+              "CallExpression[callee.object.name='document'][callee.property.name='createElement'][arguments.0.value=/^(?:input|button)$/]",
+            message: "Use @ui/Input and @ui/Button primitives in views.",
+          },
+        ],
+      },
+    },
+    {
       files: ["src/ui/**/*.{ts,tsx,js,jsx}"],
       rules: {
         "no-restricted-syntax": [

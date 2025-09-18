@@ -13,6 +13,8 @@ import {
 } from "./store";
 import { emit, on } from "./store/events";
 import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
+import createButton from "@ui/Button";
+import createInput from "@ui/Input";
 
 const NOTE_PALETTE: Record<string, { base: string; text: string }> = {
   "#FFFF88": { base: "#FFF4B8", text: "#2b2b2b" },
@@ -131,22 +133,51 @@ export async function NotesView(container: HTMLElement) {
   runViewCleanups(container);
 
   const section = document.createElement("section");
-  section.innerHTML = `
-    <h2>Notes</h2>
-    <form id="note-form">
-      <input id="note-text" type="text" placeholder="Note" required />
-      <input id="note-color" type="color" value="#FFF4B8" />
-      <button type="submit">Add</button>
-    </form>
-    <div id="notes-canvas" class="notes-canvas"></div>
-  `;
+  const heading = document.createElement("h2");
+  heading.textContent = "Notes";
+
+  const form = document.createElement("form");
+  form.id = "note-form";
+  form.setAttribute("aria-label", "Create note");
+
+  const textLabel = document.createElement("label");
+  textLabel.className = "sr-only";
+  textLabel.htmlFor = "note-text";
+  textLabel.textContent = "Note text";
+  const textInput = createInput({
+    id: "note-text",
+    type: "text",
+    placeholder: "Note",
+    ariaLabel: "Note text",
+    required: true,
+  });
+
+  const colorLabel = document.createElement("label");
+  colorLabel.className = "sr-only";
+  colorLabel.htmlFor = "note-color";
+  colorLabel.textContent = "Note color";
+  const colorInput = createInput({
+    id: "note-color",
+    type: "color",
+    value: "#FFF4B8",
+    ariaLabel: "Note color",
+  });
+
+  const submitButton = createButton({
+    label: "Add",
+    variant: "primary",
+    type: "submit",
+  });
+
+  form.append(textLabel, textInput, colorLabel, colorInput, submitButton);
+
+  const canvas = document.createElement("div");
+  canvas.id = "notes-canvas";
+  canvas.className = "notes-canvas";
+
+  section.append(heading, form, canvas);
   container.innerHTML = "";
   container.appendChild(section);
-
-  const form = section.querySelector<HTMLFormElement>("#note-form")!;
-  const textInput = section.querySelector<HTMLInputElement>("#note-text")!;
-  const colorInput = section.querySelector<HTMLInputElement>("#note-color")!;
-  const canvas = section.querySelector<HTMLDivElement>("#notes-canvas")!;
 
   let householdId = await defaultHouseholdId();
 
@@ -223,38 +254,50 @@ export async function NotesView(container: HTMLElement) {
         });
         el.appendChild(textarea);
 
-        const del = document.createElement("button");
-        del.className = "delete";
-        del.textContent = "\u00d7";
-        del.addEventListener("click", async () => {
-          note.deleted_at = Date.now();
-          try {
-            await updateNote(householdId, note.id, { deleted_at: note.deleted_at });
-            notesLocal = notesLocal.filter((n) => n.id !== note.id);
-            commitSnapshot("notes:delete", true, true);
-            render();
-          } catch (err: any) {
-            showError(err);
-          }
+        const deleteButton = createButton({
+          type: "button",
+          variant: "ghost",
+          size: "sm",
+          className: "note__control note__control--delete",
+          ariaLabel: "Delete note",
+          children: "\u00d7",
+          onClick: async (event) => {
+            event.preventDefault();
+            note.deleted_at = Date.now();
+            try {
+              await updateNote(householdId, note.id, { deleted_at: note.deleted_at });
+              notesLocal = notesLocal.filter((n) => n.id !== note.id);
+              commitSnapshot("notes:delete", true, true);
+              render();
+            } catch (err: any) {
+              showError(err);
+            }
+          },
         });
-        el.appendChild(del);
+        el.appendChild(deleteButton);
 
-        const bring = document.createElement("button");
-        bring.className = "bring";
-        bring.textContent = "\u2191";
-        bring.addEventListener("click", async () => {
-          const maxZ = Math.max(0, ...notesLocal.filter((n) => !n.deleted_at).map((n) => n.z ?? 0));
-          note.z = maxZ + 1;
-          commitSnapshot("notes:bring", false, true);
-          try {
-            await updateNote(householdId, note.id, { z: note.z });
-            commitSnapshot("notes:bring", true, true);
-            render();
-          } catch (err: any) {
-            showError(err);
-          }
+        const bringButton = createButton({
+          type: "button",
+          variant: "ghost",
+          size: "sm",
+          className: "note__control note__control--bring",
+          ariaLabel: "Bring note to front",
+          children: "\u2191",
+          onClick: async (event) => {
+            event.preventDefault();
+            const maxZ = Math.max(0, ...notesLocal.filter((n) => !n.deleted_at).map((n) => n.z ?? 0));
+            note.z = maxZ + 1;
+            commitSnapshot("notes:bring", false, true);
+            try {
+              await updateNote(householdId, note.id, { z: note.z });
+              commitSnapshot("notes:bring", true, true);
+              render();
+            } catch (err: any) {
+              showError(err);
+            }
+          },
         });
-        el.appendChild(bring);
+        el.appendChild(bringButton);
 
         el.addEventListener("pointerdown", (e) => {
           if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLButtonElement) return;
