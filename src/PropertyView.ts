@@ -25,12 +25,16 @@ async function renderDocs(listEl: HTMLUListElement, docs: PropertyDocument[]) {
     li.appendChild(
       createEmptyState({
         title: STR.empty.propertyTitle,
-        description: STR.empty.propertyDesc,
-        actionLabel: "Add document",
-        onAction: () =>
-          document
-            .querySelector<HTMLInputElement>("#prop-desc")
-            ?.focus(),
+        body: STR.empty.propertyDesc,
+        cta: {
+          kind: "button",
+          label: "Add document",
+          onClick: () => {
+            document
+              .querySelector<HTMLInputElement>("#prop-desc")
+              ?.focus();
+          },
+        },
       }),
     );
     listEl.appendChild(li);

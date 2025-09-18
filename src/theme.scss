@@ -29,6 +29,28 @@ html, body {
 /* Headings: subtle premium feel */
 h1, h2, h3 { letter-spacing: -0.01em; }
 
+@mixin theme-dark {
+  --color-background: #1f2937;
+  --color-panel: #111827;
+  --color-text: #f9fafb;
+  --color-text-muted: #9ca3af;
+  --color-border: #374151;
+  --color-accent: #ff7e36;
+  --color-accent-text: #ffffff;
+  --color-accent-soft: #3b2a21;
+  --color-accent-soft-hover: #4c372b;
+  --color-sidebar-bg: #1e293b;
+  --color-sidebar-border: #334155;
+  --color-rule: #2a2f38;
+  --color-sidebar-rule: var(--color-rule);
+  --shadow-base: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --color-row-hover: #4c372b;
+  --overlay-bg: rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.6);
+  --color-bg: var(--color-panel);
+  color-scheme: dark;
+}
+
 /* Theme tokens and base styles scoped to theme-v1 */
 .theme-v1 {
   /* Colors */
@@ -75,6 +97,7 @@ h1, h2, h3 { letter-spacing: -0.01em; }
   color: var(--color-text);
   font-family: var(--font-family-base);
   font-size: var(--font-size-base);
+  color-scheme: light;
 }
 
 @supports (color: color-mix(in srgb, black, white)) {
@@ -87,13 +110,6 @@ h1, h2, h3 { letter-spacing: -0.01em; }
     );
   }
 }
-
-/* (Optional, future) Dark theme override
-.theme-v1[data-theme="dark"] {
-  --color-rule: #2a2f38;
-  --color-sidebar-rule: var(--color-rule);
-}
-*/
 
 .theme-v1 a {
   color: var(--color-accent);
@@ -110,24 +126,14 @@ h1, h2, h3 { letter-spacing: -0.01em; }
   box-shadow: var(--shadow-base);
 }
 
+:root[data-theme="dark"] .theme-v1,
+.theme-v1[data-theme="dark"] {
+  @include theme-dark;
+}
+
 @media (prefers-color-scheme: dark) {
-  .theme-v1 {
-    --color-background: #1f2937;
-    --color-panel: #111827;
-    --color-text: #f9fafb;
-    --color-text-muted: #9ca3af;
-    --color-border: #374151;
-    --color-accent: #ff7e36;
-    --color-accent-text: #ffffff;
-    /* Opaque "pale orange" surfaces for dark UI */
-    --color-accent-soft: #3b2a21; /* base surface */
-    --color-accent-soft-hover: #4c372b; /* hover/active surface */
-    --color-sidebar-bg: #1e293b;
-    --color-sidebar-border: #334155;
-    --shadow-base: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --color-row-hover: #4c372b;
-    --overlay-bg: rgba(0, 0, 0, 0.6);
-    --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.6);
-    --color-bg: var(--color-panel);
+  :root:not([data-theme="light"]) .theme-v1,
+  .theme-v1:not([data-theme="light"]) {
+    @include theme-dark;
   }
 }

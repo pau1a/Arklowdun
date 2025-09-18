@@ -108,6 +108,7 @@ export function createFilesToolbar(props: FilesToolbarProps): FilesToolbarInstan
   const selectButton = createButton({
     label: 'Select Directory',
     variant: 'ghost',
+    className: 'grow-xs',
     onClick: () => {
       void props.onSelectDirectory();
     },
@@ -116,11 +117,13 @@ export function createFilesToolbar(props: FilesToolbarProps): FilesToolbarInstan
   const newFolderButton = createButton({
     label: 'New Folder',
     variant: 'ghost',
+    className: 'grow-xs',
   });
 
   const newFileButton = createButton({
     label: 'New File',
     variant: 'ghost',
+    className: 'grow-xs',
   });
 
   container.append(selectButton, newFolderButton, newFileButton);

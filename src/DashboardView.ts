@@ -113,7 +113,7 @@ export async function DashboardView(container: HTMLElement) {
       listEl.appendChild(
         createEmptyState({
           title: STR.empty.dashboardTitle,
-          description: "You're all caught up.",
+          body: "You're all caught up.",
         }),
       );
     }

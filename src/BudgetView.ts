@@ -53,10 +53,16 @@ async function renderSummary(
     td.appendChild(
       createEmptyState({
         title: STR.empty.budgetTitle,
-        description: STR.empty.budgetDesc,
-        actionLabel: "Add category",
-        onAction: () =>
-          document.querySelector<HTMLInputElement>("#cat-name")?.focus(),
+        body: STR.empty.budgetDesc,
+        cta: {
+          kind: "button",
+          label: "Add category",
+          onClick: () => {
+            document
+              .querySelector<HTMLInputElement>("#cat-name")
+              ?.focus();
+          },
+        },
       }),
     );
     tr.appendChild(td);

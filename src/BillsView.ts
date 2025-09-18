@@ -32,12 +32,16 @@ async function renderBills(listEl: HTMLUListElement, bills: Bill[]) {
     li.appendChild(
       createEmptyState({
         title: STR.empty.billsTitle,
-        description: STR.empty.billsDesc,
-        actionLabel: "Add bill",
-        onAction: () =>
-          document
-            .querySelector<HTMLInputElement>("#bill-amount")
-            ?.focus(),
+        body: STR.empty.billsDesc,
+        cta: {
+          kind: "button",
+          label: "Add bill",
+          onClick: () => {
+            document
+              .querySelector<HTMLInputElement>("#bill-amount")
+              ?.focus();
+          },
+        },
       }),
     );
     listEl.appendChild(li);

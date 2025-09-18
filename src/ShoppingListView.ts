@@ -38,12 +38,16 @@ export async function ShoppingListView(container: HTMLElement) {
       wrap.appendChild(
         createEmptyState({
           title: STR.empty.shoppingTitle,
-          description: STR.empty.shoppingDesc,
-          actionLabel: "Add item",
-          onAction: () =>
-            document
-              .querySelector<HTMLFormElement>("#item-form")
-              ?.dispatchEvent(new Event("submit")),
+          body: STR.empty.shoppingDesc,
+          cta: {
+            kind: "button",
+            label: "Add item",
+            onClick: () => {
+              document
+                .querySelector<HTMLFormElement>("#item-form")
+                ?.dispatchEvent(new Event("submit"));
+            },
+          },
         }),
       );
       listEl.appendChild(wrap);

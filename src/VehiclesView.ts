@@ -22,7 +22,7 @@ export async function VehiclesView(container: HTMLElement) {
           li.appendChild(
             createEmptyState({
               title: STR.empty.vehiclesTitle,
-              description: STR.empty.vehiclesDesc,
+              body: STR.empty.vehiclesDesc,
             }),
           );
           listEl?.appendChild(li);
