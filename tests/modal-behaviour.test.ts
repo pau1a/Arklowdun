@@ -6,11 +6,48 @@ import createButton from '@ui/Button';
 import { __resetKeyboardMapForTests } from '@ui/keys';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>');
-(globalThis as any).window = dom.window as unknown as typeof globalThis & Window;
-(globalThis as any).document = dom.window.document;
-(globalThis as any).HTMLElement = dom.window.HTMLElement;
-(globalThis as any).KeyboardEvent = dom.window.KeyboardEvent;
-(globalThis as any).navigator = dom.window.navigator as Navigator;
+const domWindow = dom.window;
+const { navigator: windowNavigator } = domWindow;
+(globalThis as any).window = domWindow as unknown as typeof globalThis & Window;
+(globalThis as any).document = domWindow.document;
+(globalThis as any).HTMLElement = domWindow.HTMLElement;
+(globalThis as any).KeyboardEvent = domWindow.KeyboardEvent;
+
+if (!('navigator' in globalThis)) {
+  Object.defineProperty(globalThis, 'navigator', {
+    get: () => windowNavigator as Navigator,
+    configurable: true,
+  });
+} else {
+  const targetNavigator = globalThis.navigator as Navigator & Record<string, unknown>;
+  const sourceNavigator = windowNavigator as Navigator & Record<string, unknown>;
+  const keysToCopy = ['platform', 'language', 'languages', 'userAgent'] as const;
+
+  for (const key of keysToCopy) {
+    const value = sourceNavigator[key];
+    if (value === undefined) continue;
+    if (key in targetNavigator && targetNavigator[key] === value) continue;
+
+    try {
+      Object.defineProperty(targetNavigator, key, {
+        configurable: true,
+        enumerable: true,
+        value,
+      });
+      continue;
+    } catch {
+      try {
+        Object.defineProperty(targetNavigator, key, {
+          configurable: true,
+          enumerable: true,
+          get: () => sourceNavigator[key],
+        });
+      } catch {
+        // Ignore failures when the runtime marks navigator properties as non-configurable.
+      }
+    }
+  }
+}
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
