@@ -379,4 +379,14 @@ This setup makes wandering expensive:
 * Missing CSP or weak CSP **fails audit**.
 * Owners get dragged in automatically.
 
+## Appendix: CI Enforcement (Structure & IPC Boundaries)
+
+To keep these rules tight, CI publishes three dedicated checks whenever a PR opens:
+
+- **`gate/ipc-in-components`** — Fails if files under `src/ui/**`, any `src/**/components/**` folder, or `src/main.ts` import from `@tauri-apps/api*` (or the `@tauri-apps/plugin-*` family). The check prints the exact files and import specifiers so the author can route the IPC call through `src/lib/ipc/**` or a feature API layer instead.
+- **`gate/no-deep-relatives`** — Fails when code in `src/**` reaches for paths containing `../..` (or deeper). Current grandfathered offenders are tracked inside the scanner (`scripts/guards/gate-no-deep-relatives.mjs`) and emit `::notice` logs until PR-D retires them. Everyone else must switch to the existing alias set (`@features/*`, `@ui/*`, `@layout/*`, `@lib/*`, `@store/*`).
+- **`gate/cross-feature-report`** — Succeeds, but logs a warning summary when feature slices import another feature’s `components/`, `api/`, `model/`, or `hooks/` internals. The output lists each `file → import` pair so the owning team can plan the extraction.
+
+Branch protection on `main` should require the first two checks (`gate/ipc-in-components`, `gate/no-deep-relatives`) before merge. The reach-through report stays informational so it can surface the debt without blocking progress. Locally, `npm run gate:scan` runs all three checks in one go.
+
 Do you want me to also suggest how you enforce this mechanically in GitHub (branch protection / PR template)?

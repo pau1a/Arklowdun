@@ -4,6 +4,36 @@ on:
   workflow_dispatch: {}
 
 jobs:
+  gate_ipc_in_components:
+    name: gate/ipc-in-components
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/guards/gate-ipc-in-components.mjs
+
+  gate_no_deep_relatives:
+    name: gate/no-deep-relatives
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/guards/gate-no-deep-relatives.mjs
+
+  gate_cross_feature_report:
+    name: gate/cross-feature-report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/guards/gate-cross-feature-report.mjs
+
   lint:
     runs-on: ubuntu-latest
     steps:
