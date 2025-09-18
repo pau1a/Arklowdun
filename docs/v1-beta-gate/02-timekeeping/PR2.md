@@ -43,13 +43,20 @@ This prevents silent performance issues and enforces data integrity before featu
 3. **Guard Demo (Pass):** Run on a DB after backfill → app starts normally; CLI exits 0.  
 4. **Idempotency Proof:** Run migration twice; indexes unchanged on second run.  
 5. **Error Copy:** Paste the exact failure message and ensure it is human-readable.  
-6. **Config Note:** Document the CLI flag/command for running the guard manually.  
+6. **Config Note:** Document the CLI flag/command for running the guard manually.
+
+---
+
+## Operations
+- Run the guard manually with `cargo run --bin migrate -- check` to view pending counts.
+- Apply the PR-1 timezone backfill via `cargo run --bin time-backfill -- --household-id <HOUSEHOLD> [--default-tz <TZ>]` (the guard refers to this as `backfill --apply`).
+- Dev-only bypass: set `ARKLOWDUN_SKIP_BACKFILL_GUARD=1` (ignored in release builds) when iterating locally.
 
 ---
 
 ## Rollback Plan
-- Dropping the new indexes is safe via `DROP INDEX IF EXISTS …`; no schema data loss.  
-- Migration guard logic can be disabled by reverting the startup check.  
+- Dropping the new indexes is safe via `DROP INDEX IF EXISTS …`; no schema data loss.
+- Migration guard logic can be disabled by reverting the startup check.
 - Document how to bypass guard temporarily in dev builds (env flag), but not in production.
 
 ---

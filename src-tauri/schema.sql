@@ -3,6 +3,7 @@ CREATE UNIQUE INDEX bills_household_position_idx ON bills(household_id, position
 CREATE INDEX bills_household_updated_idx ON bills(household_id, updated_at);
 CREATE UNIQUE INDEX budget_categories_household_position_idx ON budget_categories(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX budget_categories_household_updated_idx ON budget_categories(household_id, updated_at);
+CREATE INDEX events_household_end_at_utc_idx ON events(household_id, end_at_utc);
 CREATE INDEX events_household_start_at_utc_idx ON events(household_id, start_at_utc);
 CREATE INDEX events_household_updated_idx ON events(household_id, updated_at);
 CREATE INDEX expenses_category_date_idx ON expenses(category_id, date);

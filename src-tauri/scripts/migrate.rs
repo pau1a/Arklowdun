@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use anyhow::{anyhow, Context, Result};
+use arklowdun_lib::migration_guard;
 use clap::{Parser, Subcommand};
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
@@ -50,6 +51,9 @@ enum Cmd {
         #[arg(long, value_name = "NNNN")]
         to: Option<String>,
     },
+    /// Check UTC backfill guard status without running migrations
+    #[command(about, long_about = None)]
+    Check,
 }
 
 #[tokio::main]
@@ -73,6 +77,7 @@ async fn main() -> Result<()> {
         Cmd::Status => status(&db_path).await,
         Cmd::Up { to } => up(&db_path, cli.dry_run, to.as_deref()).await,
         Cmd::Down { to } => down(&db_path, cli.dry_run, to.as_deref()).await,
+        Cmd::Check => guard_check(&db_path).await,
     }
 }
 
@@ -334,6 +339,35 @@ async fn down(db: &Path, dry: bool, to: Option<&str>) -> Result<()> {
         log::info!("rollback success {}", filename);
     }
     Ok(())
+}
+
+async fn guard_check(db: &Path) -> Result<()> {
+    if !db.exists() {
+        anyhow::bail!("database not found: {}", db.display());
+    }
+    let pool = open_pool(db, false).await?;
+    migration_guard::ensure_events_indexes(&pool).await?;
+    let status = migration_guard::check_events_backfill(&pool).await?;
+
+    println!("Database: {}", db.display());
+    if status.total_missing == 0 {
+        println!("All events have UTC timestamps. Backfill guard OK.");
+        return Ok(());
+    }
+
+    println!("Households with events missing UTC fields:");
+    for hh in &status.households {
+        println!(
+            "  {id}: start_at_utc missing {start}, end_at_utc missing {end}, total {total}",
+            id = hh.household_id,
+            start = hh.missing_start_at_utc,
+            end = hh.missing_end_at_utc,
+            total = hh.missing_total
+        );
+    }
+
+    let message = migration_guard::format_guard_failure(status.total_missing);
+    Err(anyhow!(message))
 }
 
 fn split_stmts(sql: &str) -> Vec<String> {

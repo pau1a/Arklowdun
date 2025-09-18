@@ -127,6 +127,7 @@ async fn rollback_all_migrations_leaves_clean_db() -> Result<()> {
         assert_table_exists(&pool, t).await?;
     }
     assert_index_exists(&pool, "events_household_start_at_utc_idx").await?;
+    assert_index_exists(&pool, "events_household_end_at_utc_idx").await?;
     assert_fk_and_integrity_ok(&pool).await?;
 
     let expected = list_up_versions()?;

@@ -52,6 +52,18 @@ async fn migrate_fixture_sample_db() -> Result<()> {
         assert_eq!(name.as_deref(), Some(t), "expected table {t}");
     }
 
+    for idx in [
+        "events_household_start_at_utc_idx",
+        "events_household_end_at_utc_idx",
+    ] {
+        let found: Option<String> =
+            sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='index' AND name=?1")
+                .bind(idx)
+                .fetch_optional(&pool)
+                .await?;
+        assert_eq!(found.as_deref(), Some(idx), "expected index {idx}");
+    }
+
     // events new columns present
     let cols: Vec<String> = sqlx::query("PRAGMA table_info(events);")
         .fetch_all(&pool)
