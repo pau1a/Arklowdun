@@ -20,7 +20,6 @@ import {
   getFooterRoutes,
   type RouteDefinition,
 } from "./routes";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { defaultHouseholdId } from "./db/household";
 import { log } from "./utils/logger";
 import { initCommandPalette } from "@ui/CommandPalette";
@@ -29,9 +28,9 @@ import { actions, type AppPane } from "./store";
 import { emit } from "./store/events";
 import { runViewCleanups } from "./utils/viewLifecycle";
 import { initTheme } from "@ui/ThemeToggle";
+import { getStartupWindow } from "@lib/ipc/startup";
 
-const isTauri = !!import.meta.env.TAURI;
-const appWindow = isTauri ? getCurrentWindow() : null;
+const appWindow = getStartupWindow();
 
 initTheme();
 
@@ -199,7 +198,7 @@ async function enforceMinNow(growOnly = true) {
   const nextW = lastMin.w ? Math.max(w, lastMin.w) : w;
   const nextH = lastMin.h && growOnly ? Math.max(h, lastMin.h) : h;
   try {
-    await appWindow.setMinSize(new LogicalSize(nextW, nextH));
+    await appWindow.setMinSize({ width: nextW, height: nextH });
     lastMin = { w: nextW, h: nextH };
 
     const current = await appWindow.innerSize();
@@ -207,9 +206,10 @@ async function enforceMinNow(growOnly = true) {
     const curW = current.width / sf;
     const curH = current.height / sf;
     if (curW < nextW || curH < nextH) {
-      await appWindow.setSize(
-        new LogicalSize(Math.max(curW, nextW), Math.max(curH, nextH)),
-      );
+      await appWindow.setSize({
+        width: Math.max(curW, nextW),
+        height: Math.max(curH, nextH),
+      });
     }
   } catch (e) {
     log.warn("enforceMinNow failed", e);
@@ -283,9 +283,11 @@ window.addEventListener("DOMContentLoaded", () => {
 const DEV = import.meta.env.DEV ?? false;
 if (DEV && appWindow) {
   (window as any).__win = {
-    label: (appWindow as any).label,
-    setMin: (w = 1200, h = 800) => appWindow.setMinSize(new LogicalSize(w, h)),
-    setSize: (w = 1200, h = 800) => appWindow.setSize(new LogicalSize(w, h)),
+    label: appWindow.label,
+    setMin: (w = 1200, h = 800) =>
+      appWindow.setMinSize({ width: w, height: h }),
+    setSize: (w = 1200, h = 800) =>
+      appWindow.setSize({ width: w, height: h }),
   };
-  console.log("__win ready:", (appWindow as any).label);
+  console.log("__win ready:", appWindow.label);
 }
