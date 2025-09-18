@@ -3,14 +3,16 @@ import {
   fetchAboutMetadata,
   fetchDiagnosticsSummary,
   openDiagnosticsDoc,
+  SettingsPanel,
+  useSettings,
 } from "@features/settings";
 import { createEmptyState } from "./ui/EmptyState";
 import { STR } from "./ui/strings";
 import createButton from "@ui/Button";
 
 export function SettingsView(container: HTMLElement) {
-  const section = document.createElement("section");
-  section.className = "settings"; // allow other modules to locate settings root
+  const panel = SettingsPanel();
+  const section = panel.element; // allow other modules to locate settings root
 
   const backButton = createButton({
     label: "Back to dashboard",
@@ -135,6 +137,7 @@ export function SettingsView(container: HTMLElement) {
     .querySelectorAll<HTMLElement>(".settings__empty")
     .forEach((el) => el.appendChild(createEmptyState({ title: STR.empty.settingsTitle })));
 
+  void useSettings();
   setupAboutAndDiagnostics(section);
 }
 

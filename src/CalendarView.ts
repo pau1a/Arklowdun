@@ -6,7 +6,12 @@ import {
 } from "./notification";
 import { nowMs } from "./db/time";
 import { defaultHouseholdId } from "./db/household";
-import type { CalendarEvent } from "@features/calendar";
+import {
+  CalendarGrid,
+  defaultCalendarWindow,
+  type CalendarEvent,
+  useCalendar,
+} from "@features/calendar";
 import {
   actions,
   selectors,
@@ -19,26 +24,6 @@ import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
 import createButton from "@ui/Button";
 import createInput from "@ui/Input";
 
-const WINDOW_SPAN_MS = 365 * 24 * 60 * 60 * 1000;
-
-function defaultWindow(): { start: number; end: number } {
-  const now = Date.now();
-  return { start: now - WINDOW_SPAN_MS, end: now + WINDOW_SPAN_MS };
-}
-
-async function fetchEvents(
-  windowRange: { start: number; end: number } = defaultWindow(),
-): Promise<{ items: CalendarEvent[]; window: { start: number; end: number } }> {
-  const hh = await defaultHouseholdId();
-  console.log("events_list_range window", windowRange);
-  const items = await call<CalendarEvent[]>("events_list_range", {
-    householdId: hh,
-    start: windowRange.start,
-    end: windowRange.end,
-  });
-  return { items, window: windowRange };
-}
-
 async function saveEvent(
   event: Omit<
     CalendarEvent,
@@ -49,76 +34,6 @@ async function saveEvent(
   return await call<CalendarEvent>("event_create", {
     data: { ...event, household_id: hh },
   });
-}
-
-function renderMonth(root: HTMLElement, events: CalendarEvent[]) {
-  root.innerHTML = "";
-  const now = new Date(nowMs());
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  const firstDay = new Date(year, month, 1).getDay();
-  const lastDate = new Date(year, month + 1, 0).getDate();
-
-  const monthLabel = document.createElement("div");
-  monthLabel.className = "calendar__month-label";
-  monthLabel.textContent = now.toLocaleString(undefined, {
-    month: "long",
-    year: "numeric",
-  });
-  root.appendChild(monthLabel);
-
-  const table = document.createElement("table");
-  table.className = "calendar__table";
-  const headerRow = document.createElement("tr");
-  ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].forEach((d) => {
-    const th = document.createElement("th");
-    th.textContent = d;
-    headerRow.appendChild(th);
-  });
-  table.appendChild(headerRow);
-
-  let row = document.createElement("tr");
-  for (let i = 0; i < firstDay; i++) row.appendChild(document.createElement("td"));
-  for (let day = 1; day <= lastDate; day++) {
-    if ((firstDay + day - 1) % 7 === 0 && day !== 1) {
-      table.appendChild(row);
-      row = document.createElement("tr");
-    }
-    const cell = document.createElement("td");
-    cell.tabIndex = 0;
-    const cellDate = new Date(year, month, day);
-    const dateDiv = document.createElement("div");
-    dateDiv.className = "calendar__date";
-    dateDiv.textContent = String(day);
-    const today = new Date();
-    if (
-      cellDate.getFullYear() === today.getFullYear() &&
-      cellDate.getMonth() === today.getMonth() &&
-      cellDate.getDate() === today.getDate()
-    ) {
-      dateDiv.classList.add("calendar__date--today");
-    }
-    cell.appendChild(dateDiv);
-    const dayEvents = events.filter((e) => {
-      const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: e.tz || Intl.DateTimeFormat().resolvedOptions().timeZone });
-      const parts = fmt.format(new Date(e.start_at_utc ?? e.start_at));
-      const [y, m, d] = parts.split("-").map(Number);
-      return (
-        y === cellDate.getFullYear() &&
-        m - 1 === cellDate.getMonth() &&
-        d === cellDate.getDate()
-      );
-    });
-    dayEvents.forEach((ev) => {
-      const div = document.createElement("div");
-      div.className = "calendar__event";
-      div.textContent = ev.title;
-      cell.appendChild(div);
-    });
-    row.appendChild(cell);
-  }
-  table.appendChild(row);
-  root.appendChild(table);
 }
 
 async function scheduleNotifications(events: CalendarEvent[]) {
@@ -166,9 +81,8 @@ export async function CalendarView(container: HTMLElement) {
 
   const panel = document.createElement("div");
   panel.className = "card calendar__panel";
-  const calendarHost = document.createElement("div");
-  calendarHost.id = "calendar";
-  panel.appendChild(calendarHost);
+  const calendar = CalendarGrid();
+  panel.appendChild(calendar.element);
 
   const form = document.createElement("form");
   form.id = "event-form";
@@ -210,16 +124,14 @@ export async function CalendarView(container: HTMLElement) {
   container.innerHTML = "";
   container.appendChild(section);
 
-  const calendarEl = calendarHost;
-
   let currentSnapshot: EventsSnapshot | null = selectors.events.snapshot(getState());
-  let currentWindow = currentSnapshot?.window ?? defaultWindow();
+  let currentWindow = currentSnapshot?.window ?? defaultCalendarWindow();
 
   const unsubscribe = subscribe(selectors.events.snapshot, (snapshot) => {
     currentSnapshot = snapshot ?? null;
     if (snapshot?.window) currentWindow = snapshot.window;
     const items = snapshot?.items ?? [];
-    renderMonth(calendarEl, items);
+    calendar.setEvents(items);
   });
   registerViewCleanup(container, unsubscribe);
 
@@ -230,8 +142,14 @@ export async function CalendarView(container: HTMLElement) {
 
   async function loadEvents(source: string): Promise<void> {
     try {
-      const range = defaultWindow();
-      const { items, window } = await fetchEvents(range);
+      const range = defaultCalendarWindow();
+      const { data, error } = await useCalendar({ window: range });
+      if (error) {
+        console.error(error);
+        return;
+      }
+      if (!data) return;
+      const { items, window } = data;
       currentWindow = window;
       const payload = actions.events.updateSnapshot({
         items,
@@ -248,7 +166,7 @@ export async function CalendarView(container: HTMLElement) {
 
   if (currentSnapshot) {
     const items = currentSnapshot.items;
-    renderMonth(calendarEl, items);
+    calendar.setEvents(items);
     if (items.length) scheduleNotifications(items);
   } else {
     await loadEvents("initial");
@@ -272,7 +190,7 @@ export async function CalendarView(container: HTMLElement) {
     const snapshot = selectors.events.snapshot(getState());
     const baseItems = snapshot?.items ?? [];
     const nextItems = [...baseItems, ev];
-    const window = snapshot?.window ?? currentWindow ?? defaultWindow();
+    const window = snapshot?.window ?? currentWindow ?? defaultCalendarWindow();
     currentWindow = window;
     const payload = actions.events.updateSnapshot({
       items: nextItems,
