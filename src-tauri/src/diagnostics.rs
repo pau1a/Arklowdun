@@ -1,8 +1,8 @@
 use serde::Serialize;
 use std::{env, fs, path::PathBuf};
 
-use tauri::Manager;
 use crate::{git_commit_hash, resolve_logs_dir, AppError, AppResult, LOG_FILE_NAME};
+use tauri::Manager;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -106,10 +106,7 @@ pub fn resolve_doc_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResu
 
     let path_manager = app.path();
 
-    let candidates = [
-        "resources/docs/diagnostics.md",
-        "docs/diagnostics.md",
-    ];
+    let candidates = ["resources/docs/diagnostics.md", "docs/diagnostics.md"];
 
     for relative in candidates {
         match path_manager.resolve(relative, BaseDirectory::Resource) {
