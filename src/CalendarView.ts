@@ -159,7 +159,7 @@ export async function CalendarView(container: HTMLElement) {
     </div>
     <form id="event-form" class="calendar__form">
       <input id="event-title" type="text" placeholder="Title" required />
-      <input id="event-start" type="datetime-local" required />
+      <input id="event-start" type="datetime-local" aria-label="Start time" required />
       <button type="submit">Add Event</button>
     </form>
   `;

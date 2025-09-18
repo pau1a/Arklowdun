@@ -1,7 +1,7 @@
-import { search } from "../services/searchRepo";
 import type { SearchResult } from "../bindings/SearchResult";
 import { showError } from "./errors";
 import { highlight } from "../utils/highlight";
+import { formatShortcut, registerOverlay } from "./keys";
 
 interface PaletteItem {
   kind: string;
@@ -11,11 +11,19 @@ interface PaletteItem {
   action: () => void;
 }
 
-export function initCommandPalette() {
+export interface CommandPaletteController {
+  open(): void;
+  close(): void;
+  isOpen(): boolean;
+}
+
+export function initCommandPalette(): CommandPaletteController | null {
   const modalRoot = document.getElementById("modal-root");
   const live = document.querySelector<HTMLDivElement>("#search-live");
   const trigger = document.getElementById("sidebar-search");
-  if (!modalRoot || !live) return;
+  if (!modalRoot || !live) {
+    return null;
+  }
 
   let palette: HTMLElement | null = null;
   let input: HTMLInputElement;
@@ -23,10 +31,16 @@ export function initCommandPalette() {
   let activeIndex = -1;
   let reqId = 0;
   let lastFocused: HTMLElement | null = null;
-  const MINLEN = Number(import.meta.env.VITE_SEARCH_MINLEN ?? "2");
+  const minLenConfig =
+    typeof import.meta !== "undefined" && typeof import.meta.env !== "undefined"
+      ? import.meta.env.VITE_SEARCH_MINLEN
+      : undefined;
+  const MINLEN = Number(minLenConfig ?? "2");
   let t: number | undefined;
   const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+  let releaseOverlay: (() => void) | null = null;
+  let openState = false;
+  let restoreOverflow = "";
 
   function announce(text: string) {
     if (live) live.textContent = text;
@@ -62,7 +76,9 @@ export function initCommandPalette() {
 
   function open() {
     if (!palette) build();
-    palette!.hidden = false;
+    if (!palette || openState) return;
+    palette.hidden = false;
+    restoreOverflow = document.documentElement.style.overflow;
     document.documentElement.style.overflow = "hidden";
     lastFocused = document.activeElement as HTMLElement;
     input.value = "";
@@ -71,19 +87,30 @@ export function initCommandPalette() {
     reqId++;
     input.setAttribute("aria-expanded", "true");
     input.removeAttribute("aria-activedescendant");
+    releaseOverlay = registerOverlay("palette", () => close());
+    openState = true;
     input.focus();
   }
 
   function close() {
-    if (!palette) return;
+    if (!palette || !openState) return;
     palette.hidden = true;
-    document.documentElement.style.overflow = "";
+    document.documentElement.style.overflow = restoreOverflow;
     reqId++;
     activeIndex = -1;
     input.value = "";
     input.removeAttribute("aria-busy");
     input.setAttribute("aria-expanded", "false");
-    if (lastFocused) lastFocused.focus();
+    releaseOverlay?.();
+    releaseOverlay = null;
+    openState = false;
+    if (lastFocused) {
+      try {
+        lastFocused.focus();
+      } catch {
+        /* ignore focus restore errors */
+      }
+    }
   }
 
   function options(): HTMLLIElement[] {
@@ -149,6 +176,7 @@ export function initCommandPalette() {
     const my = ++reqId;
     showStatus("Searching…", "loading");
     try {
+      const search = await resolveSearch();
       const results = await search(q, 50, 0);
       if (my !== reqId) return;
       if (results.length === 0) {
@@ -294,22 +322,29 @@ export function initCommandPalette() {
   }
 
   if (trigger) {
-    const label = isMac ? "Search (⌘K)" : "Search (Ctrl+K)";
+    const label = `Search (${formatShortcut("K")})`;
     trigger.setAttribute("aria-label", label);
     trigger.setAttribute("title", label);
     trigger.addEventListener("click", () => open());
   }
 
-  if (!(window as any).__cpBound) {
-    (window as any).__cpBound = true;
-    document.addEventListener("keydown", (e) => {
-      const inEditor = (e.target as HTMLElement)?.closest('input, textarea, [contenteditable="true"]');
-      if (inEditor) return;
-      if ((isMac && e.metaKey && e.key.toLowerCase() === "k") || (!isMac && e.ctrlKey && e.key.toLowerCase() === "k")) {
-        e.preventDefault();
-        open();
-      }
-    });
-    window.addEventListener("hashchange", () => close());
-  }
+  window.addEventListener("hashchange", () => close());
+
+  return {
+    open,
+    close,
+    isOpen: () => openState,
+  };
 }
+type SearchFunction = typeof import("../services/searchRepo").search;
+
+let searchImpl: SearchFunction | null = null;
+
+async function resolveSearch(): Promise<SearchFunction> {
+  if (!searchImpl) {
+    const mod = await import("../services/searchRepo");
+    searchImpl = mod.search;
+  }
+  return searchImpl;
+}
+
