@@ -3,7 +3,7 @@ import { openDb } from "./db/open";
 import { newUuidV7 } from "./db/id";
 import { defaultHouseholdId } from "./db/household";
 import { showError } from "./ui/errors";
-import type { Note } from "@features/notes";
+import { NotesList, useNotes, type Note } from "@features/notes";
 import {
   actions,
   selectors,
@@ -25,18 +25,6 @@ const NOTE_PALETTE: Record<string, { base: string; text: string }> = {
   "#EADCF9": { base: "#EADCF9", text: "#1f2937" },
   "#F6EBDC": { base: "#F6EBDC", text: "#1f2937" },
 };
-
-async function loadNotes(householdId: string): Promise<Note[]> {
-  const db = await openDb();
-  const rows = await db.select<Note[]>(
-    `SELECT id, text, color, x, y, z, position, household_id, created_at, updated_at, deleted_at
-       FROM notes
-      WHERE household_id = ? AND deleted_at IS NULL
-      ORDER BY COALESCE(z,0) DESC, position, created_at, id`,
-    [householdId]
-  );
-  return rows ?? [];
-}
 
 async function insertNote(
   householdId: string,
@@ -171,9 +159,8 @@ export async function NotesView(container: HTMLElement) {
 
   form.append(textLabel, textInput, colorLabel, colorInput, submitButton);
 
-  const canvas = document.createElement("div");
-  canvas.id = "notes-canvas";
-  canvas.className = "notes-canvas";
+  const notesBoard = NotesList();
+  const canvas = notesBoard.element;
 
   section.append(heading, form, canvas);
   container.innerHTML = "";
@@ -210,7 +197,9 @@ export async function NotesView(container: HTMLElement) {
 
   async function reload(source: string): Promise<void> {
     try {
-      const loaded = await loadNotes(householdId);
+      const result = await useNotes({ householdId });
+      if (result.error) throw result.error;
+      const loaded = result.data ?? [];
       notesLocal = cloneNotes(loaded);
       commitSnapshot(source, true, true);
       render();
@@ -220,7 +209,7 @@ export async function NotesView(container: HTMLElement) {
   }
 
   function render() {
-    canvas.innerHTML = "";
+    notesBoard.clear();
     notesLocal
       .filter((n) => !n.deleted_at)
       .sort((a, b) =>
