@@ -249,14 +249,15 @@ window.addEventListener("DOMContentLoaded", () => {
   log.debug("app booted");
   defaultHouseholdId().catch((e) => console.error("DB init failed:", e));
 
+  const onHashChange = () => {
+    void handleRouteChange();
+  };
+  window.addEventListener("hashchange", onHashChange);
+
   void (async () => {
     await handleRouteChange();
     initCommandPalette();
     emit("app:ready", { ts: Date.now() });
-
-    window.addEventListener("hashchange", () => {
-      void handleRouteChange();
-    });
 
     requestAnimationFrame(() => {
       console.log("Runtime window label:", appWindow.label);
