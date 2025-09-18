@@ -104,6 +104,61 @@ module.exports = {
       },
     },
     {
+      files: ["src/ui/**/*.{ts,tsx,js,jsx}"],
+      rules: {
+        "no-restricted-syntax": [
+          "error",
+          {
+            selector:
+              "Literal[value=/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/]",
+            message: "Use design tokens via @ui/theme instead of hard-coded colour literals.",
+          },
+          {
+            selector: "Literal[value=/#[0-9a-fA-F]{3,8}/]",
+            message: "Use design tokens via @ui/theme instead of hard-coded colour literals.",
+          },
+          {
+            selector: "Literal[value=/^(?:rgb|rgba|hsl|hsla)\\(/i]",
+            message: "Use design tokens via @ui/theme instead of hard-coded colour literals.",
+          },
+          {
+            selector: "Literal[value=/(?:^|[^a-z])(?:rgb|rgba|hsl|hsla)\\s*\\(/i]",
+            message: "Use design tokens via @ui/theme instead of hard-coded colour literals.",
+          },
+          {
+            selector:
+              "Literal[value=/^(?:red|blue|green|black|white|gray|grey|orange|purple|pink|yellow|cyan|magenta)$/i]",
+            message: "Use design tokens via @ui/theme instead of hard-coded colour literals.",
+          },
+          {
+            selector:
+              "TemplateLiteral[quasis.length=1][quasis.0.value.raw=/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/]",
+            message: "Use design tokens via @ui/theme instead of hard-coded colour literals.",
+          },
+          {
+            selector:
+              "TemplateLiteral[quasis.length=1][quasis.0.value.raw=/#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})/i]",
+            message: "Use design tokens via @ui/theme instead of hard-coded colour literals.",
+          },
+          {
+            selector:
+              "TemplateLiteral[quasis.length=1][quasis.0.value.raw=/^(?:rgb|rgba|hsl|hsla)\\(/i]",
+            message: "Use design tokens via @ui/theme instead of hard-coded colour literals.",
+          },
+          {
+            selector:
+              "TemplateLiteral[quasis.length=1][quasis.0.value.raw=/(?:^|[^a-z])(?:rgb|rgba|hsl|hsla)\\s*\\(/i]",
+            message: "Use design tokens via @ui/theme instead of hard-coded colour literals.",
+          },
+          {
+            selector:
+              "TemplateLiteral[quasis.length=1][quasis.0.value.raw=/^(?:red|blue|green|black|white|gray|grey|orange|purple|pink|yellow|cyan|magenta)$/i]",
+            message: "Use design tokens via @ui/theme instead of hard-coded colour literals.",
+          },
+        ],
+      },
+    },
+    {
       files: ["src/features/**/components/**/*.{ts,tsx,js,jsx}"],
       rules: {
         "no-restricted-imports": ["error", componentImportRestriction],

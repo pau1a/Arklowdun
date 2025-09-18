@@ -1,7 +1,16 @@
+import { getNumber } from './theme';
+
 export interface TooltipProps {
   content: string;
   delay?: number;
   id?: string;
+}
+
+const TOOLTIP_OFFSET_TOKEN = '--space-2';
+const TOOLTIP_OFFSET_FALLBACK_PX = 8;
+
+function getTooltipOffset(): number {
+  return getNumber(TOOLTIP_OFFSET_TOKEN, 'px', TOOLTIP_OFFSET_FALLBACK_PX);
 }
 
 function ensureContainer(): HTMLElement {
@@ -40,8 +49,9 @@ export function attachTooltip(target: HTMLElement, props: TooltipProps): () => v
     if (isVisible) return;
     if (!tooltip.isConnected) container.appendChild(tooltip);
     const rect = target.getBoundingClientRect();
+    const offset = getTooltipOffset();
     tooltip.style.position = 'fixed';
-    tooltip.style.top = `${rect.bottom + 8}px`;
+    tooltip.style.top = `${rect.bottom + offset}px`;
     tooltip.style.left = `${rect.left}px`;
     tooltip.hidden = false;
     isVisible = true;
