@@ -1,5 +1,9 @@
 import { writeText } from "@lib/ipc/clipboard";
-import { fetchAboutMetadata, fetchDiagnosticsSummary, openDiagnosticsDoc } from "./api/diagnostics";
+import {
+  fetchAboutMetadata,
+  fetchDiagnosticsSummary,
+  openDiagnosticsDoc,
+} from "@features/settings";
 import { createEmptyState } from "./ui/EmptyState";
 import { STR } from "./ui/strings";
 import createButton from "@ui/Button";

@@ -1,5 +1,6 @@
 import type { FsEntryLite as FsEntry } from "./types";
-import type { Event, Note } from "../models";
+import type { Note } from "@features/notes";
+import type { Event } from "../models";
 import type {
   FilesUpdatedPayload,
   EventsUpdatedPayload,

@@ -22,11 +22,12 @@ import {
 } from './store';
 import { emit, on } from './store/events';
 import { runViewCleanups, registerViewCleanup } from './utils/viewLifecycle';
-import createFilesList, {
+import {
+  createFilesList,
+  createFilesToolbar,
   type FilesListItem,
   type FilesListRowAction,
-} from '@features/files/components/FilesList';
-import createFilesToolbar from '@features/files/components/FilesToolbar';
+} from '@features/files';
 import createButton from '@ui/Button';
 
 const ROOT: RootKey = 'attachments';

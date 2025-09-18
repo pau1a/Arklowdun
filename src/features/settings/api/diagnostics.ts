@@ -1,4 +1,4 @@
-import { call } from "./call";
+import { call } from "@lib/ipc/call";
 
 export interface DiagnosticsSummary {
   platform: string;

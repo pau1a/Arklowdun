@@ -7,7 +7,7 @@ import {
   listenImportError,
   listenImportProgress,
   listenImportStarted,
-} from "@features/files/api/importApi";
+} from "@features/files";
 
 export function ImportModal(el: HTMLElement) {
   el.innerHTML = `

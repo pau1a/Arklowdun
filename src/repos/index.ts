@@ -6,9 +6,9 @@ import type {
   Pet,
   FamilyMember,
   InventoryItem,
-  Note,
   ShoppingItem,
 } from "../models";
+import type { Note } from "@features/notes";
 import type { Event } from "../bindings/Event";
 
 export const billsRepo = createCrudRepo<Bill, NewRow<Bill>, PatchRow<Bill>>("bills");
