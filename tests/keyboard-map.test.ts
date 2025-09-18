@@ -27,7 +27,12 @@ globalThis.HTMLInputElement = window.HTMLInputElement;
 globalThis.Element = window.Element;
 globalThis.KeyboardEvent = window.KeyboardEvent;
 globalThis.Event = window.Event;
-globalThis.navigator = window.navigator as Navigator;
+if (!('navigator' in globalThis)) {
+  Object.defineProperty(globalThis, 'navigator', {
+    get: () => window.navigator as Navigator,
+    configurable: true,
+  });
+}
 globalThis.matchMedia = window.matchMedia.bind(window);
 
 test('command palette shortcut opens and closes with focus restore', async () => {

@@ -10,7 +10,12 @@ globalThis.window = dom.window as unknown as typeof globalThis & Window;
 globalThis.document = dom.window.document;
 globalThis.HTMLElement = dom.window.HTMLElement;
 globalThis.KeyboardEvent = dom.window.KeyboardEvent;
-globalThis.navigator = dom.window.navigator as Navigator;
+if (!('navigator' in globalThis)) {
+  Object.defineProperty(globalThis, 'navigator', {
+    get: () => dom.window.navigator as Navigator,
+    configurable: true,
+  });
+}
 if (!dom.window.matchMedia) {
   dom.window.matchMedia = () =>
     ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }) as MediaQueryList;
