@@ -1,4 +1,5 @@
 import type { AppPane } from "../store";
+import { createThemeToggle } from "@ui/ThemeToggle";
 
 type IconVariant = "solid" | "regular";
 
@@ -58,6 +59,7 @@ export function Footer(items: FooterItemConfig[]): FooterInstance {
 
     const span = document.createElement("span");
     span.textContent = primaryItem.label;
+    span.className = "footer__label hide-sm";
     anchor.appendChild(span);
 
     footer.appendChild(anchor);
@@ -97,6 +99,10 @@ export function Footer(items: FooterItemConfig[]): FooterInstance {
   question.setAttribute("aria-hidden", "true");
   help.appendChild(question);
   utilities.appendChild(help);
+
+  const toggle = createThemeToggle();
+  toggle.element.classList.add("grow-xs");
+  utilities.appendChild(toggle.element);
 
   footer.appendChild(utilities);
 

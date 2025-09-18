@@ -42,9 +42,13 @@ export interface SidebarInstance {
   getLink(id: AppPane): HTMLAnchorElement | undefined;
 }
 
+function iconVariantClass(variant: IconVariant): string {
+  return variant === "solid" ? ICON_VARIANT_CLASS.solid : ICON_VARIANT_CLASS.regular;
+}
+
 function setIconVariant(icon: HTMLElement, variant: IconVariant) {
   icon.classList.remove(ICON_VARIANT_CLASS.solid, ICON_VARIANT_CLASS.regular);
-  icon.classList.add(ICON_VARIANT_CLASS[variant]);
+  icon.classList.add(iconVariantClass(variant));
 }
 
 function createLink(item: SidebarItemConfig): SidebarEntry {
@@ -56,13 +60,14 @@ function createLink(item: SidebarItemConfig): SidebarEntry {
   if (item.ariaLabel) link.setAttribute("aria-label", item.ariaLabel);
 
   const icon = document.createElement("i");
-  icon.className = `nav__icon ${ICON_VARIANT_CLASS[item.icon.defaultVariant]} ${item.icon.name}`;
+  icon.className = `nav__icon ${iconVariantClass(item.icon.defaultVariant)} ${item.icon.name}`;
   icon.setAttribute("aria-hidden", "true");
   if (item.icon.fixed) icon.dataset.fixed = "true";
   link.appendChild(icon);
 
   const label = document.createElement("span");
   label.textContent = item.label;
+  label.className = "sidebar__label hide-md";
   link.appendChild(label);
 
   return { item, link, icon };
@@ -89,6 +94,7 @@ export function Sidebar(props: SidebarProps): SidebarInstance {
 
   const title = document.createElement("h1");
   title.textContent = "Arklowdun";
+  title.className = "brand__title hide-md";
   brand.appendChild(title);
   top.appendChild(brand);
 

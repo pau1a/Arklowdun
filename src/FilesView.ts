@@ -75,8 +75,10 @@ export async function FilesView(container: HTMLElement) {
 
   const header = document.createElement('header');
   header.className = 'files__header';
+  header.classList.add('stack-md');
 
   const headerInfo = document.createElement('div');
+  headerInfo.className = 'files__header-info';
   const title = document.createElement('h2');
   title.textContent = 'Files';
   const breadcrumbNav = document.createElement('nav');

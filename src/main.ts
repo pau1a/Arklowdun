@@ -28,9 +28,12 @@ import { initKeyboardMap } from "@ui/keys";
 import { actions, type AppPane } from "./store";
 import { emit } from "./store/events";
 import { runViewCleanups } from "./utils/viewLifecycle";
+import { initTheme } from "@ui/ThemeToggle";
 
 const isTauri = !!import.meta.env.TAURI;
 const appWindow = isTauri ? getCurrentWindow() : null;
+
+initTheme();
 
 interface LayoutContext {
   page: PageInstance;

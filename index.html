@@ -4,6 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Arklowdun — Home Management</title>
+    <script>
+      (() => {
+        const storageKey = "arklowdun.theme";
+        const fallback = "system";
+        try {
+          const stored = localStorage.getItem(storageKey);
+          const theme = stored === "light" || stored === "dark" || stored === "system" ? stored : fallback;
+          document.documentElement.dataset.theme = theme;
+        } catch (error) {
+          document.documentElement.dataset.theme = fallback;
+          console.warn("theme bootstrap failed", error);
+        }
+      })();
+    </script>
     <script type="module" src="/src/main.ts" defer></script>
   </head>
 
