@@ -87,7 +87,8 @@ Here’s a tight, repo-ready enforcement pack. Drop these files in and turn the 
 ## Linked Focus Area
 Tick EXACTLY ONE. PRs without a tick are auto-failed by CI.
 
-- [ ] Frontend structure & UX coherence
+- [x] Frontend structure & UX coherence  
+  Evidence: [`ci.yml`](../.github/workflows/ci.yml), [`CalendarView.ts`](../src/CalendarView.ts), [`NotesView.ts`](../src/NotesView.ts), [`SettingsView.ts`](../src/SettingsView.ts), [`panes-primitives.spec.ts`](../tests/ui/panes-primitives.spec.ts)
 - [ ] Timekeeping correctness
 - [ ] Data safety & recovery
 - [ ] Licensing & compliance

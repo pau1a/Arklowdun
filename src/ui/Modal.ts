@@ -170,14 +170,16 @@ export function createModal(props: ModalProps): ModalInstance {
       applyOpen();
     },
     update(next: Partial<Omit<ModalProps, 'onOpenChange'>>) {
+    if (Object.prototype.hasOwnProperty.call(next, 'titleId')) {
       if (next.titleId !== undefined) {
         currentTitleId = next.titleId;
         applyAria();
       }
-      if (next.descriptionId !== undefined) {
-        currentDescriptionId = next.descriptionId;
-        applyAria();
-      }
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'descriptionId')) {
+      currentDescriptionId = next.descriptionId;
+      applyAria();
+    }
       if (next.initialFocus !== undefined) {
         currentInitialFocus = next.initialFocus;
       }

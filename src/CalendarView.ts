@@ -16,6 +16,8 @@ import {
 } from "./store";
 import { emit, on } from "./store/events";
 import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
+import createButton from "@ui/Button";
+import createInput from "@ui/Input";
 
 const WINDOW_SPAN_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -147,29 +149,65 @@ export async function CalendarView(container: HTMLElement) {
 
   const section = document.createElement("section");
   section.className = "calendar";
-  section.innerHTML = `
-    <header class="calendar__header">
-      <div>
-        <h2>Calendar</h2>
-        <p class="kicker">All times local</p>
-      </div>
-    </header>
-    <div class="card calendar__panel">
-      <div id="calendar"></div>
-    </div>
-    <form id="event-form" class="calendar__form">
-      <input id="event-title" type="text" placeholder="Title" required />
-      <input id="event-start" type="datetime-local" aria-label="Start time" required />
-      <button type="submit">Add Event</button>
-    </form>
-  `;
+
+  const header = document.createElement("header");
+  header.className = "calendar__header";
+  const headerContent = document.createElement("div");
+  const title = document.createElement("h2");
+  title.textContent = "Calendar";
+  const kicker = document.createElement("p");
+  kicker.className = "kicker";
+  kicker.textContent = "All times local";
+  headerContent.append(title, kicker);
+  header.appendChild(headerContent);
+
+  const panel = document.createElement("div");
+  panel.className = "card calendar__panel";
+  const calendarHost = document.createElement("div");
+  calendarHost.id = "calendar";
+  panel.appendChild(calendarHost);
+
+  const form = document.createElement("form");
+  form.id = "event-form";
+  form.className = "calendar__form";
+  form.setAttribute("aria-label", "Create calendar event");
+
+  const titleLabel = document.createElement("label");
+  titleLabel.className = "sr-only";
+  titleLabel.htmlFor = "event-title";
+  titleLabel.textContent = "Event title";
+  const titleInput = createInput({
+    id: "event-title",
+    type: "text",
+    placeholder: "Title",
+    ariaLabel: "Event title",
+    required: true,
+  });
+
+  const dateLabel = document.createElement("label");
+  dateLabel.className = "sr-only";
+  dateLabel.htmlFor = "event-start";
+  dateLabel.textContent = "Start time";
+  const dateInput = createInput({
+    id: "event-start",
+    type: "datetime-local",
+    ariaLabel: "Start time",
+    required: true,
+  });
+
+  const submitButton = createButton({
+    label: "Add Event",
+    variant: "primary",
+    type: "submit",
+  });
+
+  form.append(titleLabel, titleInput, dateLabel, dateInput, submitButton);
+
+  section.append(header, panel, form);
   container.innerHTML = "";
   container.appendChild(section);
 
-  const calendarEl = section.querySelector<HTMLElement>("#calendar");
-  const form = section.querySelector<HTMLFormElement>("#event-form");
-  const titleInput = section.querySelector<HTMLInputElement>("#event-title");
-  const dateInput = section.querySelector<HTMLInputElement>("#event-start");
+  const calendarEl = calendarHost;
 
   let currentSnapshot: EventsSnapshot | null = selectors.events.snapshot(getState());
   let currentWindow = currentSnapshot?.window ?? defaultWindow();
@@ -178,7 +216,7 @@ export async function CalendarView(container: HTMLElement) {
     currentSnapshot = snapshot ?? null;
     if (snapshot?.window) currentWindow = snapshot.window;
     const items = snapshot?.items ?? [];
-    if (calendarEl) renderMonth(calendarEl, items);
+    renderMonth(calendarEl, items);
   });
   registerViewCleanup(container, unsubscribe);
 
@@ -207,15 +245,14 @@ export async function CalendarView(container: HTMLElement) {
 
   if (currentSnapshot) {
     const items = currentSnapshot.items;
-    if (calendarEl) renderMonth(calendarEl, items);
+    renderMonth(calendarEl, items);
     if (items.length) scheduleNotifications(items);
   } else {
     await loadEvents("initial");
   }
 
-  form?.addEventListener("submit", async (e) => {
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    if (!titleInput || !dateInput) return;
     const dt = new Date(dateInput.value);
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const ms = dt.getTime();

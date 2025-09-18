@@ -1113,18 +1113,37 @@ footer a.footer__settings {
   white-space: pre-wrap;
 }
 
-.note button.delete,
-.note button.bring {
+.note [data-ui="button"].note__control {
   position: absolute;
   top: 4px;
-  border: none;
   background: transparent;
-  cursor: pointer;
+  border: none;
   color: inherit;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  box-shadow: none;
+  transform: none;
 }
 
-.note button.delete { right: 4px; }
-.note button.bring  { right: 24px; }
+.note [data-ui="button"].note__control:hover,
+.note [data-ui="button"].note__control:focus-visible {
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.note [data-ui="button"].note__control:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.note [data-ui="button"].note__control--delete { right: 4px; }
+.note [data-ui="button"].note__control--bring { right: 28px; }
 
 .note--sm { min-width: 160px; min-height: 120px; }
 .note--md { min-width: 220px; min-height: 160px; }

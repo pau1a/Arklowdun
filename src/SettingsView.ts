@@ -2,62 +2,127 @@ import { writeText } from "@lib/ipc/clipboard";
 import { fetchAboutMetadata, fetchDiagnosticsSummary, openDiagnosticsDoc } from "./api/diagnostics";
 import { createEmptyState } from "./ui/EmptyState";
 import { STR } from "./ui/strings";
+import createButton from "@ui/Button";
 
 export function SettingsView(container: HTMLElement) {
   const section = document.createElement("section");
   section.className = "settings"; // allow other modules to locate settings root
-  section.innerHTML = `
-    <a href="#" class="settings__back">Back to dashboard</a>
-    <h2 class="settings__title">Settings</h2>
 
-    <section class="card settings__section" aria-labelledby="settings-general">
-      <h3 id="settings-general">General</h3>
-      <div class="settings__empty"></div>
-    </section>
+  const backButton = createButton({
+    label: "Back to dashboard",
+    variant: "ghost",
+    className: "settings__back",
+    type: "button",
+    onClick: (event) => {
+      event.preventDefault();
+      document.querySelector<HTMLAnchorElement>("#nav-dashboard")?.click();
+    },
+  });
 
-    <section class="card settings__section" aria-labelledby="settings-storage">
-      <h3 id="settings-storage">Storage and permissions</h3>
-      <div class="settings__empty"></div>
-    </section>
+  const title = document.createElement("h2");
+  title.className = "settings__title";
+  title.textContent = "Settings";
 
-    <section class="card settings__section" aria-labelledby="settings-notifications">
-      <h3 id="settings-notifications">Notifications</h3>
-      <div class="settings__empty"></div>
-    </section>
+  const createEmptySection = (id: string, headingText: string): HTMLElement => {
+    const panel = document.createElement("section");
+    panel.className = "card settings__section";
+    panel.setAttribute("aria-labelledby", id);
 
-    <section class="card settings__section" aria-labelledby="settings-appearance">
-      <h3 id="settings-appearance">Appearance</h3>
-      <div class="settings__empty"></div>
-    </section>
+    const heading = document.createElement("h3");
+    heading.id = id;
+    heading.textContent = headingText;
 
-    <section class="card settings__section" aria-labelledby="settings-about">
-      <h3 id="settings-about">About and diagnostics</h3>
-      <div class="settings__body settings__body--about">
-        <dl class="settings__meta">
-          <div class="settings__meta-item">
-            <dt>Version</dt>
-            <dd data-settings-version>Loading…</dd>
-          </div>
-          <div class="settings__meta-item">
-            <dt>Commit</dt>
-            <dd><span data-settings-commit title="Loading…">Loading…</span></dd>
-          </div>
-        </dl>
-        <p class="settings__note">
-          Copying diagnostics only captures the quick summary: platform, app version, commit hash, the active RUST_LOG value, and the last
-          200 lines from the rotating log file.
-        </p>
-        <div class="settings__actions">
-          <button type="button" class="settings__button" data-copy-diagnostics>
-            Copy diagnostics summary
-          </button>
-          <button type="button" class="settings__link" data-open-diagnostics-doc>Help → Diagnostics guide</button>
-        </div>
-        <div class="settings__status" data-settings-status role="status" aria-live="polite"></div>
-        <pre class="settings__preview" data-diagnostics-preview hidden aria-label="Latest copied diagnostics summary"></pre>
-      </div>
-    </section>
-  `;
+    const empty = document.createElement("div");
+    empty.className = "settings__empty";
+
+    panel.append(heading, empty);
+    return panel;
+  };
+
+  const general = createEmptySection("settings-general", "General");
+  const storage = createEmptySection("settings-storage", "Storage and permissions");
+  const notifications = createEmptySection("settings-notifications", "Notifications");
+  const appearance = createEmptySection("settings-appearance", "Appearance");
+
+  const about = document.createElement("section");
+  about.className = "card settings__section";
+  about.setAttribute("aria-labelledby", "settings-about");
+
+  const aboutHeading = document.createElement("h3");
+  aboutHeading.id = "settings-about";
+  aboutHeading.textContent = "About and diagnostics";
+
+  const aboutBody = document.createElement("div");
+  aboutBody.className = "settings__body settings__body--about";
+
+  const metaList = document.createElement("dl");
+  metaList.className = "settings__meta";
+
+  const versionItem = document.createElement("div");
+  versionItem.className = "settings__meta-item";
+  const versionTerm = document.createElement("dt");
+  versionTerm.textContent = "Version";
+  const versionValue = document.createElement("dd");
+  versionValue.dataset.settingsVersion = "";
+  versionValue.textContent = "Loading…";
+  versionItem.append(versionTerm, versionValue);
+
+  const commitItem = document.createElement("div");
+  commitItem.className = "settings__meta-item";
+  const commitTerm = document.createElement("dt");
+  commitTerm.textContent = "Commit";
+  const commitValue = document.createElement("dd");
+  const commitSpan = document.createElement("span");
+  commitSpan.dataset.settingsCommit = "";
+  commitSpan.title = "Loading…";
+  commitSpan.textContent = "Loading…";
+  commitValue.appendChild(commitSpan);
+  commitItem.append(commitTerm, commitValue);
+
+  metaList.append(versionItem, commitItem);
+
+  const note = document.createElement("p");
+  note.className = "settings__note";
+  note.textContent =
+    "Copying diagnostics only captures the quick summary: platform, app version, commit hash, the active RUST_LOG value, and the last 200 lines from the rotating log file.";
+
+  const actions = document.createElement("div");
+  actions.className = "settings__actions";
+
+  const copyButton = createButton({
+    label: "Copy diagnostics summary",
+    variant: "primary",
+    className: "settings__button",
+    type: "button",
+  });
+  copyButton.dataset.copyDiagnostics = "";
+
+  const helpButton = createButton({
+    label: "Help → Diagnostics guide",
+    variant: "ghost",
+    className: "settings__link",
+    type: "button",
+  });
+  helpButton.dataset.openDiagnosticsDoc = "";
+
+  actions.append(copyButton, helpButton);
+
+  const status = document.createElement("div");
+  status.className = "settings__status";
+  status.dataset.settingsStatus = "";
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
+
+  const preview = document.createElement("pre");
+  preview.className = "settings__preview";
+  preview.dataset.diagnosticsPreview = "";
+  preview.hidden = true;
+  preview.setAttribute("aria-label", "Latest copied diagnostics summary");
+
+  aboutBody.append(metaList, note, actions, status, preview);
+  about.append(aboutHeading, aboutBody);
+
+  section.append(backButton, title, general, storage, notifications, appearance, about);
 
   container.innerHTML = "";
   container.appendChild(section);
@@ -65,13 +130,6 @@ export function SettingsView(container: HTMLElement) {
   section
     .querySelectorAll<HTMLElement>(".settings__empty")
     .forEach((el) => el.appendChild(createEmptyState({ title: STR.empty.settingsTitle })));
-
-  section
-    .querySelector<HTMLAnchorElement>(".settings__back")
-    ?.addEventListener("click", (e) => {
-      e.preventDefault();
-      document.querySelector<HTMLAnchorElement>("#nav-dashboard")?.click();
-    });
 
   setupAboutAndDiagnostics(section);
 }
