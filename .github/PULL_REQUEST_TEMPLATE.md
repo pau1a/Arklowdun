@@ -15,6 +15,11 @@ Tick all checkboxes that this PR advances and link to supporting evidence where 
 ## Summary
 <!-- One-paragraph summary of the change. Include key paths and user-visible effects. -->
 
+## Gate Scans (run locally before push)
+- [ ] `npm run gate:ipc-in-components`
+- [ ] `npm run gate:no-deep-relatives`
+- [ ] `npm run gate:cross-feature-report`
+
 ## UI Screenshots
 - [ ] Not a UI change
 - Before: <!-- attach image or `n/a` -->
