@@ -15,12 +15,12 @@ message: string,
 /**
  * Arbitrary key/value pairs that provide additional context.
  */
-context: Record<string, string> | undefined,
-/**
- * Optional crash identifier that can be shared with support.
- */
-crash_id?: string,
+context: Record<string, string> | undefined, 
 /**
  * Optional nested cause that preserves the error chain.
  */
-cause?: AppError, };
+cause?: AppError, 
+/**
+ * Crash identifier associated with critical failures.
+ */
+crash_id?: string | undefined, };
