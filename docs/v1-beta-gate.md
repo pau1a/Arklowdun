@@ -66,7 +66,7 @@ The app ships to **closed beta testers** only when this gate is complete.
 
 ## Checklist
 
-- [ ] Frontend structure & UX coherence  
+- [x] Frontend structure & UX coherence — Calendar/Notes/Settings now built from UI primitives; ESLint guard prevents raw controls in views.
 - [ ] Timekeeping correctness  
 - [ ] Data safety & recovery  
 - [ ] Licensing & compliance  

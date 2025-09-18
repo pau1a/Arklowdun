@@ -253,6 +253,7 @@ export async function CalendarView(container: HTMLElement) {
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (!dateInput.value) return;
     const dt = new Date(dateInput.value);
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const ms = dt.getTime();

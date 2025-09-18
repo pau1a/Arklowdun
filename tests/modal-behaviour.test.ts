@@ -1,3 +1,4 @@
+// Node 22+: navigator is a read-only getter; do not reassign globalThis.navigator.
 import { strict as assert } from 'node:assert';
 import test from 'node:test';
 import { JSDOM } from 'jsdom';
