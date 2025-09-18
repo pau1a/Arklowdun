@@ -24,12 +24,16 @@ async function renderInventory(listEl: HTMLUListElement, items: InventoryItem[])
     li.appendChild(
       createEmptyState({
         title: STR.empty.inventoryTitle,
-        description: STR.empty.inventoryDesc,
-        actionLabel: "Add item",
-        onAction: () =>
-          document
-            .querySelector<HTMLAnchorElement>("#nav-inventory")
-            ?.click(),
+        body: STR.empty.inventoryDesc,
+        cta: {
+          kind: "button",
+          label: "Add item",
+          onClick: () => {
+            document
+              .querySelector<HTMLAnchorElement>("#nav-inventory")
+              ?.click();
+          },
+        },
         icon: "📦",
       }),
     );

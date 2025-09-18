@@ -28,7 +28,6 @@ export interface FilesListProps {
   emptyState?: {
     icon?: EmptyStateIcon;
     title: string;
-    description?: string;
     body?: string;
     actionLabel?: string;
   };
@@ -51,12 +50,10 @@ function renderEmptyState(props: FilesListProps): HTMLTableRowElement {
   const cell = document.createElement('td');
   cell.colSpan = 5;
   if (props.emptyState) {
-    const body =
-      props.emptyState.body ?? props.emptyState.description ?? undefined;
     const empty = createEmptyState({
       icon: props.emptyState.icon,
       title: props.emptyState.title,
-      body,
+      body: props.emptyState.body,
       cta:
         props.emptyState.actionLabel && props.onEmptyAction
           ? {

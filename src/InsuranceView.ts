@@ -32,12 +32,16 @@ async function renderPolicies(listEl: HTMLUListElement, policies: Policy[]) {
     li.appendChild(
       createEmptyState({
         title: STR.empty.policiesTitle,
-        description: STR.empty.policiesDesc,
-        actionLabel: "Add policy",
-        onAction: () =>
-          document
-            .querySelector<HTMLInputElement>("#policy-amount")
-            ?.focus(),
+        body: STR.empty.policiesDesc,
+        cta: {
+          kind: "button",
+          label: "Add policy",
+          onClick: () => {
+            document
+              .querySelector<HTMLInputElement>("#policy-amount")
+              ?.focus();
+          },
+        },
       }),
     );
     listEl.appendChild(li);

@@ -75,13 +75,18 @@ export function createEmptyState(props: EmptyStateProps): EmptyStateElement {
   let currentCta = props.cta ?? null;
 
   let buttonCta: ReturnType<typeof createButton> | null = null;
+  let buttonClickHandler: ((event: MouseEvent) => void) | null = null;
   let linkCta: HTMLAnchorElement | null = null;
 
   const syncCta = () => {
     if (!currentCta) {
       ctaSlot.hidden = true;
       if (buttonCta && buttonCta.isConnected) buttonCta.remove();
+      if (buttonCta && buttonClickHandler) {
+        buttonCta.removeEventListener('click', buttonClickHandler);
+      }
       if (linkCta && linkCta.isConnected) linkCta.remove();
+      buttonClickHandler = null;
       return;
     }
 
@@ -89,6 +94,11 @@ export function createEmptyState(props: EmptyStateProps): EmptyStateElement {
     if (currentCta.kind === 'button') {
       linkCta?.remove();
       linkCta = null;
+      const onClick = currentCta.onClick;
+      const clickHandler = (event: MouseEvent) => {
+        event.preventDefault();
+        onClick();
+      };
       if (!buttonCta) {
         buttonCta = createButton({
           label: currentCta.label,
@@ -96,12 +106,13 @@ export function createEmptyState(props: EmptyStateProps): EmptyStateElement {
           size: currentCta.size ?? 'md',
           ariaLabel: currentCta.ariaLabel,
           className: 'empty-state__cta-button',
-          onClick: (event) => {
-            event.preventDefault();
-            currentCta.onClick();
-          },
+          onClick: clickHandler,
         });
       } else {
+        if (buttonClickHandler) {
+          buttonCta.removeEventListener('click', buttonClickHandler);
+        }
+        buttonCta.addEventListener('click', clickHandler);
         buttonCta.update({
           label: currentCta.label,
           variant: currentCta.variant ?? 'primary',
@@ -109,10 +120,12 @@ export function createEmptyState(props: EmptyStateProps): EmptyStateElement {
           ariaLabel: currentCta.ariaLabel,
         });
       }
+      buttonClickHandler = clickHandler;
       if (!buttonCta.isConnected) ctaSlot.appendChild(buttonCta);
     } else {
       buttonCta?.remove();
       buttonCta = null;
+      buttonClickHandler = null;
       if (!linkCta) {
         linkCta = document.createElement('a');
         linkCta.className = 'empty-state__link';
