@@ -6,7 +6,7 @@ import {
 } from "./notification";
 import { nowMs } from "./db/time";
 import { defaultHouseholdId } from "./db/household";
-import type { Event } from "./models";
+import type { CalendarEvent } from "@features/calendar";
 import {
   actions,
   selectors,
@@ -28,10 +28,10 @@ function defaultWindow(): { start: number; end: number } {
 
 async function fetchEvents(
   windowRange: { start: number; end: number } = defaultWindow(),
-): Promise<{ items: Event[]; window: { start: number; end: number } }> {
+): Promise<{ items: CalendarEvent[]; window: { start: number; end: number } }> {
   const hh = await defaultHouseholdId();
   console.log("events_list_range window", windowRange);
-  const items = await call<Event[]>("events_list_range", {
+  const items = await call<CalendarEvent[]>("events_list_range", {
     householdId: hh,
     start: windowRange.start,
     end: windowRange.end,
@@ -40,15 +40,18 @@ async function fetchEvents(
 }
 
 async function saveEvent(
-  event: Omit<Event, "id" | "created_at" | "updated_at" | "household_id" | "deleted_at">,
-): Promise<Event> {
+  event: Omit<
+    CalendarEvent,
+    "id" | "created_at" | "updated_at" | "household_id" | "deleted_at"
+  >,
+): Promise<CalendarEvent> {
   const hh = await defaultHouseholdId();
-  return await call<Event>("event_create", {
+  return await call<CalendarEvent>("event_create", {
     data: { ...event, household_id: hh },
   });
 }
 
-function renderMonth(root: HTMLElement, events: Event[]) {
+function renderMonth(root: HTMLElement, events: CalendarEvent[]) {
   root.innerHTML = "";
   const now = new Date(nowMs());
   const year = now.getFullYear();
@@ -118,7 +121,7 @@ function renderMonth(root: HTMLElement, events: Event[]) {
   root.appendChild(table);
 }
 
-async function scheduleNotifications(events: Event[]) {
+async function scheduleNotifications(events: CalendarEvent[]) {
   let granted = await isPermissionGranted();
   if (!granted) {
     granted = (await requestPermission()) === "granted";

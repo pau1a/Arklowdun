@@ -3,7 +3,7 @@ import { openDb } from "./db/open";
 import { newUuidV7 } from "./db/id";
 import { defaultHouseholdId } from "./db/household";
 import { showError } from "./ui/errors";
-import type { Note } from "./models";
+import type { Note } from "@features/notes";
 import {
   actions,
   selectors,

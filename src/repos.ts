@@ -10,12 +10,12 @@ import type {
   PetMedicalRecord,
   FamilyMember,
   InventoryItem,
-  Note,
   ShoppingItem,
   Event,
   BudgetCategory,
   Expense,
 } from "./models";
+import type { Note } from "@features/notes";
 
 type ListOpts = {
   householdId: string;
