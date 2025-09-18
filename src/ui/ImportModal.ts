@@ -1,8 +1,13 @@
-import { listen } from "@tauri-apps/api/event";
 import { call } from "../api/call";
 import { defaultHouseholdId } from "../db/household";
 import { showError } from "./errors";
 import { presentFsError } from "@lib/ipc";
+import {
+  listenImportDone,
+  listenImportError,
+  listenImportProgress,
+  listenImportStarted,
+} from "@features/files/api/importApi";
 
 export function ImportModal(el: HTMLElement) {
   el.innerHTML = `
@@ -33,9 +38,9 @@ export function ImportModal(el: HTMLElement) {
   async function start() {
     const hh = await defaultHouseholdId();
 
-    const u1 = await listen("import://started", (e:any) => {
-      const p = e.payload as any;
-      const lp = p.fields?.logPath;
+    const u1 = await listenImportStarted((event) => {
+      const p = event.payload;
+      const lp = typeof p.fields?.logPath === "string" ? p.fields.logPath : undefined;
       if (lp) {
         logLink.innerHTML = "";
         const btn = document.createElement("button");
@@ -53,8 +58,8 @@ export function ImportModal(el: HTMLElement) {
     });
     unsub.push(u1);
 
-    const u2 = await listen("import://progress", (e:any) => {
-      const p = e.payload as any;
+    const u2 = await listenImportProgress((event) => {
+      const p = event.payload;
       if (p.event === "step_start") {
         line(`Start: ${p.step}`);
       } else if (p.event === "step_end") {
@@ -63,14 +68,19 @@ export function ImportModal(el: HTMLElement) {
     });
     unsub.push(u2);
 
-    const u3 = await listen("import://error", (e:any) => {
-      line(`Error: ${e.payload?.fields?.source ?? "unknown"}`);
+    const u3 = await listenImportError((event) => {
+      const source = event.payload.fields?.source;
+      line(`Error: ${typeof source === "string" ? source : "unknown"}`);
     });
     unsub.push(u3);
 
-    const u4 = await listen("import://done", (e:any) => {
-      const p = e.payload as any;
-      line(`Done: imported=${p.fields?.imported} skipped=${p.fields?.skipped} (${p.duration_ms}ms)`);
+    const u4 = await listenImportDone((event) => {
+      const p = event.payload;
+      const imported = p.fields?.imported;
+      const skipped = p.fields?.skipped;
+      line(
+        `Done: imported=${imported ?? "unknown"} skipped=${skipped ?? "unknown"} (${p.duration_ms}ms)`,
+      );
     });
     unsub.push(u4);
 
