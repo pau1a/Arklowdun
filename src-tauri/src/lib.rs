@@ -102,6 +102,7 @@ mod id;
 mod importer;
 pub mod logging;
 pub mod migrate;
+pub mod migration_guard;
 mod repo;
 pub mod security;
 mod state;
@@ -1816,6 +1817,10 @@ pub fn run() {
             #[allow(clippy::needless_borrow)]
             let pool = tauri::async_runtime::block_on(crate::db::open_sqlite_pool(&handle))?;
             tauri::async_runtime::block_on(crate::db::apply_migrations(&pool))?;
+            tauri::async_runtime::block_on(crate::migration_guard::ensure_events_indexes(&pool))
+                .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
+            tauri::async_runtime::block_on(crate::migration_guard::enforce_events_backfill_guard(&pool))
+                .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
             tauri::async_runtime::block_on(async {
                 if let Ok(cols) = sqlx::query("PRAGMA table_info(events);").fetch_all(&pool).await {
                     let names: Vec<String> = cols

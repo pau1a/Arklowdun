@@ -99,6 +99,7 @@ async fn migrate_from_zero_is_correct_and_idempotent() -> Result<()> {
     }
 
     assert_index_exists(&pool, "events_household_start_at_utc_idx").await?;
+    assert_index_exists(&pool, "events_household_end_at_utc_idx").await?;
 
     assert_fk_and_integrity_ok(&pool).await?;
 
