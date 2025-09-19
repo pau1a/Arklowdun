@@ -37,8 +37,8 @@ async fn timed_mismatch_is_detected() -> Result<()> {
         .and_hms_opt(9, 0, 0)
         .unwrap();
     let end = start + Duration::hours(1);
-    let start_ms = start.timestamp_millis();
-    let end_ms = end.timestamp_millis();
+    let start_ms = start.and_utc().timestamp_millis();
+    let end_ms = end.and_utc().timestamp_millis();
     let start_utc = start_ms - 3_600_000;
     let end_utc = end_ms - 3_600_000;
     sqlx::query(
@@ -76,8 +76,8 @@ async fn all_day_shift_within_one_day_is_allowed() -> Result<()> {
         .unwrap()
         .and_hms_opt(0, 0, 0)
         .unwrap();
-    let start_ms = start.timestamp_millis();
-    let end_ms = end.timestamp_millis();
+    let start_ms = start.and_utc().timestamp_millis();
+    let end_ms = end.and_utc().timestamp_millis();
     let start_utc = tz
         .with_ymd_and_hms(2024, 3, 9, 0, 0, 0)
         .unwrap()
@@ -120,8 +120,8 @@ async fn all_day_boundary_violation_is_reported() -> Result<()> {
         .unwrap()
         .and_hms_opt(0, 0, 0)
         .unwrap();
-    let start_ms = start.timestamp_millis();
-    let end_ms = end.timestamp_millis();
+    let start_ms = start.and_utc().timestamp_millis();
+    let end_ms = end.and_utc().timestamp_millis();
     let start_utc = tz
         .with_ymd_and_hms(2024, 3, 8, 0, 0, 0)
         .unwrap()
@@ -163,7 +163,7 @@ async fn missing_timezone_is_flagged() -> Result<()> {
         .unwrap()
         .and_hms_opt(12, 0, 0)
         .unwrap();
-    let start_ms = start.timestamp_millis();
+    let start_ms = start.and_utc().timestamp_millis();
     let start_utc = start_ms;
     sqlx::query(
         "INSERT INTO events (id, household_id, title, start_at, end_at, tz, start_at_utc, end_at_utc, deleted_at)
