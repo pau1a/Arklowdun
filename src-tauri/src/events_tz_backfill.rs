@@ -3,6 +3,7 @@ use chrono_tz::Tz;
 use serde::Serialize;
 use serde_json::json;
 use sqlx::{Error as SqlxError, Row, Sqlite, SqlitePool, Transaction};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::{fmt, path::PathBuf, sync::Arc, time::Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::time::{sleep, Duration};
@@ -12,10 +13,10 @@ use crate::{state::AppState, time::now_ms, util::dispatch_async_app_result, AppE
 
 const OPERATION: &str = "events_backfill_timezone";
 const CHECKPOINT_TABLE: &str = "events_backfill_checkpoint";
-pub const MIN_CHUNK_SIZE: usize = 1;
+pub const MIN_CHUNK_SIZE: usize = 100;
 pub const MAX_CHUNK_SIZE: usize = 5_000;
-pub const MIN_PROGRESS_INTERVAL: usize = 1;
-pub const MAX_PROGRESS_INTERVAL: usize = 10_000;
+pub const MIN_PROGRESS_INTERVAL_MS: u64 = 250;
+pub const MAX_PROGRESS_INTERVAL_MS: u64 = 60_000;
 const DEFAULT_CHUNK_SIZE: usize = 500;
 const MAX_SKIP_LOG_EXAMPLES: usize = 50;
 const BUSY_RETRY_MAX_ATTEMPTS: usize = 5;
@@ -26,7 +27,7 @@ pub struct BackfillOptions {
     pub household_id: String,
     pub default_tz: Option<String>,
     pub chunk_size: usize,
-    pub progress_interval: usize,
+    pub progress_interval_ms: u64,
     pub dry_run: bool,
     pub reset_checkpoint: bool,
 }
@@ -36,11 +37,12 @@ pub type ProgressCallback = Arc<dyn Fn(BackfillProgress) + Send + Sync + 'static
 #[derive(Debug, Clone, Serialize)]
 pub struct BackfillProgress {
     pub household_id: String,
-    pub processed: u64,
+    pub scanned: u64,
     pub updated: u64,
     pub skipped: u64,
-    pub total: u64,
     pub remaining: u64,
+    pub elapsed_ms: u64,
+    pub chunk_size: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -50,6 +52,123 @@ pub struct BackfillSummary {
     pub total_updated: u64,
     pub total_skipped: u64,
     pub elapsed_ms: u64,
+    pub status: BackfillStatus,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BackfillStatus {
+    Completed,
+    Cancelled,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BackfillCheckpointStatus {
+    pub processed: u64,
+    pub updated: u64,
+    pub skipped: u64,
+    pub total: u64,
+    pub remaining: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BackfillStatusReport {
+    pub running: Option<String>,
+    pub checkpoint: Option<BackfillCheckpointStatus>,
+    pub pending: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct BackfillControl {
+    id: u64,
+    cancelled: Arc<AtomicBool>,
+}
+
+impl BackfillControl {
+    fn next_id() -> u64 {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+        NEXT_ID.fetch_add(1, Ordering::Relaxed)
+    }
+
+    pub fn new() -> Self {
+        Self {
+            id: Self::next_id(),
+            cancelled: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct BackfillCoordinator {
+    active: Option<ActiveBackfill>,
+}
+
+#[derive(Debug)]
+struct ActiveBackfill {
+    control: BackfillControl,
+    household_id: String,
+}
+
+impl BackfillCoordinator {
+    pub fn new() -> Self {
+        Self { active: None }
+    }
+
+    pub fn try_start(&mut self, household_id: &str) -> AppResult<BackfillControl> {
+        if self.active.is_some() {
+            return Err(AppError::new(
+                "BACKFILL/ALREADY_RUNNING",
+                "Timezone backfill already running",
+            )
+            .with_context("operation", OPERATION)
+            .with_context("household_id", household_id.to_string()));
+        }
+        let control = BackfillControl::new();
+        self.active = Some(ActiveBackfill {
+            control: control.clone(),
+            household_id: household_id.to_string(),
+        });
+        Ok(control)
+    }
+
+    pub fn finish(&mut self, control_id: u64) {
+        if let Some(active) = &self.active {
+            if active.control.id() == control_id {
+                self.active = None;
+            }
+        }
+    }
+
+    pub fn cancel(&mut self) -> bool {
+        if let Some(active) = &self.active {
+            active.control.cancel();
+            return true;
+        }
+        false
+    }
+
+    pub fn running_household(&self) -> Option<String> {
+        self.active
+            .as_ref()
+            .map(|active| active.household_id.clone())
+    }
+
+    pub fn control_clone(&self) -> Option<BackfillControl> {
+        self.active.as_ref().map(|active| active.control.clone())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -122,17 +241,17 @@ fn sanitize_chunk_size(requested: usize) -> AppResult<usize> {
     Ok(requested)
 }
 
-fn sanitize_progress_interval(requested: usize, chunk_size: usize) -> AppResult<usize> {
+fn sanitize_progress_interval(requested: u64) -> AppResult<u64> {
     if requested == 0 {
-        return Ok(chunk_size.max(MIN_PROGRESS_INTERVAL));
+        return Ok(1_000);
     }
-    if !(MIN_PROGRESS_INTERVAL..=MAX_PROGRESS_INTERVAL).contains(&requested) {
+    if !(MIN_PROGRESS_INTERVAL_MS..=MAX_PROGRESS_INTERVAL_MS).contains(&requested) {
         return Err(AppError::new(
             "BACKFILL/INVALID_PROGRESS_INTERVAL",
             format!(
-                "Progress interval {requested} is outside the supported range ({min}-{max}).",
-                min = MIN_PROGRESS_INTERVAL,
-                max = MAX_PROGRESS_INTERVAL
+                "Progress interval {requested}ms is outside the supported range ({min}-{max}ms).",
+                min = MIN_PROGRESS_INTERVAL_MS,
+                max = MAX_PROGRESS_INTERVAL_MS
             ),
         )
         .with_context("operation", OPERATION)
@@ -554,19 +673,22 @@ fn emit_progress(callback: Option<&ProgressCallback>, progress: BackfillProgress
 
 fn make_progress(
     household_id: &str,
-    processed: u64,
+    scanned: u64,
     updated: u64,
     skipped: u64,
     total: u64,
+    elapsed_ms: u64,
+    chunk_size: usize,
 ) -> BackfillProgress {
-    let remaining = total.saturating_sub(processed);
+    let remaining = total.saturating_sub(scanned);
     BackfillProgress {
         household_id: household_id.to_string(),
-        processed,
+        scanned,
         updated,
         skipped,
-        total,
         remaining,
+        elapsed_ms,
+        chunk_size,
     }
 }
 
@@ -592,27 +714,38 @@ async fn run_dry_run(
     options: &BackfillOptions,
     fallback: Option<Tz>,
     chunk_size: usize,
-    progress_every: usize,
+    progress_interval: Duration,
+    control: Option<&BackfillControl>,
     progress_cb: Option<&ProgressCallback>,
 ) -> AppResult<(BackfillSummary, Vec<SkipLogEntry>)> {
     let mut scanned = 0u64;
     let mut updated = 0u64;
     let mut skipped = 0u64;
     let mut last_rowid = 0i64;
-    let mut last_reported = 0u64;
     let total = count_pending_after(pool, &options.household_id, 0).await?;
     let mut skip_examples = Vec::new();
 
+    let start = Instant::now();
+    let mut last_emit = Instant::now();
+
     emit_progress(
         progress_cb,
-        make_progress(&options.household_id, scanned, updated, skipped, total),
+        make_progress(
+            &options.household_id,
+            scanned,
+            updated,
+            skipped,
+            total,
+            0,
+            chunk_size,
+        ),
     );
 
-    let start = Instant::now();
-
     loop {
-        let sql = "SELECT rowid, id, start_at, end_at, tz FROM events
-            WHERE household_id=?1
+        let sql = r#"
+            SELECT rowid, id, start_at, end_at, tz
+            FROM events
+            WHERE household_id = ?1
               AND rowid > ?2
               AND (
                 start_at_utc IS NULL
@@ -621,7 +754,8 @@ async fn run_dry_run(
                 OR COALESCE(LENGTH(TRIM(tz)), 0) = 0
               )
             ORDER BY rowid
-            LIMIT ?3";
+            LIMIT ?3
+        "#;
         let rows = sqlx::query(sql)
             .bind(&options.household_id)
             .bind(last_rowid)
@@ -638,6 +772,8 @@ async fn run_dry_run(
         if rows.is_empty() {
             break;
         }
+
+        let mut chunk_last_rowid = last_rowid;
 
         for row in rows {
             let rowid: i64 = row
@@ -657,7 +793,7 @@ async fn run_dry_run(
                 .map_err(|err| map_row_error(err, "tz", &options.household_id, Some(&event_id)))?;
 
             scanned += 1;
-            last_rowid = rowid;
+            chunk_last_rowid = rowid;
 
             let tz = match choose_timezone(tz_str.as_deref(), fallback) {
                 Ok(tz) => tz,
@@ -699,21 +835,55 @@ async fn run_dry_run(
             let _ = start_utc;
             updated += 1;
 
-            if scanned - last_reported >= progress_every as u64 {
+            if last_emit.elapsed() >= progress_interval {
+                let elapsed = start.elapsed().as_millis() as u64;
                 emit_progress(
                     progress_cb,
-                    make_progress(&options.household_id, scanned, updated, skipped, total),
+                    make_progress(
+                        &options.household_id,
+                        scanned,
+                        updated,
+                        skipped,
+                        total,
+                        elapsed,
+                        chunk_size,
+                    ),
                 );
-                last_reported = scanned;
+                last_emit = Instant::now();
             }
+
+            if control.map(|c| c.is_cancelled()).unwrap_or(false) {
+                break;
+            }
+        }
+
+        if chunk_last_rowid != last_rowid {
+            last_rowid = chunk_last_rowid;
+        }
+
+        if control.map(|c| c.is_cancelled()).unwrap_or(false) {
+            break;
         }
     }
 
-    if scanned != last_reported {
-        emit_progress(
-            progress_cb,
-            make_progress(&options.household_id, scanned, updated, skipped, total),
-        );
+    let elapsed_ms = start.elapsed().as_millis() as u64;
+
+    emit_progress(
+        progress_cb,
+        make_progress(
+            &options.household_id,
+            scanned,
+            updated,
+            skipped,
+            total,
+            elapsed_ms,
+            chunk_size,
+        ),
+    );
+
+    let mut status = BackfillStatus::Completed;
+    if control.map(|c| c.is_cancelled()).unwrap_or(false) {
+        status = BackfillStatus::Cancelled;
     }
 
     let summary = BackfillSummary {
@@ -721,7 +891,8 @@ async fn run_dry_run(
         total_scanned: scanned,
         total_updated: updated,
         total_skipped: skipped,
-        elapsed_ms: start.elapsed().as_millis() as u64,
+        elapsed_ms,
+        status,
     };
 
     info!(
@@ -812,10 +983,12 @@ pub async fn run_events_backfill(
     pool: &SqlitePool,
     options: BackfillOptions,
     log_dir: Option<PathBuf>,
+    control: Option<BackfillControl>,
     progress_cb: Option<ProgressCallback>,
 ) -> AppResult<BackfillSummary> {
     let chunk_size = sanitize_chunk_size(options.chunk_size)?;
-    let progress_every = sanitize_progress_interval(options.progress_interval, chunk_size)?;
+    let progress_ms = sanitize_progress_interval(options.progress_interval_ms)?;
+    let progress_interval = Duration::from_millis(progress_ms);
 
     let (fallback_tz, fallback_label) = resolve_fallback_tz(pool, &options).await?;
 
@@ -824,12 +997,13 @@ pub async fn run_events_backfill(
         event = "events_backfill_start",
         household_id = %options.household_id,
         chunk_size,
-        progress_interval = progress_every,
+        progress_interval_ms = progress_ms,
         dry_run = options.dry_run,
         fallback_tz = fallback_label.as_deref().unwrap_or("<none>")
     );
 
     let progress_cb_ref = progress_cb.as_ref();
+    let control_ref = control.as_ref();
 
     if options.dry_run {
         let (summary, skip_examples) = run_dry_run(
@@ -837,7 +1011,8 @@ pub async fn run_events_backfill(
             &options,
             fallback_tz,
             chunk_size,
-            progress_every,
+            progress_interval,
+            control_ref,
             progress_cb_ref,
         )
         .await?;
@@ -858,6 +1033,8 @@ pub async fn run_events_backfill(
         }
     };
 
+    let processed_at_start = checkpoint.processed;
+
     let pending_after =
         count_pending_after(pool, &options.household_id, checkpoint.last_rowid).await?;
     checkpoint.total = checkpoint.processed + pending_after;
@@ -874,21 +1051,28 @@ pub async fn run_events_backfill(
             checkpoint.updated,
             checkpoint.skipped,
             checkpoint.total,
+            0,
+            chunk_size,
         ),
     );
 
     let start = Instant::now();
-    let mut scanned_this_run = 0u64;
+    let mut last_emit = Instant::now();
     let mut updated_this_run = 0u64;
     let mut skipped_this_run = 0u64;
-    let mut last_reported = checkpoint.processed;
     let mut skip_examples = Vec::new();
 
     loop {
+        if control_ref.map(|c| c.is_cancelled()).unwrap_or(false) {
+            break;
+        }
+
         let mut tx = begin_tx_with_retry(pool, &options.household_id).await?;
 
-        let sql = "SELECT rowid, id, start_at, end_at, tz FROM events
-            WHERE household_id=?1
+        let sql = r#"
+            SELECT rowid, id, start_at, end_at, tz
+            FROM events
+            WHERE household_id = ?1
               AND rowid > ?2
               AND (
                 start_at_utc IS NULL
@@ -897,7 +1081,8 @@ pub async fn run_events_backfill(
                 OR COALESCE(LENGTH(TRIM(tz)), 0) = 0
               )
             ORDER BY rowid
-            LIMIT ?3";
+            LIMIT ?3
+        "#;
         let rows = sqlx::query(sql)
             .bind(&options.household_id)
             .bind(checkpoint.last_rowid)
@@ -936,7 +1121,6 @@ pub async fn run_events_backfill(
                 .map_err(|err| map_row_error(err, "tz", &options.household_id, Some(&event_id)))?;
 
             checkpoint.processed += 1;
-            scanned_this_run += 1;
             chunk_last_rowid = rowid;
 
             let tz = match choose_timezone(tz_str.as_deref(), fallback_tz) {
@@ -1019,7 +1203,8 @@ pub async fn run_events_backfill(
                 .with_context("household_id", options.household_id.clone())
         })?;
 
-        if checkpoint.processed - last_reported >= progress_every as u64 {
+        if last_emit.elapsed() >= progress_interval {
+            let elapsed = start.elapsed().as_millis() as u64;
             emit_progress(
                 progress_cb_ref,
                 make_progress(
@@ -1028,31 +1213,43 @@ pub async fn run_events_backfill(
                     checkpoint.updated,
                     checkpoint.skipped,
                     checkpoint.total,
+                    elapsed,
+                    chunk_size,
                 ),
             );
-            last_reported = checkpoint.processed;
+            last_emit = Instant::now();
         }
     }
 
-    if checkpoint.processed != last_reported {
-        emit_progress(
-            progress_cb_ref,
-            make_progress(
-                &options.household_id,
-                checkpoint.processed,
-                checkpoint.updated,
-                checkpoint.skipped,
-                checkpoint.total,
-            ),
-        );
-    }
+    let elapsed_ms = start.elapsed().as_millis() as u64;
+    emit_progress(
+        progress_cb_ref,
+        make_progress(
+            &options.household_id,
+            checkpoint.processed,
+            checkpoint.updated,
+            checkpoint.skipped,
+            checkpoint.total,
+            elapsed_ms,
+            chunk_size,
+        ),
+    );
+
+    let status = if control_ref.map(|c| c.is_cancelled()).unwrap_or(false) {
+        BackfillStatus::Cancelled
+    } else {
+        BackfillStatus::Completed
+    };
+
+    let total_scanned = checkpoint.processed.saturating_sub(processed_at_start);
 
     let summary = BackfillSummary {
         household_id: options.household_id.clone(),
-        total_scanned: scanned_this_run,
+        total_scanned: total_scanned,
         total_updated: updated_this_run,
         total_skipped: skipped_this_run,
-        elapsed_ms: start.elapsed().as_millis() as u64,
+        elapsed_ms,
+        status,
     };
 
     info!(
@@ -1063,7 +1260,8 @@ pub async fn run_events_backfill(
         total_scanned = summary.total_scanned,
         total_updated = summary.total_updated,
         total_skipped = summary.total_skipped,
-        elapsed_ms = summary.elapsed_ms
+        elapsed_ms = summary.elapsed_ms,
+        status = ?summary.status,
     );
 
     write_summary_log(log_dir, &summary, false, &skip_examples);
@@ -1078,7 +1276,7 @@ pub async fn events_backfill_timezone(
     default_tz: Option<String>,
     dry_run: bool,
     chunk_size: Option<u32>,
-    progress_interval: Option<u32>,
+    progress_interval_ms: Option<u64>,
     reset_checkpoint: Option<bool>,
 ) -> AppResult<BackfillSummary> {
     let app = app.clone();
@@ -1087,34 +1285,120 @@ pub async fn events_backfill_timezone(
         let household_id = household_id.clone();
         let default_tz = default_tz.clone();
         async move {
-            let pool = {
-                let state: State<AppState> = app.state();
-                state.pool.clone()
+            let state: State<AppState> = app.state();
+            let pool = state.pool.clone();
+            let control = {
+                let mut guard = state.backfill.lock().unwrap();
+                guard.try_start(&household_id)?
             };
-
             let log_dir = app.path().app_data_dir().ok();
             let emitter = app.clone();
+            let progress_emitter = emitter.clone();
             let progress_cb: ProgressCallback = Arc::new(move |progress: BackfillProgress| {
-                let _ = emitter.emit("events_tz_backfill_progress", progress.clone());
+                let payload = json!({
+                    "type": "progress",
+                    "household_id": progress.household_id,
+                    "scanned": progress.scanned,
+                    "updated": progress.updated,
+                    "skipped": progress.skipped,
+                    "remaining": progress.remaining,
+                    "elapsed_ms": progress.elapsed_ms,
+                    "chunk_size": progress.chunk_size,
+                });
+                let _ = progress_emitter.emit("events_tz_backfill_progress", payload);
             });
 
-            run_events_backfill(
+            let result = run_events_backfill(
                 &pool,
                 BackfillOptions {
                     household_id,
                     default_tz,
                     chunk_size: chunk_size.map(|v| v as usize).unwrap_or(DEFAULT_CHUNK_SIZE),
-                    progress_interval: progress_interval.map(|v| v as usize).unwrap_or(0),
+                    progress_interval_ms: progress_interval_ms.unwrap_or(0),
                     dry_run,
                     reset_checkpoint: reset_checkpoint.unwrap_or(false),
                 },
                 log_dir,
+                Some(control.clone()),
                 Some(progress_cb),
             )
-            .await
+            .await;
+
+            {
+                let state: State<AppState> = app.state();
+                let mut guard = state.backfill.lock().unwrap();
+                guard.finish(control.id());
+            }
+
+            match result {
+                Ok(summary) => {
+                    let payload = json!({
+                        "type": "summary",
+                        "household_id": summary.household_id,
+                        "scanned": summary.total_scanned,
+                        "updated": summary.total_updated,
+                        "skipped": summary.total_skipped,
+                        "elapsed_ms": summary.elapsed_ms,
+                        "status": summary.status,
+                    });
+                    let _ = emitter.emit("events_tz_backfill_progress", payload);
+                    Ok(summary)
+                }
+                Err(err) => {
+                    let payload = json!({
+                        "type": "summary",
+                        "status": "failed",
+                        "error": {
+                            "code": err.code().to_string(),
+                            "message": err.message().to_string(),
+                        },
+                    });
+                    let _ = emitter.emit("events_tz_backfill_progress", payload);
+                    Err(err)
+                }
+            }
         }
     })
     .await
+}
+
+#[tauri::command]
+pub async fn events_backfill_timezone_cancel(app: AppHandle) -> AppResult<bool> {
+    let state: State<AppState> = app.state();
+    let cancelled = {
+        let mut guard = state.backfill.lock().unwrap();
+        guard.cancel()
+    };
+    Ok(cancelled)
+}
+
+#[tauri::command]
+pub async fn events_backfill_timezone_status(
+    app: AppHandle,
+    household_id: String,
+) -> AppResult<BackfillStatusReport> {
+    let state: State<AppState> = app.state();
+    let pool = state.pool.clone();
+    let running = {
+        let guard = state.backfill.lock().unwrap();
+        guard.running_household()
+    };
+
+    let checkpoint = fetch_checkpoint(&pool, &household_id).await?;
+    let checkpoint_status = checkpoint.map(|cp| BackfillCheckpointStatus {
+        processed: cp.processed,
+        updated: cp.updated,
+        skipped: cp.skipped,
+        total: cp.total,
+        remaining: cp.total.saturating_sub(cp.processed),
+    });
+    let pending = count_pending_after(&pool, &household_id, 0).await?;
+
+    Ok(BackfillStatusReport {
+        running,
+        checkpoint: checkpoint_status,
+        pending,
+    })
 }
 
 #[cfg(test)]

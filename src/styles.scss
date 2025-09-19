@@ -897,6 +897,92 @@ footer a.footer__settings {
   color: var(--color-text-muted);
 }
 
+.settings__section--timezone {
+  margin-bottom: var(--space-4);
+}
+
+.timezone-maintenance__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.timezone-maintenance__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 200px;
+  font-size: 0.875rem;
+}
+
+.timezone-maintenance__input,
+.timezone-maintenance__select {
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-base);
+  border: 1px solid var(--color-border);
+  font-size: 0.875rem;
+  color: var(--color-text);
+  background: var(--color-surface);
+}
+
+.timezone-maintenance__hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.timezone-maintenance__checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.timezone-maintenance__checkbox-input {
+  inline-size: 1rem;
+  block-size: 1rem;
+}
+
+.timezone-maintenance__actions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  margin-top: var(--space-3);
+}
+
+.timezone-maintenance__status {
+  margin-top: var(--space-3);
+  font-size: 0.875rem;
+  min-height: 1.75rem;
+  color: var(--color-text-muted);
+}
+
+.timezone-maintenance__summary {
+  margin-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-3);
+}
+
+.timezone-maintenance__summary-list {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 0.5rem var(--space-4);
+  margin: 0;
+}
+
+.timezone-maintenance__summary-list dt {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+}
+
+.timezone-maintenance__summary-list dd {
+  margin: 0;
+  font-weight: 600;
+}
+
 .settings__preview {
   background: var(--color-panel);
   border: 1px solid var(--color-border);

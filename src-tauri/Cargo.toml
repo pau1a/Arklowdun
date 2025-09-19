@@ -90,5 +90,5 @@ name = "crash_probe"
 path = "scripts/crash_probe.rs"
 
 [[bin]]
-name = "time_backfill"
+name = "time"
 path = "scripts/time_backfill.rs"
