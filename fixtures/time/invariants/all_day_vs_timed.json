@@ -1,0 +1,59 @@
+{
+  "description": "Mixed timed vs all-day invariants for threshold coverage.",
+  "reference": "Timed events must stay within one minute; all-day events must keep midnight boundaries (spec PR-4).",
+  "events": [
+    {
+      "id": "timed-stable",
+      "household_id": "hh_thresholds",
+      "title": "Noon check-in",
+      "tz": "UTC",
+      "local_start": "2024-04-01T12:00:00",
+      "local_end": "2024-04-01T13:00:00",
+      "note": "Exact UTC match should not drift."
+    },
+    {
+      "id": "timed-drift-45s",
+      "household_id": "hh_thresholds",
+      "title": "Noon check-in",
+      "tz": "UTC",
+      "local_start": "2024-04-02T12:00:00",
+      "local_end": "2024-04-02T13:00:00",
+      "start_at_utc": "2024-04-02T11:59:15Z",
+      "end_at_utc": "2024-04-02T12:59:15Z",
+      "note": "45-second difference stays below detection threshold."
+    },
+    {
+      "id": "timed-drift-65s",
+      "household_id": "hh_thresholds",
+      "title": "Noon check-in",
+      "tz": "UTC",
+      "local_start": "2024-04-03T12:00:00",
+      "local_end": "2024-04-03T13:00:00",
+      "start_at_utc": "2024-04-03T11:58:55Z",
+      "end_at_utc": "2024-04-03T12:58:55Z",
+      "note": "65-second difference must be flagged as timed drift.",
+      "expected_drift": "timed_mismatch"
+    },
+    {
+      "id": "allday-stable",
+      "household_id": "hh_thresholds",
+      "title": "All-day summit",
+      "tz": "America/New_York",
+      "local_start": "2024-03-10T00:00:00",
+      "local_end": "2024-03-11T00:00:00",
+      "note": "DST boundary shift is tolerated when it stays within ±1 day of midnight."
+    },
+    {
+      "id": "allday-boundary-drift",
+      "household_id": "hh_thresholds",
+      "title": "All-day summit",
+      "tz": "America/New_York",
+      "local_start": "2024-03-11T00:00:00",
+      "local_end": "2024-03-12T00:00:00",
+      "start_at_utc": "2024-03-09T05:00:00Z",
+      "end_at_utc": "2024-03-10T05:00:00Z",
+      "note": "UTC dates shifted two days earlier should trigger boundary violation.",
+      "expected_drift": "allday_boundary_error"
+    }
+  ]
+}

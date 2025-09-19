@@ -1,0 +1,24 @@
+{
+  "description": "DST spring-forward coverage for America/New_York on 2025-03-09.",
+  "reference": "https://www.timeanddate.com/time/change/usa/new-york?year=2025",
+  "events": [
+    {
+      "id": "dst-forward-2025-03-07",
+      "household_id": "hh_dst_forward",
+      "title": "Daily 9am standup",
+      "tz": "America/New_York",
+      "local_start": "2025-03-07T09:00:00",
+      "local_end": "2025-03-07T10:00:00",
+      "note": "Pre-shift: EST (UTC-05:00) still in effect; recompute should stay at 09:00 local."
+    },
+    {
+      "id": "dst-forward-2025-03-10",
+      "household_id": "hh_dst_forward",
+      "title": "Daily 9am standup",
+      "tz": "America/New_York",
+      "local_start": "2025-03-10T09:00:00",
+      "local_end": "2025-03-10T10:00:00",
+      "note": "Post-shift: EDT (UTC-04:00) applies; 9am meeting must remain 09:00 local after conversion."
+    }
+  ]
+}
