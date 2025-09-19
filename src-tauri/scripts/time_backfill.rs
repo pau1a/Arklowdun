@@ -5,7 +5,7 @@ use arklowdun_lib::{
         BackfillSummary, MAX_CHUNK_SIZE, MAX_PROGRESS_INTERVAL_MS, MIN_CHUNK_SIZE,
         MIN_PROGRESS_INTERVAL_MS,
     },
-    AppError,
+    time_invariants, AppError,
 };
 use clap::{Args, Parser, Subcommand};
 use serde_json::json;
@@ -16,6 +16,7 @@ use sqlx::{
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
+    time::Instant,
 };
 use tokio::signal;
 use tracing::info;
@@ -31,6 +32,8 @@ struct Cli {
 enum Command {
     #[command(about = "Run the timezone backfill with progress reporting")]
     Backfill(BackfillArgs),
+    #[command(about = "Check wall-clock invariants between local and UTC timestamps")]
+    Invariants(InvariantArgs),
 }
 
 #[derive(Args)]
@@ -63,6 +66,21 @@ struct BackfillArgs {
     log_dir: Option<PathBuf>,
 }
 
+#[derive(Args)]
+struct InvariantArgs {
+    #[arg(long, value_name = "PATH")]
+    db: Option<PathBuf>,
+
+    #[arg(long, value_name = "PATH", default_value = "drift-report.json")]
+    output: PathBuf,
+
+    #[arg(long, value_name = "HOUSEHOLD")]
+    household: Option<String>,
+
+    #[arg(long)]
+    pretty: bool,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     init_logging();
@@ -70,6 +88,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Backfill(args) => run_backfill(args).await?,
+        Command::Invariants(args) => run_invariants(args).await?,
     }
 
     Ok(())
@@ -196,6 +215,39 @@ fn format_status(status: &BackfillStatus) -> &'static str {
         BackfillStatus::Cancelled => "cancelled",
         BackfillStatus::Failed => "failed",
     }
+}
+
+async fn run_invariants(args: InvariantArgs) -> Result<()> {
+    let db_path = args.db.unwrap_or(default_db_path()?);
+    let pool = open_pool(&db_path).await?;
+    let options = time_invariants::DriftCheckOptions {
+        household_id: args.household.clone(),
+    };
+    let started = Instant::now();
+    let report = time_invariants::run_drift_check(&pool, options).await?;
+    let elapsed = started.elapsed();
+
+    println!("{}", time_invariants::format_human_summary(&report));
+    println!("Elapsed: {:.2}s", elapsed.as_secs_f64());
+
+    let json = if args.pretty {
+        serde_json::to_vec_pretty(&report.drift_events)?
+    } else {
+        serde_json::to_vec(&report.drift_events)?
+    };
+    std::fs::write(&args.output, &json)
+        .with_context(|| format!("write {}", args.output.display()))?;
+    eprintln!(
+        "Wrote {} drift events to {}",
+        report.drift_events.len(),
+        args.output.display()
+    );
+
+    if !report.drift_events.is_empty() {
+        std::process::exit(2);
+    }
+
+    Ok(())
 }
 
 fn init_logging() {

@@ -107,6 +107,7 @@ mod repo;
 pub mod security;
 mod state;
 mod time;
+pub mod time_invariants;
 pub mod util;
 
 pub use error::{AppError, AppResult, ErrorDto};
@@ -1691,6 +1692,26 @@ async fn open_diagnostics_doc(app: tauri::AppHandle) -> AppResult<()> {
     .await
 }
 
+#[tauri::command]
+async fn time_invariants_check(
+    state: State<'_, AppState>,
+    household_id: Option<String>,
+) -> AppResult<time_invariants::DriftReport> {
+    let pool = state.pool.clone();
+    dispatch_async_app_result(move || {
+        let pool = pool.clone();
+        let household_id = household_id.clone();
+        async move {
+            time_invariants::run_drift_check(
+                &pool,
+                time_invariants::DriftCheckOptions { household_id },
+            )
+            .await
+        }
+    })
+    .await
+}
+
 #[macro_export]
 macro_rules! app_commands {
     ($($extra:ident),* $(,)?) => {
@@ -1794,6 +1815,7 @@ macro_rules! app_commands {
             diagnostics_summary,
             diagnostics_doc_path,
             open_diagnostics_doc,
+            time_invariants_check,
             about_metadata,
             $($extra),*
         ]
