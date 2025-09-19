@@ -43,19 +43,19 @@ export function startBackfill(options: StartBackfillOptions): Promise<BackfillSu
   } = options;
 
   const args: Record<string, unknown> = {
-    household_id: householdId,
-    dry_run: dryRun,
-    reset_checkpoint: !resume,
+    householdId: householdId,
+    dryRun: dryRun,
+    resetCheckpoint: !resume,
   };
 
   if (typeof chunkSize === "number") {
-    args.chunk_size = chunkSize;
+    args.chunkSize = chunkSize;
   }
   if (typeof defaultTimezone === "string" && defaultTimezone.length > 0) {
-    args.default_tz = defaultTimezone;
+    args.defaultTz = defaultTimezone;
   }
   if (typeof progressIntervalMs === "number") {
-    args.progress_interval_ms = progressIntervalMs;
+    args.progressIntervalMs = progressIntervalMs;
   }
 
   return call<BackfillSummary>("events_backfill_timezone", args);
@@ -67,6 +67,6 @@ export function cancelBackfill(): Promise<boolean> {
 
 export function fetchBackfillStatus(householdId: string): Promise<BackfillStatusReport> {
   return call<BackfillStatusReport>("events_backfill_timezone_status", {
-    household_id: householdId,
+    householdId,
   });
 }
