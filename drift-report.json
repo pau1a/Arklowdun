@@ -1,0 +1,29 @@
+[
+  {
+    "event_id": "timed_drift",
+    "household_id": "hh1",
+    "start_at": 1710061200000,
+    "end_at": 1710064800000,
+    "recomputed_start_at": 1710057600000,
+    "recomputed_end_at": 1710061200000,
+    "delta_ms": 3600000,
+    "category": "timed_mismatch"
+  },
+  {
+    "event_id": "allday_bad",
+    "household_id": "hh3",
+    "start_at": 1710028800000,
+    "end_at": 1710115200000,
+    "recomputed_start_at": 1709856000000,
+    "recomputed_end_at": 1709942400000,
+    "delta_ms": 172800000,
+    "category": "allday_boundary_error"
+  },
+  {
+    "event_id": "missing_tz",
+    "household_id": "hh4",
+    "start_at": 1711972800000,
+    "delta_ms": 0,
+    "category": "tz_missing"
+  }
+]
