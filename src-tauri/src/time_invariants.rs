@@ -3,7 +3,7 @@ use std::{
     fmt::{self, Write},
 };
 
-use chrono::{DateTime, Datelike, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, Datelike, NaiveDateTime, NaiveTime, Utc};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, QueryBuilder, SqlitePool};
@@ -71,11 +71,13 @@ struct EventRow {
 }
 
 fn naive_from_ms(ms: i64) -> AppResult<NaiveDateTime> {
-    NaiveDateTime::from_timestamp_millis(ms).ok_or_else(|| {
-        AppError::new("TIME/INVALID_TIMESTAMP", "Invalid wall-clock timestamp")
-            .with_context("operation", OPERATION)
-            .with_context("timestamp", ms.to_string())
-    })
+    DateTime::<Utc>::from_timestamp_millis(ms)
+        .map(|dt| dt.naive_utc())
+        .ok_or_else(|| {
+            AppError::new("TIME/INVALID_TIMESTAMP", "Invalid wall-clock timestamp")
+                .with_context("operation", OPERATION)
+                .with_context("timestamp", ms.to_string())
+        })
 }
 
 fn utc_from_ms(ms: i64) -> AppResult<DateTime<Utc>> {
@@ -199,8 +201,8 @@ fn evaluate_row(row: &EventRow) -> AppResult<Option<DriftRecord>> {
         if ok {
             return Ok(None);
         }
-        let recomputed_start_ms = computed_start.timestamp_millis();
-        let recomputed_end_ms = computed_end.map(|dt| dt.timestamp_millis());
+        let recomputed_start_ms = computed_start.and_utc().timestamp_millis();
+        let recomputed_end_ms = computed_end.map(|dt| dt.and_utc().timestamp_millis());
         let mut delta = diff_ms(row.start_at, recomputed_start_ms);
         if let (Some(end), Some(recomp)) = (row.end_at, recomputed_end_ms) {
             delta = delta.max(diff_ms(end, recomp));
@@ -214,12 +216,12 @@ fn evaluate_row(row: &EventRow) -> AppResult<Option<DriftRecord>> {
         )));
     }
 
-    let recomputed_start_ms = computed_start.timestamp_millis();
+    let recomputed_start_ms = computed_start.and_utc().timestamp_millis();
     let mut delta = diff_ms(row.start_at, recomputed_start_ms);
     let mut mismatch = delta >= MINUTE_MS;
 
     let recomputed_end_ms = if let (Some(end_at), Some(computed_end)) = (row.end_at, computed_end) {
-        let recomputed = computed_end.timestamp_millis();
+        let recomputed = computed_end.and_utc().timestamp_millis();
         let end_delta = diff_ms(end_at, recomputed);
         if end_delta >= MINUTE_MS {
             mismatch = true;
