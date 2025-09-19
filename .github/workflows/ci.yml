@@ -34,6 +34,34 @@ jobs:
           node-version: 20
       - run: node scripts/guards/gate-cross-feature-report.mjs
 
+  gate_time_invariants:
+    name: gate/time-invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install sqlite3
+        run: sudo apt-get update && sudo apt-get install -y sqlite3
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build drift-check database from SQL
+        run: |
+          mkdir -p fixtures/time
+          sqlite3 fixtures/time/drift-check.db < fixtures/time/drift-check.sql
+          sqlite3 fixtures/time/drift-check.db 'PRAGMA integrity_check;'
+      - name: Run drift check
+        working-directory: src-tauri
+        run: >
+          cargo run
+          --bin time -- invariants
+          --db ../fixtures/time/drift-check.db
+          --output drift-report.json
+          --pretty
+      - name: Upload drift report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-report
+          path: src-tauri/drift-report.json
+
   lint:
     runs-on: ubuntu-latest
     steps:

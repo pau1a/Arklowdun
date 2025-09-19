@@ -2,9 +2,10 @@ use arklowdun_lib::AppError;
 
 fn main() {
     arklowdun_lib::init_logging();
-    let _ = arklowdun_lib::init_file_logging_standalone("com.arklowdun.app").map(|path| {
+
+    // Log the path if file logging initialized successfully (side effect only).
+    let _ = arklowdun_lib::init_file_logging_standalone("com.arklowdun.app").inspect(|path| {
         println!("File log: {}", path.display());
-        path
     });
 
     let error = AppError::critical("SUPPORT/PROBE", "crash probe triggered");

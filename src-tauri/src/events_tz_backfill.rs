@@ -111,6 +111,12 @@ impl BackfillControl {
     }
 }
 
+impl Default for BackfillControl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct BackfillCoordinator {
     active: Option<ActiveBackfill>,
@@ -127,6 +133,7 @@ impl BackfillCoordinator {
         Self { active: None }
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn try_start(&mut self, household_id: &str) -> AppResult<BackfillControl> {
         if self.active.is_some() {
             return Err(AppError::new(
@@ -224,6 +231,7 @@ fn capture_skip_example(
     });
 }
 
+#[allow(clippy::result_large_err)]
 fn sanitize_chunk_size(requested: usize) -> AppResult<usize> {
     if !(MIN_CHUNK_SIZE..=MAX_CHUNK_SIZE).contains(&requested) {
         return Err(AppError::new(
@@ -241,6 +249,7 @@ fn sanitize_chunk_size(requested: usize) -> AppResult<usize> {
     Ok(requested)
 }
 
+#[allow(clippy::result_large_err)]
 fn sanitize_progress_interval(requested: u64) -> AppResult<u64> {
     if requested == 0 {
         return Ok(1_000);
@@ -276,6 +285,7 @@ fn is_sqlite_locked(err: &SqlxError) -> bool {
     }
 }
 
+#[allow(clippy::result_large_err)]
 async fn begin_tx_with_retry<'a>(
     pool: &'a SqlitePool,
     household_id: &str,
@@ -312,6 +322,7 @@ async fn begin_tx_with_retry<'a>(
 /// timezone. Interpret `local_ms` using `tz` and return the corresponding UTC
 /// instant. Ambiguous times during a DST fall-back choose the earlier
 /// occurrence; gaps choose the earliest valid instant after the gap.
+#[allow(clippy::result_large_err)]
 fn to_utc_ms(local_ms: i64, tz: Tz) -> AppResult<i64> {
     #[allow(deprecated)]
     let naive = NaiveDateTime::from_timestamp_millis(local_ms).ok_or_else(|| {
@@ -341,6 +352,7 @@ fn sanitize_tz(value: Option<String>) -> Option<String> {
     })
 }
 
+#[allow(clippy::result_large_err)]
 fn parse_named_timezone(name: &str) -> AppResult<Tz> {
     name.parse().map_err(|_| {
         AppError::new("BACKFILL/INVALID_TIMEZONE", "Invalid timezone identifier")
@@ -350,6 +362,7 @@ fn parse_named_timezone(name: &str) -> AppResult<Tz> {
     })
 }
 
+#[allow(clippy::result_large_err)]
 async fn fetch_household_tz(pool: &SqlitePool, household_id: &str) -> AppResult<Option<String>> {
     let row = sqlx::query("SELECT tz FROM household WHERE id = ?1")
         .bind(household_id)
@@ -400,6 +413,7 @@ fn choose_timezone(row_tz: Option<&str>, fallback: Option<Tz>) -> Result<Tz, Ski
     fallback.ok_or(SkipReason::MissingTimezone)
 }
 
+#[allow(clippy::result_large_err)]
 async fn ensure_checkpoint_table(pool: &SqlitePool) -> AppResult<()> {
     let sql = format!(
         "CREATE TABLE IF NOT EXISTS {CHECKPOINT_TABLE} (
@@ -423,6 +437,7 @@ async fn ensure_checkpoint_table(pool: &SqlitePool) -> AppResult<()> {
         })
 }
 
+#[allow(clippy::result_large_err)]
 async fn reset_checkpoint(pool: &SqlitePool, household_id: &str) -> AppResult<()> {
     let sql = format!("DELETE FROM {CHECKPOINT_TABLE} WHERE household_id=?1");
     sqlx::query(&sql)
@@ -438,6 +453,7 @@ async fn reset_checkpoint(pool: &SqlitePool, household_id: &str) -> AppResult<()
         })
 }
 
+#[allow(clippy::result_large_err)]
 fn to_u64(value: i64, field: &'static str, household_id: &str) -> AppResult<u64> {
     u64::try_from(value).map_err(|_| {
         AppError::new(
@@ -451,6 +467,7 @@ fn to_u64(value: i64, field: &'static str, household_id: &str) -> AppResult<u64>
     })
 }
 
+#[allow(clippy::result_large_err)]
 fn to_i64(value: u64, field: &'static str, household_id: &str) -> AppResult<i64> {
     i64::try_from(value).map_err(|_| {
         AppError::new(
@@ -464,6 +481,7 @@ fn to_i64(value: u64, field: &'static str, household_id: &str) -> AppResult<i64>
     })
 }
 
+#[allow(clippy::result_large_err)]
 async fn fetch_checkpoint(pool: &SqlitePool, household_id: &str) -> AppResult<Option<Checkpoint>> {
     let sql = format!(
         "SELECT last_rowid, processed, updated, skipped, total FROM {CHECKPOINT_TABLE} WHERE household_id=?1"
@@ -539,6 +557,7 @@ async fn fetch_checkpoint(pool: &SqlitePool, household_id: &str) -> AppResult<Op
     }))
 }
 
+#[allow(clippy::result_large_err)]
 async fn insert_checkpoint(
     pool: &SqlitePool,
     household_id: &str,
@@ -570,6 +589,7 @@ async fn insert_checkpoint(
     })
 }
 
+#[allow(clippy::result_large_err)]
 async fn update_checkpoint_total(
     pool: &SqlitePool,
     household_id: &str,
@@ -592,6 +612,7 @@ async fn update_checkpoint_total(
         })
 }
 
+#[allow(clippy::result_large_err)]
 async fn update_checkpoint_record(
     tx: &mut Transaction<'_, Sqlite>,
     household_id: &str,
@@ -626,6 +647,7 @@ async fn update_checkpoint_record(
         })
 }
 
+#[allow(clippy::result_large_err)]
 async fn count_pending_after(
     pool: &SqlitePool,
     household_id: &str,
@@ -709,6 +731,7 @@ fn map_row_error(
     app_err
 }
 
+#[allow(clippy::result_large_err)]
 async fn run_dry_run(
     pool: &SqlitePool,
     options: &BackfillOptions,
@@ -963,6 +986,7 @@ fn write_summary_log(
     }
 }
 
+#[allow(clippy::result_large_err)]
 async fn resolve_fallback_tz(
     pool: &SqlitePool,
     options: &BackfillOptions,
@@ -979,6 +1003,7 @@ async fn resolve_fallback_tz(
     Ok((None, None))
 }
 
+#[allow(clippy::result_large_err)]
 pub async fn run_events_backfill(
     pool: &SqlitePool,
     options: BackfillOptions,
@@ -1245,7 +1270,7 @@ pub async fn run_events_backfill(
 
     let summary = BackfillSummary {
         household_id: options.household_id.clone(),
-        total_scanned: total_scanned,
+        total_scanned,
         total_updated: updated_this_run,
         total_skipped: skipped_this_run,
         elapsed_ms,
@@ -1270,6 +1295,7 @@ pub async fn run_events_backfill(
 }
 
 #[tauri::command]
+#[allow(clippy::result_large_err)]
 pub async fn events_backfill_timezone(
     app: AppHandle,
     household_id: String,
@@ -1363,6 +1389,7 @@ pub async fn events_backfill_timezone(
 }
 
 #[tauri::command]
+#[allow(clippy::result_large_err)]
 pub async fn events_backfill_timezone_cancel(app: AppHandle) -> AppResult<bool> {
     let state: State<AppState> = app.state();
     let cancelled = {
@@ -1373,6 +1400,7 @@ pub async fn events_backfill_timezone_cancel(app: AppHandle) -> AppResult<bool> 
 }
 
 #[tauri::command]
+#[allow(clippy::result_large_err)]
 pub async fn events_backfill_timezone_status(
     app: AppHandle,
     household_id: String,

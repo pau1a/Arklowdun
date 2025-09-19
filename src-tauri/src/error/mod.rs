@@ -22,7 +22,7 @@ pub use crash_id::CrashId;
 const CRASH_MESSAGE_PREFIX: &str = "Something went wrong. Crash ID: ";
 
 thread_local! {
-    static HOOK_CRASH_ID: RefCell<Option<CrashId>> = RefCell::new(None);
+    static HOOK_CRASH_ID: RefCell<Option<CrashId>> = const { RefCell::new(None) };
 }
 
 static PANIC_HOOK: OnceCell<()> = OnceCell::new();

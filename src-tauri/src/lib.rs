@@ -107,6 +107,7 @@ mod repo;
 pub mod security;
 mod state;
 mod time;
+pub mod time_invariants;
 pub mod util;
 
 pub use error::{AppError, AppResult, ErrorDto};
@@ -223,7 +224,7 @@ pub fn init_logging() {
         .with_span_list(false);
 
     let file_layer = fmt::layer()
-        .with_writer(RotatingFileWriter::default())
+        .with_writer(RotatingFileWriter)
         .json()
         .with_target(true)
         .with_timer(UtcTime::rfc_3339())
@@ -262,13 +263,13 @@ pub enum FileLoggingError {
 }
 
 pub fn init_file_logging<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
+    app: tauri::AppHandle<R>,
 ) -> Result<(), FileLoggingError> {
     if FILE_LOG_WRITER.get().is_some() {
         return Ok(());
     }
 
-    let logs_dir = resolve_logs_dir(app)?;
+    let logs_dir = resolve_logs_dir(&app)?;
     std::fs::create_dir_all(&logs_dir).map_err(|source| FileLoggingError::CreateDir {
         dir: logs_dir.clone(),
         source,
@@ -931,6 +932,7 @@ async fn get_default_household_id(state: tauri::State<'_, state::AppState>) -> A
 }
 
 #[tauri::command]
+#[allow(clippy::result_large_err)]
 fn set_default_household_id(state: tauri::State<state::AppState>, id: String) -> AppResult<()> {
     dispatch_app_result(move || {
         let requested_id = id.clone();
@@ -1663,6 +1665,7 @@ async fn diagnostics_summary(app: tauri::AppHandle) -> AppResult<diagnostics::Su
 }
 
 #[tauri::command]
+#[allow(clippy::result_large_err)]
 fn about_metadata(app: tauri::AppHandle) -> AppResult<diagnostics::AboutInfo> {
     Ok(diagnostics::about_info(&app))
 }
@@ -1686,6 +1689,27 @@ async fn open_diagnostics_doc(app: tauri::AppHandle) -> AppResult<()> {
             let p = crate::diagnostics::resolve_doc_path(&app)?;
             let pb = std::path::PathBuf::from(p);
             crate::attachments::open_with_os(&pb)
+        }
+    })
+    .await
+}
+
+#[tauri::command]
+#[allow(clippy::result_large_err)]
+async fn time_invariants_check(
+    state: State<'_, AppState>,
+    household_id: Option<String>,
+) -> AppResult<time_invariants::DriftReport> {
+    let pool = state.pool.clone();
+    dispatch_async_app_result(move || {
+        let pool = pool.clone();
+        let household_id = household_id.clone();
+        async move {
+            time_invariants::run_drift_check(
+                &pool,
+                time_invariants::DriftCheckOptions { household_id },
+            )
+            .await
         }
     })
     .await
@@ -1794,6 +1818,7 @@ macro_rules! app_commands {
             diagnostics_summary,
             diagnostics_doc_path,
             open_diagnostics_doc,
+            time_invariants_check,
             about_metadata,
             $($extra),*
         ]
@@ -1811,7 +1836,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let handle = app.handle();
-            if let Err(err) = crate::init_file_logging(&handle) {
+            if let Err(err) = crate::init_file_logging(handle.clone()) {
                 tracing::warn!(
                     target: "arklowdun",
                     event = "file_logging_disabled",
