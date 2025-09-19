@@ -5,13 +5,13 @@ use futures::Future;
 use futures::FutureExt;
 
 use crate::{
-    error::{panic_payload, take_panic_crash_id, CrashId},
+    error::{panic_payload, take_panic_crash_id},
     AppError, AppResult,
 };
 
 fn app_error_from_panic(payload: Box<dyn Any + Send>) -> AppError {
     let message = panic_payload(payload.as_ref());
-    let crash_id = take_panic_crash_id().unwrap_or_else(CrashId::new);
+    let crash_id = take_panic_crash_id().unwrap_or_default();
 
     let mut error = AppError::new("RUNTIME/PANIC", message);
     error.set_crash_id(crash_id);
