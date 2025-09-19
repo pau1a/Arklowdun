@@ -6,6 +6,7 @@ import {
   SettingsPanel,
   useSettings,
 } from "@features/settings";
+import { createTimezoneMaintenanceSection } from "@features/settings/components/TimezoneMaintenanceSection";
 import { createEmptyState } from "./ui/EmptyState";
 import { STR } from "./ui/strings";
 import createButton from "@ui/Button";
@@ -45,6 +46,7 @@ export function SettingsView(container: HTMLElement) {
     return panel;
   };
 
+  const timezoneMaintenance = createTimezoneMaintenanceSection();
   const general = createEmptySection("settings-general", "General");
   const storage = createEmptySection("settings-storage", "Storage and permissions");
   const notifications = createEmptySection("settings-notifications", "Notifications");
@@ -128,7 +130,16 @@ export function SettingsView(container: HTMLElement) {
   aboutBody.append(metaList, note, actions, status, preview);
   about.append(aboutHeading, aboutBody);
 
-  section.append(backButton, title, general, storage, notifications, appearance, about);
+  section.append(
+    backButton,
+    title,
+    timezoneMaintenance.element,
+    general,
+    storage,
+    notifications,
+    appearance,
+    about,
+  );
 
   container.innerHTML = "";
   container.appendChild(section);

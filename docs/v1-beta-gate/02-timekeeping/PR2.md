@@ -49,7 +49,7 @@ This prevents silent performance issues and enforces data integrity before featu
 
 ## Operations
 - Run the guard manually with `cargo run --bin migrate -- check` to view pending counts.
-- Apply the PR-1 timezone backfill via `cargo run --bin time-backfill -- --household-id <HOUSEHOLD> [--default-tz <TZ>]` (the guard refers to this as `backfill --apply`).
+- Apply the PR-1 timezone backfill via `cargo run --bin time -- backfill --household <HOUSEHOLD> [--default-tz <TZ>]`.
 - Dev-only bypass: set `ARKLOWDUN_SKIP_BACKFILL_GUARD=1` (ignored in release builds) when iterating locally.
 
 ---

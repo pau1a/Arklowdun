@@ -1,12 +1,14 @@
 use anyhow::{anyhow, Context, Result};
 use arklowdun_lib::{
     events_tz_backfill::{
-        run_events_backfill, BackfillOptions, BackfillProgress, MAX_CHUNK_SIZE,
-        MAX_PROGRESS_INTERVAL, MIN_CHUNK_SIZE, MIN_PROGRESS_INTERVAL,
+        run_events_backfill, BackfillControl, BackfillOptions, BackfillProgress, BackfillStatus,
+        BackfillSummary, MAX_CHUNK_SIZE, MAX_PROGRESS_INTERVAL_MS, MIN_CHUNK_SIZE,
+        MIN_PROGRESS_INTERVAL_MS,
     },
     AppError,
 };
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
+use serde_json::json;
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
     ConnectOptions, SqlitePool,
@@ -15,43 +17,48 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+use tokio::signal;
 use tracing::info;
 
 #[derive(Parser)]
-#[command(
-    name = "time-backfill",
-    about = "Chunked, resumable backfill for event UTC fields"
-)]
+#[command(name = "time", about = "Timekeeping maintenance utilities")]
 struct Cli {
-    /// Optional explicit DB path
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    #[command(about = "Run the timezone backfill with progress reporting")]
+    Backfill(BackfillArgs),
+}
+
+#[derive(Args)]
+struct BackfillArgs {
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 
-    /// Target household identifier
     #[arg(long, value_name = "HOUSEHOLD")]
-    household_id: String,
+    household: String,
 
-    /// Fallback timezone to use when events lack one
     #[arg(long, value_name = "TZ")]
     default_tz: Option<String>,
 
-    /// Number of rows to process inside a single transaction
     #[arg(long, value_name = "N", default_value_t = 500)]
     chunk_size: usize,
 
-    /// Emit progress after processing this many rows (defaults to chunk size)
-    #[arg(long, value_name = "N")]
-    progress_interval: Option<usize>,
+    #[arg(long, value_name = "MS")]
+    progress_interval: Option<u64>,
 
-    /// Compute counts without modifying the database
     #[arg(long)]
     dry_run: bool,
 
-    /// Drop existing checkpoint state before running
     #[arg(long)]
-    reset: bool,
+    resume: bool,
 
-    /// Optional override for the backfill log directory
+    #[arg(long)]
+    json_summary: bool,
+
     #[arg(long, value_name = "PATH")]
     log_dir: Option<PathBuf>,
 }
@@ -61,56 +68,134 @@ async fn main() -> Result<()> {
     init_logging();
 
     let cli = Cli::parse();
-    let db_path = cli.db.unwrap_or(default_db_path()?);
+    match cli.command {
+        Command::Backfill(args) => run_backfill(args).await?,
+    }
+
+    Ok(())
+}
+
+async fn run_backfill(args: BackfillArgs) -> Result<()> {
+    let db_path = args.db.unwrap_or(default_db_path()?);
     let pool = open_pool(&db_path).await?;
 
-    if cli.chunk_size < MIN_CHUNK_SIZE || cli.chunk_size > MAX_CHUNK_SIZE {
+    if !(MIN_CHUNK_SIZE..=MAX_CHUNK_SIZE).contains(&args.chunk_size) {
         anyhow::bail!(
             "Chunk size must be between {MIN_CHUNK_SIZE} and {MAX_CHUNK_SIZE} rows per batch."
         );
     }
-    let progress_interval = if let Some(interval) = cli.progress_interval {
-        if interval < MIN_PROGRESS_INTERVAL || interval > MAX_PROGRESS_INTERVAL {
+
+    if let Some(interval) = args.progress_interval {
+        if !(MIN_PROGRESS_INTERVAL_MS..=MAX_PROGRESS_INTERVAL_MS).contains(&interval) {
             anyhow::bail!(
-                "Progress interval must be between {MIN_PROGRESS_INTERVAL} and {MAX_PROGRESS_INTERVAL} rows."
+                "Progress interval must be between {MIN_PROGRESS_INTERVAL_MS} and {MAX_PROGRESS_INTERVAL_MS} milliseconds."
             );
         }
-        interval
-    } else {
-        0
-    };
-    let chunk_size = cli.chunk_size;
+    }
 
+    let control = BackfillControl::new();
     let progress_cb: Arc<dyn Fn(BackfillProgress) + Send + Sync> = Arc::new(|progress| {
+        let event = json!({
+            "type": "progress",
+            "household_id": progress.household_id,
+            "scanned": progress.scanned,
+            "updated": progress.updated,
+            "skipped": progress.skipped,
+            "remaining": progress.remaining,
+            "elapsed_ms": progress.elapsed_ms,
+            "chunk_size": progress.chunk_size,
+        });
+        println!("{}", event);
         info!(
             target: "arklowdun::backfill",
             household_id = %progress.household_id,
-            processed = progress.processed,
-            total = progress.total,
+            scanned = progress.scanned,
             updated = progress.updated,
             skipped = progress.skipped,
-            remaining = progress.remaining
+            remaining = progress.remaining,
+            elapsed_ms = progress.elapsed_ms,
+            chunk_size = progress.chunk_size,
+            "progress"
         );
     });
 
-    let summary = run_events_backfill(
+    let backfill_future = run_events_backfill(
         &pool,
         BackfillOptions {
-            household_id: cli.household_id.clone(),
-            default_tz: cli.default_tz.clone(),
-            chunk_size,
-            progress_interval,
-            dry_run: cli.dry_run,
-            reset_checkpoint: cli.reset,
+            household_id: args.household.clone(),
+            default_tz: args.default_tz.clone(),
+            chunk_size: args.chunk_size,
+            progress_interval_ms: args.progress_interval.unwrap_or(0),
+            dry_run: args.dry_run,
+            reset_checkpoint: !args.resume,
         },
-        cli.log_dir.clone(),
+        args.log_dir.clone(),
+        Some(control.clone()),
         Some(progress_cb),
-    )
-    .await
-    .map_err(|err| anyhow!(format_cli_error(&err)))?;
+    );
 
-    println!("{}", serde_json::to_string_pretty(&summary)?);
+    tokio::pin!(backfill_future);
+    let summary_result = loop {
+        tokio::select! {
+            result = &mut backfill_future => break result,
+            signal = signal::ctrl_c() => {
+                signal.expect("install Ctrl+C handler");
+                if !control.is_cancelled() {
+                    eprintln!("Received interrupt. Finishing current chunk before exiting…");
+                    control.cancel();
+                }
+            }
+        }
+    };
+
+    let summary = summary_result.map_err(|err| anyhow!(format_cli_error(&err)))?;
+    emit_summary_event(&summary);
+    if !args.json_summary {
+        print_human_summary(&summary);
+    }
+
+    let exit_code = match summary.status {
+        BackfillStatus::Completed => 0,
+        BackfillStatus::Cancelled => 130,
+        BackfillStatus::Failed => 1,
+    };
+
+    if exit_code != 0 {
+        std::process::exit(exit_code);
+    }
+
     Ok(())
+}
+
+fn emit_summary_event(summary: &BackfillSummary) {
+    let event = json!({
+        "type": "summary",
+        "household_id": summary.household_id,
+        "scanned": summary.total_scanned,
+        "updated": summary.total_updated,
+        "skipped": summary.total_skipped,
+        "elapsed_ms": summary.elapsed_ms,
+        "status": summary.status,
+    });
+    println!("{}", event);
+}
+
+fn print_human_summary(summary: &BackfillSummary) {
+    eprintln!("\nSummary ({})", format_status(&summary.status));
+    eprintln!("  Household: {}", summary.household_id);
+    eprintln!("  Scanned:   {}", summary.total_scanned);
+    eprintln!("  Updated:   {}", summary.total_updated);
+    eprintln!("  Skipped:   {}", summary.total_skipped);
+    eprintln!("  Elapsed:   {:.2}s", summary.elapsed_ms as f64 / 1000.0);
+    eprintln!();
+}
+
+fn format_status(status: &BackfillStatus) -> &'static str {
+    match status {
+        BackfillStatus::Completed => "completed",
+        BackfillStatus::Cancelled => "cancelled",
+        BackfillStatus::Failed => "failed",
+    }
 }
 
 fn init_logging() {
@@ -172,13 +257,13 @@ fn format_cli_error(err: &AppError) -> String {
             format!("{} (allowed range: {range})", err.message())
         }
         "BACKFILL/INVALID_PROGRESS_INTERVAL" => {
-            let range = format!("{MIN_PROGRESS_INTERVAL}-{MAX_PROGRESS_INTERVAL}");
+            let range = format!("{MIN_PROGRESS_INTERVAL_MS}-{MAX_PROGRESS_INTERVAL_MS}");
             if let Some(value) = err.context().get("progress_interval") {
                 return format!(
-                    "Progress interval {value} is outside the supported range ({range})."
+                    "Progress interval {value}ms is outside the supported range ({range}ms)."
                 );
             }
-            format!("{} (allowed range: {range})", err.message())
+            format!("{} (allowed range: {range}ms)", err.message())
         }
         _ => err.to_string(),
     }

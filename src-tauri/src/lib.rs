@@ -110,7 +110,9 @@ mod time;
 pub mod util;
 
 pub use error::{AppError, AppResult, ErrorDto};
-use events_tz_backfill::events_backfill_timezone;
+use events_tz_backfill::{
+    events_backfill_timezone, events_backfill_timezone_cancel, events_backfill_timezone_status,
+};
 use security::{error_map::UiError, fs_policy, fs_policy::RootKey, hash_path};
 use util::{dispatch_app_result, dispatch_async_app_result};
 
@@ -1694,6 +1696,8 @@ macro_rules! app_commands {
     ($($extra:ident),* $(,)?) => {
         tauri::generate_handler![
             events_backfill_timezone,
+            events_backfill_timezone_cancel,
+            events_backfill_timezone_status,
             events_list_range,
             event_create,
             event_update,
@@ -1836,6 +1840,7 @@ pub fn run() {
             app.manage(crate::state::AppState {
                 pool: pool.clone(),
                 default_household_id: Arc::new(Mutex::new(hh)),
+                backfill: Arc::new(Mutex::new(crate::events_tz_backfill::BackfillCoordinator::new())),
             });
             Ok(())
         })

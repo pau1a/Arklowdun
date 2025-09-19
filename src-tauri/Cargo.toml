@@ -55,7 +55,7 @@ futures = "0.3"
 once_cell = "1"
 clap = { version = "4", features = ["derive"] }
 similar = "2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 tempfile = "3"
 windows-sys = { version = "0.52", features = ["Win32_Storage_FileSystem"] }
 dirs = "5"
@@ -90,5 +90,5 @@ name = "crash_probe"
 path = "scripts/crash_probe.rs"
 
 [[bin]]
-name = "time_backfill"
+name = "time"
 path = "scripts/time_backfill.rs"
