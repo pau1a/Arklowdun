@@ -6,6 +6,7 @@ use chrono::{DateTime, Duration, LocalResult, NaiveDateTime, Offset, TimeZone, U
 use chrono_tz::Tz as ChronoTz;
 use rrule::{RRule, RRuleSet, Tz, Unvalidated};
 
+#[allow(clippy::result_large_err)]
 fn from_local_ms(ms: i64, tz: Tz) -> AppResult<DateTime<Tz>> {
     #[allow(deprecated)]
     let naive = NaiveDateTime::from_timestamp_millis(ms).ok_or_else(|| {

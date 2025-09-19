@@ -13,7 +13,7 @@ fn file_sink_writes_json_lines() {
     // Initialize file logging in this process to ensure the directory exists
     let app = tauri::test::mock_app();
     let handle = app.app_handle();
-    arklowdun_lib::init_file_logging(&handle).expect("file logging to initialize");
+    arklowdun_lib::init_file_logging(handle.clone()).expect("file logging to initialize");
 
     // resolve_logs_dir() uses ARK_FAKE_APPDATA in the library, so mirror that here
     let fake = std::env::var("ARK_FAKE_APPDATA").expect("ARK_FAKE_APPDATA set");

@@ -19,6 +19,7 @@ fn app_error_from_panic(payload: Box<dyn Any + Send>) -> AppError {
     error
 }
 
+#[allow(clippy::result_large_err)]
 pub fn dispatch_with_fence<T, F>(f: F) -> Result<T, AppError>
 where
     F: FnOnce() -> T,
@@ -29,6 +30,7 @@ where
     }
 }
 
+#[allow(clippy::result_large_err)]
 pub async fn dispatch_async_with_fence<F, Fut, T>(f: F) -> Result<T, AppError>
 where
     F: FnOnce() -> Fut,
@@ -41,6 +43,7 @@ where
     }
 }
 
+#[allow(clippy::result_large_err)]
 pub fn dispatch_app_result<T, F>(f: F) -> AppResult<T>
 where
     F: FnOnce() -> AppResult<T>,
@@ -48,6 +51,7 @@ where
     dispatch_with_fence(f)?
 }
 
+#[allow(clippy::result_large_err)]
 pub async fn dispatch_async_app_result<F, Fut, T>(f: F) -> AppResult<T>
 where
     F: FnOnce() -> Fut,

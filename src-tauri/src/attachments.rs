@@ -3,6 +3,7 @@ use sqlx::Row;
 use std::path::Path;
 
 /// Query a table for (root_key, relative_path).
+#[allow(clippy::result_large_err)]
 pub async fn load_attachment_columns(
     pool: &sqlx::SqlitePool,
     table: &str,
@@ -43,6 +44,7 @@ pub async fn load_attachment_columns(
 }
 
 /// Open the file with the OS.
+#[allow(clippy::result_large_err)]
 pub fn open_with_os(path: &Path) -> Result<(), AppError> {
     #[cfg(target_os = "macos")]
     {
@@ -85,6 +87,7 @@ pub fn open_with_os(path: &Path) -> Result<(), AppError> {
 }
 
 /// Reveal the file in the OS file manager.
+#[allow(clippy::result_large_err)]
 pub fn reveal_with_os(path: &Path) -> Result<(), AppError> {
     #[cfg(target_os = "macos")]
     {

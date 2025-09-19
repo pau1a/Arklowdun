@@ -49,6 +49,12 @@ impl From<CrashId> for Uuid {
     }
 }
 
+impl Default for CrashId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

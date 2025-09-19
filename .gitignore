@@ -34,3 +34,6 @@ tauri
 src-tauri/resources/docs/diagnostics.md
 
 docs/samples/*.zip
+ 
+# fixtures
+fixtures/**/*.db

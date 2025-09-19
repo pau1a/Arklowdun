@@ -27,6 +27,7 @@ pub struct AboutInfo {
     pub commit_hash: String,
 }
 
+#[allow(clippy::result_large_err)]
 pub fn gather_summary<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<Summary> {
     let platform = env::consts::OS.to_string();
     let arch = env::consts::ARCH.to_string();
@@ -36,14 +37,12 @@ pub fn gather_summary<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult
     let mut rust_log_source = None;
     let rust_log = env::var("RUST_LOG")
         .ok()
-        .map(|value| {
+        .inspect(|_| {
             rust_log_source = Some(String::from("RUST_LOG"));
-            value
         })
         .or_else(|| {
-            env::var("TAURI_ARKLOWDUN_LOG").ok().map(|value| {
+            env::var("TAURI_ARKLOWDUN_LOG").ok().inspect(|_| {
                 rust_log_source = Some(String::from("TAURI_ARKLOWDUN_LOG"));
-                value
             })
         });
 
@@ -101,6 +100,7 @@ pub fn about_info<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AboutInfo {
     }
 }
 
+#[allow(clippy::result_large_err)]
 pub fn resolve_doc_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<String> {
     use tauri::path::BaseDirectory;
 
