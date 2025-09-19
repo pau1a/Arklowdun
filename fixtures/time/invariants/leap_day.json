@@ -1,0 +1,24 @@
+{
+  "description": "Leap day stability for 2024-02-29 covering single events and an overnight span.",
+  "reference": "https://en.wikipedia.org/wiki/Leap_year#Leap_day",
+  "events": [
+    {
+      "id": "leap-day-2024-02-29-morning",
+      "household_id": "hh_leap_day",
+      "title": "Leap day planning",
+      "tz": "America/Chicago",
+      "local_start": "2024-02-29T09:30:00",
+      "local_end": "2024-02-29T10:30:00",
+      "note": "Single-day meeting on leap day should remain stable."
+    },
+    {
+      "id": "leap-day-overnight",
+      "household_id": "hh_leap_day",
+      "title": "Leap day overnight deployment",
+      "tz": "America/Chicago",
+      "local_start": "2024-02-29T23:15:00",
+      "local_end": "2024-03-01T01:00:00",
+      "note": "Overnight span remains stable as it crosses into March."
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "description": "DST fall-back coverage for Europe/London on 2025-10-26.",
+  "reference": "https://www.timeanddate.com/time/change/uk/london?year=2025",
+  "events": [
+    {
+      "id": "dst-back-2025-10-24",
+      "household_id": "hh_dst_back",
+      "title": "Daily 9am standup",
+      "tz": "Europe/London",
+      "local_start": "2025-10-24T09:00:00",
+      "local_end": "2025-10-24T10:00:00",
+      "note": "Pre-shift: BST (UTC+01:00) active."
+    },
+    {
+      "id": "dst-back-2025-10-26",
+      "household_id": "hh_dst_back",
+      "title": "Daily 9am standup",
+      "tz": "Europe/London",
+      "local_start": "2025-10-26T09:00:00",
+      "local_end": "2025-10-26T10:00:00",
+      "note": "Shift morning: after 02:00 fallback to GMT; meeting should still resolve to 09:00 local once."
+    },
+    {
+      "id": "dst-back-ambiguous-0130",
+      "household_id": "hh_dst_back",
+      "title": "Night support rotation",
+      "tz": "Europe/London",
+      "local_start": "2025-10-26T01:30:00",
+      "local_end": "2025-10-26T02:30:00",
+      "note": "Ambiguous 01:30 occurs twice during fall-back; policy chooses the first (BST) offset."
+    },
+    {
+      "id": "dst-back-2025-10-27",
+      "household_id": "hh_dst_back",
+      "title": "Daily 9am standup",
+      "tz": "Europe/London",
+      "local_start": "2025-10-27T09:00:00",
+      "local_end": "2025-10-27T10:00:00",
+      "note": "Post-shift: GMT (UTC+00:00) in effect."
+    }
+  ]
+}

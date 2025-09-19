@@ -13,14 +13,24 @@ timestamp which is `NULL` when the record is active.
 - `deleted_at` `INTEGER?`
 
 ## events
-- `id` `TEXT`
-- `household_id` `TEXT`
-- `title` `TEXT`
-- `starts_at` `INTEGER`
-- `reminder` `INTEGER?`
-- `created_at` `INTEGER`
-- `updated_at` `INTEGER`
-- `deleted_at` `INTEGER?`
+- `id` `TEXT` – primary key.
+- `household_id` `TEXT` – foreign key to `household(id)`.
+- `title` `TEXT`.
+- `start_at` `INTEGER` – local wall-clock milliseconds computed from the event’s
+  naive local datetime using `NaiveDateTime::timestamp_millis()` (the same
+  encoding as the `encode_local_ms` helper in the invariant harness). The value
+  is timezone-agnostic; decode it with the associated `tz`.
+- `end_at` `INTEGER?` – optional local wall-clock milliseconds encoded with the
+  same policy as `start_at`.
+- `tz` `TEXT?` – IANA timezone identifier describing the wall-clock context.
+- `start_at_utc` `INTEGER?` – UTC instant in milliseconds.
+- `end_at_utc` `INTEGER?` – optional UTC instant in milliseconds.
+- `rrule` `TEXT?` – recurrence rule when present.
+- `exdates` `TEXT?` – comma-delimited ISO timestamps excluded from recurrence.
+- `reminder` `INTEGER?` – optional reminder timestamp.
+- `created_at` `INTEGER`.
+- `updated_at` `INTEGER`.
+- `deleted_at` `INTEGER?`.
 
 ## bills
 - `id` `TEXT`

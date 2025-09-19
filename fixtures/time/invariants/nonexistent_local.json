@@ -1,0 +1,15 @@
+{
+  "description": "DST gap handling for America/New_York on 2025-03-09 where 02:00-03:00 local is skipped.",
+  "reference": "https://www.timeanddate.com/time/change/usa/new-york?year=2025",
+  "events": [
+    {
+      "id": "dst-gap-2025-03-09",
+      "household_id": "hh_dst_gap",
+      "title": "Maintenance window",
+      "tz": "America/New_York",
+      "local_start": "2025-03-09T02:15:00",
+      "local_end": "2025-03-09T03:15:00",
+      "note": "02:15 local does not exist; policy maps forward to the first valid instant at 03:00 local."
+    }
+  ]
+}

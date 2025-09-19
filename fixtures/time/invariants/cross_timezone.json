@@ -1,0 +1,26 @@
+{
+  "description": "Cross-timezone recompute of the same UTC meeting in UTC vs Asia/Tokyo.",
+  "reference": "https://www.timeanddate.com/time/zone/japan/tokyo",
+  "events": [
+    {
+      "id": "cross-tz-utc",
+      "household_id": "hh_cross_tz",
+      "title": "Status sync",
+      "tz": "UTC",
+      "local_start": "2024-06-15T12:00:00",
+      "local_end": "2024-06-15T13:00:00",
+      "note": "Original scheduling in UTC."
+    },
+    {
+      "id": "cross-tz-tokyo",
+      "household_id": "hh_cross_tz",
+      "title": "Status sync",
+      "tz": "Asia/Tokyo",
+      "local_start": "2024-06-15T21:00:00",
+      "local_end": "2024-06-15T22:00:00",
+      "start_at_utc": "2024-06-15T12:00:00Z",
+      "end_at_utc": "2024-06-15T13:00:00Z",
+      "note": "Same meeting after a move to Tokyo (UTC+09:00)."
+    }
+  ]
+}

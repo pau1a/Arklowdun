@@ -13,6 +13,14 @@ use crate::{AppError, AppResult};
 const OPERATION: &str = "time_invariants";
 const MINUTE_MS: i64 = 60_000;
 
+/// Maximum millisecond drift tolerated for timed events before flagging a
+/// mismatch.
+pub const TIMED_DRIFT_THRESHOLD_MS: i64 = MINUTE_MS;
+
+/// Number of days an all-day event is allowed to shift across midnight
+/// boundaries without being considered drift.
+pub const ALL_DAY_BOUNDARY_SLACK_DAYS: i32 = 1;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DriftCategory {
@@ -112,7 +120,7 @@ fn allow_all_day_shift(stored: &NaiveDateTime, recomputed: &NaiveDateTime) -> bo
     }
     let stored_days = stored.date().num_days_from_ce();
     let recomputed_days = recomputed.date().num_days_from_ce();
-    (recomputed_days - stored_days).abs() <= 1
+    (recomputed_days - stored_days).abs() <= ALL_DAY_BOUNDARY_SLACK_DAYS
 }
 
 fn midnight() -> NaiveTime {
@@ -215,12 +223,12 @@ fn evaluate_row(row: &EventRow) -> AppResult<Option<DriftRecord>> {
 
     let recomputed_start_ms = computed_start.and_utc().timestamp_millis();
     let mut delta = diff_ms(row.start_at, recomputed_start_ms);
-    let mut mismatch = delta >= MINUTE_MS;
+    let mut mismatch = delta >= TIMED_DRIFT_THRESHOLD_MS;
 
     let recomputed_end_ms = if let (Some(end_at), Some(computed_end)) = (row.end_at, computed_end) {
         let recomputed = computed_end.and_utc().timestamp_millis();
         let end_delta = diff_ms(end_at, recomputed);
-        if end_delta >= MINUTE_MS {
+        if end_delta >= TIMED_DRIFT_THRESHOLD_MS {
             mismatch = true;
         }
         delta = delta.max(end_delta);
