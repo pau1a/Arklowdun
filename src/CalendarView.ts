@@ -26,6 +26,8 @@ import createInput from "@ui/Input";
 import createModal from "@ui/Modal";
 import createTimezoneBadge from "@ui/TimezoneBadge";
 import createTruncationBanner from "@ui/TruncationBanner";
+import createErrorBanner from "@ui/ErrorBanner";
+import { describeTimekeepingError } from "@utils/timekeepingErrors";
 
 async function saveEvent(
   event: Omit<
@@ -157,8 +159,13 @@ export async function CalendarView(container: HTMLElement) {
 
   const panel = document.createElement("div");
   panel.className = "card calendar__panel";
+  const errorRegion = document.createElement("div");
+  errorRegion.className = "calendar__error-region";
+  errorRegion.setAttribute("aria-live", "polite");
+  errorRegion.setAttribute("aria-atomic", "true");
+  errorRegion.hidden = true;
   const calendar = CalendarGrid({ onEventSelect: openEventModal });
-  panel.appendChild(calendar.element);
+  panel.append(errorRegion, calendar.element);
   registerViewCleanup(container, () => {
     eventModal.setOpen(false);
     eventModal.dialog.innerHTML = "";
@@ -208,6 +215,31 @@ export async function CalendarView(container: HTMLElement) {
   let currentWindow = currentSnapshot?.window ?? defaultCalendarWindow();
   let truncationDismissed = false;
   let lastTruncationToken: number | null = null;
+  let inlineError: ReturnType<typeof createErrorBanner> | null = null;
+
+  const clearInlineError = () => {
+    if (inlineError) {
+      inlineError.remove();
+      inlineError = null;
+    }
+    errorRegion.hidden = true;
+  };
+
+  const showInlineError = (message: string, detail?: string | null) => {
+    if (!inlineError) {
+      inlineError = createErrorBanner({
+        message,
+        detail: detail ?? undefined,
+        onDismiss: () => {
+          clearInlineError();
+        },
+      });
+      errorRegion.appendChild(inlineError);
+    } else {
+      inlineError.update({ message, detail: detail ?? undefined });
+    }
+    errorRegion.hidden = false;
+  };
 
   function updateTruncationNotice(
     count: number,
@@ -241,6 +273,11 @@ export async function CalendarView(container: HTMLElement) {
   });
   registerViewCleanup(container, stopHousehold);
 
+  const stopCalendarError = on("calendar:load-error", ({ message, detail }) => {
+    showInlineError(message, detail ?? undefined);
+  });
+  registerViewCleanup(container, stopCalendarError);
+
   async function loadEvents(source: string): Promise<void> {
     try {
       const range = defaultCalendarWindow();
@@ -252,6 +289,7 @@ export async function CalendarView(container: HTMLElement) {
       if (!data) return;
       const { items, window, truncated } = data;
       currentWindow = window;
+      clearInlineError();
       const payload = actions.events.updateSnapshot({
         items,
         ts: Date.now(),
@@ -262,7 +300,12 @@ export async function CalendarView(container: HTMLElement) {
       emit("events:updated", payload);
       scheduleNotifications(items);
     } catch (err) {
-      console.error(err);
+      const descriptor = describeTimekeepingError(err);
+      console.error("Calendar load failed", descriptor.error);
+      emit("calendar:load-error", {
+        message: descriptor.message,
+        detail: descriptor.detail ?? null,
+      });
     }
   }
 

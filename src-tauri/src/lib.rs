@@ -108,6 +108,7 @@ mod repo;
 pub mod security;
 mod state;
 mod time;
+pub mod time_errors;
 pub mod time_invariants;
 pub mod util;
 
@@ -1715,11 +1716,20 @@ async fn time_invariants_check(
         let pool = pool.clone();
         let household_id = household_id.clone();
         async move {
-            time_invariants::run_drift_check(
+            let report = time_invariants::run_drift_check(
                 &pool,
-                time_invariants::DriftCheckOptions { household_id },
+                time_invariants::DriftCheckOptions {
+                    household_id: household_id.clone(),
+                },
             )
-            .await
+            .await?;
+            if let Some(mut err) =
+                time_invariants::drift_report_to_error(&report, household_id.as_deref())
+            {
+                err = err.with_context("operation", "time_invariants_check");
+                return Err(err);
+            }
+            Ok(report)
         }
     })
     .await

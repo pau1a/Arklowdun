@@ -9,7 +9,10 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::time::{sleep, Duration};
 use tracing::{info, warn};
 
-use crate::{state::AppState, time::now_ms, util::dispatch_async_app_result, AppError, AppResult};
+use crate::{
+    state::AppState, time::now_ms, time_errors::TimeErrorCode, util::dispatch_async_app_result,
+    AppError, AppResult,
+};
 
 const OPERATION: &str = "events_backfill_timezone";
 const CHECKPOINT_TABLE: &str = "events_backfill_checkpoint";
@@ -355,7 +358,8 @@ fn sanitize_tz(value: Option<String>) -> Option<String> {
 #[allow(clippy::result_large_err)]
 fn parse_named_timezone(name: &str) -> AppResult<Tz> {
     name.parse().map_err(|_| {
-        AppError::new("BACKFILL/INVALID_TIMEZONE", "Invalid timezone identifier")
+        TimeErrorCode::TimezoneUnknown
+            .into_error()
             .with_context("operation", OPERATION)
             .with_context("step", "parse_timezone")
             .with_context("timezone", name.to_string())

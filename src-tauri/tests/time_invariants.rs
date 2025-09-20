@@ -1,5 +1,5 @@
 use anyhow::Result;
-use arklowdun_lib::time_invariants::{self, DriftCategory};
+use arklowdun_lib::time_invariants::{self, DriftCategory, DriftRecord, DriftReport};
 use chrono::{Duration, NaiveDate, TimeZone, Utc};
 use chrono_tz::Tz;
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
@@ -181,4 +181,39 @@ async fn missing_timezone_is_flagged() -> Result<()> {
     assert_eq!(report.drift_events.len(), 1);
     assert_eq!(report.drift_events[0].category, DriftCategory::TzMissing);
     Ok(())
+}
+
+#[test]
+fn drift_report_maps_to_taxonomy_error() {
+    let report = DriftReport {
+        total_events: 1,
+        drift_events: vec![DriftRecord {
+            event_id: "evt-1".into(),
+            household_id: "hh-test".into(),
+            start_at: 0,
+            end_at: None,
+            recomputed_start_at: Some(1_000),
+            recomputed_end_at: None,
+            delta_ms: 65_000,
+            category: DriftCategory::TimedMismatch,
+        }],
+        counts_by_category: Default::default(),
+        counts_by_household: Default::default(),
+    };
+
+    let err = time_invariants::drift_report_to_error(&report, Some("hh-test"))
+        .expect("drift should produce error");
+    assert_eq!(err.code(), "E_TZ_DRIFT_DETECTED");
+    assert_eq!(
+        err.context().get("household_id").map(String::as_str),
+        Some("hh-test")
+    );
+    assert_eq!(
+        err.context().get("drift_count").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        err.context().get("sample_event_ids").map(String::as_str),
+        Some("evt-1")
+    );
 }
