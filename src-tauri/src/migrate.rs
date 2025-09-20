@@ -419,6 +419,8 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
+    crate::exdate::normalize_existing_exdates(pool).await?;
+
     Ok(())
 }
 
