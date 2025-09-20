@@ -136,7 +136,7 @@ pub async fn normalize_existing_exdates(pool: &SqlitePool) -> Result<ExdateMigra
     let rows = sqlx::query(
         "SELECT id, household_id, start_at, start_at_utc, rrule, exdates \
          FROM events \
-         WHERE exdates IS NOT NULL AND TRIM(exdates) <> ''",
+         WHERE exdates IS NOT NULL",
     )
     .fetch_all(pool)
     .await?;
