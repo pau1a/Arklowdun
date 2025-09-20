@@ -147,3 +147,55 @@ async fn query_limit_truncates_after_10000() {
     assert_eq!(res.items.len(), 10_000);
     assert!(res.truncated);
 }
+
+#[tokio::test]
+async fn invalid_timezone_surfaces_taxonomy_error() {
+    let pool = setup_pool().await;
+    sqlx::query(
+        "INSERT INTO events (id, household_id, title, start_at, end_at, tz, start_at_utc, end_at_utc, rrule, created_at, updated_at) \
+         VALUES ('bad-tz', 'HH', 'Broken timezone', 0, 3_600_000, 'Mars/Olympus', 0, 3_600_000, 'FREQ=DAILY;COUNT=2', 0, 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let err = commands::events_list_range_command(&pool, "HH", -1, 86_400_000)
+        .await
+        .expect_err("invalid timezone should error");
+
+    assert_eq!(err.code(), "E_TZ_UNKNOWN");
+    assert_eq!(
+        err.context().get("timezone").map(|tz| tz.as_str()),
+        Some("Mars/Olympus")
+    );
+    assert_eq!(
+        err.context().get("operation").map(|op| op.as_str()),
+        Some("events_list_range")
+    );
+}
+
+#[tokio::test]
+async fn unsupported_rrule_surfaces_taxonomy_error() {
+    let pool = setup_pool().await;
+    sqlx::query(
+        "INSERT INTO events (id, household_id, title, start_at, end_at, tz, start_at_utc, end_at_utc, rrule, created_at, updated_at) \
+         VALUES ('bad-rrule', 'HH', 'Unsupported rule', 0, 3_600_000, 'UTC', 0, 3_600_000, 'FREQ=DAILY;FOO=BAR', 0, 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let err = commands::events_list_range_command(&pool, "HH", -1, 86_400_000)
+        .await
+        .expect_err("unsupported rrule should error");
+
+    assert_eq!(err.code(), "E_RRULE_UNSUPPORTED_FIELD");
+    assert_eq!(
+        err.context().get("event_id").map(|id| id.as_str()),
+        Some("bad-rrule")
+    );
+    assert_eq!(
+        err.context().get("rrule").map(|rule| rule.as_str()),
+        Some("FREQ=DAILY;FOO=BAR")
+    );
+}

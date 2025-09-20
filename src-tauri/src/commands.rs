@@ -6,6 +6,7 @@ use crate::{
     id::new_uuid_v7,
     repo,
     time::now_ms,
+    time_errors::TimeErrorCode,
     AppError, AppResult, Event, EventsListRangeResponse,
 };
 use chrono::{DateTime, Duration, LocalResult, NaiveDateTime, Offset, TimeZone, Utc};
@@ -83,11 +84,9 @@ fn optional_string(value: Option<&Value>, field: &'static str) -> AppResult<Opti
                 Ok(Some(trimmed.to_string()))
             }
         }
-        Some(_) => Err(AppError::new(
-            "E_EXDATE_INVALID_FORMAT",
-            "Excluded dates require the recurrence rule to be a string.",
-        )
-        .with_context("field", field)),
+        Some(_) => Err(TimeErrorCode::ExdateInvalidFormat
+            .into_error()
+            .with_context("field", field)),
     }
 }
 
@@ -107,39 +106,33 @@ fn parse_exdate_input(value: &Value) -> AppResult<Vec<String>> {
                         }
                     }
                     _ => {
-                        return Err(AppError::new(
-                            "E_EXDATE_INVALID_FORMAT",
-                            "Excluded dates must be strings.",
-                        )
-                        .with_context("field", "exdates"));
+                        return Err(TimeErrorCode::ExdateInvalidFormat
+                            .into_error()
+                            .with_context("field", "exdates"));
                     }
                 }
             }
             Ok(out)
         }
-        _ => Err(AppError::new(
-            "E_EXDATE_INVALID_FORMAT",
-            "Excluded dates must be a comma separated string or array of strings.",
-        )
-        .with_context("field", "exdates")),
+        _ => Err(TimeErrorCode::ExdateInvalidFormat
+            .into_error()
+            .with_context("field", "exdates")),
     }
 }
 
 fn ensure_start_datetime(start_ms: Option<i64>, event_id: &str) -> AppResult<DateTime<Utc>> {
     let ms = start_ms.ok_or_else(|| {
-        AppError::new(
-            "E_EXDATE_OUT_OF_RANGE",
-            "Event start time is required to validate excluded dates.",
-        )
-        .with_context("event_id", event_id.to_string())
+        TimeErrorCode::ExdateOutOfRange
+            .into_error()
+            .with_context("event_id", event_id.to_string())
+            .with_context("reason", "missing_start_timestamp")
     })?;
     DateTime::<Utc>::from_timestamp_millis(ms).ok_or_else(|| {
-        AppError::new(
-            "E_EXDATE_OUT_OF_RANGE",
-            "Event start time is invalid for exclusion validation.",
-        )
-        .with_context("event_id", event_id.to_string())
-        .with_context("start_ms", ms.to_string())
+        TimeErrorCode::ExdateOutOfRange
+            .into_error()
+            .with_context("event_id", event_id.to_string())
+            .with_context("start_ms", ms.to_string())
+            .with_context("reason", "invalid_start_timestamp")
     })
 }
 
@@ -160,11 +153,10 @@ fn normalize_event_exdates_for_create(data: &mut Map<String, Value>) -> AppResul
     let start = ensure_start_datetime(start_ms, event_id)?;
     let rrule = optional_string(data.get("rrule"), "rrule")?;
     let rrule = rrule.ok_or_else(|| {
-        AppError::new(
-            "E_EXDATE_OUT_OF_RANGE",
-            "Excluded dates require a recurrence rule.",
-        )
-        .with_context("event_id", event_id.to_string())
+        TimeErrorCode::ExdateOutOfRange
+            .into_error()
+            .with_context("event_id", event_id.to_string())
+            .with_context("reason", "missing_rrule")
     })?;
     let until = parse_rrule_until(&rrule);
     let context = ExdateContext {
@@ -179,20 +171,16 @@ fn normalize_event_exdates_for_create(data: &mut Map<String, Value>) -> AppResul
             .or_else(|| inspection.non_utc.first())
             .cloned()
             .unwrap_or_default();
-        return Err(AppError::new(
-            "E_EXDATE_INVALID_FORMAT",
-            "Excluded dates must use ISO-8601 UTC format (YYYY-MM-DDTHH:MM:SSZ).",
-        )
-        .with_context("event_id", event_id.to_string())
-        .with_context("invalid_value", sample));
+        return Err(TimeErrorCode::ExdateInvalidFormat
+            .into_error()
+            .with_context("event_id", event_id.to_string())
+            .with_context("invalid_value", sample));
     }
     if !inspection.out_of_range.is_empty() {
-        return Err(AppError::new(
-            "E_EXDATE_OUT_OF_RANGE",
-            "Excluded dates must fall within the recurrence window.",
-        )
-        .with_context("event_id", event_id.to_string())
-        .with_context("out_of_range", inspection.out_of_range.join(",")));
+        return Err(TimeErrorCode::ExdateOutOfRange
+            .into_error()
+            .with_context("event_id", event_id.to_string())
+            .with_context("out_of_range", inspection.out_of_range.join(",")));
     }
 
     match inspection.canonical {
@@ -252,12 +240,11 @@ async fn normalize_event_exdates_for_update(
             .filter(|s| !s.is_empty())
     });
     let rrule = final_rrule.ok_or_else(|| {
-        AppError::new(
-            "E_EXDATE_OUT_OF_RANGE",
-            "Excluded dates require a recurrence rule.",
-        )
-        .with_context("event_id", event_id.to_string())
-        .with_context("household_id", household_id.to_string())
+        TimeErrorCode::ExdateOutOfRange
+            .into_error()
+            .with_context("event_id", event_id.to_string())
+            .with_context("household_id", household_id.to_string())
+            .with_context("reason", "missing_rrule")
     })?;
     let until = parse_rrule_until(&rrule);
     let context = ExdateContext {
@@ -272,22 +259,18 @@ async fn normalize_event_exdates_for_update(
             .or_else(|| inspection.non_utc.first())
             .cloned()
             .unwrap_or_default();
-        return Err(AppError::new(
-            "E_EXDATE_INVALID_FORMAT",
-            "Excluded dates must use ISO-8601 UTC format (YYYY-MM-DDTHH:MM:SSZ).",
-        )
-        .with_context("event_id", event_id.to_string())
-        .with_context("household_id", household_id.to_string())
-        .with_context("invalid_value", sample));
+        return Err(TimeErrorCode::ExdateInvalidFormat
+            .into_error()
+            .with_context("event_id", event_id.to_string())
+            .with_context("household_id", household_id.to_string())
+            .with_context("invalid_value", sample));
     }
     if !inspection.out_of_range.is_empty() {
-        return Err(AppError::new(
-            "E_EXDATE_OUT_OF_RANGE",
-            "Excluded dates must fall within the recurrence window.",
-        )
-        .with_context("event_id", event_id.to_string())
-        .with_context("household_id", household_id.to_string())
-        .with_context("out_of_range", inspection.out_of_range.join(",")));
+        return Err(TimeErrorCode::ExdateOutOfRange
+            .into_error()
+            .with_context("event_id", event_id.to_string())
+            .with_context("household_id", household_id.to_string())
+            .with_context("out_of_range", inspection.out_of_range.join(",")));
     }
 
     match inspection.canonical {
@@ -608,11 +591,18 @@ pub async fn events_list_range_command(
     let mut out = Vec::new();
     'rows: for (row_index, row) in rows.into_iter().enumerate() {
         if let Some(rrule_str) = row.rrule.clone() {
+            let event_id = row.id.clone();
             let tz_str = row.tz.clone().unwrap_or_else(|| "UTC".into());
-            let tz_chrono: ChronoTz = tz_str.parse().unwrap_or(chrono_tz::UTC);
+            let tz_chrono: ChronoTz = tz_str.parse().map_err(|_| {
+                TimeErrorCode::TimezoneUnknown
+                    .into_error()
+                    .with_context("operation", "events_list_range")
+                    .with_context("household_id", household_id.to_string())
+                    .with_context("event_id", event_id.clone())
+                    .with_context("timezone", tz_str.clone())
+            })?;
             let tz_name = tz_chrono.name().to_string();
             let tz: Tz = tz_chrono.into();
-            let event_id = row.id.clone();
             let start_local = from_local_ms(row.start_at, tz).map_err(|err| {
                 err.with_context("operation", "events_list_range")
                     .with_context("household_id", household_id.to_string())
@@ -622,90 +612,109 @@ pub async fn events_list_range_command(
                 .end_at
                 .unwrap_or(row.start_at)
                 .saturating_sub(row.start_at);
-            let rrule_un: Result<RRule<Unvalidated>, _> = rrule_str.parse();
-            match rrule_un {
-                Ok(rrule_un) => match rrule_un.validate(start_local) {
-                    Ok(rrule) => {
-                        let mut set = RRuleSet::new(start_local).rrule(rrule);
-                        if let Some(exdates_str) = &row.exdates {
-                            for ex_s in exdates_str.split(',') {
-                                let ex_s = ex_s.trim();
-                                if ex_s.is_empty() {
-                                    continue;
-                                }
-                                if let Ok(ex_utc) = DateTime::parse_from_rfc3339(ex_s) {
-                                    let ex_local = ex_utc.with_timezone(&Utc).with_timezone(&tz);
-                                    set = set.exdate(ex_local);
-                                }
-                            }
-                        }
-                        let after = range_start_utc.with_timezone(&tz);
-                        let before = range_end_utc.with_timezone(&tz);
-                        set = set.after(after).before(before);
-                        let occurrences = set.all((PER_SERIES_LIMIT + 1) as u16);
-                        let mut dates = occurrences.dates;
-                        let series_over_limit = dates.len() > PER_SERIES_LIMIT;
-                        if series_over_limit {
-                            truncated = true;
-                            dates.truncate(PER_SERIES_LIMIT);
-                        }
-                        let series_len = dates.len();
-                        for (occ_index, occ) in dates.into_iter().enumerate() {
-                            if out.len() >= TOTAL_LIMIT {
-                                truncated = true;
-                                break 'rows;
-                            }
-                            let start_utc_ms = occ.with_timezone(&Utc).timestamp_millis();
-                            let end_dt = occ + Duration::milliseconds(duration);
-                            let end_utc_ms = end_dt.with_timezone(&Utc).timestamp_millis();
-                            if end_utc_ms < start || start_utc_ms > end {
-                                continue;
-                            }
-                            let inst = Event {
-                                id: format!("{}::{}", row.id, start_utc_ms),
-                                household_id: row.household_id.clone(),
-                                title: row.title.clone(),
-                                start_at: start_utc_ms,
-                                end_at: Some(end_utc_ms),
-                                tz: Some(tz_name.clone()),
-                                start_at_utc: Some(start_utc_ms),
-                                end_at_utc: Some(end_utc_ms),
-                                // Instances must look like single events to the UI
-                                // so strip recurrence metadata
-                                rrule: None,
-                                exdates: None,
-                                reminder: row.reminder,
-                                created_at: row.created_at,
-                                updated_at: row.updated_at,
-                                deleted_at: None,
-                                series_parent_id: Some(row.id.clone()),
-                            };
-                            out.push(inst);
-                            if out.len() >= TOTAL_LIMIT {
-                                if series_over_limit
-                                    || occ_index + 1 < series_len
-                                    || row_index + 1 < row_count
-                                {
-                                    truncated = true;
-                                }
-                                break 'rows;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            event_id = %row.id,
-                            rule = %rrule_str.chars().take(80).collect::<String>(),
-                            "invalid rrule: {e}"
-                        );
-                    }
-                },
-                Err(e) => {
+            let rrule_un: RRule<Unvalidated> = match rrule_str.parse() {
+                Ok(un) => un,
+                Err(err) => {
                     tracing::warn!(
-                        event_id = %row.id,
+                        target: "arklowdun",
+                        event = "events_rrule_parse_error",
+                        event_id = %event_id,
                         rule = %rrule_str.chars().take(80).collect::<String>(),
-                        "failed to parse rrule: {e}"
+                        error = %err
                     );
+                    return Err(
+                        TimeErrorCode::RruleUnsupportedField
+                            .into_error()
+                            .with_context("operation", "events_list_range")
+                            .with_context("household_id", household_id.to_string())
+                            .with_context("event_id", event_id.clone())
+                            .with_context("rrule", rrule_str.clone())
+                            .with_context("detail", err.to_string())
+                    );
+                }
+            };
+            let rrule = match rrule_un.validate(start_local) {
+                Ok(v) => v,
+                Err(err) => {
+                    tracing::warn!(
+                        target: "arklowdun",
+                        event = "events_rrule_validate_error",
+                        event_id = %event_id,
+                        rule = %rrule_str.chars().take(80).collect::<String>(),
+                        error = %err
+                    );
+                    return Err(
+                        TimeErrorCode::RruleUnsupportedField
+                            .into_error()
+                            .with_context("operation", "events_list_range")
+                            .with_context("household_id", household_id.to_string())
+                            .with_context("event_id", event_id.clone())
+                            .with_context("rrule", rrule_str.clone())
+                            .with_context("detail", err.to_string())
+                    );
+                }
+            };
+            let mut set = RRuleSet::new(start_local).rrule(rrule);
+            if let Some(exdates_str) = &row.exdates {
+                for ex_s in exdates_str.split(',') {
+                    let ex_s = ex_s.trim();
+                    if ex_s.is_empty() {
+                        continue;
+                    }
+                    if let Ok(ex_utc) = DateTime::parse_from_rfc3339(ex_s) {
+                        let ex_local = ex_utc.with_timezone(&Utc).with_timezone(&tz);
+                        set = set.exdate(ex_local);
+                    }
+                }
+            }
+            let after = range_start_utc.with_timezone(&tz);
+            let before = range_end_utc.with_timezone(&tz);
+            set = set.after(after).before(before);
+            let occurrences = set.all((PER_SERIES_LIMIT + 1) as u16);
+            let mut dates = occurrences.dates;
+            let series_over_limit = dates.len() > PER_SERIES_LIMIT;
+            if series_over_limit {
+                truncated = true;
+                dates.truncate(PER_SERIES_LIMIT);
+            }
+            let series_len = dates.len();
+            for (occ_index, occ) in dates.into_iter().enumerate() {
+                if out.len() >= TOTAL_LIMIT {
+                    truncated = true;
+                    break 'rows;
+                }
+                let start_utc_ms = occ.with_timezone(&Utc).timestamp_millis();
+                let end_dt = occ + Duration::milliseconds(duration);
+                let end_utc_ms = end_dt.with_timezone(&Utc).timestamp_millis();
+                if end_utc_ms < start || start_utc_ms > end {
+                    continue;
+                }
+                let inst = Event {
+                    id: format!("{}::{}", row.id, start_utc_ms),
+                    household_id: row.household_id.clone(),
+                    title: row.title.clone(),
+                    start_at: start_utc_ms,
+                    end_at: Some(end_utc_ms),
+                    tz: Some(tz_name.clone()),
+                    start_at_utc: Some(start_utc_ms),
+                    end_at_utc: Some(end_utc_ms),
+                    // Instances must look like single events to the UI
+                    // so strip recurrence metadata
+                    rrule: None,
+                    exdates: None,
+                    reminder: row.reminder,
+                    created_at: row.created_at,
+                    updated_at: row.updated_at,
+                    deleted_at: None,
+                    series_parent_id: Some(row.id.clone()),
+                };
+                out.push(inst);
+                if out.len() >= TOTAL_LIMIT {
+                    if series_over_limit || occ_index + 1 < series_len || row_index + 1 < row_count
+                    {
+                        truncated = true;
+                    }
+                    break 'rows;
                 }
             }
         } else {
