@@ -612,38 +612,49 @@ pub async fn events_list_range_command(
                 .end_at
                 .unwrap_or(row.start_at)
                 .saturating_sub(row.start_at);
-            let rrule_un: RRule<Unvalidated> = rrule_str.parse().map_err(|err| {
-                tracing::warn!(
-                    target: "arklowdun",
-                    event = "events_rrule_parse_error",
-                    event_id = %event_id,
-                    rule = %rrule_str.chars().take(80).collect::<String>(),
-                    error = %err
-                );
-                TimeErrorCode::RruleUnsupportedField
-                    .into_error()
-                    .with_context("operation", "events_list_range")
-                    .with_context("household_id", household_id.to_string())
-                    .with_context("event_id", event_id.clone())
-                    .with_context("rrule", rrule_str.clone())
-                    .with_context("detail", err.to_string())
-            })?;
-            let rrule = rrule_un.validate(start_local).map_err(|err| {
-                tracing::warn!(
-                    target: "arklowdun",
-                    event = "events_rrule_validate_error",
-                    event_id = %event_id,
-                    rule = %rrule_str.chars().take(80).collect::<String>(),
-                    error = %err
-                );
-                TimeErrorCode::RruleUnsupportedField
-                    .into_error()
-                    .with_context("operation", "events_list_range")
-                    .with_context("household_id", household_id.to_string())
-                    .with_context("event_id", event_id.clone())
-                    .with_context("rrule", rrule_str.clone())
-                    .with_context("detail", err.to_string())
-            })?;
+
+            // Parse RRULE → taxonomy error on failure
+            let rrule_un: RRule<Unvalidated> = match rrule_str.parse() {
+                Ok(un) => un,
+                Err(err) => {
+                    tracing::warn!(
+                        target: "arklowdun",
+                        event = "events_rrule_parse_error",
+                        event_id = %event_id,
+                        rule = %rrule_str.chars().take(80).collect::<String>(),
+                        error = %err
+                    );
+                    return Err(TimeErrorCode::RruleUnsupportedField
+                        .into_error()
+                        .with_context("operation", "events_list_range")
+                        .with_context("household_id", household_id.to_string())
+                        .with_context("event_id", event_id.clone())
+                        .with_context("rrule", rrule_str.clone())
+                        .with_context("detail", err.to_string()));
+                }
+            };
+
+            // Validate RRULE → taxonomy error on failure
+            let rrule = match rrule_un.validate(start_local) {
+                Ok(v) => v,
+                Err(err) => {
+                    tracing::warn!(
+                        target: "arklowdun",
+                        event = "events_rrule_validate_error",
+                        event_id = %event_id,
+                        rule = %rrule_str.chars().take(80).collect::<String>(),
+                        error = %err
+                    );
+                    return Err(TimeErrorCode::RruleUnsupportedField
+                        .into_error()
+                        .with_context("operation", "events_list_range")
+                        .with_context("household_id", household_id.to_string())
+                        .with_context("event_id", event_id.clone())
+                        .with_context("rrule", rrule_str.clone())
+                        .with_context("detail", err.to_string()));
+                }
+            };
+
             let mut set = RRuleSet::new(start_local).rrule(rrule);
             if let Some(exdates_str) = &row.exdates {
                 for ex_s in exdates_str.split(',') {
@@ -657,9 +668,11 @@ pub async fn events_list_range_command(
                     }
                 }
             }
+
             let after = range_start_utc.with_timezone(&tz);
             let before = range_end_utc.with_timezone(&tz);
             set = set.after(after).before(before);
+
             let occurrences = set.all((PER_SERIES_LIMIT + 1) as u16);
             let mut dates = occurrences.dates;
             let series_over_limit = dates.len() > PER_SERIES_LIMIT;
@@ -668,6 +681,7 @@ pub async fn events_list_range_command(
                 dates.truncate(PER_SERIES_LIMIT);
             }
             let series_len = dates.len();
+
             for (occ_index, occ) in dates.into_iter().enumerate() {
                 if out.len() >= TOTAL_LIMIT {
                     truncated = true;
