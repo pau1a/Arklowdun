@@ -23,6 +23,7 @@ import { emit, on } from "./store/events";
 import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
 import createButton from "@ui/Button";
 import createInput from "@ui/Input";
+import createTruncationBanner from "@ui/TruncationBanner";
 
 async function saveEvent(
   event: Omit<
@@ -79,26 +80,14 @@ export async function CalendarView(container: HTMLElement) {
   headerContent.append(title, kicker);
   header.appendChild(headerContent);
 
-  const truncationNotice = document.createElement("div");
-  truncationNotice.className = "calendar__truncation";
-  truncationNotice.setAttribute("role", "status");
-  truncationNotice.setAttribute("aria-live", "polite");
-  truncationNotice.hidden = true;
-  const truncationMessage = document.createElement("span");
-  truncationMessage.className = "calendar__truncation-message";
-  const truncationDismiss = createButton({
-    label: "Dismiss",
-    variant: "ghost",
-    size: "sm",
-    className: "calendar__truncation-dismiss",
-    ariaLabel: "Dismiss truncation message",
-    onClick: (event) => {
-      event.preventDefault();
+  const truncationBanner = createTruncationBanner({
+    count: 0,
+    hidden: true,
+    onDismiss: () => {
       truncationDismissed = true;
-      truncationNotice.hidden = true;
+      truncationBanner.update({ hidden: true });
     },
   });
-  truncationNotice.append(truncationMessage, truncationDismiss);
 
   const panel = document.createElement("div");
   panel.className = "card calendar__panel";
@@ -141,7 +130,7 @@ export async function CalendarView(container: HTMLElement) {
 
   form.append(titleLabel, titleInput, dateLabel, dateInput, submitButton);
 
-  section.append(header, truncationNotice, panel, form);
+  section.append(header, truncationBanner, panel, form);
   container.innerHTML = "";
   container.appendChild(section);
 
@@ -156,7 +145,7 @@ export async function CalendarView(container: HTMLElement) {
     token: number | null,
   ) {
     if (!truncated) {
-      truncationNotice.hidden = true;
+      truncationBanner.update({ hidden: true });
       truncationDismissed = false;
       lastTruncationToken = null;
       return;
@@ -165,8 +154,7 @@ export async function CalendarView(container: HTMLElement) {
       truncationDismissed = false;
       lastTruncationToken = token;
     }
-    truncationMessage.textContent = `This list was shortened to the first ${count.toLocaleString()} results.`;
-    truncationNotice.hidden = truncationDismissed;
+    truncationBanner.update({ count, hidden: truncationDismissed });
   }
 
   const unsubscribe = subscribe(selectors.events.snapshot, (snapshot) => {

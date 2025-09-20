@@ -22,13 +22,16 @@ Whenever either cap prevents additional instances from being returned, the IPC p
 
 The flag is `false` when the full result set fit within the limits. Backwards compatibility is preserved because the `items` array still contains fully hydrated `Event` objects.
 
-## UI Expectations
+## Truncation Banner UX
 
-When `truncated` is `true`, the calendar view displays an accessible banner with the copy:
+When `truncated` is `true`, calendar and other recurrence-driven surfaces render the shared `TruncationBanner` primitive above their list content. The component:
 
-> “This list was shortened to the first N results.”
+- Announces “This list was shortened to the first _N_ results.” with the list size formatted using the viewer’s locale.
+- Exposes `role="status"` and `aria-live="polite"` so screen readers announce the banner as soon as it appears.
+- Ships with a keyboard-focusable “Close” button that hides the banner until the next truncated payload is fetched. A fresh payload (indicated by a new timestamp token) re-enables the message so the truncation state is not missed.
+- Collapses automatically when a subsequent fetch returns the full, untruncated dataset.
 
-The banner uses an `aria-live="polite"` region and includes a keyboard-focusable dismiss button. The message refreshes (and the banner is re-announced) whenever a new truncated payload is received. When results fall back under the caps the banner is hidden automatically.
+The primitive lives in `src/ui/TruncationBanner.ts` and is available for any list that needs to surface truncation.
 
 ## Operational Notes
 
