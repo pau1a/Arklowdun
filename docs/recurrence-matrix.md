@@ -7,6 +7,10 @@ Each scenario seeds a series into an in-memory database, expands
 `events_list_range`, and compares the results to deterministic snapshots
 under `tests/rrule_snapshots/`.
 
+> **Note:** `RDATE` scenarios are intentionally excluded from this suite.
+> See [`docs/rdate-policy.md`](./rdate-policy.md) for the v1 policy and
+> future planning guidance.
+
 ## Scenario Coverage
 
 | Scenario | Timezone | RRULE Fields | Notes |

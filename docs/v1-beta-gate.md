@@ -67,10 +67,12 @@ The app ships to **closed beta testers** only when this gate is complete.
 ## Checklist
 
 - [x] Frontend structure & UX coherence — Calendar/Notes/Settings now built from UI primitives; ESLint guard prevents raw controls in views.
-- [ ] Timekeeping correctness  
-- [ ] Data safety & recovery  
-- [ ] Licensing & compliance  
-- [ ] Platform security & distribution  
+- [ ] Timekeeping correctness[^rdate-policy]
+- [ ] Data safety & recovery
+- [ ] Licensing & compliance
+- [ ] Platform security & distribution
+
+[^rdate-policy]: `RDATE` support is explicitly deferred until after v1. Refer to [`docs/rdate-policy.md`](./rdate-policy.md) for the full scope rationale and follow-up plan.
 
 ---
 
@@ -87,7 +89,7 @@ Here’s a tight, repo-ready enforcement pack. Drop these files in and turn the 
 ## Linked Focus Area
 Tick EXACTLY ONE. PRs without a tick are auto-failed by CI.
 
-- [x] Frontend structure & UX coherence  
+- [x] Frontend structure & UX coherence
   Evidence: [`ci.yml`](../.github/workflows/ci.yml), [`CalendarView.ts`](../src/CalendarView.ts), [`NotesView.ts`](../src/NotesView.ts), [`SettingsView.ts`](../src/SettingsView.ts), [`panes-primitives.spec.ts`](../tests/ui/panes-primitives.spec.ts)
 - [ ] Timekeeping correctness
 - [ ] Data safety & recovery
