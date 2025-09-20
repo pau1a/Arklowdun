@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import test from 'node:test';
 import { JSDOM } from 'jsdom';
-import createTruncationBanner from '@ui/TruncationBanner';
+import createTruncationBanner from '../src/ui/TruncationBanner.ts';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>');
 (globalThis as any).window = dom.window as unknown as typeof globalThis & Window;
