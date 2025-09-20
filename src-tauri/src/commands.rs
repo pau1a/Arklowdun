@@ -612,25 +612,122 @@ pub async fn events_list_range_command(
                 .end_at
                 .unwrap_or(row.start_at)
                 .saturating_sub(row.start_at);
-            let rrule_un: RRule<Unvalidated> = match rrule_str.parse() {
-                Ok(un) => un,
-                Err(err) => {
-                    tracing::warn!(
-                        target: "arklowdun",
-                        event = "events_rrule_parse_error",
-                        event_id = %event_id,
-                        rule = %rrule_str.chars().take(80).collect::<String>(),
-                        error = %err
-                    );
-                    return Err(
-                        TimeErrorCode::RruleUnsupportedField
-                            .into_error()
-                            .with_context("operation", "events_list_range")
-                            .with_context("household_id", household_id.to_string())
-                            .with_context("event_id", event_id.clone())
-                            .with_context("rrule", rrule_str.clone())
-                            .with_context("detail", err.to_string())
-                    );
+let duration = row
+    .end_at
+    .unwrap_or(row.start_at)
+    .saturating_sub(row.start_at);
+
+// Parse RRULE → taxonomy error on failure
+let rrule_un: RRule<Unvalidated> = match rrule_str.parse() {
+    Ok(un) => un,
+    Err(err) => {
+        tracing::warn!(
+            target: "arklowdun",
+            event = "events_rrule_parse_error",
+            event_id = %event_id,
+            rule = %rrule_str.chars().take(80).collect::<String>(),
+            error = %err
+        );
+        return Err(
+            TimeErrorCode::RruleUnsupportedField
+                .into_error()
+                .with_context("operation", "events_list_range")
+                .with_context("household_id", household_id.to_string())
+                .with_context("event_id", event_id.clone())
+                .with_context("rrule", rrule_str.clone())
+                .with_context("detail", err.to_string())
+        );
+    }
+};
+
+// Validate RRULE → taxonomy error on failure
+let rrule = match rrule_un.validate(start_local) {
+    Ok(v) => v,
+    Err(err) => {
+        tracing::warn!(
+            target: "arklowdun",
+            event = "events_rrule_validate_error",
+            event_id = %event_id,
+            rule = %rrule_str.chars().take(80).collect::<String>(),
+            error = %err
+        );
+        return Err(
+            TimeErrorCode::RruleUnsupportedField
+                .into_error()
+                .with_context("operation", "events_list_range")
+                .with_context("household_id", household_id.to_string())
+                .with_context("event_id", event_id.clone())
+                .with_context("rrule", rrule_str.clone())
+                .with_context("detail", err.to_string())
+        );
+    }
+};
+
+let mut set = RRuleSet::new(start_local).rrule(rrule);
+if let Some(exdates_str) = &row.exdates {
+    for ex_s in exdates_str.split(',') {
+        let ex_s = ex_s.trim();
+        if ex_s.is_empty() {
+            continue;
+        }
+        if let Ok(ex_utc) = DateTime::parse_from_rfc3339(ex_s) {
+            let ex_local = ex_utc.with_timezone(&Utc).with_timezone(&tz);
+            set = set.exdate(ex_local);
+        }
+    }
+}
+
+let after = range_start_utc.with_timezone(&tz);
+let before = range_end_utc.with_timezone(&tz);
+set = set.after(after).before(before);
+
+let occurrences = set.all((PER_SERIES_LIMIT + 1) as u16);
+let mut dates = occurrences.dates;
+let series_over_limit = dates.len() > PER_SERIES_LIMIT;
+if series_over_limit {
+    truncated = true;
+    dates.truncate(PER_SERIES_LIMIT);
+}
+let series_len = dates.len();
+
+for (occ_index, occ) in dates.into_iter().enumerate() {
+    if out.len() >= TOTAL_LIMIT {
+        truncated = true;
+        break 'rows;
+    }
+    let start_utc_ms = occ.with_timezone(&Utc).timestamp_millis();
+    let end_dt = occ + Duration::milliseconds(duration);
+    let end_utc_ms = end_dt.with_timezone(&Utc).timestamp_millis();
+    if end_utc_ms < start || start_utc_ms > end {
+        continue;
+    }
+    let inst = Event {
+        id: format!("{}::{}", row.id, start_utc_ms),
+        household_id: row.household_id.clone(),
+        title: row.title.clone(),
+        start_at: start_utc_ms,
+        end_at: Some(end_utc_ms),
+        tz: Some(tz_name.clone()),
+        start_at_utc: Some(start_utc_ms),
+        end_at_utc: Some(end_utc_ms),
+        // Instances must look like single events to the UI
+        // so strip recurrence metadata
+        rrule: None,
+        exdates: None,
+        reminder: row.reminder,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        deleted_at: None,
+        series_parent_id: Some(row.id.clone()),
+    };
+    out.push(inst);
+    if out.len() >= TOTAL_LIMIT {
+        if series_over_limit || occ_index + 1 < series_len || row_index + 1 < row_count {
+            truncated = true;
+        }
+        break 'rows;
+    }
+}
                 }
             };
             let rrule = match rrule_un.validate(start_local) {
