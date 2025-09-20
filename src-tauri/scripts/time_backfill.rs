@@ -228,6 +228,14 @@ async fn run_invariants(args: InvariantArgs) -> Result<()> {
     let elapsed = started.elapsed();
 
     println!("{}", time_invariants::format_human_summary(&report));
+    if report.drift_events.is_empty() {
+        println!("✅ No drift detected (0 offending events)");
+    } else {
+        println!(
+            "❌ Drift detected ({} offending events)",
+            report.drift_events.len()
+        );
+    }
     println!("Elapsed: {:.2}s", elapsed.as_secs_f64());
 
     let json = if args.pretty {

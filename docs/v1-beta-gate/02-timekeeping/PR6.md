@@ -27,7 +27,7 @@ Ensure that any introduction of drift or regression in invariants is automatical
 
 ## Acceptance Criteria
 1. **Job defined:** New job `gate/time-invariants` appears in CI workflow file.  
-2. **Fixture DB:** Uses a stable fixture dataset stored in `/fixtures/time/drift-check.db` (or generated deterministically).  
+2. **Fixture DB:** Builds a stable fixture database at `/fixtures/time/drift-check.db` from the deterministic SQL fixture in `/fixtures/time/drift-check-fixture.sql`.
 3. **Drift threshold:** Exit code 0 when drift count = 0; exit non-zero when drift > 0.  
 4. **Artifact upload:** On failure, `drift-report.json` is attached to CI run.  
 5. **Summary log:** On success, console shows: *“✅ No drift detected (0 offending events)”*.  

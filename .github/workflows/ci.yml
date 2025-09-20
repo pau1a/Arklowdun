@@ -3,6 +3,13 @@ name: CI
 on:
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   gate_ipc_in_components:
     name: gate/ipc-in-components
@@ -45,13 +52,23 @@ jobs:
         with:
           workspaces: |
             src-tauri
-      - name: Install sqlite3
-        run: sudo apt-get update && sudo apt-get install -y sqlite3
-      - name: Build drift-check database from SQL
+      - name: Install system dependencies
         run: |
-          mkdir -p fixtures/time
-          sqlite3 fixtures/time/drift-check.db < fixtures/time/drift-check.sql
-          sqlite3 fixtures/time/drift-check.db 'PRAGMA integrity_check;'
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            sqlite3
+      - name: Build drift-check fixture
+        run: |
+          set -euxo pipefail
+          rm -f fixtures/time/drift-check.db
+          sqlite3 fixtures/time/drift-check.db < fixtures/time/drift-check-fixture.sql
+      - name: Verify drift-check fixture
+        run: sqlite3 fixtures/time/drift-check.db 'PRAGMA integrity_check;'
       - name: Run drift check
         working-directory: src-tauri
         run: >
@@ -61,7 +78,7 @@ jobs:
           --output drift-report.json
           --pretty
       - name: Upload drift report
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: drift-report

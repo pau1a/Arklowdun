@@ -1,3 +1,5 @@
+-- Drift-check fixture that intentionally produces drift events. Useful when
+-- documenting or debugging failure output from the guardrail.
 PRAGMA journal_mode=WAL;
 BEGIN;
 
