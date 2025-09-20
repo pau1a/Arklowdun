@@ -51,7 +51,7 @@ pub fn parse_rrule_until(rrule: &str) -> Option<DateTime<Utc>> {
                 return None;
             }
             if let Ok(naive) = NaiveDateTime::parse_from_str(value, "%Y%m%dT%H%M%SZ") {
-                return Some(DateTime::<Utc>::from_utc(naive, Utc));
+                return Some(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc));
             }
         }
     }
