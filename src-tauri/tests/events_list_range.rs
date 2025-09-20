@@ -159,7 +159,8 @@ async fn invalid_timezone_surfaces_taxonomy_error() {
     .await
     .unwrap();
 
-    let err = match commands::events_list_range_command(&pool, "HH", -1, 86_400_000).await {
+    let res = commands::events_list_range_command(&pool, "HH", -1, 86_400_000).await;
+    let err = match res {
         Ok(_) => panic!("invalid timezone should error"),
         Err(e) => e,
     };
@@ -186,7 +187,8 @@ async fn unsupported_rrule_surfaces_taxonomy_error() {
     .await
     .unwrap();
 
-    let err = match commands::events_list_range_command(&pool, "HH", -1, 86_400_000).await {
+    let res = commands::events_list_range_command(&pool, "HH", -1, 86_400_000).await;
+    let err = match res {
         Ok(_) => panic!("unsupported rrule should error"),
         Err(e) => e,
     };
