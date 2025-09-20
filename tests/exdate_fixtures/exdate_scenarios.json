@@ -1,0 +1,73 @@
+{
+  "scenarios": [
+    {
+      "name": "single_exdate_removal",
+      "description": "Daily UTC meeting drops the occurrence that exactly matches the EXDATE",
+      "timezone": "UTC",
+      "local_start": "2024-05-01T09:00",
+      "local_end": "2024-05-01T10:00",
+      "rrule": "FREQ=DAILY;COUNT=3",
+      "exdates": [
+        "2024-05-02T09:00:00Z"
+      ],
+      "range_start_utc": "2024-05-01T00:00:00Z",
+      "range_end_utc": "2024-05-05T00:00:00Z"
+    },
+    {
+      "name": "multiple_bulk_exdates",
+      "description": "Daily Berlin stand-up removes two different days via EXDATE list",
+      "timezone": "Europe/Berlin",
+      "local_start": "2024-04-10T18:30",
+      "local_end": "2024-04-10T19:15",
+      "rrule": "FREQ=DAILY;COUNT=5",
+      "exdates": [
+        "2024-04-11T16:30:00Z",
+        "2024-04-13T16:30:00Z"
+      ],
+      "range_start_utc": "2024-04-09T00:00:00Z",
+      "range_end_utc": "2024-04-20T00:00:00Z"
+    },
+    {
+      "name": "duplicate_exdates_are_idempotent",
+      "description": "Weekly Los Angeles series tolerates duplicate EXDATE tokens",
+      "timezone": "America/Los_Angeles",
+      "local_start": "2024-06-01T08:00",
+      "local_end": "2024-06-01T09:00",
+      "rrule": "FREQ=WEEKLY;COUNT=4;BYDAY=SA",
+      "exdates": [
+        "2024-06-08T15:00:00Z",
+        "2024-06-08T15:00:00Z",
+        "2024-06-22T15:00:00Z"
+      ],
+      "range_start_utc": "2024-05-25T00:00:00Z",
+      "range_end_utc": "2024-07-01T00:00:00Z"
+    },
+    {
+      "name": "dst_transitions_are_respected",
+      "description": "New York overnight maintenance skips spring-forward and fall-back Sundays",
+      "timezone": "America/New_York",
+      "local_start": "2024-03-03T01:30",
+      "local_end": "2024-03-03T03:00",
+      "rrule": "FREQ=WEEKLY;BYDAY=SU;UNTIL=20241110T063000Z",
+      "exdates": [
+        "2024-03-10T06:30:00Z",
+        "2024-11-03T05:30:00Z"
+      ],
+      "range_start_utc": "2024-03-01T00:00:00Z",
+      "range_end_utc": "2024-12-01T00:00:00Z"
+    },
+    {
+      "name": "leap_day_exdate_propagates",
+      "description": "Leap day celebration removes 2024 instance but continues on future leap years",
+      "timezone": "Europe/London",
+      "local_start": "2024-02-29T08:00",
+      "local_end": "2024-02-29T10:00",
+      "rrule": "FREQ=YEARLY;COUNT=4;BYMONTH=2;BYMONTHDAY=29",
+      "exdates": [
+        "2024-02-29T08:00:00Z"
+      ],
+      "range_start_utc": "2024-01-01T00:00:00Z",
+      "range_end_utc": "2037-01-01T00:00:00Z"
+    }
+  ]
+}

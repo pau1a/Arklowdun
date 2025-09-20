@@ -69,3 +69,11 @@ snapshot mismatch for daily_london_dst at tests/rrule_snapshots/daily_london_dst
 
 CI job `gate/rrule-matrix` runs the suite on every pull request so any
 unexpected drift is caught automatically.
+
+## EXDATE removal companion suite
+
+The same CI gate also executes the EXDATE scenarios in
+`cargo test --manifest-path src-tauri/Cargo.toml --test exdate_application`.
+These tests reuse the snapshot workflow and fixtures stored under
+`tests/exdate_fixtures/` to prove that excluded dates are filtered before the
+instances reach the IPC boundary.
