@@ -1235,6 +1235,55 @@ footer a.footer__settings {
 .note--md { min-width: 220px; min-height: 160px; }
 .note--lg { min-width: 300px; min-height: 220px; }
 
+.notes__deadline-panel {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-base);
+  background-color: var(--color-panel);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  box-shadow: var(--shadow-base);
+}
+
+.notes__deadline-panel h3 {
+  margin: 0;
+}
+
+.notes__deadline-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.notes__deadline-item {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-base);
+  padding: var(--space-2);
+  background-color: var(--color-panel);
+  box-shadow: var(--shadow-base);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.notes__deadline-title {
+  font-weight: 600;
+}
+
+.notes__deadline-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
 /* Files view */
 .files {
   max-width: 1024px;
@@ -1308,6 +1357,51 @@ footer a.footer__settings {
 }
 
 .files__panel { overflow-x: auto; }
+
+#preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.files__preview-content {
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-base);
+  min-height: 220px;
+  display: grid;
+  place-items: center;
+  color: var(--color-text-muted);
+  padding: var(--space-3);
+}
+
+.files__preview-content:empty {
+  min-height: 0;
+  padding: 0;
+}
+
+.files__reminder-detail {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-base);
+  padding: var(--space-3);
+  background-color: var(--color-panel);
+  box-shadow: var(--shadow-base);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.files__reminder-detail h3 {
+  margin: 0;
+}
+
+.files__reminder-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
 
 @media (max-width: 900px) {
   .files__header {
@@ -1437,6 +1531,39 @@ footer a.footer__settings {
 
 .btn--ghost:hover { background-color: var(--color-border); }
 
+.timezone-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  min-height: 24px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-panel);
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: default;
+  white-space: nowrap;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+@supports (color: color-mix(in srgb, black, white)) {
+  .timezone-badge {
+    background-color: color-mix(
+      in srgb,
+      var(--color-border) 55%,
+      var(--color-panel)
+    );
+  }
+}
+
+.timezone-badge:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
 /* Calendar view */
 .calendar {
   max-width: 1024px;
@@ -1507,6 +1634,34 @@ footer a.footer__settings {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.calendar__event:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.calendar__event-meta {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  align-items: center;
+  margin: var(--space-2) 0;
+}
+
+.calendar__event-modal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.calendar__event-modal h2 {
+  margin: 0;
+}
+
+.calendar__event-modal [data-ui="button"] {
+  align-self: flex-end;
 }
 
 .calendar__form { display: flex; gap: var(--space-2); }

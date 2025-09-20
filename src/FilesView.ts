@@ -13,6 +13,7 @@ import { STR } from '@ui/strings';
 import { showError } from '@ui/errors';
 import createLoading from '@ui/Loading';
 import createErrorBanner from '@ui/ErrorBanner';
+import createTimezoneBadge from '@ui/TimezoneBadge';
 import {
   actions,
   selectors,
@@ -90,8 +91,63 @@ export async function FilesView(container: HTMLElement) {
   const preview = document.createElement('div');
   preview.id = 'preview';
 
+  const reminderDetail = document.createElement('div');
+  reminderDetail.className = 'files__reminder-detail';
+  reminderDetail.hidden = true;
+  reminderDetail.setAttribute('aria-live', 'polite');
+  reminderDetail.setAttribute('aria-atomic', 'true');
+
+  const previewContent = document.createElement('div');
+  previewContent.className = 'files__preview-content';
+
+  preview.append(reminderDetail, previewContent);
+
   let currentDir: string | null = selectors.files.path(getState());
   let previewToken = 0;
+
+  const appTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC';
+
+  const renderReminderDetail = (item: FilesListItem | null) => {
+    reminderDetail.innerHTML = '';
+    if (
+      !item ||
+      item.entry.isDirectory === true ||
+      item.reminder === undefined ||
+      item.reminder === null
+    ) {
+      reminderDetail.hidden = true;
+      return;
+    }
+
+    reminderDetail.hidden = false;
+
+    const heading = document.createElement('h3');
+    heading.textContent = 'Reminder';
+
+    const formatted = new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: item.reminderTz ?? appTimezone ?? 'UTC',
+    }).format(new Date(item.reminder));
+
+    const description = document.createElement('p');
+    description.textContent = `Scheduled for ${formatted}`;
+
+    const meta = document.createElement('div');
+    meta.className = 'files__reminder-meta';
+
+    const badge = createTimezoneBadge({
+      eventTimezone: item.reminderTz,
+      appTimezone,
+      tooltipId: `file-reminder-${item.entry.name}-timezone`,
+    });
+    if (!badge.hidden) {
+      meta.appendChild(badge);
+    }
+
+    reminderDetail.append(heading, description);
+    if (meta.childElementCount > 0) reminderDetail.appendChild(meta);
+  };
 
   const toolbar = createFilesToolbar({
     onSelectDirectory: async () => {
@@ -270,11 +326,13 @@ export async function FilesView(container: HTMLElement) {
 
   async function handleActivate(item: FilesListItem) {
     if (item.entry.isDirectory) {
+      renderReminderDetail(null);
       await handleNavigate(item.relativePath);
       return;
     }
     const token = ++previewToken;
-    preview.innerHTML = '';
+    renderReminderDetail(item);
+    previewContent.innerHTML = '';
     const ext = item.entry.name.split('.').pop()?.toLowerCase();
     try {
       const { realPath } = await canonicalizeAndVerify(item.relativePath, ROOT);
@@ -288,16 +346,16 @@ export async function FilesView(container: HTMLElement) {
         const img = document.createElement('img');
         img.src = url;
         img.style.maxWidth = '100%';
-        if (token === previewToken) preview.appendChild(img);
+        if (token === previewToken) previewContent.appendChild(img);
       } else if (ext === 'pdf') {
         const embed = document.createElement('embed');
         embed.src = url;
         embed.type = 'application/pdf';
         embed.style.width = '100%';
         embed.style.height = '600px';
-        if (token === previewToken) preview.appendChild(embed);
+        if (token === previewToken) previewContent.appendChild(embed);
       } else {
-        preview.textContent = 'No preview available';
+        previewContent.textContent = 'No preview available';
       }
     } catch (error) {
       showError({ code: 'INFO', message: toUserMessage(error) });
@@ -309,13 +367,15 @@ export async function FilesView(container: HTMLElement) {
       setDir(null);
       filesList.clear();
       breadcrumbNav.innerHTML = '';
-      preview.innerHTML = '';
+      previewContent.innerHTML = '';
+      renderReminderDetail(null);
       return;
     }
     setLoading(false);
     clearInlineError();
     setDir(snapshot.path);
     renderBreadcrumb(snapshot.path, breadcrumbNav, handleNavigate);
+    renderReminderDetail(null);
     const items: FilesListItem[] = snapshot.items.map((entry) => ({
       entry,
       relativePath:
@@ -323,6 +383,8 @@ export async function FilesView(container: HTMLElement) {
       typeLabel: entry.isDirectory ? 'Folder' : 'File',
       sizeLabel: '',
       modifiedLabel: '',
+      reminder: entry.reminder ?? null,
+      reminderTz: entry.reminder_tz ?? null,
     }));
     filesList.setItems(items);
   }

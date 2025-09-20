@@ -23,6 +23,8 @@ import { emit, on } from "./store/events";
 import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
 import createButton from "@ui/Button";
 import createInput from "@ui/Input";
+import createModal from "@ui/Modal";
+import createTimezoneBadge from "@ui/TimezoneBadge";
 import createTruncationBanner from "@ui/TruncationBanner";
 
 async function saveEvent(
@@ -89,10 +91,78 @@ export async function CalendarView(container: HTMLElement) {
     },
   });
 
+  const systemTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const appTimezone = systemTimezone;
+
+  const eventModal = createModal({
+    open: false,
+    titleId: "calendar-event-modal-title",
+    onOpenChange(open) {
+      if (!open) eventModal.setOpen(false);
+    },
+  });
+  eventModal.dialog.classList.add("calendar__event-modal");
+
+  const openEventModal = (event: CalendarEvent) => {
+    const dialog = eventModal.dialog;
+    dialog.innerHTML = "";
+
+    const heading = document.createElement("h2");
+    heading.id = "calendar-event-modal-title";
+    heading.textContent = event.title;
+
+    const description = document.createElement("p");
+    description.id = "calendar-event-modal-description";
+    const zone = event.tz ?? systemTimezone ?? "UTC";
+    const when = new Intl.DateTimeFormat(undefined, {
+      dateStyle: "full",
+      timeStyle: "short",
+      timeZone: zone,
+    }).format(new Date(event.start_at_utc ?? event.start_at));
+    description.textContent = `Starts ${when}`;
+
+    const meta = document.createElement("div");
+    meta.className = "calendar__event-meta";
+
+    const timezoneBadge = createTimezoneBadge({
+      eventTimezone: event.tz,
+      appTimezone,
+      tooltipId: "calendar-event-timezone",
+    });
+    if (!timezoneBadge.hidden) {
+      meta.appendChild(timezoneBadge);
+    }
+
+    const closeButton = createButton({
+      label: "Close",
+      variant: "ghost",
+      type: "button",
+      onClick: (ev) => {
+        ev.preventDefault();
+        eventModal.setOpen(false);
+      },
+    });
+
+    dialog.append(heading, description);
+    if (meta.childElementCount > 0) dialog.append(meta);
+    dialog.append(closeButton);
+
+    eventModal.update({
+      titleId: heading.id,
+      descriptionId: description.id,
+      initialFocus: closeButton,
+    });
+    eventModal.setOpen(true);
+  };
+
   const panel = document.createElement("div");
   panel.className = "card calendar__panel";
-  const calendar = CalendarGrid();
+  const calendar = CalendarGrid({ onEventSelect: openEventModal });
   panel.appendChild(calendar.element);
+  registerViewCleanup(container, () => {
+    eventModal.setOpen(false);
+    eventModal.dialog.innerHTML = "";
+  });
 
   const form = document.createElement("form");
   form.id = "event-form";

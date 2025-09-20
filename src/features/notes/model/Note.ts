@@ -10,4 +10,6 @@ export interface Note {
   created_at: number;
   updated_at: number;
   deleted_at?: number | null;
+  deadline?: number | null;
+  deadline_tz?: string | null;
 }
