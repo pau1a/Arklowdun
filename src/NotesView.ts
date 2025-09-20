@@ -15,6 +15,7 @@ import { emit, on } from "./store/events";
 import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
 import createButton from "@ui/Button";
 import createInput from "@ui/Input";
+import createTimezoneBadge from "@ui/TimezoneBadge";
 
 const NOTE_PALETTE: Record<string, { base: string; text: string }> = {
   "#FFFF88": { base: "#FFF4B8", text: "#2b2b2b" },
@@ -162,7 +163,21 @@ export async function NotesView(container: HTMLElement) {
   const notesBoard = NotesList();
   const canvas = notesBoard.element;
 
+  const deadlinesPanel = document.createElement("section");
+  deadlinesPanel.className = "notes__deadline-panel";
+  deadlinesPanel.setAttribute("aria-labelledby", "notes-deadlines-heading");
+  deadlinesPanel.hidden = true;
+
+  const deadlinesHeading = document.createElement("h3");
+  deadlinesHeading.id = "notes-deadlines-heading";
+  deadlinesHeading.textContent = "Deadlines";
+
+  const deadlinesList = document.createElement("ul");
+  deadlinesList.className = "notes__deadline-list";
+  deadlinesPanel.append(deadlinesHeading, deadlinesList);
+
   section.append(heading, form, canvas);
+  section.append(deadlinesPanel);
   container.innerHTML = "";
   container.appendChild(section);
 
@@ -170,6 +185,59 @@ export async function NotesView(container: HTMLElement) {
 
   const cloneNotes = (items: Note[]): Note[] => items.map((note) => ({ ...note }));
   let notesLocal: Note[] = cloneNotes(selectors.notes.items(getState()));
+  const appTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
+
+  const renderDeadlines = (notes: Note[]): void => {
+    const upcoming = notes
+      .filter((note) => note.deadline !== undefined && note.deadline !== null && !note.deleted_at)
+      .sort((a, b) => (a.deadline ?? 0) - (b.deadline ?? 0));
+
+    deadlinesList.innerHTML = "";
+    if (upcoming.length === 0) {
+      deadlinesPanel.hidden = true;
+      return;
+    }
+
+    deadlinesPanel.hidden = false;
+
+    upcoming.forEach((note) => {
+      const item = document.createElement("li");
+      item.className = "notes__deadline-item";
+
+      const title = document.createElement("span");
+      title.className = "notes__deadline-title";
+      title.textContent = note.text;
+
+      const meta = document.createElement("div");
+      meta.className = "notes__deadline-meta";
+
+      const zone = note.deadline_tz ?? appTimezone ?? "UTC";
+      const dueMs = Number(note.deadline);
+      if (!Number.isFinite(dueMs)) return;
+      const formatted = new Intl.DateTimeFormat(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+        timeZone: zone,
+      }).format(new Date(dueMs));
+      const dueLabel = document.createElement("span");
+      dueLabel.textContent = `Due ${formatted}`;
+      meta.appendChild(dueLabel);
+
+      const badge = createTimezoneBadge({
+        eventTimezone: note.deadline_tz,
+        appTimezone,
+        tooltipId: `note-deadline-${note.id}-timezone`,
+      });
+      if (!badge.hidden) {
+        meta.appendChild(badge);
+      }
+
+      item.append(title, meta);
+      deadlinesList.appendChild(item);
+    });
+  };
+
+  renderDeadlines(notesLocal);
 
   let suppressNextRender = false;
 
@@ -193,6 +261,7 @@ export async function NotesView(container: HTMLElement) {
       source,
     });
     if (emitEvent) emit("notes:updated", payload);
+    renderDeadlines(notesLocal);
   };
 
   async function reload(source: string): Promise<void> {
@@ -328,8 +397,10 @@ export async function NotesView(container: HTMLElement) {
           el.addEventListener("pointerup", onUp);
         });
 
-        canvas.appendChild(el);
+    canvas.appendChild(el);
       });
+
+    renderDeadlines(notesLocal);
   }
 
   const unsubscribe = subscribe(selectors.notes.snapshot, (snapshot) => {

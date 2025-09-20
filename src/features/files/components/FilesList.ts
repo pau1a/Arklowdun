@@ -11,6 +11,8 @@ export interface FilesListItem {
   typeLabel: string;
   sizeLabel?: string;
   modifiedLabel?: string;
+  reminder?: number | null;
+  reminderTz?: string | null;
 }
 
 export interface FilesListRowAction {

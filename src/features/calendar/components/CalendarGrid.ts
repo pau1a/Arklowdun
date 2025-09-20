@@ -3,6 +3,7 @@ import type { CalendarEvent } from "../model/CalendarEvent";
 
 export interface CalendarGridOptions {
   getNow?: () => number;
+  onEventSelect?: (event: CalendarEvent) => void;
 }
 
 export interface CalendarGridInstance {
@@ -10,7 +11,12 @@ export interface CalendarGridInstance {
   setEvents(events: CalendarEvent[]): void;
 }
 
-function renderMonth(root: HTMLElement, events: CalendarEvent[], getNow: () => number): void {
+function renderMonth(
+  root: HTMLElement,
+  events: CalendarEvent[],
+  getNow: () => number,
+  onEventSelect?: (event: CalendarEvent) => void,
+): void {
   root.innerHTML = "";
   const now = new Date(getNow());
   const year = now.getFullYear();
@@ -76,6 +82,20 @@ function renderMonth(root: HTMLElement, events: CalendarEvent[], getNow: () => n
       const div = document.createElement("div");
       div.className = "calendar__event";
       div.textContent = ev.title;
+      div.tabIndex = 0;
+      div.setAttribute("role", "button");
+      if (onEventSelect) {
+        div.addEventListener("click", (event) => {
+          event.preventDefault();
+          onEventSelect(ev);
+        });
+        div.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " " || event.key === "Spacebar") {
+            event.preventDefault();
+            onEventSelect(ev);
+          }
+        });
+      }
       cell.appendChild(div);
     });
     row.appendChild(cell);
@@ -88,11 +108,12 @@ export function CalendarGrid(options: CalendarGridOptions = {}): CalendarGridIns
   const element = document.createElement("div");
   element.id = "calendar";
   const getNow = options.getNow ?? nowMs;
+  const onEventSelect = options.onEventSelect;
 
   return {
     element,
     setEvents(events: CalendarEvent[]) {
-      renderMonth(element, events, getNow);
+      renderMonth(element, events, getNow, onEventSelect);
     },
   };
 }
