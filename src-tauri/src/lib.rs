@@ -97,6 +97,7 @@ pub mod db;
 mod diagnostics;
 pub mod error;
 pub mod events_tz_backfill;
+pub mod exdate;
 mod household; // declare module; avoid `use` to prevent name collision
 mod id;
 mod importer;

@@ -2,7 +2,11 @@ use serde_json::{Map, Value};
 use sqlx::{sqlite::SqliteRow, Column, Row, SqlitePool, TypeInfo, ValueRef};
 
 use crate::{
-    id::new_uuid_v7, repo, time::now_ms, AppError, AppResult, Event, EventsListRangeResponse,
+    exdate::{inspect_exdates, parse_rrule_until, split_csv_exdates, ExdateContext},
+    id::new_uuid_v7,
+    repo,
+    time::now_ms,
+    AppError, AppResult, Event, EventsListRangeResponse,
 };
 use chrono::{DateTime, Duration, LocalResult, NaiveDateTime, Offset, TimeZone, Utc};
 use chrono_tz::Tz as ChronoTz;
@@ -60,6 +64,243 @@ fn row_to_value(row: SqliteRow) -> Value {
     Value::Object(map)
 }
 
+fn value_to_i64(value: Option<&Value>) -> Option<i64> {
+    match value {
+        Some(Value::Number(n)) => n.as_i64().or_else(|| n.as_f64().map(|f| f.trunc() as i64)),
+        Some(Value::String(s)) => s.trim().parse::<i64>().ok(),
+        _ => None,
+    }
+}
+
+fn optional_string(value: Option<&Value>, field: &'static str) -> AppResult<Option<String>> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(s)) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(trimmed.to_string()))
+            }
+        }
+        Some(_) => Err(AppError::new(
+            "E_EXDATE_INVALID_FORMAT",
+            "Excluded dates require the recurrence rule to be a string.",
+        )
+        .with_context("field", field)),
+    }
+}
+
+fn parse_exdate_input(value: &Value) -> AppResult<Vec<String>> {
+    match value {
+        Value::Null => Ok(Vec::new()),
+        Value::String(raw) => Ok(split_csv_exdates(raw)),
+        Value::Array(items) => {
+            let mut out = Vec::new();
+            for item in items {
+                match item {
+                    Value::Null => {}
+                    Value::String(s) => {
+                        let trimmed = s.trim();
+                        if !trimmed.is_empty() {
+                            out.push(trimmed.to_string());
+                        }
+                    }
+                    _ => {
+                        return Err(AppError::new(
+                            "E_EXDATE_INVALID_FORMAT",
+                            "Excluded dates must be strings.",
+                        )
+                        .with_context("field", "exdates"));
+                    }
+                }
+            }
+            Ok(out)
+        }
+        _ => Err(AppError::new(
+            "E_EXDATE_INVALID_FORMAT",
+            "Excluded dates must be a comma separated string or array of strings.",
+        )
+        .with_context("field", "exdates")),
+    }
+}
+
+fn ensure_start_datetime(start_ms: Option<i64>, event_id: &str) -> AppResult<DateTime<Utc>> {
+    let ms = start_ms.ok_or_else(|| {
+        AppError::new(
+            "E_EXDATE_OUT_OF_RANGE",
+            "Event start time is required to validate excluded dates.",
+        )
+        .with_context("event_id", event_id.to_string())
+    })?;
+    DateTime::<Utc>::from_timestamp_millis(ms).ok_or_else(|| {
+        AppError::new(
+            "E_EXDATE_OUT_OF_RANGE",
+            "Event start time is invalid for exclusion validation.",
+        )
+        .with_context("event_id", event_id.to_string())
+        .with_context("start_ms", ms.to_string())
+    })
+}
+
+fn normalize_event_exdates_for_create(data: &mut Map<String, Value>) -> AppResult<()> {
+    let Some(exdates_value) = data.get("exdates").cloned() else {
+        return Ok(());
+    };
+    let event_id = data.get("id").and_then(|v| v.as_str()).unwrap_or("new");
+
+    let entries = parse_exdate_input(&exdates_value)?;
+    if entries.is_empty() {
+        data.insert("exdates".into(), Value::Null);
+        return Ok(());
+    }
+
+    let start_ms =
+        value_to_i64(data.get("start_at_utc")).or_else(|| value_to_i64(data.get("start_at")));
+    let start = ensure_start_datetime(start_ms, event_id)?;
+    let rrule = optional_string(data.get("rrule"), "rrule")?;
+    let rrule = rrule.ok_or_else(|| {
+        AppError::new(
+            "E_EXDATE_OUT_OF_RANGE",
+            "Excluded dates require a recurrence rule.",
+        )
+        .with_context("event_id", event_id.to_string())
+    })?;
+    let until = parse_rrule_until(&rrule);
+    let context = ExdateContext {
+        start: Some(start),
+        until,
+    };
+    let inspection = inspect_exdates(entries, &context);
+    if inspection.invalid_total() > 0 {
+        let sample = inspection
+            .invalid_format
+            .first()
+            .or_else(|| inspection.non_utc.first())
+            .cloned()
+            .unwrap_or_default();
+        return Err(AppError::new(
+            "E_EXDATE_INVALID_FORMAT",
+            "Excluded dates must use ISO-8601 UTC format (YYYY-MM-DDTHH:MM:SSZ).",
+        )
+        .with_context("event_id", event_id.to_string())
+        .with_context("invalid_value", sample));
+    }
+    if !inspection.out_of_range.is_empty() {
+        return Err(AppError::new(
+            "E_EXDATE_OUT_OF_RANGE",
+            "Excluded dates must fall within the recurrence window.",
+        )
+        .with_context("event_id", event_id.to_string())
+        .with_context("out_of_range", inspection.out_of_range.join(",")));
+    }
+
+    match inspection.canonical {
+        Some(canonical) => {
+            data.insert("exdates".into(), Value::String(canonical));
+        }
+        None => {
+            data.insert("exdates".into(), Value::Null);
+        }
+    }
+    Ok(())
+}
+
+async fn normalize_event_exdates_for_update(
+    pool: &SqlitePool,
+    household_id: &str,
+    event_id: &str,
+    data: &mut Map<String, Value>,
+) -> AppResult<()> {
+    let Some(exdates_value) = data.get("exdates").cloned() else {
+        return Ok(());
+    };
+
+    let entries = parse_exdate_input(&exdates_value)?;
+    if entries.is_empty() {
+        data.insert("exdates".into(), Value::Null);
+        return Ok(());
+    }
+
+    let existing = repo::get_active(pool, "events", Some(household_id), event_id)
+        .await
+        .map_err(|err| {
+            AppError::from(err)
+                .with_context("table", "events")
+                .with_context("id", event_id.to_string())
+                .with_context("household_id", household_id.to_string())
+        })?;
+    let mut existing_start_at = None;
+    let mut existing_start_at_utc = None;
+    let mut existing_rrule: Option<String> = None;
+    if let Some(row) = existing {
+        existing_start_at = row.try_get("start_at").ok();
+        existing_start_at_utc = row.try_get("start_at_utc").ok();
+        existing_rrule = row.try_get("rrule").ok();
+    }
+
+    let start_ms = value_to_i64(data.get("start_at_utc"))
+        .or_else(|| value_to_i64(data.get("start_at")))
+        .or(existing_start_at_utc)
+        .or(existing_start_at);
+    let start = ensure_start_datetime(start_ms, event_id)?;
+
+    let incoming_rrule = optional_string(data.get("rrule"), "rrule")?;
+    let final_rrule = incoming_rrule.or_else(|| {
+        existing_rrule
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    });
+    let rrule = final_rrule.ok_or_else(|| {
+        AppError::new(
+            "E_EXDATE_OUT_OF_RANGE",
+            "Excluded dates require a recurrence rule.",
+        )
+        .with_context("event_id", event_id.to_string())
+        .with_context("household_id", household_id.to_string())
+    })?;
+    let until = parse_rrule_until(&rrule);
+    let context = ExdateContext {
+        start: Some(start),
+        until,
+    };
+    let inspection = inspect_exdates(entries, &context);
+    if inspection.invalid_total() > 0 {
+        let sample = inspection
+            .invalid_format
+            .first()
+            .or_else(|| inspection.non_utc.first())
+            .cloned()
+            .unwrap_or_default();
+        return Err(AppError::new(
+            "E_EXDATE_INVALID_FORMAT",
+            "Excluded dates must use ISO-8601 UTC format (YYYY-MM-DDTHH:MM:SSZ).",
+        )
+        .with_context("event_id", event_id.to_string())
+        .with_context("household_id", household_id.to_string())
+        .with_context("invalid_value", sample));
+    }
+    if !inspection.out_of_range.is_empty() {
+        return Err(AppError::new(
+            "E_EXDATE_OUT_OF_RANGE",
+            "Excluded dates must fall within the recurrence window.",
+        )
+        .with_context("event_id", event_id.to_string())
+        .with_context("household_id", household_id.to_string())
+        .with_context("out_of_range", inspection.out_of_range.join(",")));
+    }
+
+    match inspection.canonical {
+        Some(canonical) => {
+            data.insert("exdates".into(), Value::String(canonical));
+        }
+        None => {
+            data.insert("exdates".into(), Value::Null);
+        }
+    }
+    Ok(())
+}
+
 async fn list(
     pool: &SqlitePool,
     table: &str,
@@ -99,6 +340,10 @@ async fn create(pool: &SqlitePool, table: &str, mut data: Map<String, Value>) ->
         .or_insert(Value::from(now));
     data.insert("updated_at".into(), Value::from(now));
 
+    if table == "events" {
+        normalize_event_exdates_for_create(&mut data)?;
+    }
+
     let cols: Vec<String> = data.keys().cloned().collect();
     let placeholders: Vec<String> = cols.iter().map(|_| "?".into()).collect();
     let sql = format!(
@@ -126,6 +371,15 @@ async fn update(
     mut data: Map<String, Value>,
     household_id: Option<&str>,
 ) -> AppResult<()> {
+    if table == "events" {
+        let hh = household_id.ok_or_else(|| {
+            AppError::new(
+                "COMMANDS/MISSING_FIELD",
+                "Household is required when updating events.",
+            )
+        })?;
+        normalize_event_exdates_for_update(pool, hh, id, &mut data).await?;
+    }
     data.remove("id");
     data.remove("created_at");
     let now = now_ms();
