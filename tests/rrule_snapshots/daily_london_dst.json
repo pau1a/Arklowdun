@@ -1,0 +1,69 @@
+{
+  "scenario": "daily_london_dst",
+  "description": "Daily 22:15 meeting spanning the Europe/London spring DST change",
+  "timezone": "Europe/London",
+  "tzdb": "2025b (chrono-tz 0.10.4)",
+  "dtstart_local": "2024-03-29T22:15",
+  "dtend_local": "2024-03-29T23:00",
+  "rrule": "FREQ=DAILY;COUNT=5",
+  "range_start_utc": "2024-03-29T00:00:00Z",
+  "range_end_utc": "2024-04-04T00:00:00Z",
+  "expected_count": 5,
+  "instances": [
+    {
+      "index": 0,
+      "id": "series-daily_london_dst::1711750500000",
+      "start_utc": "2024-03-29T22:15:00Z",
+      "end_utc": "2024-03-29T23:00:00Z",
+      "local_start": "2024-03-29T22:15:00+00:00",
+      "local_end": "2024-03-29T23:00:00+00:00",
+      "weekday": "Friday",
+      "offset_seconds": 0,
+      "duration_minutes": 45
+    },
+    {
+      "index": 1,
+      "id": "series-daily_london_dst::1711836900000",
+      "start_utc": "2024-03-30T22:15:00Z",
+      "end_utc": "2024-03-30T23:00:00Z",
+      "local_start": "2024-03-30T22:15:00+00:00",
+      "local_end": "2024-03-30T23:00:00+00:00",
+      "weekday": "Saturday",
+      "offset_seconds": 0,
+      "duration_minutes": 45
+    },
+    {
+      "index": 2,
+      "id": "series-daily_london_dst::1711919700000",
+      "start_utc": "2024-03-31T21:15:00Z",
+      "end_utc": "2024-03-31T22:00:00Z",
+      "local_start": "2024-03-31T22:15:00+01:00",
+      "local_end": "2024-03-31T23:00:00+01:00",
+      "weekday": "Sunday",
+      "offset_seconds": 3600,
+      "duration_minutes": 45
+    },
+    {
+      "index": 3,
+      "id": "series-daily_london_dst::1712006100000",
+      "start_utc": "2024-04-01T21:15:00Z",
+      "end_utc": "2024-04-01T22:00:00Z",
+      "local_start": "2024-04-01T22:15:00+01:00",
+      "local_end": "2024-04-01T23:00:00+01:00",
+      "weekday": "Monday",
+      "offset_seconds": 3600,
+      "duration_minutes": 45
+    },
+    {
+      "index": 4,
+      "id": "series-daily_london_dst::1712092500000",
+      "start_utc": "2024-04-02T21:15:00Z",
+      "end_utc": "2024-04-02T22:00:00Z",
+      "local_start": "2024-04-02T22:15:00+01:00",
+      "local_end": "2024-04-02T23:00:00+01:00",
+      "weekday": "Tuesday",
+      "offset_seconds": 3600,
+      "duration_minutes": 45
+    }
+  ]
+}

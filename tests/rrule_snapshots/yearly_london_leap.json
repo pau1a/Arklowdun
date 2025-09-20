@@ -1,0 +1,58 @@
+{
+  "scenario": "yearly_london_leap",
+  "description": "Leap day tradition anchored to 29 February using BYMONTH/BYMONTHDAY",
+  "timezone": "Europe/London",
+  "tzdb": "2025b (chrono-tz 0.10.4)",
+  "dtstart_local": "2024-02-29T08:00",
+  "dtend_local": "2024-02-29T10:00",
+  "rrule": "FREQ=YEARLY;COUNT=4;BYMONTH=2;BYMONTHDAY=29",
+  "range_start_utc": "2024-01-01T00:00:00Z",
+  "range_end_utc": "2036-03-02T00:00:00Z",
+  "expected_count": 4,
+  "instances": [
+    {
+      "index": 0,
+      "id": "series-yearly_london_leap::1709193600000",
+      "start_utc": "2024-02-29T08:00:00Z",
+      "end_utc": "2024-02-29T10:00:00Z",
+      "local_start": "2024-02-29T08:00:00+00:00",
+      "local_end": "2024-02-29T10:00:00+00:00",
+      "weekday": "Thursday",
+      "offset_seconds": 0,
+      "duration_minutes": 120
+    },
+    {
+      "index": 1,
+      "id": "series-yearly_london_leap::1835424000000",
+      "start_utc": "2028-02-29T08:00:00Z",
+      "end_utc": "2028-02-29T10:00:00Z",
+      "local_start": "2028-02-29T08:00:00+00:00",
+      "local_end": "2028-02-29T10:00:00+00:00",
+      "weekday": "Tuesday",
+      "offset_seconds": 0,
+      "duration_minutes": 120
+    },
+    {
+      "index": 2,
+      "id": "series-yearly_london_leap::1961654400000",
+      "start_utc": "2032-02-29T08:00:00Z",
+      "end_utc": "2032-02-29T10:00:00Z",
+      "local_start": "2032-02-29T08:00:00+00:00",
+      "local_end": "2032-02-29T10:00:00+00:00",
+      "weekday": "Sunday",
+      "offset_seconds": 0,
+      "duration_minutes": 120
+    },
+    {
+      "index": 3,
+      "id": "series-yearly_london_leap::2087884800000",
+      "start_utc": "2036-02-29T08:00:00Z",
+      "end_utc": "2036-02-29T10:00:00Z",
+      "local_start": "2036-02-29T08:00:00+00:00",
+      "local_end": "2036-02-29T10:00:00+00:00",
+      "weekday": "Friday",
+      "offset_seconds": 0,
+      "duration_minutes": 120
+    }
+  ]
+}
