@@ -787,13 +787,22 @@ pub struct Event {
     pub series_parent_id: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct EventsListRangeResponse {
+    #[serde(default)]
+    pub items: Vec<Event>,
+    #[serde(default)]
+    pub truncated: bool,
+}
+
 #[tauri::command]
 async fn events_list_range(
     state: State<'_, AppState>,
     household_id: String,
     start: i64,
     end: i64,
-) -> AppResult<Vec<Event>> {
+) -> AppResult<EventsListRangeResponse> {
     let pool = state.pool.clone();
     dispatch_async_app_result(move || {
         let household_id = household_id;

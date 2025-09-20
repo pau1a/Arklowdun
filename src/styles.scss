@@ -1458,6 +1458,23 @@ footer a.footer__settings {
 }
 
 .calendar__panel { padding: var(--space-4); }
+.calendar__truncation {
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent-soft);
+  color: var(--color-text);
+  border-radius: var(--radius-base);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.calendar__truncation-message {
+  flex: 1;
+}
+.calendar__truncation-dismiss {
+  margin-left: auto;
+}
 
 .calendar__table {
   width: 100%;

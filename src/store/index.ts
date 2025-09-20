@@ -41,6 +41,7 @@ export type EventsSnapshot = {
   ts: number;
   window?: { start: number; end: number };
   source?: string;
+  truncated?: boolean;
 };
 
 export type NotesSnapshot = {
@@ -174,6 +175,7 @@ export const selectors = {
     items: (s: AppState) => s.events.snapshot?.items ?? [],
     window: (s: AppState) => s.events.snapshot?.window ?? null,
     ts: (s: AppState) => s.events.snapshot?.ts ?? 0,
+    truncated: (s: AppState) => s.events.snapshot?.truncated ?? false,
   },
   notes: {
     snapshot: (s: AppState) => s.notes.snapshot,
@@ -257,7 +259,8 @@ export const actions = {
       setState(() => withEventsSnapshot(snapshot));
       const count = snapshot?.items.length ?? 0;
       const ts = snapshot?.ts ?? Date.now();
-      return { count, ts, window: snapshot?.window };
+      const truncated = snapshot?.truncated ?? false;
+      return { count, ts, window: snapshot?.window, truncated };
     },
   },
   notes: {

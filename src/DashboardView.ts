@@ -90,8 +90,15 @@ export async function DashboardView(container: HTMLElement) {
 
   // Events (via eventsApi)
   {
-    const events: Event[] = await eventsApi.listRange(hh, now, Date.now() + 90 * 24 * 60 * 60 * 1000);
-    const next = events.sort((a,b) => (a.start_at_utc ?? a.start_at) - (b.start_at_utc ?? b.start_at))[0];
+    const eventsResult = await eventsApi.listRange(
+      hh,
+      now,
+      Date.now() + 90 * 24 * 60 * 60 * 1000,
+    );
+    const events: Event[] = [...eventsResult.items];
+    const next = events.sort(
+      (a, b) => (a.start_at_utc ?? a.start_at) - (b.start_at_utc ?? b.start_at),
+    )[0];
     if (next) {
       const formatted = new Intl.DateTimeFormat(undefined, {
         timeZone: next.tz || Intl.DateTimeFormat().resolvedOptions().timeZone,
