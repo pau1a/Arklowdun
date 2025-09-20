@@ -159,9 +159,10 @@ async fn invalid_timezone_surfaces_taxonomy_error() {
     .await
     .unwrap();
 
-    let err = commands::events_list_range_command(&pool, "HH", -1, 86_400_000)
-        .await
-        .expect_err("invalid timezone should error");
+    let err = match commands::events_list_range_command(&pool, "HH", -1, 86_400_000).await {
+        Ok(_) => panic!("invalid timezone should error"),
+        Err(e) => e,
+    };
 
     assert_eq!(err.code(), "E_TZ_UNKNOWN");
     assert_eq!(
@@ -185,9 +186,10 @@ async fn unsupported_rrule_surfaces_taxonomy_error() {
     .await
     .unwrap();
 
-    let err = commands::events_list_range_command(&pool, "HH", -1, 86_400_000)
-        .await
-        .expect_err("unsupported rrule should error");
+    let err = match commands::events_list_range_command(&pool, "HH", -1, 86_400_000).await {
+        Ok(_) => panic!("unsupported rrule should error"),
+        Err(e) => e,
+    };
 
     assert_eq!(err.code(), "E_RRULE_UNSUPPORTED_FIELD");
     assert_eq!(
