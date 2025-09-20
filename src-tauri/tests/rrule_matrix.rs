@@ -141,11 +141,26 @@ async fn run_scenario(scenario: &Scenario) -> Result<()> {
     let second = commands::events_list_range_command(&pool, &household_id, range_start, range_end)
         .await
         .with_context(|| format!("second expansion for {}", scenario.name))?;
-    assert_eq!(first.len(), second.len(), "{} count drift", scenario.name);
+    assert!(
+        !first.truncated,
+        "scenario {} unexpectedly truncated first expansion",
+        scenario.name
+    );
+    assert!(
+        !second.truncated,
+        "scenario {} unexpectedly truncated second expansion",
+        scenario.name
+    );
+    assert_eq!(
+        first.items.len(),
+        second.items.len(),
+        "{} count drift",
+        scenario.name
+    );
 
     let tz = scenario.tz();
-    let first_records = records_from_instances(&first, &tz)?;
-    let second_records = records_from_instances(&second, &tz)?;
+    let first_records = records_from_instances(&first.items, &tz)?;
+    let second_records = records_from_instances(&second.items, &tz)?;
     assert_eq!(
         first_records, second_records,
         "{} ordering drift",

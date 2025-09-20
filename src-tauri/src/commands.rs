@@ -1,7 +1,9 @@
 use serde_json::{Map, Value};
 use sqlx::{sqlite::SqliteRow, Column, Row, SqlitePool, TypeInfo, ValueRef};
 
-use crate::{id::new_uuid_v7, repo, time::now_ms, AppError, AppResult, Event};
+use crate::{
+    id::new_uuid_v7, repo, time::now_ms, AppError, AppResult, Event, EventsListRangeResponse,
+};
 use chrono::{DateTime, Duration, LocalResult, NaiveDateTime, Offset, TimeZone, Utc};
 use chrono_tz::Tz as ChronoTz;
 use rrule::{RRule, RRuleSet, Tz, Unvalidated};
@@ -303,7 +305,7 @@ pub async fn events_list_range_command(
     household_id: &str,
     start: i64,
     end: i64,
-) -> AppResult<Vec<Event>> {
+) -> AppResult<EventsListRangeResponse> {
     let hh = repo::require_household(household_id)
         .map_err(|err| AppError::from(err).with_context("operation", "events_list_range"))?;
     let rows = sqlx::query_as::<_, Event>(
@@ -333,6 +335,7 @@ pub async fn events_list_range_command(
             .with_context("end", end.to_string())
     })?;
 
+    const PER_SERIES_LIMIT: usize = 500;
     const TOTAL_LIMIT: usize = 10_000;
     let range_start_utc = DateTime::<Utc>::from_timestamp_millis(start).ok_or_else(|| {
         AppError::new("TIME/INVALID_TIMESTAMP", "Invalid range start timestamp")
@@ -346,8 +349,10 @@ pub async fn events_list_range_command(
             .with_context("household_id", household_id.to_string())
             .with_context("end", end.to_string())
     })?;
+    let row_count = rows.len();
+    let mut truncated = false;
     let mut out = Vec::new();
-    'rows: for row in rows {
+    'rows: for (row_index, row) in rows.into_iter().enumerate() {
         if let Some(rrule_str) = row.rrule.clone() {
             let tz_str = row.tz.clone().unwrap_or_else(|| "UTC".into());
             let tz_chrono: ChronoTz = tz_str.parse().unwrap_or(chrono_tz::UTC);
@@ -383,7 +388,19 @@ pub async fn events_list_range_command(
                         let after = range_start_utc.with_timezone(&tz);
                         let before = range_end_utc.with_timezone(&tz);
                         set = set.after(after).before(before);
-                        for occ in set.all(500).dates {
+                        let occurrences = set.all((PER_SERIES_LIMIT + 1) as u16);
+                        let mut dates = occurrences.dates;
+                        let series_over_limit = dates.len() > PER_SERIES_LIMIT;
+                        if series_over_limit {
+                            truncated = true;
+                            dates.truncate(PER_SERIES_LIMIT);
+                        }
+                        let series_len = dates.len();
+                        for (occ_index, occ) in dates.into_iter().enumerate() {
+                            if out.len() >= TOTAL_LIMIT {
+                                truncated = true;
+                                break 'rows;
+                            }
                             let start_utc_ms = occ.with_timezone(&Utc).timestamp_millis();
                             let end_dt = occ + Duration::milliseconds(duration);
                             let end_utc_ms = end_dt.with_timezone(&Utc).timestamp_millis();
@@ -411,6 +428,12 @@ pub async fn events_list_range_command(
                             };
                             out.push(inst);
                             if out.len() >= TOTAL_LIMIT {
+                                if series_over_limit
+                                    || occ_index + 1 < series_len
+                                    || row_index + 1 < row_count
+                                {
+                                    truncated = true;
+                                }
                                 break 'rows;
                             }
                         }
@@ -435,8 +458,15 @@ pub async fn events_list_range_command(
             let start_utc = row.start_at_utc.unwrap_or(row.start_at);
             let end_utc = row.end_at_utc.or(row.end_at).unwrap_or(row.start_at);
             if end_utc >= start && start_utc <= end {
+                if out.len() >= TOTAL_LIMIT {
+                    truncated = true;
+                    break;
+                }
                 out.push(row);
                 if out.len() >= TOTAL_LIMIT {
+                    if row_index + 1 < row_count {
+                        truncated = true;
+                    }
                     break;
                 }
             }
@@ -451,5 +481,8 @@ pub async fn events_list_range_command(
             .then(a.id.cmp(&b.id))
     });
 
-    Ok(out)
+    Ok(EventsListRangeResponse {
+        items: out,
+        truncated,
+    })
 }

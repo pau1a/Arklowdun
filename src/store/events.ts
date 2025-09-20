@@ -4,6 +4,7 @@ export type EventsUpdatedPayload = {
   count: number;
   ts: number;
   window?: { start: number; end: number };
+  truncated?: boolean;
 };
 export type NotesUpdatedPayload = { count: number; ts: number };
 export type HouseholdChangedPayload = { householdId: string };

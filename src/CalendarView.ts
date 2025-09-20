@@ -79,6 +79,27 @@ export async function CalendarView(container: HTMLElement) {
   headerContent.append(title, kicker);
   header.appendChild(headerContent);
 
+  const truncationNotice = document.createElement("div");
+  truncationNotice.className = "calendar__truncation";
+  truncationNotice.setAttribute("role", "status");
+  truncationNotice.setAttribute("aria-live", "polite");
+  truncationNotice.hidden = true;
+  const truncationMessage = document.createElement("span");
+  truncationMessage.className = "calendar__truncation-message";
+  const truncationDismiss = createButton({
+    label: "Dismiss",
+    variant: "ghost",
+    size: "sm",
+    className: "calendar__truncation-dismiss",
+    ariaLabel: "Dismiss truncation message",
+    onClick: (event) => {
+      event.preventDefault();
+      truncationDismissed = true;
+      truncationNotice.hidden = true;
+    },
+  });
+  truncationNotice.append(truncationMessage, truncationDismiss);
+
   const panel = document.createElement("div");
   panel.className = "card calendar__panel";
   const calendar = CalendarGrid();
@@ -120,18 +141,40 @@ export async function CalendarView(container: HTMLElement) {
 
   form.append(titleLabel, titleInput, dateLabel, dateInput, submitButton);
 
-  section.append(header, panel, form);
+  section.append(header, truncationNotice, panel, form);
   container.innerHTML = "";
   container.appendChild(section);
 
   let currentSnapshot: EventsSnapshot | null = selectors.events.snapshot(getState());
   let currentWindow = currentSnapshot?.window ?? defaultCalendarWindow();
+  let truncationDismissed = false;
+  let lastTruncationToken: number | null = null;
+
+  function updateTruncationNotice(
+    count: number,
+    truncated: boolean,
+    token: number | null,
+  ) {
+    if (!truncated) {
+      truncationNotice.hidden = true;
+      truncationDismissed = false;
+      lastTruncationToken = null;
+      return;
+    }
+    if (token !== null && token !== lastTruncationToken) {
+      truncationDismissed = false;
+      lastTruncationToken = token;
+    }
+    truncationMessage.textContent = `This list was shortened to the first ${count.toLocaleString()} results.`;
+    truncationNotice.hidden = truncationDismissed;
+  }
 
   const unsubscribe = subscribe(selectors.events.snapshot, (snapshot) => {
     currentSnapshot = snapshot ?? null;
     if (snapshot?.window) currentWindow = snapshot.window;
     const items = snapshot?.items ?? [];
     calendar.setEvents(items);
+    updateTruncationNotice(items.length, snapshot?.truncated ?? false, snapshot?.ts ?? null);
   });
   registerViewCleanup(container, unsubscribe);
 
@@ -149,13 +192,14 @@ export async function CalendarView(container: HTMLElement) {
         return;
       }
       if (!data) return;
-      const { items, window } = data;
+      const { items, window, truncated } = data;
       currentWindow = window;
       const payload = actions.events.updateSnapshot({
         items,
         ts: Date.now(),
         window,
         source,
+        truncated,
       });
       emit("events:updated", payload);
       scheduleNotifications(items);
@@ -167,6 +211,11 @@ export async function CalendarView(container: HTMLElement) {
   if (currentSnapshot) {
     const items = currentSnapshot.items;
     calendar.setEvents(items);
+    updateTruncationNotice(
+      items.length,
+      currentSnapshot.truncated ?? false,
+      currentSnapshot.ts,
+    );
     if (items.length) scheduleNotifications(items);
   } else {
     await loadEvents("initial");
@@ -197,6 +246,7 @@ export async function CalendarView(container: HTMLElement) {
       ts: Date.now(),
       window,
       source: "create",
+      truncated: snapshot?.truncated ?? false,
     });
     emit("events:updated", payload);
     scheduleNotifications([ev]);

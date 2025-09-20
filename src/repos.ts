@@ -16,6 +16,7 @@ import type {
   Expense,
 } from "./models";
 import type { Note } from "@features/notes";
+import type { EventsListRangeResponse } from "@bindings/EventsListRangeResponse";
 
 type ListOpts = {
   householdId: string;
@@ -119,9 +120,17 @@ export const billsApi = {
 
 // ---- Events: dedicated API (uses events_list_range and singular CRUD) ----
 export const eventsApi = {
-  async listRange(householdId: string, start = 0, end = Date.now() + 90 * 24 * 60 * 60 * 1000): Promise<Event[]> {
+  async listRange(
+    householdId: string,
+    start = 0,
+    end = Date.now() + 90 * 24 * 60 * 60 * 1000,
+  ): Promise<EventsListRangeResponse> {
     console.log("events_list_range (repos.ts)", { householdId, start, end });
-    return await call<Event[]>("events_list_range", { householdId, start, end });
+    return await call<EventsListRangeResponse>("events_list_range", {
+      householdId,
+      start,
+      end,
+    });
   },
   async create(householdId: string, data: Partial<Event>): Promise<Event> {
     const out = await call<Event>("event_create", { data: { ...data, household_id: householdId } });
