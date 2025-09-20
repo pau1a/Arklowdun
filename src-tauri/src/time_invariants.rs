@@ -8,7 +8,7 @@ use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, QueryBuilder, SqlitePool};
 
-use crate::{AppError, AppResult};
+use crate::{time_errors::TimeErrorCode, AppError, AppResult};
 
 const OPERATION: &str = "time_invariants";
 const MINUTE_MS: i64 = 60_000;
@@ -302,6 +302,35 @@ pub async fn run_drift_check(
         counts_by_category,
         counts_by_household,
     })
+}
+
+#[must_use]
+pub fn drift_report_to_error(report: &DriftReport, household_id: Option<&str>) -> Option<AppError> {
+    if report.drift_events.is_empty() {
+        return None;
+    }
+    let mut err = TimeErrorCode::TimezoneDriftDetected
+        .into_error()
+        .with_context("drift_count", report.drift_events.len().to_string());
+    if let Some(hh) = household_id {
+        err = err.with_context("household_id", hh.to_string());
+    }
+    let sample_ids: Vec<String> = report
+        .drift_events
+        .iter()
+        .filter_map(|record| {
+            if record.event_id.is_empty() {
+                None
+            } else {
+                Some(record.event_id.clone())
+            }
+        })
+        .take(3)
+        .collect();
+    if !sample_ids.is_empty() {
+        err = err.with_context("sample_event_ids", sample_ids.join(","));
+    }
+    Some(err)
 }
 
 pub fn format_human_summary(report: &DriftReport) -> String {
