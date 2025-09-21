@@ -1,43 +1,35 @@
 import { expect, test } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import type { Page } from '@playwright/test';
 import { formatViolations } from './helpers';
-
-async function showTruncatedBanner(
-  page: Page,
-  options: { count: number; ts: number },
-) {
-  await page.evaluate(async ({ count, ts }) => {
-    const { actions } = await import('/src/store/index.ts');
-    const now = Date.now();
-    const items = Array.from({ length: count }, (_, index) => ({
-      id: `event-${ts}-${index}`,
-      household_id: 'playwright-household',
-      title: `Event ${index + 1}`,
-      start_at: now + index * 60_000,
-      end_at: now + index * 60_000 + 30_000,
-      start_at_utc: now + index * 60_000,
-      end_at_utc: now + index * 60_000 + 30_000,
-      created_at: now,
-      updated_at: now,
-    }));
-    actions.events.updateSnapshot({
-      items,
-      ts,
-      window: { start: now - 86_400_000, end: now + 86_400_000 },
-      source: 'playwright-truncation-a11y',
-      truncated: true,
-    });
-  }, options);
-}
+import { createUtcEvents, seedCalendarSnapshot } from '../support/calendar';
 
 test.describe('Truncation banner accessibility', () => {
   test('banner announces via status region and passes axe-core scan', async ({ page }) => {
     await page.goto('/#/calendar');
     await page.waitForSelector('main[role="main"]');
 
-    const ts = Date.now() + 5_000;
-    await showTruncatedBanner(page, { count: 600, ts });
+    const baseNow = Date.UTC(2024, 4, 16, 9, 30, 0);
+    const calendarWindow = {
+      start: baseNow - 86_400_000,
+      end: baseNow + 86_400_000,
+    };
+    const truncatedSnapshot = {
+      ts: baseNow + 5_000,
+      truncated: true,
+      events: createUtcEvents({
+        baseTs: baseNow,
+        count: 600,
+        idSeed: 'a11y-truncated-utc',
+      }),
+    } as const;
+
+    await seedCalendarSnapshot(page, {
+      events: truncatedSnapshot.events,
+      truncated: truncatedSnapshot.truncated,
+      ts: truncatedSnapshot.ts,
+      window: calendarWindow,
+      source: 'playwright-truncation-a11y',
+    });
 
     const banner = page.locator('[data-ui="truncation-banner"]');
     await expect(banner).toBeVisible();

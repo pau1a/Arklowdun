@@ -44,3 +44,5 @@ backfill_bench_*.sqlite3
 *.sqlite3
 fixtures/**/*.sqlite3
 src-tauri/fixtures/**/*.sqlite3
+
+test-results/

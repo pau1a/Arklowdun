@@ -1,38 +1,45 @@
 import { expect, test } from '@playwright/test';
 
+import { createUtcEvents, seedCalendarSnapshot } from '../support/calendar';
+import { STORE_MODULE_PATH } from '../support/store';
+
 test.describe('Timezone badge integrations', () => {
   test('shows in calendar event modal for cross-timezone events', async ({ page }) => {
     await page.goto('/#/calendar');
 
-    await page.evaluate(async () => {
-      const { actions } = await import('/src/store/index.ts');
-      const now = Date.now();
-      const event = {
-        id: 'evt-test-1',
-        household_id: 'hh-test',
-        title: 'Cross-zone call',
-        start_at: now,
-        end_at: now + 60 * 60 * 1000,
-        start_at_utc: now,
-        end_at_utc: now + 60 * 60 * 1000,
-        tz: 'America/New_York',
-        reminder: null,
-        created_at: now,
-        updated_at: now,
-      } as const;
-      actions.events.updateSnapshot({
-        items: [event],
-        ts: Date.now(),
-        window: { start: now - 24 * 60 * 60 * 1000, end: now + 24 * 60 * 60 * 1000 },
-        truncated: false,
-      });
+    // Place the event near "now" so the default calendar view renders it.
+    const eventStart = Date.now();
+    const calendarWindow = {
+      start: eventStart - 24 * 60 * 60 * 1000,
+      end: eventStart + 24 * 60 * 60 * 1000,
+    };
+    const [crossZoneEvent] = createUtcEvents({
+      baseTs: eventStart,
+      count: 1,
+      idSeed: 'evt-test',
+      titlePrefix: 'Cross-zone call',
+      appendIndex: false,
+      durationMs: 60 * 60 * 1000,
+      householdId: 'hh-test',
+      tz: 'America/New_York',
     });
 
+    await seedCalendarSnapshot(page, {
+      events: [crossZoneEvent],
+      truncated: false,
+      ts: eventStart + 1_000,
+      window: calendarWindow,
+      source: 'playwright-timezone-test',
+    });
+
+    // Calendar tiles don’t expose button semantics; use the rendered class selector.
     const eventRow = page.locator('.calendar__event', { hasText: 'Cross-zone call' });
     await expect(eventRow).toBeVisible();
     await eventRow.click();
 
-    const badge = page.locator('.calendar__event-modal [data-ui="timezone-badge"]');
+    const modal = page.locator('.calendar__event-modal');
+    await expect(modal).toBeVisible();
+    const badge = modal.locator('[data-ui="timezone-badge"]');
     await expect(badge).toBeVisible();
     await expect(badge).toContainText('America/New_York');
 
@@ -42,29 +49,34 @@ test.describe('Timezone badge integrations', () => {
   test('appears for note deadlines when timezone differs', async ({ page }) => {
     await page.goto('/#/notes');
 
-    await page.evaluate(async () => {
-      const { actions } = await import('/src/store/index.ts');
-      const now = Date.now();
-      const note = {
-        id: 'note-deadline-1',
-        text: 'Submit quarterly report',
-        color: '#FFF4B8',
-        x: 16,
-        y: 24,
-        z: 0,
-        position: 0,
-        household_id: 'hh-test',
-        created_at: now,
-        updated_at: now,
-        deleted_at: null,
-        deadline: now + 2 * 24 * 60 * 60 * 1000,
-        deadline_tz: 'America/Los_Angeles',
-      } as const;
-      actions.notes.updateSnapshot({
-        items: [note],
-        ts: Date.now(),
-      });
-    });
+    const noteSeed = Date.UTC(2024, 5, 13, 16, 30, 0);
+    const noteSnapshotTs = noteSeed + 2_000;
+    const noteDeadline = noteSeed + 2 * 24 * 60 * 60 * 1000;
+    const note = {
+      id: 'note-deadline-1',
+      text: 'Submit quarterly report',
+      color: '#FFF4B8',
+      x: 16,
+      y: 24,
+      z: 0,
+      position: 0,
+      household_id: 'hh-test',
+      created_at: noteSeed,
+      updated_at: noteSeed,
+      deadline: noteDeadline,
+      deadline_tz: 'America/Los_Angeles',
+    };
+
+    await page.evaluate(
+      async ({ noteData, snapshotTs, storeModulePath }) => {
+        const { actions } = await import(storeModulePath);
+        actions.notes.updateSnapshot({
+          items: [noteData],
+          ts: snapshotTs,
+        });
+      },
+      { noteData: note, snapshotTs: noteSnapshotTs, storeModulePath: STORE_MODULE_PATH },
+    );
 
     const badge = page.locator('.notes__deadline-panel [data-ui="timezone-badge"]');
     await expect(badge).toBeVisible();
@@ -74,22 +86,29 @@ test.describe('Timezone badge integrations', () => {
   test('files reminder detail surfaces timezone badge', async ({ page }) => {
     await page.goto('/#/files');
 
-    await page.evaluate(async () => {
-      const { actions } = await import('/src/store/index.ts');
-      const now = Date.now();
-      actions.files.updateSnapshot({
-        items: [
-          {
-            name: 'policy-renewal.pdf',
-            isDirectory: false,
-            reminder: now + 7 * 24 * 60 * 60 * 1000,
-            reminder_tz: 'America/Chicago',
-          },
-        ],
-        ts: Date.now(),
-        path: '.',
-      });
-    });
+    const reminderSeed = Date.UTC(2024, 5, 14, 12, 0, 0);
+    const reminderDue = reminderSeed + 7 * 24 * 60 * 60 * 1000;
+
+    await page.evaluate(
+      async ({ reminderTs, entry, storeModulePath }) => {
+        const { actions } = await import(storeModulePath);
+        actions.files.updateSnapshot({
+          items: [entry],
+          ts: reminderTs,
+          path: '.',
+        });
+      },
+      {
+        reminderTs: reminderSeed + 1_000,
+        entry: {
+          name: 'policy-renewal.pdf',
+          isDirectory: false,
+          reminder: reminderDue,
+          reminder_tz: 'America/Chicago',
+        },
+        storeModulePath: STORE_MODULE_PATH,
+      },
+    );
 
     const row = page.locator('.files__table tbody tr').first();
     await expect(row).toBeVisible();
