@@ -20,6 +20,7 @@ See the [Arklowdun Master Plan](docs/master-plan.md) for the high-level strategi
 - `scripts/check_migrations.sh` — verify numbering/pairing (prints OK or first error)
 - `scripts/renumber_migrations.sh -n|--apply` — dry-run/apply contiguous renumbering
 - `(cd src-tauri && cargo run --locked --bin time -- backfill-bench --rows 10000 --chunk-size 500 --progress-interval 0)` — run the timezone backfill benchmark harness (see [`docs/backfill-performance.md`](docs/backfill-performance.md)).
+- `(cd src-tauri && cargo run --locked --bin time -- query-bench --rows 10000 --iterations 200 --warmup 5 --window day --window week --window month)` — run the `events_list_range` latency benchmark (see [`docs/query-performance.md`](docs/query-performance.md)).
 
 Recommended IDE: VS Code with Tauri and rust-analyzer extensions.
 
