@@ -6,7 +6,7 @@ use arklowdun_lib::{
         BackfillProgress, BackfillStatus, BackfillSummary, MAX_CHUNK_SIZE,
         MAX_PROGRESS_INTERVAL_MS, MIN_CHUNK_SIZE, MIN_PROGRESS_INTERVAL_MS,
     },
-    time_invariants, AppError,
+    time_invariants, time_shadow, AppError,
 };
 use chrono::{DateTime, Utc};
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -43,6 +43,8 @@ enum Command {
     QueryBench(QueryBenchArgs),
     #[command(about = "Check wall-clock invariants between local and UTC timestamps")]
     Invariants(InvariantArgs),
+    #[command(about = "Show shadow-read counters and the latest discrepancy sample")]
+    ShadowReport(ShadowReportArgs),
 }
 
 #[derive(Args)]
@@ -232,6 +234,12 @@ struct InvariantArgs {
     pretty: bool,
 }
 
+#[derive(Args)]
+struct ShadowReportArgs {
+    #[arg(long, value_name = "PATH")]
+    db: Option<PathBuf>,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     init_logging();
@@ -242,6 +250,7 @@ async fn main() -> Result<()> {
         Command::BackfillBench(args) => run_backfill_bench(args).await?,
         Command::QueryBench(args) => run_query_bench(args).await?,
         Command::Invariants(args) => run_invariants(args).await?,
+        Command::ShadowReport(args) => run_shadow_report(args).await?,
     }
 
     Ok(())
@@ -1082,6 +1091,77 @@ async fn run_invariants(args: InvariantArgs) -> Result<()> {
 
     if !report.drift_events.is_empty() {
         std::process::exit(2);
+    }
+
+    Ok(())
+}
+
+async fn run_shadow_report(args: ShadowReportArgs) -> Result<()> {
+    let db_path = args.db.unwrap_or(default_db_path()?);
+    let pool = open_pool(&db_path).await?;
+
+    let summary = time_shadow::load_summary(&pool).await?;
+    let mode = if time_shadow::is_shadow_read_enabled() {
+        "on"
+    } else {
+        "off"
+    };
+
+    println!("Shadow-read mode: {mode}");
+    println!("Total rows inspected: {}", summary.total_rows);
+    println!("Discrepancies detected: {}", summary.discrepancies);
+
+    match summary.last {
+        Some(sample) => {
+            println!("\nLast discrepancy:");
+            println!("  Event ID: {}", sample.event_id);
+            println!("  Household: {}", sample.household_id);
+            if let Some(tz) = sample.tz.as_deref() {
+                if !tz.is_empty() {
+                    println!("  Timezone: {tz}");
+                }
+            }
+            if let Some(delta) = sample.start_delta_ms {
+                println!("  Start delta (ms): {delta}");
+                println!(
+                    "    Legacy start (ms): {}",
+                    sample
+                        .legacy_start_ms
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "n/a".into())
+                );
+                println!(
+                    "    UTC start (ms): {}",
+                    sample
+                        .utc_start_ms
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "n/a".into())
+                );
+            }
+            if let Some(delta) = sample.end_delta_ms {
+                println!("  End delta (ms): {delta}");
+                println!(
+                    "    Legacy end (ms): {}",
+                    sample
+                        .legacy_end_ms
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "n/a".into())
+                );
+                println!(
+                    "    UTC end (ms): {}",
+                    sample
+                        .utc_end_ms
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "n/a".into())
+                );
+            }
+            if let Some(observed) = sample.observed_at_ms {
+                println!("  Observed at (ms): {observed}");
+            }
+        }
+        None => {
+            println!("\nNo discrepancies recorded.");
+        }
     }
 
     Ok(())

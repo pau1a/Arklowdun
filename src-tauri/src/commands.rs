@@ -7,6 +7,7 @@ use crate::{
     repo,
     time::now_ms,
     time_errors::TimeErrorCode,
+    time_shadow::ShadowAudit,
     AppError, AppResult, Event, EventsListRangeResponse,
 };
 use chrono::{DateTime, Duration, LocalResult, NaiveDateTime, Offset, TimeZone, Utc};
@@ -572,6 +573,8 @@ pub async fn events_list_range_command(
             .with_context("end", end.to_string())
     })?;
 
+    let mut shadow_audit = ShadowAudit::new();
+
     const PER_SERIES_LIMIT: usize = 500;
     const TOTAL_LIMIT: usize = 10_000;
     let range_start_utc = DateTime::<Utc>::from_timestamp_millis(start).ok_or_else(|| {
@@ -590,6 +593,7 @@ pub async fn events_list_range_command(
     let mut truncated = false;
     let mut out = Vec::new();
     'rows: for (row_index, row) in rows.into_iter().enumerate() {
+        shadow_audit.observe_row(&row);
         if let Some(rrule_str) = row.rrule.clone() {
             let event_id = row.id.clone();
             let tz_str = row.tz.clone().unwrap_or_else(|| "UTC".into());
@@ -739,6 +743,8 @@ pub async fn events_list_range_command(
             }
         }
     }
+
+    shadow_audit.finalize(pool).await;
 
     out.sort_by(|a, b| {
         a.start_at_utc
