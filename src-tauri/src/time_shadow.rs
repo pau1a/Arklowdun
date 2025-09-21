@@ -255,6 +255,8 @@ fn detect_discrepancy(
 
 fn log_discrepancy(record: &ShadowDiscrepancyRecord) {
     let tz_display = record.tz.as_deref().unwrap_or("(none)");
+    let start_delta_value = record.start_delta_ms.unwrap_or_default();
+    let end_delta_value = record.end_delta_ms.unwrap_or_default();
     tracing::warn!(
         target: "arklowdun",
         event = "time_shadow_discrepancy",
@@ -263,10 +265,12 @@ fn log_discrepancy(record: &ShadowDiscrepancyRecord) {
         tz = %tz_display,
         legacy_start_ms = ?record.legacy_start_ms,
         utc_start_ms = ?record.utc_start_ms,
-        start_delta_ms = ?record.start_delta_ms,
+        start_delta_ms = start_delta_value,
+        start_delta_missing = record.start_delta_ms.is_none(),
         legacy_end_ms = ?record.legacy_end_ms,
         utc_end_ms = ?record.utc_end_ms,
-        end_delta_ms = ?record.end_delta_ms,
+        end_delta_ms = end_delta_value,
+        end_delta_missing = record.end_delta_ms.is_none(),
         observed_at_ms = ?record.observed_at_ms,
         "shadow-read discrepancy detected"
     );
