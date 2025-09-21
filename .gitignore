@@ -37,3 +37,5 @@ docs/samples/*.zip
  
 # fixtures
 fixtures/**/*.db
+fixtures/**/*.sqlite3
+backfill_bench_*.sqlite3
