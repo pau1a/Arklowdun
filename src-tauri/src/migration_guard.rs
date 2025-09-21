@@ -51,10 +51,8 @@ impl BackfillGuardStatus {
             summaries.push(format!("{} ({})", household.household_id, parts.join(", ")));
         }
 
-        (
-            summaries,
-            self.households.len().saturating_sub(summaries.len()),
-        )
+        let additional = self.households.len().saturating_sub(summaries.len());
+        (summaries, additional)
     }
 }
 
