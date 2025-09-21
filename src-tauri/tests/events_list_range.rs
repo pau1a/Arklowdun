@@ -1,5 +1,10 @@
-use arklowdun_lib::commands;
+use arklowdun_lib::{commands, time_shadow};
+use once_cell::sync::Lazy;
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+use std::io::Write;
+use std::sync::{Arc, Mutex};
+use tracing::subscriber;
+use tracing_subscriber::EnvFilter;
 
 const CREATE_EVENTS_TABLE: &str = "\
     CREATE TABLE events (\
@@ -20,6 +25,26 @@ const CREATE_EVENTS_TABLE: &str = "\
     )\
 ";
 
+const CREATE_SHADOW_TABLE: &str = "\
+    CREATE TABLE shadow_read_audit (\
+        id INTEGER PRIMARY KEY CHECK (id = 1),\
+        total_rows INTEGER NOT NULL DEFAULT 0,\
+        discrepancies INTEGER NOT NULL DEFAULT 0,\
+        last_event_id TEXT,\
+        last_household_id TEXT,\
+        last_tz TEXT,\
+        last_legacy_start_ms INTEGER,\
+        last_utc_start_ms INTEGER,\
+        last_start_delta_ms INTEGER,\
+        last_legacy_end_ms INTEGER,\
+        last_utc_end_ms INTEGER,\
+        last_end_delta_ms INTEGER,\
+        last_observed_at_ms INTEGER\
+    )\
+";
+
+static ENV_GUARD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
 async fn setup_pool() -> SqlitePool {
     let pool: SqlitePool = SqlitePoolOptions::new()
         .max_connections(1)
@@ -27,6 +52,10 @@ async fn setup_pool() -> SqlitePool {
         .await
         .unwrap();
     sqlx::query(CREATE_EVENTS_TABLE)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(CREATE_SHADOW_TABLE)
         .execute(&pool)
         .await
         .unwrap();
@@ -202,4 +231,86 @@ async fn unsupported_rrule_surfaces_taxonomy_error() {
         err.context().get("rrule").map(|rule| rule.as_str()),
         Some("FREQ=DAILY;FOO=BAR")
     );
+}
+
+#[tokio::test]
+async fn shadow_read_counts_discrepancies_and_logs() {
+    let _guard = ENV_GUARD.lock().unwrap();
+    std::env::set_var("ARK_TIME_SHADOW_READ", "on");
+
+    let buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+    let writer = buffer.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::new("arklowdun=info"))
+        .with_writer(move || BufferWriter(writer.clone()))
+        .json()
+        .finish();
+    let _subscriber_guard = subscriber::set_default(subscriber);
+
+    let pool = setup_pool().await;
+    sqlx::query(
+        "INSERT INTO events (id, household_id, title, start_at, end_at, tz, start_at_utc, end_at_utc, created_at, updated_at) \
+         VALUES ('shadow-1', 'HH', 'shadow', 0, 3_600_000, 'UTC', 60_000, 3_660_000, 0, 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let res = commands::events_list_range_command(&pool, "HH", -1, 120_000)
+        .await
+        .unwrap();
+    assert_eq!(res.items.len(), 1);
+
+    let summary = time_shadow::load_summary(&pool).await.unwrap();
+    assert_eq!(summary.total_rows, 1);
+    assert_eq!(summary.discrepancies, 1);
+    let sample = summary.last.expect("expected discrepancy sample");
+    assert_eq!(sample.event_id, "shadow-1");
+    assert_eq!(sample.household_id, "HH");
+    assert_eq!(sample.start_delta_ms, Some(60_000));
+
+    let log = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
+    assert!(log.contains("\"event\":\"time_shadow_discrepancy\""));
+    assert!(log.contains("\"start_delta_ms\":60000"));
+
+    std::env::remove_var("ARK_TIME_SHADOW_READ");
+}
+
+#[tokio::test]
+async fn shadow_read_disabled_skips_audit() {
+    let _guard = ENV_GUARD.lock().unwrap();
+    std::env::set_var("ARK_TIME_SHADOW_READ", "off");
+
+    let pool = setup_pool().await;
+    sqlx::query(
+        "INSERT INTO events (id, household_id, title, start_at, end_at, tz, start_at_utc, end_at_utc, created_at, updated_at) \
+         VALUES ('shadow-off', 'HH', 'shadow', 0, 3_600_000, 'UTC', 60_000, 3_660_000, 0, 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let res = commands::events_list_range_command(&pool, "HH", -1, 120_000)
+        .await
+        .unwrap();
+    assert_eq!(res.items.len(), 1);
+
+    let summary = time_shadow::load_summary(&pool).await.unwrap();
+    assert_eq!(summary.total_rows, 0);
+    assert_eq!(summary.discrepancies, 0);
+
+    std::env::remove_var("ARK_TIME_SHADOW_READ");
+}
+
+struct BufferWriter(Arc<Mutex<Vec<u8>>>);
+
+impl Write for BufferWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
