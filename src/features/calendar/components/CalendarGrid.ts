@@ -69,8 +69,7 @@ function renderMonth(
       const fmt = new Intl.DateTimeFormat("en-CA", {
         timeZone: event.tz || timeZone,
       });
-      const source = event.start_at_utc ?? event.start_at;
-      const parts = fmt.format(new Date(source));
+      const parts = fmt.format(new Date(event.start_at_utc));
       const [y, m, d] = parts.split("-").map(Number);
       return (
         y === cellDate.getFullYear() &&

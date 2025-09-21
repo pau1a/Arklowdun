@@ -10,27 +10,240 @@ use crate::{
     time_shadow::ShadowAudit,
     AppError, AppResult, Event, EventsListRangeResponse,
 };
-use chrono::{DateTime, Duration, LocalResult, NaiveDateTime, Offset, TimeZone, Utc};
+use chrono::{DateTime, Duration, TimeZone, Utc};
 use chrono_tz::Tz as ChronoTz;
 use rrule::{RRule, RRuleSet, Tz, Unvalidated};
 
 #[allow(clippy::result_large_err)]
-fn from_local_ms(ms: i64, tz: Tz) -> AppResult<DateTime<Tz>> {
-    #[allow(deprecated)]
-    let naive = NaiveDateTime::from_timestamp_millis(ms).ok_or_else(|| {
-        AppError::new("TIME/INVALID_TIMESTAMP", "Invalid local timestamp")
-            .with_context("local_ms", ms.to_string())
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct EventRow {
+    id: String,
+    household_id: String,
+    title: String,
+    start_at: i64,
+    end_at: Option<i64>,
+    tz: Option<String>,
+    start_at_utc: i64,
+    end_at_utc: Option<i64>,
+    rrule: Option<String>,
+    exdates: Option<String>,
+    reminder: Option<i64>,
+    created_at: i64,
+    updated_at: i64,
+    deleted_at: Option<i64>,
+}
+
+impl From<&EventRow> for Event {
+    fn from(row: &EventRow) -> Self {
+        Event {
+            id: row.id.clone(),
+            household_id: row.household_id.clone(),
+            title: row.title.clone(),
+            tz: row.tz.clone(),
+            start_at_utc: row.start_at_utc,
+            end_at_utc: row.end_at_utc,
+            rrule: row.rrule.clone(),
+            exdates: row.exdates.clone(),
+            reminder: row.reminder,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+            deleted_at: row.deleted_at,
+            series_parent_id: None,
+        }
+    }
+}
+
+fn parse_timezone_name(value: Option<&Value>) -> Option<String> {
+    match value {
+        Some(Value::String(s)) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        _ => None,
+    }
+}
+
+fn canonicalize_timezone(tz_name: Option<String>) -> AppResult<(ChronoTz, String)> {
+    let name = tz_name.unwrap_or_else(|| "UTC".to_string());
+    let parsed: ChronoTz = name.parse().map_err(|_| {
+        TimeErrorCode::TimezoneUnknown
+            .into_error()
+            .with_context("timezone", name.clone())
     })?;
-    let local = match tz.from_local_datetime(&naive) {
-        LocalResult::Single(dt) => dt,
-        LocalResult::Ambiguous(a, _b) => a,
-        LocalResult::None => tz
-            .offset_from_utc_datetime(&naive)
-            .fix()
-            .from_utc_datetime(&naive)
-            .with_timezone(&tz),
-    };
-    Ok(local)
+    Ok((parsed, parsed.name().to_string()))
+}
+
+fn local_wallclock_ms(ms: i64, tz: &ChronoTz, field: &'static str) -> AppResult<i64> {
+    DateTime::<Utc>::from_timestamp_millis(ms)
+        .ok_or_else(|| {
+            AppError::new("TIME/INVALID_TIMESTAMP", "Invalid UTC timestamp")
+                .with_context("field", field)
+                .with_context("timestamp", ms.to_string())
+        })
+        .map(|dt| {
+            // This intentionally inverts `time_shadow::local_ms_to_utc` so DST
+            // ambiguities round-trip the same way while the legacy columns still
+            // exist.
+            dt.with_timezone(tz)
+                .naive_local()
+                .and_utc()
+                .timestamp_millis()
+        })
+}
+
+fn derive_event_wall_clock_for_create(data: &mut Map<String, Value>) -> AppResult<()> {
+    let legacy_start_present = data.contains_key("start_at");
+    let legacy_end_present = data.contains_key("end_at");
+    if legacy_start_present || legacy_end_present {
+        let event_id = data
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        tracing::debug!(
+            target: "arklowdun",
+            event = "event_legacy_fields_sanitized",
+            context = "create",
+            event_id = %event_id.as_deref().unwrap_or(""),
+            legacy_start_present,
+            legacy_end_present,
+            "legacy wall-clock fields sanitized in create payload"
+        );
+    }
+
+    let tz_name = parse_timezone_name(data.get("tz"));
+    let (tz, canonical) = canonicalize_timezone(tz_name)?;
+    data.insert("tz".into(), Value::String(canonical));
+
+    let start_at_utc = value_to_i64(data.get("start_at_utc")).ok_or_else(|| {
+        AppError::new(
+            "TIME/MISSING_START_AT_UTC",
+            "Events must include a UTC start timestamp.",
+        )
+        .with_context("field", "start_at_utc")
+    })?;
+    let local_start = local_wallclock_ms(start_at_utc, &tz, "start_at_utc")?;
+    data.insert("start_at".into(), Value::from(local_start));
+
+    match value_to_i64(data.get("end_at_utc")) {
+        Some(end_utc) => {
+            let local_end = local_wallclock_ms(end_utc, &tz, "end_at_utc")?;
+            data.insert("end_at".into(), Value::from(local_end));
+        }
+        None => {
+            data.remove("end_at");
+        }
+    }
+
+    Ok(())
+}
+
+async fn derive_event_wall_clock_for_update(
+    pool: &SqlitePool,
+    household_id: &str,
+    event_id: &str,
+    data: &mut Map<String, Value>,
+) -> AppResult<()> {
+    let touches_time = data.contains_key("start_at_utc")
+        || data.contains_key("end_at_utc")
+        || data.contains_key("tz")
+        || data.contains_key("start_at")
+        || data.contains_key("end_at");
+    if !touches_time {
+        return Ok(());
+    }
+
+    let legacy_start = data.remove("start_at");
+    let legacy_end = data.remove("end_at");
+    if legacy_start.is_some() || legacy_end.is_some() {
+        tracing::debug!(
+            target: "arklowdun",
+            event = "event_legacy_fields_sanitized",
+            context = "update",
+            household_id = %household_id,
+            event_id = %event_id,
+            legacy_start_present = legacy_start.is_some(),
+            legacy_end_present = legacy_end.is_some(),
+            "legacy wall-clock fields sanitized in update payload"
+        );
+    }
+
+    let existing = repo::get_active(pool, "events", Some(household_id), event_id)
+        .await
+        .map_err(|err| {
+            AppError::from(err)
+                .with_context("operation", "events_wall_clock")
+                .with_context("household_id", household_id.to_string())
+                .with_context("event_id", event_id.to_string())
+        })?;
+
+    let mut existing_tz_raw: Option<String> = None;
+    let mut existing_start_at_utc: Option<i64> = None;
+    let mut existing_end_at_utc: Option<i64> = None;
+    if let Some(row) = existing {
+        existing_tz_raw = row.try_get("tz").ok();
+        existing_start_at_utc = row.try_get("start_at_utc").ok();
+        existing_end_at_utc = row.try_get("end_at_utc").ok();
+    }
+
+    let tz_name_override = parse_timezone_name(data.get("tz"));
+    let existing_tz_canonical = existing_tz_raw.clone().and_then(|tz| {
+        let trimmed = tz.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
+    let tz_input = tz_name_override.clone().or(existing_tz_canonical);
+    let defaulted_timezone = tz_input.is_none();
+    let (tz, canonical) = canonicalize_timezone(tz_input)?;
+    if data.contains_key("tz") {
+        data.insert("tz".into(), Value::String(canonical));
+    }
+    if defaulted_timezone {
+        tracing::debug!(
+            target: "arklowdun",
+            event = "event_timezone_defaulted",
+            household_id = %household_id,
+            event_id = %event_id,
+            fallback = %canonical,
+            had_existing_tz = existing_tz_raw.is_some(),
+            tz_override_present = tz_name_override.is_some(),
+            "defaulting timezone for wall-clock derivation"
+        );
+    }
+
+    let start_at_utc = value_to_i64(data.get("start_at_utc"))
+        .or(existing_start_at_utc)
+        .ok_or_else(|| {
+            AppError::new(
+                "TIME/MISSING_START_AT_UTC",
+                "Events must include a UTC start timestamp.",
+            )
+            .with_context("field", "start_at_utc")
+            .with_context("event_id", event_id.to_string())
+        })?;
+    let local_start = local_wallclock_ms(start_at_utc, &tz, "start_at_utc")?;
+    data.insert("start_at".into(), Value::from(local_start));
+
+    let end_at_utc = value_to_i64(data.get("end_at_utc")).or(existing_end_at_utc);
+    match end_at_utc {
+        Some(end_utc) => {
+            let local_end = local_wallclock_ms(end_utc, &tz, "end_at_utc")?;
+            data.insert("end_at".into(), Value::from(local_end));
+        }
+        None => {
+            if data.contains_key("end_at_utc") {
+                data.insert("end_at".into(), Value::Null);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn row_to_value(row: SqliteRow) -> Value {
@@ -325,6 +538,7 @@ async fn create(pool: &SqlitePool, table: &str, mut data: Map<String, Value>) ->
     data.insert("updated_at".into(), Value::from(now));
 
     if table == "events" {
+        derive_event_wall_clock_for_create(&mut data)?;
         normalize_event_exdates_for_create(&mut data)?;
     }
 
@@ -363,6 +577,7 @@ async fn update(
             )
         })?;
         normalize_event_exdates_for_update(pool, hh, id, &mut data).await?;
+        derive_event_wall_clock_for_update(pool, hh, id, &mut data).await?;
     }
     data.remove("id");
     data.remove("created_at");
@@ -546,18 +761,18 @@ pub async fn events_list_range_command(
 ) -> AppResult<EventsListRangeResponse> {
     let hh = repo::require_household(household_id)
         .map_err(|err| AppError::from(err).with_context("operation", "events_list_range"))?;
-    let rows = sqlx::query_as::<_, Event>(
+    let rows = sqlx::query_as::<_, EventRow>(
         r#"
         SELECT id, household_id, title, start_at, end_at, tz, start_at_utc, end_at_utc,
-               rrule, exdates, reminder, created_at, updated_at, deleted_at,
-               NULL AS series_parent_id
+               rrule, exdates, reminder, created_at, updated_at, deleted_at
         FROM events
         WHERE household_id = ? AND deleted_at IS NULL
+          AND start_at_utc IS NOT NULL
           AND (
-            (rrule IS NULL AND COALESCE(end_at_utc, end_at, start_at) >= ? AND COALESCE(start_at_utc, start_at) <= ?)
+            (rrule IS NULL AND COALESCE(end_at_utc, start_at_utc) >= ? AND start_at_utc <= ?)
             OR rrule IS NOT NULL
           )
-        ORDER BY COALESCE(start_at_utc, start_at), id
+        ORDER BY start_at_utc, id
         "#,
     )
     .bind(hh)
@@ -593,7 +808,15 @@ pub async fn events_list_range_command(
     let mut truncated = false;
     let mut out = Vec::new();
     'rows: for (row_index, row) in rows.into_iter().enumerate() {
-        shadow_audit.observe_row(&row);
+        shadow_audit.observe_event(
+            &row.id,
+            &row.household_id,
+            row.tz.as_deref(),
+            Some(row.start_at),
+            row.end_at,
+            Some(row.start_at_utc),
+            row.end_at_utc,
+        );
         if let Some(rrule_str) = row.rrule.clone() {
             let event_id = row.id.clone();
             let tz_str = row.tz.clone().unwrap_or_else(|| "UTC".into());
@@ -607,15 +830,23 @@ pub async fn events_list_range_command(
             })?;
             let tz_name = tz_chrono.name().to_string();
             let tz: Tz = tz_chrono.into();
-            let start_local = from_local_ms(row.start_at, tz).map_err(|err| {
-                err.with_context("operation", "events_list_range")
+            let start_local = DateTime::<Utc>::from_timestamp_millis(row.start_at_utc)
+                .ok_or_else(|| {
+                    AppError::new(
+                        "TIME/INVALID_TIMESTAMP",
+                        "Invalid recurrence anchor timestamp",
+                    )
+                    .with_context("operation", "events_list_range")
                     .with_context("household_id", household_id.to_string())
                     .with_context("event_id", event_id.clone())
-            })?;
-            let duration = row
-                .end_at
-                .unwrap_or(row.start_at)
-                .saturating_sub(row.start_at);
+                    .with_context("field", "start_at_utc")
+                })?
+                .with_timezone(&tz);
+            let duration_ms = row
+                .end_at_utc
+                .unwrap_or(row.start_at_utc)
+                .saturating_sub(row.start_at_utc);
+            let duration = Duration::milliseconds(duration_ms);
 
             // Parse RRULE → taxonomy error on failure
             let rrule_un: RRule<Unvalidated> = match rrule_str.parse() {
@@ -692,7 +923,7 @@ pub async fn events_list_range_command(
                     break 'rows;
                 }
                 let start_utc_ms = occ.with_timezone(&Utc).timestamp_millis();
-                let end_dt = occ + Duration::milliseconds(duration);
+                let end_dt = occ + duration;
                 let end_utc_ms = end_dt.with_timezone(&Utc).timestamp_millis();
                 if end_utc_ms < start || start_utc_ms > end {
                     continue;
@@ -701,10 +932,8 @@ pub async fn events_list_range_command(
                     id: format!("{}::{}", row.id, start_utc_ms),
                     household_id: row.household_id.clone(),
                     title: row.title.clone(),
-                    start_at: start_utc_ms,
-                    end_at: Some(end_utc_ms),
                     tz: Some(tz_name.clone()),
-                    start_at_utc: Some(start_utc_ms),
+                    start_at_utc: start_utc_ms,
                     end_at_utc: Some(end_utc_ms),
                     // Instances must look like single events to the UI
                     // so strip recurrence metadata
@@ -726,14 +955,14 @@ pub async fn events_list_range_command(
                 }
             }
         } else {
-            let start_utc = row.start_at_utc.unwrap_or(row.start_at);
-            let end_utc = row.end_at_utc.or(row.end_at).unwrap_or(row.start_at);
+            let start_utc = row.start_at_utc;
+            let end_utc = row.end_at_utc.unwrap_or(row.start_at_utc);
             if end_utc >= start && start_utc <= end {
                 if out.len() >= TOTAL_LIMIT {
                     truncated = true;
                     break;
                 }
-                out.push(row);
+                out.push(Event::from(&row));
                 if out.len() >= TOTAL_LIMIT {
                     if row_index + 1 < row_count {
                         truncated = true;
@@ -748,8 +977,7 @@ pub async fn events_list_range_command(
 
     out.sort_by(|a, b| {
         a.start_at_utc
-            .unwrap_or(a.start_at)
-            .cmp(&b.start_at_utc.unwrap_or(b.start_at))
+            .cmp(&b.start_at_utc)
             .then(a.title.cmp(&b.title))
             .then(a.id.cmp(&b.id))
     });

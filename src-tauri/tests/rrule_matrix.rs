@@ -294,12 +294,9 @@ fn records_from_instances(
 ) -> Result<Vec<InstanceRecord>> {
     let mut out = Vec::with_capacity(instances.len());
     for (index, instance) in instances.iter().enumerate() {
-        let start_utc = DateTime::<Utc>::from_timestamp_millis(instance.start_at)
+        let start_utc = DateTime::<Utc>::from_timestamp_millis(instance.start_at_utc)
             .with_context(|| format!("instance {} missing start", instance.id))?;
-        let end_ms = instance
-            .end_at
-            .or(instance.end_at_utc)
-            .with_context(|| format!("instance {} missing end", instance.id))?;
+        let end_ms = instance.end_at_utc.unwrap_or(instance.start_at_utc);
         let end_utc = DateTime::<Utc>::from_timestamp_millis(end_ms)
             .with_context(|| format!("instance {} invalid end", instance.id))?;
 

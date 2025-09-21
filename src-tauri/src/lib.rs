@@ -742,7 +742,7 @@ async fn vehicles_restore(
     .await
 }
 
-#[derive(Serialize, Deserialize, Clone, TS, sqlx::FromRow)]
+#[derive(Serialize, Deserialize, Clone, TS)]
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct Event {
     #[serde(default)]
@@ -750,17 +750,11 @@ pub struct Event {
     #[serde(default)]
     pub household_id: String,
     pub title: String,
-    #[ts(type = "number")]
-    pub start_at: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional, type = "number")]
-    pub end_at: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub tz: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional, type = "number")]
-    pub start_at_utc: Option<i64>,
+    #[ts(type = "number")]
+    pub start_at_utc: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "number")]
     pub end_at_utc: Option<i64>,

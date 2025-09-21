@@ -14,6 +14,7 @@ export type AppReadyPayload = { ts: number };
 export interface AppEventMap {
   "files:updated": FilesUpdatedPayload;
   "files:load-error": FilesLoadErrorPayload;
+  "calendar:load-error": FilesLoadErrorPayload;
   "events:updated": EventsUpdatedPayload;
   "notes:updated": NotesUpdatedPayload;
   "household:changed": HouseholdChangedPayload;

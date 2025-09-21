@@ -134,7 +134,7 @@ pub struct ExdateMigrationStats {
 
 pub async fn normalize_existing_exdates(pool: &SqlitePool) -> Result<ExdateMigrationStats> {
     let rows = sqlx::query(
-        "SELECT id, household_id, start_at, start_at_utc, rrule, exdates \
+        "SELECT id, household_id, start_at_utc, rrule, exdates \
          FROM events \
          WHERE exdates IS NOT NULL",
     )
@@ -148,7 +148,6 @@ pub async fn normalize_existing_exdates(pool: &SqlitePool) -> Result<ExdateMigra
     for row in rows {
         stats.scanned += 1;
         let event_id: String = row.try_get("id")?;
-        let start_at: Option<i64> = row.try_get("start_at").ok();
         let start_at_utc: Option<i64> = row.try_get("start_at_utc").ok();
         let rrule: Option<String> = row.try_get("rrule").ok();
         let raw_exdates: String = row.try_get("exdates")?;
@@ -164,8 +163,7 @@ pub async fn normalize_existing_exdates(pool: &SqlitePool) -> Result<ExdateMigra
             continue;
         }
 
-        let start_ms = start_at_utc.or(start_at);
-        let start = start_ms.and_then(DateTime::<Utc>::from_timestamp_millis);
+        let start = start_at_utc.and_then(DateTime::<Utc>::from_timestamp_millis);
         let until = rrule.as_deref().and_then(parse_rrule_until);
         let context = ExdateContext { start, until };
         let inspection = inspect_exdates(tokens.clone(), &context);
