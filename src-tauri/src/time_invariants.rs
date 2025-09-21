@@ -194,7 +194,7 @@ fn evaluate_row(row: &EventRow) -> AppResult<Option<DriftRecord>> {
         None => None,
     };
 
-    if is_all_day(&stored_start, stored_end.as_ref()) {
+    if is_all_day(&computed_start, computed_end.as_ref()) {
         let mut ok = allow_all_day_shift(&stored_start, &computed_start);
         if let Some(stored_end) = stored_end.as_ref() {
             if let Some(computed_end) = computed_end.as_ref() {
@@ -266,7 +266,7 @@ pub async fn run_drift_check(
         builder.push(" AND household_id = ");
         builder.push_bind(hh);
     }
-    builder.push(" ORDER BY household_id, start_at, id");
+    builder.push(" ORDER BY household_id, start_at_utc, id");
 
     let rows: Vec<EventRow> = builder
         .build_query_as()

@@ -285,12 +285,9 @@ fn events_to_snapshots(
         .with_context(|| format!("unknown timezone {}", scenario.timezone))?;
     let mut snapshots = Vec::with_capacity(events.len());
     for event in events {
-        let start_utc = DateTime::<Utc>::from_timestamp_millis(event.start_at)
+        let start_utc = DateTime::<Utc>::from_timestamp_millis(event.start_at_utc)
             .with_context(|| format!("event {} missing start", event.id))?;
-        let end_ms = event
-            .end_at
-            .or(event.end_at_utc)
-            .with_context(|| format!("event {} missing end", event.id))?;
+        let end_ms = event.end_at_utc.unwrap_or(event.start_at_utc);
         let end_utc = DateTime::<Utc>::from_timestamp_millis(end_ms)
             .with_context(|| format!("event {} invalid end", event.id))?;
         let local_start = start_utc.with_timezone(&tz);

@@ -96,9 +96,7 @@ export async function DashboardView(container: HTMLElement) {
       Date.now() + 90 * 24 * 60 * 60 * 1000,
     );
     const events: Event[] = [...eventsResult.items];
-    const next = events.sort(
-      (a, b) => (a.start_at_utc ?? a.start_at) - (b.start_at_utc ?? b.start_at),
-    )[0];
+    const next = events.sort((a, b) => a.start_at_utc - b.start_at_utc)[0];
     if (next) {
       const formatted = new Intl.DateTimeFormat(undefined, {
         timeZone: next.tz || Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -107,8 +105,8 @@ export async function DashboardView(container: HTMLElement) {
         day: "2-digit",
         hour: "2-digit",
         minute: "2-digit",
-      }).format(new Date(next.start_at_utc ?? next.start_at));
-      items.push({ date: next.start_at_utc ?? next.start_at, text: `${next.title} ${formatted}` });
+      }).format(new Date(next.start_at_utc));
+      items.push({ date: next.start_at_utc, text: `${next.title} ${formatted}` });
     }
   }
 

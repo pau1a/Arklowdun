@@ -60,7 +60,7 @@ async function scheduleNotifications(events: CalendarEvent[]) {
         day: "2-digit",
         hour: "2-digit",
         minute: "2-digit",
-      }).format(new Date(ev.start_at_utc ?? ev.start_at)),
+      }).format(new Date(ev.start_at_utc)),
         });
       }, ev.reminder - now);
     }
@@ -120,7 +120,7 @@ export async function CalendarView(container: HTMLElement) {
       dateStyle: "full",
       timeStyle: "short",
       timeZone: zone,
-    }).format(new Date(event.start_at_utc ?? event.start_at));
+    }).format(new Date(event.start_at_utc));
     description.textContent = `Starts ${when}`;
 
     const meta = document.createElement("div");
@@ -304,7 +304,7 @@ export async function CalendarView(container: HTMLElement) {
       console.error("Calendar load failed", descriptor.error);
       emit("calendar:load-error", {
         message: descriptor.message,
-        detail: descriptor.detail ?? null,
+        detail: descriptor.detail ?? undefined,
       });
     }
   }
@@ -330,8 +330,6 @@ export async function CalendarView(container: HTMLElement) {
     const ms = dt.getTime();
     const ev = await saveEvent({
       title: titleInput.value,
-      start_at: ms,
-      end_at: ms,
       start_at_utc: ms,
       end_at_utc: ms,
       tz,

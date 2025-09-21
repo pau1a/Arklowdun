@@ -4,7 +4,7 @@ use chrono::{LocalResult, NaiveDateTime, Offset, TimeZone, Utc};
 use chrono_tz::Tz as ChronoTz;
 use sqlx::{Row, SqlitePool};
 
-use crate::{time::now_ms, Event};
+use crate::time::now_ms;
 
 const ENV_VAR: &str = "ARK_TIME_SHADOW_READ";
 
@@ -64,13 +64,31 @@ impl ShadowAudit {
         }
     }
 
-    pub fn observe_row(&mut self, row: &Event) {
+    #[allow(clippy::too_many_arguments)]
+    pub fn observe_event(
+        &mut self,
+        event_id: &str,
+        household_id: &str,
+        tz: Option<&str>,
+        legacy_start_ms: Option<i64>,
+        legacy_end_ms: Option<i64>,
+        utc_start_ms: Option<i64>,
+        utc_end_ms: Option<i64>,
+    ) {
         if !self.enabled {
             return;
         }
         self.total_rows = self.total_rows.saturating_add(1);
 
-        if let Some(mut record) = detect_discrepancy(row) {
+        if let Some(mut record) = detect_discrepancy(
+            event_id,
+            household_id,
+            tz,
+            legacy_start_ms,
+            legacy_end_ms,
+            utc_start_ms,
+            utc_end_ms,
+        ) {
             record.observed_at_ms = Some(now_ms());
             log_discrepancy(&record);
             self.discrepancies = self.discrepancies.saturating_add(1);
@@ -188,23 +206,31 @@ async fn persist_summary(pool: &SqlitePool, audit: &ShadowAudit) -> Result<(), s
     query.execute(pool).await.map(|_| ())
 }
 
-fn detect_discrepancy(row: &Event) -> Option<ShadowDiscrepancyRecord> {
-    let tz_name = row.tz.as_deref().map(str::trim).filter(|s| !s.is_empty());
+fn detect_discrepancy(
+    event_id: &str,
+    household_id: &str,
+    tz_name: Option<&str>,
+    legacy_start_ms: Option<i64>,
+    legacy_end_ms: Option<i64>,
+    utc_start_ms: Option<i64>,
+    utc_end_ms: Option<i64>,
+) -> Option<ShadowDiscrepancyRecord> {
+    let tz_name = tz_name.map(str::trim).filter(|s| !s.is_empty());
     let mut tz_for_record = tz_name.map(|s| s.to_string());
 
     let (legacy_start, legacy_end) = match tz_name {
         Some(name) => match name.parse::<ChronoTz>() {
             Ok(tz) => (
-                local_ms_to_utc(row.start_at, &tz),
-                row.end_at.and_then(|ms| local_ms_to_utc(ms, &tz)),
+                legacy_start_ms.and_then(|ms| local_ms_to_utc(ms, &tz)),
+                legacy_end_ms.and_then(|ms| local_ms_to_utc(ms, &tz)),
             ),
             Err(_) => (None, None),
         },
-        None => (Some(row.start_at), row.end_at),
+        None => (legacy_start_ms, legacy_end_ms),
     };
 
-    let start_delta = diff_opt(legacy_start, row.start_at_utc);
-    let end_delta = diff_opt(legacy_end, row.end_at_utc);
+    let start_delta = diff_opt(legacy_start, utc_start_ms);
+    let end_delta = diff_opt(legacy_end, utc_end_ms);
 
     let start_mismatch = start_delta.is_some_and(|d| d > 0);
     let end_mismatch = end_delta.is_some_and(|d| d > 0);
@@ -214,14 +240,14 @@ fn detect_discrepancy(row: &Event) -> Option<ShadowDiscrepancyRecord> {
     }
 
     Some(ShadowDiscrepancyRecord {
-        event_id: row.id.clone(),
-        household_id: row.household_id.clone(),
+        event_id: event_id.to_string(),
+        household_id: household_id.to_string(),
         tz: tz_for_record.take(),
         legacy_start_ms: legacy_start,
-        utc_start_ms: row.start_at_utc,
+        utc_start_ms,
         start_delta_ms: start_delta,
         legacy_end_ms: legacy_end,
-        utc_end_ms: row.end_at_utc,
+        utc_end_ms,
         end_delta_ms: end_delta,
         observed_at_ms: None,
     })
@@ -229,6 +255,8 @@ fn detect_discrepancy(row: &Event) -> Option<ShadowDiscrepancyRecord> {
 
 fn log_discrepancy(record: &ShadowDiscrepancyRecord) {
     let tz_display = record.tz.as_deref().unwrap_or("(none)");
+    let start_delta_value = record.start_delta_ms.unwrap_or_default();
+    let end_delta_value = record.end_delta_ms.unwrap_or_default();
     tracing::warn!(
         target: "arklowdun",
         event = "time_shadow_discrepancy",
@@ -237,10 +265,12 @@ fn log_discrepancy(record: &ShadowDiscrepancyRecord) {
         tz = %tz_display,
         legacy_start_ms = ?record.legacy_start_ms,
         utc_start_ms = ?record.utc_start_ms,
-        start_delta_ms = ?record.start_delta_ms,
+        start_delta_ms = start_delta_value,
+        start_delta_missing = record.start_delta_ms.is_none(),
         legacy_end_ms = ?record.legacy_end_ms,
         utc_end_ms = ?record.utc_end_ms,
-        end_delta_ms = ?record.end_delta_ms,
+        end_delta_ms = end_delta_value,
+        end_delta_missing = record.end_delta_ms.is_none(),
         observed_at_ms = ?record.observed_at_ms,
         "shadow-read discrepancy detected"
     );
