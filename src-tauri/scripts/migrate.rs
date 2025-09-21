@@ -366,7 +366,7 @@ async fn guard_check(db: &Path) -> Result<()> {
         );
     }
 
-    let message = migration_guard::format_guard_failure(status.total_missing);
+    let message = migration_guard::format_guard_failure(&status);
     Err(anyhow!(message))
 }
 
