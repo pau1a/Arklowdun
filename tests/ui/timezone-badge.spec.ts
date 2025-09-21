@@ -7,7 +7,8 @@ test.describe('Timezone badge integrations', () => {
   test('shows in calendar event modal for cross-timezone events', async ({ page }) => {
     await page.goto('/#/calendar');
 
-    const eventStart = Date.UTC(2024, 5, 12, 14, 0, 0);
+    // Place the event near "now" so the default calendar view renders it.
+    const eventStart = Date.now();
     const calendarWindow = {
       start: eventStart - 24 * 60 * 60 * 1000,
       end: eventStart + 24 * 60 * 60 * 1000,
@@ -31,7 +32,8 @@ test.describe('Timezone badge integrations', () => {
       source: 'playwright-timezone-test',
     });
 
-    const eventRow = page.getByRole('button', { name: 'Cross-zone call' });
+    // Calendar tiles don’t expose button semantics; use the rendered class selector.
+    const eventRow = page.locator('.calendar__event', { hasText: 'Cross-zone call' });
     await expect(eventRow).toBeVisible();
     await eventRow.click();
 
