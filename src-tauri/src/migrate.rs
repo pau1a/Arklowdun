@@ -225,11 +225,12 @@ async fn should_skip_stmt(conn: &mut SqliteConnection, stmt: &str) -> anyhow::Re
 async fn ensure_events_utc_time_columns_clean(
     tx: &mut Transaction<'_, sqlx::Sqlite>,
 ) -> anyhow::Result<()> {
-    let row = sqlx::query("SELECT COUNT(*) AS c FROM events WHERE start_at_utc IS NULL")
-        .fetch_one(&mut *tx)
-        .await
-        .context("precheck: count NULL start_at_utc values")?;
-    let missing_start_utc: i64 = row.try_get("c")?;
+    let missing_start_utc: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM events WHERE start_at_utc IS NULL",
+    )
+    .fetch_one(tx.as_mut())
+    .await
+    .context("precheck: count NULL start_at_utc values")?;
 
     if missing_start_utc > 0 {
         bail!(
@@ -237,13 +238,12 @@ async fn ensure_events_utc_time_columns_clean(
         );
     }
 
-    let row = sqlx::query(
-        "SELECT COUNT(*) AS c FROM events WHERE end_at IS NOT NULL AND end_at_utc IS NULL",
+    let missing_end_utc: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM events WHERE end_at IS NOT NULL AND end_at_utc IS NULL",
     )
-    .fetch_one(&mut *tx)
+    .fetch_one(tx.as_mut())
     .await
     .context("precheck: count legacy end_at rows missing end_at_utc")?;
-    let missing_end_utc: i64 = row.try_get("c")?;
 
     if missing_end_utc > 0 {
         bail!(
@@ -349,6 +349,7 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             let upper_trim = stmt.trim_start().to_ascii_uppercase();
             if upper_trim.starts_with("INSERT INTO EVENTS_NEW")
                 && upper_trim.contains("FROM EVENTS")
+                && upper_trim.contains("DATETIME")
             {
                 let has_datetime = column_exists(tx.as_mut(), "events", "datetime").await?;
                 let has_start_at = column_exists(tx.as_mut(), "events", "start_at").await?;
@@ -369,13 +370,26 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
                     ));
                 };
 
-                stmt_to_run = format!(
-                    "INSERT INTO events_new \
+                if src_col != "datetime" {
+                    let select_regex = Regex::new(r"(?is)SELECT\s+id,\s*title,\s*datetime")
+                        .context("compile datetime select regex")?;
+                    if select_regex.is_match(&stmt_to_run) {
+                        stmt_to_run = select_regex
+                            .replace(
+                                &stmt_to_run,
+                                format!("SELECT id, title, {src} AS datetime", src = src_col),
+                            )
+                            .into_owned();
+                    } else {
+                        stmt_to_run = format!(
+                            "INSERT INTO events_new \
              (id, title, datetime, reminder, household_id, created_at, updated_at, deleted_at) \
              SELECT id, title, {src} AS datetime, reminder, household_id, created_at, updated_at, deleted_at \
              FROM events",
-                    src = src_col
-                );
+                            src = src_col
+                        );
+                    }
+                }
                 debug!(
                     target: "arklowdun",
                     event = "migration_stmt_rewrite",
@@ -450,11 +464,18 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
         sqlx::query(sql).execute(pool).await?;
     }
 
-    sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_events_household_start_end ON events(household_id, start_at, end_at)",
+    if sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM pragma_table_info('events') WHERE name='start_at'",
     )
-    .execute(pool)
-    .await?;
+    .fetch_optional(pool)
+    .await?
+    .is_some()
+    {
+        let sql =
+            "CREATE INDEX IF NOT EXISTS idx_events_household_start_end ON events(household_id, start_at, end_at)";
+        info!(target: "arklowdun", event = "migration_stmt", sql = %preview(sql));
+        sqlx::query(sql).execute(pool).await?;
+    }
 
     crate::exdate::normalize_existing_exdates(pool).await?;
 
