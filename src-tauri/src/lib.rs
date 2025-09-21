@@ -760,11 +760,9 @@ pub struct Event {
     pub end_at_utc: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    #[sqlx(default)]
     pub rrule: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    #[sqlx(default)]
     pub exdates: Option<String>,
     #[ts(optional, type = "number")]
     pub reminder: Option<i64>,
@@ -780,7 +778,6 @@ pub struct Event {
     pub deleted_at: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    #[sqlx(default)]
     pub series_parent_id: Option<String>,
 }
 

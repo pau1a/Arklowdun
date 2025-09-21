@@ -10,7 +10,7 @@ use crate::{
     time_shadow::ShadowAudit,
     AppError, AppResult, Event, EventsListRangeResponse,
 };
-use chrono::{DateTime, Duration, TimeZone, Utc};
+use chrono::{DateTime, Duration, Utc};
 use chrono_tz::Tz as ChronoTz;
 use rrule::{RRule, RRuleSet, Tz, Unvalidated};
 
@@ -202,7 +202,7 @@ async fn derive_event_wall_clock_for_update(
     let defaulted_timezone = tz_input.is_none();
     let (tz, canonical) = canonicalize_timezone(tz_input)?;
     if data.contains_key("tz") {
-        data.insert("tz".into(), Value::String(canonical));
+        data.insert("tz".into(), Value::String(canonical.clone()));
     }
     if defaulted_timezone {
         tracing::debug!(
