@@ -216,8 +216,6 @@ async function main() {
       [
         "id",
         "title",
-        "start_at",
-        "end_at",
         "tz",
         "start_at_utc",
         "end_at_utc",
@@ -481,18 +479,16 @@ async function main() {
       const eventCount = opts.rows;
       for (let e = 0; e < eventCount; e++) {
         const id = uuidLike(rand);
-        const start = randDateAround(rand, now, 180);
-        const end = start + randInt(rand, 1, 48) * 3_600_000;
+        const startUtc = randDateAround(rand, now, 180);
+        const endUtc = startUtc + randInt(rand, 1, 48) * 3_600_000;
         const cAt = now - randInt(rand, 0, 540) * DAY;
         const uAt = cAt + randInt(rand, 0, 30) * DAY;
         insertEvent({
           id,
           title: `Event ${e + 1}`,
-          start_at: start,
-          end_at: end,
           tz,
-          start_at_utc: start,
-          end_at_utc: end,
+          start_at_utc: startUtc,
+          end_at_utc: endUtc,
           household_id: hhId,
           created_at: cAt,
           updated_at: uAt,
