@@ -1,8 +1,11 @@
 use anyhow::Result;
+use arklowdun_lib::migrate;
+use include_dir::{include_dir, Dir};
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::{Executor, Row, SqlitePool};
 
-const MIGRATION_SQL: &str = include_str!("../migrations/0023_events_drop_legacy_time.up.sql");
+const TARGET_MIGRATION: &str = "0023_events_drop_legacy_time.up.sql";
+static MIGRATIONS_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../migrations");
 
 async fn setup_pre_migration_schema(pool: &SqlitePool) -> Result<()> {
     pool.execute("PRAGMA foreign_keys=ON;").await?;
@@ -36,10 +39,8 @@ async fn setup_pre_migration_schema(pool: &SqlitePool) -> Result<()> {
          );",
     )
     .await?;
-    pool.execute(
-        "CREATE INDEX events_household_start_idx ON events(household_id, start_at);",
-    )
-    .await?;
+    pool.execute("CREATE INDEX events_household_start_idx ON events(household_id, start_at);")
+        .await?;
     pool.execute(
         "INSERT INTO household (id, name, created_at, updated_at, tz) VALUES ('hh', 'Household', 0, 0, 'UTC');",
     )
@@ -47,30 +48,47 @@ async fn setup_pre_migration_schema(pool: &SqlitePool) -> Result<()> {
     Ok(())
 }
 
-async fn run_migration(pool: &SqlitePool) -> Result<()> {
-    for stmt in MIGRATION_SQL.split(';') {
-        let trimmed = stmt.trim();
-        if trimmed.is_empty() {
+async fn prime_prior_migrations(pool: &SqlitePool) -> Result<()> {
+    pool.execute(
+        "CREATE TABLE IF NOT EXISTS schema_migrations (\
+           version   TEXT PRIMARY KEY,\
+           applied_at INTEGER NOT NULL\
+         )",
+    )
+    .await?;
+
+    for file in MIGRATIONS_DIR.files() {
+        let name = file
+            .path()
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+        if !name.ends_with(".up.sql") {
             continue;
         }
-        if trimmed
-            .chars()
-            .take(6)
-            .map(|c| c.to_ascii_uppercase())
-            .collect::<String>()
-            .starts_with("SELECT")
-        {
-            sqlx::query(trimmed).fetch_all(pool).await?;
-        } else {
-            sqlx::query(trimmed).execute(pool).await?;
+        if name >= TARGET_MIGRATION {
+            continue;
         }
+        sqlx::query("INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, 0)")
+            .bind(name)
+            .execute(pool)
+            .await?;
     }
+
     Ok(())
 }
 
+async fn run_migration(pool: &SqlitePool) -> Result<()> {
+    prime_prior_migrations(pool).await?;
+    migrate::apply_migrations(pool).await
+}
+
 fn has_column(rows: &[sqlx::sqlite::SqliteRow], name: &str) -> bool {
-    rows.iter()
-        .any(|row| row.try_get::<String, _>("name").map(|c| c == name).unwrap_or(false))
+    rows.iter().any(|row| {
+        row.try_get::<String, _>("name")
+            .map(|c| c == name)
+            .unwrap_or(false)
+    })
 }
 
 #[tokio::test]
@@ -92,10 +110,9 @@ async fn migration_aborts_when_start_at_utc_missing() -> Result<()> {
     let err = run_migration(&pool)
         .await
         .expect_err("migration should fail when start_at_utc is NULL");
-    let message = err.to_string();
-    assert!(
-        message.contains("start_at_utc"),
-        "error should mention start_at_utc, got: {message}"
+    assert_eq!(
+        err.to_string(),
+        "Migration 0023 blocked: events.start_at_utc contains NULL values. Run the timezone backfill before dropping start_at/end_at."
     );
 
     let columns = sqlx::query("PRAGMA table_info(events);")
@@ -127,10 +144,9 @@ async fn migration_aborts_when_end_at_utc_missing() -> Result<()> {
     let err = run_migration(&pool)
         .await
         .expect_err("migration should fail when end_at has no UTC value");
-    let message = err.to_string();
-    assert!(
-        message.contains("end_at_utc"),
-        "error should mention end_at_utc, got: {message}"
+    assert_eq!(
+        err.to_string(),
+        "Migration 0023 blocked: events.end_at_utc contains NULL values for rows that have legacy end_at. Run the timezone backfill before dropping start_at/end_at."
     );
 
     let columns = sqlx::query("PRAGMA table_info(events);")
@@ -164,7 +180,10 @@ async fn migration_succeeds_when_clean() -> Result<()> {
     let columns = sqlx::query("PRAGMA table_info(events);")
         .fetch_all(&pool)
         .await?;
-    assert!(!has_column(&columns, "start_at"), "start_at should be dropped");
+    assert!(
+        !has_column(&columns, "start_at"),
+        "start_at should be dropped"
+    );
     assert!(!has_column(&columns, "end_at"), "end_at should be dropped");
     assert!(has_column(&columns, "start_at_utc"));
     assert!(has_column(&columns, "end_at_utc"));
@@ -174,10 +193,7 @@ async fn migration_succeeds_when_clean() -> Result<()> {
     )
     .fetch_all(&pool)
     .await?;
-    assert!(
-        idx_rows.is_empty(),
-        "legacy start index must be removed"
-    );
+    assert!(idx_rows.is_empty(), "legacy start index must be removed");
 
     let start_at_utc: i64 = sqlx::query_scalar("SELECT start_at_utc FROM events WHERE id='evt'")
         .fetch_one(&pool)

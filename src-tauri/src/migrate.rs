@@ -1,9 +1,9 @@
-use anyhow::{anyhow, bail};
+use anyhow::{anyhow, bail, Context};
 use include_dir::{include_dir, Dir};
 use once_cell::sync::OnceCell;
 use regex::Regex;
 use sqlx::sqlite::SqliteConnection;
-use sqlx::{Executor, Row, SqlitePool};
+use sqlx::{Executor, Row, SqlitePool, Transaction};
 use std::collections::HashSet;
 use std::time::Instant;
 
@@ -222,6 +222,37 @@ async fn should_skip_stmt(conn: &mut SqliteConnection, stmt: &str) -> anyhow::Re
     Ok(false)
 }
 
+async fn ensure_events_utc_time_columns_clean(
+    tx: &mut Transaction<'_, sqlx::Sqlite>,
+) -> anyhow::Result<()> {
+    let missing_start_utc: i64 =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM events WHERE start_at_utc IS NULL")
+            .fetch_one(&mut *tx)
+            .await
+            .context("precheck: count NULL start_at_utc values")?;
+
+    if missing_start_utc > 0 {
+        bail!(
+            "Migration 0023 blocked: events.start_at_utc contains NULL values. Run the timezone backfill before dropping start_at/end_at."
+        );
+    }
+
+    let missing_end_utc: i64 = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM events WHERE end_at IS NOT NULL AND end_at_utc IS NULL",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .context("precheck: count legacy end_at rows missing end_at_utc")?;
+
+    if missing_end_utc > 0 {
+        bail!(
+            "Migration 0023 blocked: events.end_at_utc contains NULL values for rows that have legacy end_at. Run the timezone backfill before dropping start_at/end_at."
+        );
+    }
+
+    Ok(())
+}
+
 // TXN: domain=OUT OF SCOPE tables=schema_migrations
 pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     pool.execute("PRAGMA foreign_keys=ON").await?;
@@ -300,6 +331,11 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
         sqlx::query("PRAGMA foreign_keys=ON")
             .execute(&mut *tx)
             .await?;
+
+        if version == "0023" && name == "events_drop_legacy_time" {
+            ensure_events_utc_time_columns_clean(&mut tx).await?;
+        }
+
         let start = Instant::now();
         info!(target: "arklowdun", event = "migration_tx_begin", file = %filename);
         for stmt in split_statements(&cleaned) {

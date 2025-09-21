@@ -1,15 +1,6 @@
-SELECT CASE
-  WHEN EXISTS (SELECT 1 FROM events WHERE start_at_utc IS NULL)
-  THEN RAISE(ABORT, 'events.start_at_utc contains NULL values; run timezone backfill before dropping start_at/end_at')
-END;
-
-SELECT CASE
-  WHEN EXISTS (
-    SELECT 1 FROM events
-     WHERE end_at IS NOT NULL AND end_at_utc IS NULL
-  )
-  THEN RAISE(ABORT, 'events.end_at_utc contains NULL values for rows with legacy end_at; run timezone backfill before dropping start_at/end_at')
-END;
+-- Preconditions enforced by the Rust migrator before executing this file:
+-- 1) No NULL start_at_utc values remain.
+-- 2) Rows with legacy end_at must also have end_at_utc populated.
 
 DROP INDEX IF EXISTS events_household_start_idx;
 
