@@ -173,7 +173,14 @@ pub async fn ensure_events_indexes(pool: &SqlitePool) -> Result<()> {
 }
 
 pub async fn check_events_backfill(pool: &SqlitePool) -> Result<BackfillGuardStatus> {
-    let rows = sqlx::query(
+    let legacy_end_present = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM pragma_table_info('events') WHERE name='end_at'",
+    )
+    .fetch_optional(pool)
+    .await?
+    .is_some();
+
+    let sql = if legacy_end_present {
         "SELECT household_id,
                 SUM(CASE WHEN start_at_utc IS NULL THEN 1 ELSE 0 END) AS missing_start,
                 SUM(CASE WHEN end_at IS NOT NULL AND end_at_utc IS NULL THEN 1 ELSE 0 END) AS missing_end,
@@ -182,10 +189,21 @@ pub async fn check_events_backfill(pool: &SqlitePool) -> Result<BackfillGuardSta
           WHERE start_at_utc IS NULL
              OR (end_at IS NOT NULL AND end_at_utc IS NULL)
           GROUP BY household_id
-          ORDER BY missing_total DESC, household_id",
-    )
-    .fetch_all(pool)
-    .await?;
+          ORDER BY missing_total DESC, household_id"
+            .to_string()
+    } else {
+        "SELECT household_id,
+                SUM(CASE WHEN start_at_utc IS NULL THEN 1 ELSE 0 END) AS missing_start,
+                0 AS missing_end,
+                SUM(CASE WHEN start_at_utc IS NULL THEN 1 ELSE 0 END) AS missing_total
+           FROM events
+          WHERE start_at_utc IS NULL
+          GROUP BY household_id
+          ORDER BY missing_total DESC, household_id"
+            .to_string()
+    };
+
+    let rows = sqlx::query(&sql).fetch_all(pool).await?;
 
     let mut households = Vec::with_capacity(rows.len());
     let mut total_missing = 0i64;

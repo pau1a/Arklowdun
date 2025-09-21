@@ -7,6 +7,7 @@ use chrono::{DateTime, Datelike, NaiveDateTime, NaiveTime, Utc};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, QueryBuilder, SqlitePool};
+use tracing::info;
 
 use crate::{time_errors::TimeErrorCode, AppError, AppResult};
 
@@ -255,6 +256,29 @@ pub async fn run_drift_check(
     pool: &SqlitePool,
     options: DriftCheckOptions,
 ) -> AppResult<DriftReport> {
+    let legacy_start_present = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM pragma_table_info('events') WHERE name='start_at'",
+    )
+    .fetch_optional(pool)
+    .await?
+    .is_some();
+    let legacy_end_present = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM pragma_table_info('events') WHERE name='end_at'",
+    )
+    .fetch_optional(pool)
+    .await?
+    .is_some();
+
+    if !legacy_start_present || !legacy_end_present {
+        info!(
+            target: "arklowdun",
+            event = "time_invariants_skip_legacy",
+            has_start = legacy_start_present,
+            has_end = legacy_end_present
+        );
+        return Ok(DriftReport::default());
+    }
+
     let mut builder = QueryBuilder::new(
         "SELECT id, household_id, start_at, end_at, tz, start_at_utc, end_at_utc \
          FROM events \
