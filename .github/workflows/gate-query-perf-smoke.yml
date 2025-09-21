@@ -1,0 +1,221 @@
+name: gate/query-perf-smoke (manual)
+
+permissions:
+  contents: read
+  statuses: write        # needed for createCommitStatus
+  pull-requests: write   # needed for PR comments
+
+on:
+  workflow_dispatch:
+    inputs:
+      rows:
+        description: Number of rows in the generated fixture
+        required: false
+        default: '1000'
+      iterations:
+        description: Iterations per window for query-bench
+        required: false
+        default: '30'
+      warmup:
+        description: Warm-up iterations discarded from results
+        required: false
+        default: '5'
+      threshold_ms:
+        description: Warning threshold in milliseconds
+        required: false
+        default: '500'
+      windows:
+        description: Comma-separated list of windows (day,week,month)
+        required: false
+        default: 'day,week,month'
+      seed:
+        description: RNG seed forwarded to query-bench
+        required: false
+        default: '42'
+      fixture_seed:
+        description: RNG seed used for the generated fixture
+        required: false
+        default: '104729'
+      target_sha:
+        description: Commit SHA to annotate with the gate/query-perf-smoke status (defaults to run SHA)
+        required: false
+      pr_number:
+        description: PR number to comment with the summary table (optional)
+        required: false
+
+jobs:
+  query-perf-smoke:
+    name: gate/query-perf-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            python3 \
+            make \
+            g++ \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            sqlite3
+      - name: Install Node dependencies
+        run: npm ci
+      - name: Run query performance smoke
+        env:
+          QUERY_PERF_ROWS: ${{ inputs.rows }}
+          QUERY_PERF_ITERATIONS: ${{ inputs.iterations }}
+          QUERY_PERF_WARMUP: ${{ inputs.warmup }}
+          QUERY_PERF_THRESHOLD_MS: ${{ inputs.threshold_ms }}
+          QUERY_PERF_WINDOWS: ${{ inputs.windows }}
+          QUERY_PERF_SEED: ${{ inputs.seed }}
+          QUERY_PERF_FIXTURE_SEED: ${{ inputs.fixture_seed }}
+        run: node scripts/ci/query-perf-smoke.mjs
+      - name: Summarise query perf results
+        id: summary
+        if: always()
+        run: |
+          if [ ! -f test-results/query-perf-smoke.json ]; then
+            {
+              echo "found=false"
+              echo "warnings=0"
+              echo "description=Query perf smoke failed before producing results"
+              echo "table="
+            } >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          node <<'NODE'
+          import fs from 'node:fs';
+
+          try {
+            const outputPath = 'test-results/query-perf-smoke.json';
+            const payload = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
+            const windows = Array.isArray(payload.windows) ? payload.windows : [];
+            const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
+            const threshold = Number(payload.threshold_ms ?? 0);
+
+            const header = ['Window', 'Min (ms)', 'P50 (ms)', 'P95 (ms)', 'Max (ms)', 'Items (avg)', 'Truncated'];
+            const divider = header.map(() => '---');
+
+            const rows = windows.map((window) => {
+              const itemsMean = window.items && Number.isFinite(window.items.mean)
+                ? window.items.mean
+                : Number.isFinite(window.items_mean)
+                  ? window.items_mean
+                  : 0;
+              return [
+                window.window ?? '',
+                (Number.isFinite(window.min_ms) ? window.min_ms : 0).toFixed(2),
+                (Number.isFinite(window.p50_ms) ? window.p50_ms : 0).toFixed(2),
+                (Number.isFinite(window.p95_ms) ? window.p95_ms : 0).toFixed(2),
+                (Number.isFinite(window.max_ms) ? window.max_ms : 0).toFixed(2),
+                itemsMean.toFixed(1),
+                String(window.truncated ?? 0),
+              ];
+            });
+
+            const table = [
+              `| ${header.join(' | ')} |`,
+              `| ${divider.join(' | ')} |`,
+              ...rows.map((row) => `| ${row.join(' | ')} |`),
+            ].join('\n');
+
+            const warningDescription = warnings.length === 0
+              ? `All windows under ${threshold} ms`
+              : `Warnings: ${warnings.length} window(s) over ${threshold} ms`;
+
+            const fsOut = fs.createWriteStream(process.env.GITHUB_OUTPUT, { flags: 'a' });
+            fsOut.write(`found=true\n`);
+            fsOut.write(`warnings=${warnings.length}\n`);
+            fsOut.write(`description=${warningDescription.replace(/\n/g, ' ')}\n`);
+            fsOut.write(`table<<__TABLE__\n${table}\n__TABLE__\n`);
+            fsOut.end();
+          } catch (error) {
+            console.error('Failed to summarise query perf results', error);
+            const fsOut = fs.createWriteStream(process.env.GITHUB_OUTPUT, { flags: 'a' });
+            fsOut.write('found=false\n');
+            fsOut.write('warnings=0\n');
+            fsOut.write('description=Query perf smoke results could not be parsed\n');
+            fsOut.write('table=\n');
+            fsOut.end();
+          }
+          NODE
+      - name: Upload query perf timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: query-perf-smoke-${{ runner.os }}
+          path: test-results/query-perf-smoke.json
+      - name: Set commit status
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          TARGET_SHA_INPUT: ${{ inputs.target_sha }}
+          SUMMARY_FOUND: ${{ steps.summary.outputs.found }}
+          WARNINGS_COUNT: ${{ steps.summary.outputs.warnings }}
+          STATUS_DESCRIPTION: ${{ steps.summary.outputs.description }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const targetSha = (process.env.TARGET_SHA_INPUT || '').trim() || context.sha;
+            const found = process.env.SUMMARY_FOUND === 'true';
+            const warnings = Number.parseInt(process.env.WARNINGS_COUNT || '0', 10);
+            let state = 'success';
+            let description = process.env.STATUS_DESCRIPTION || 'Query perf smoke completed';
+            if (!found) {
+              state = 'error';
+              description = 'Query perf smoke failed before producing results';
+            }
+
+            const truncatedDescription = description.length > 140
+              ? `${description.slice(0, 137)}...`
+              : description;
+
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: targetSha,
+              state,
+              context: 'gate/query-perf-smoke',
+              description: truncatedDescription,
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
+
+            core.info(`Set ${state} status on ${targetSha} (warnings=${warnings}).`);
+      - name: Comment results on PR
+        if: ${{ steps.summary.outputs.found == 'true' && inputs.pr_number != '' }}
+        uses: actions/github-script@v7
+        env:
+          TARGET_PR: ${{ inputs.pr_number }}
+          TABLE_MD: ${{ steps.summary.outputs.table }}
+          STATUS_DESCRIPTION: ${{ steps.summary.outputs.description }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = Number.parseInt(process.env.TARGET_PR, 10);
+            if (!Number.isFinite(prNumber)) {
+              core.warning(`Skipping PR comment because pr_number="${process.env.TARGET_PR}" is not numeric.`);
+            } else {
+              const body = [`### gate/query-perf-smoke`, '', process.env.STATUS_DESCRIPTION || '', '', process.env.TABLE_MD || 'No data found.', '', `Artifacts: [query-perf-smoke.json](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`].join('\n');
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+              core.info(`Posted comment to PR #${prNumber}.`);
+            }

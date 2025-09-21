@@ -1,0 +1,42 @@
+name: guard/no-sqlite3
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: Base ref to diff against (defaults to PR base or main)
+        required: false
+      head_ref:
+        description: Head ref to check (defaults to current ref)
+        required: false
+
+jobs:
+  scan:
+    name: guard/no-sqlite3
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.head_ref || github.ref }}
+      - name: Detect committed SQLite fixtures
+        env:
+          BASE_REF: ${{ inputs.base_ref || github.base_ref || 'main' }}
+        run: |
+          set -euo pipefail
+          BASE_REF="${BASE_REF}"
+          if git rev-parse --verify "origin/${BASE_REF}" >/dev/null 2>&1; then
+            BASE="origin/${BASE_REF}"
+          else
+            BASE="${BASE_REF}"
+          fi
+
+          echo "Comparing HEAD against ${BASE}"
+
+          if git diff --name-only "${BASE}"...HEAD | grep -E '\\.sqlite3$'; then
+            echo "::error::SQLite fixtures detected in diff. Generate them locally; do not commit binaries." >&2
+            exit 1
+          else
+            echo "No SQLite fixtures detected in diff."
+          fi
