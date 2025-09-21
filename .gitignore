@@ -39,3 +39,8 @@ docs/samples/*.zip
 fixtures/**/*.db
 fixtures/**/*.sqlite3
 backfill_bench_*.sqlite3
+
+# Ignore generated SQLite fixtures
+*.sqlite3
+fixtures/**/*.sqlite3
+src-tauri/fixtures/**/*.sqlite3
