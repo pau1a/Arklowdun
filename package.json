@@ -8,6 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "bench:gen": "node --loader ts-node/esm scripts/bench/generate_backfill_fixture.ts",
+    "bench:smoke": "cd src-tauri && cargo run --locked --bin time -- backfill-bench --rows 1000 --chunk-size 500 --progress-interval 0",
     "migrate:checksum": "node --loader ts-node/esm scripts/migrate-checksum.ts",
     "migrate:batch1": "node --loader ts-node/esm src/tools/migrate-batch1.ts",
     "check:household": "bash scripts/check-household-scope.sh",
@@ -78,7 +80,7 @@
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "tsx": "^4.20.5",
-    "typescript": "~5.6.2",
+    "typescript": "^5.6.2",
     "vite": "^6.0.3",
     "vitest": "^1.6.0"
   }

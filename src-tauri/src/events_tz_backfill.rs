@@ -36,6 +36,7 @@ pub struct BackfillOptions {
 }
 
 pub type ProgressCallback = Arc<dyn Fn(BackfillProgress) + Send + Sync + 'static>;
+pub type ChunkObserver = Arc<dyn Fn(BackfillChunkStats) + Send + Sync + 'static>;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct BackfillProgress {
@@ -46,6 +47,16 @@ pub struct BackfillProgress {
     pub remaining: u64,
     pub elapsed_ms: u64,
     pub chunk_size: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BackfillChunkStats {
+    pub household_id: String,
+    pub chunk_index: u64,
+    pub scanned: u64,
+    pub updated: u64,
+    pub skipped: u64,
+    pub elapsed_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -744,6 +755,7 @@ async fn run_dry_run(
     progress_interval: Duration,
     control: Option<&BackfillControl>,
     progress_cb: Option<&ProgressCallback>,
+    chunk_observer: Option<&ChunkObserver>,
 ) -> AppResult<(BackfillSummary, Vec<SkipLogEntry>)> {
     let mut scanned = 0u64;
     let mut updated = 0u64;
@@ -751,6 +763,7 @@ async fn run_dry_run(
     let mut last_rowid = 0i64;
     let total = count_pending_after(pool, &options.household_id, 0).await?;
     let mut skip_examples = Vec::new();
+    let mut chunk_index = 0u64;
 
     let start = Instant::now();
     let mut last_emit = Instant::now();
@@ -769,6 +782,7 @@ async fn run_dry_run(
     );
 
     loop {
+        let chunk_started = Instant::now();
         let sql = r#"
             SELECT rowid, id, start_at, end_at, tz
             FROM events
@@ -800,6 +814,10 @@ async fn run_dry_run(
             break;
         }
 
+        chunk_index += 1;
+        let mut chunk_scanned = 0u64;
+        let mut chunk_updated = 0u64;
+        let mut chunk_skipped = 0u64;
         let mut chunk_last_rowid = last_rowid;
 
         for row in rows {
@@ -820,12 +838,14 @@ async fn run_dry_run(
                 .map_err(|err| map_row_error(err, "tz", &options.household_id, Some(&event_id)))?;
 
             scanned += 1;
+            chunk_scanned += 1;
             chunk_last_rowid = rowid;
 
             let tz = match choose_timezone(tz_str.as_deref(), fallback) {
                 Ok(tz) => tz,
                 Err(reason) => {
                     skipped += 1;
+                    chunk_skipped += 1;
                     log_skip(&options.household_id, &event_id, rowid, &reason);
                     capture_skip_example(&mut skip_examples, &event_id, rowid, &reason);
                     continue;
@@ -836,6 +856,7 @@ async fn run_dry_run(
                 Ok(v) => v,
                 Err(err) => {
                     skipped += 1;
+                    chunk_skipped += 1;
                     let reason = SkipReason::InvalidTimestamp {
                         field: "start_at",
                         error: err.to_string(),
@@ -849,6 +870,7 @@ async fn run_dry_run(
             if let Some(end_local) = end_at {
                 if let Err(err) = to_utc_ms(end_local, tz) {
                     skipped += 1;
+                    chunk_skipped += 1;
                     let reason = SkipReason::InvalidTimestamp {
                         field: "end_at",
                         error: err.to_string(),
@@ -861,6 +883,7 @@ async fn run_dry_run(
 
             let _ = start_utc;
             updated += 1;
+            chunk_updated += 1;
 
             if last_emit.elapsed() >= progress_interval {
                 let elapsed = start.elapsed().as_millis() as u64;
@@ -886,6 +909,20 @@ async fn run_dry_run(
 
         if chunk_last_rowid != last_rowid {
             last_rowid = chunk_last_rowid;
+        }
+
+        if let Some(observer) = chunk_observer {
+            if chunk_scanned > 0 {
+                let elapsed = chunk_started.elapsed().as_millis() as u64;
+                observer(BackfillChunkStats {
+                    household_id: options.household_id.clone(),
+                    chunk_index,
+                    scanned: chunk_scanned,
+                    updated: chunk_updated,
+                    skipped: chunk_skipped,
+                    elapsed_ms: elapsed,
+                });
+            }
         }
 
         if control.map(|c| c.is_cancelled()).unwrap_or(false) {
@@ -1014,6 +1051,7 @@ pub async fn run_events_backfill(
     log_dir: Option<PathBuf>,
     control: Option<BackfillControl>,
     progress_cb: Option<ProgressCallback>,
+    chunk_observer: Option<ChunkObserver>,
 ) -> AppResult<BackfillSummary> {
     let chunk_size = sanitize_chunk_size(options.chunk_size)?;
     let progress_ms = sanitize_progress_interval(options.progress_interval_ms)?;
@@ -1032,6 +1070,7 @@ pub async fn run_events_backfill(
     );
 
     let progress_cb_ref = progress_cb.as_ref();
+    let chunk_cb_ref = chunk_observer.as_ref();
     let control_ref = control.as_ref();
 
     if options.dry_run {
@@ -1043,6 +1082,7 @@ pub async fn run_events_backfill(
             progress_interval,
             control_ref,
             progress_cb_ref,
+            chunk_cb_ref,
         )
         .await?;
         write_summary_log(log_dir, &summary, true, &skip_examples);
@@ -1090,6 +1130,7 @@ pub async fn run_events_backfill(
     let mut updated_this_run = 0u64;
     let mut skipped_this_run = 0u64;
     let mut skip_examples = Vec::new();
+    let mut chunk_index = 0u64;
 
     loop {
         if control_ref.map(|c| c.is_cancelled()).unwrap_or(false) {
@@ -1097,7 +1138,7 @@ pub async fn run_events_backfill(
         }
 
         let mut tx = begin_tx_with_retry(pool, &options.household_id).await?;
-
+        let chunk_started = Instant::now();
         let sql = r#"
             SELECT rowid, id, start_at, end_at, tz
             FROM events
@@ -1130,6 +1171,10 @@ pub async fn run_events_backfill(
             break;
         }
 
+        chunk_index += 1;
+        let mut chunk_processed = 0u64;
+        let mut chunk_updated = 0u64;
+        let mut chunk_skipped = 0u64;
         let mut chunk_last_rowid = checkpoint.last_rowid;
 
         for row in rows {
@@ -1150,6 +1195,7 @@ pub async fn run_events_backfill(
                 .map_err(|err| map_row_error(err, "tz", &options.household_id, Some(&event_id)))?;
 
             checkpoint.processed += 1;
+            chunk_processed += 1;
             chunk_last_rowid = rowid;
 
             let tz = match choose_timezone(tz_str.as_deref(), fallback_tz) {
@@ -1157,6 +1203,7 @@ pub async fn run_events_backfill(
                 Err(reason) => {
                     checkpoint.skipped += 1;
                     skipped_this_run += 1;
+                    chunk_skipped += 1;
                     log_skip(&options.household_id, &event_id, rowid, &reason);
                     capture_skip_example(&mut skip_examples, &event_id, rowid, &reason);
                     continue;
@@ -1168,6 +1215,7 @@ pub async fn run_events_backfill(
                 Err(err) => {
                     checkpoint.skipped += 1;
                     skipped_this_run += 1;
+                    chunk_skipped += 1;
                     let reason = SkipReason::InvalidTimestamp {
                         field: "start_at",
                         error: err.to_string(),
@@ -1184,6 +1232,7 @@ pub async fn run_events_backfill(
                     Err(err) => {
                         checkpoint.skipped += 1;
                         skipped_this_run += 1;
+                        chunk_skipped += 1;
                         let reason = SkipReason::InvalidTimestamp {
                             field: "end_at",
                             error: err.to_string(),
@@ -1215,6 +1264,7 @@ pub async fn run_events_backfill(
 
             checkpoint.updated += 1;
             updated_this_run += 1;
+            chunk_updated += 1;
         }
 
         if chunk_last_rowid != checkpoint.last_rowid {
@@ -1231,6 +1281,20 @@ pub async fn run_events_backfill(
                 .with_context("step", "commit_tx")
                 .with_context("household_id", options.household_id.clone())
         })?;
+
+        if let Some(observer) = chunk_cb_ref {
+            if chunk_processed > 0 {
+                let elapsed = chunk_started.elapsed().as_millis() as u64;
+                observer(BackfillChunkStats {
+                    household_id: options.household_id.clone(),
+                    chunk_index,
+                    scanned: chunk_processed,
+                    updated: chunk_updated,
+                    skipped: chunk_skipped,
+                    elapsed_ms: elapsed,
+                });
+            }
+        }
 
         if last_emit.elapsed() >= progress_interval {
             let elapsed = start.elapsed().as_millis() as u64;
@@ -1351,6 +1415,7 @@ pub async fn events_backfill_timezone(
                 log_dir,
                 Some(control.clone()),
                 Some(progress_cb),
+                None,
             )
             .await;
 
