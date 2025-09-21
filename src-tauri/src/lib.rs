@@ -753,6 +753,7 @@ pub struct Event {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub tz: Option<String>,
+    #[serde(default)]
     #[ts(type = "number")]
     pub start_at_utc: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
