@@ -16,13 +16,101 @@ pub struct HouseholdBackfillStatus {
 #[derive(Debug, Clone)]
 pub struct BackfillGuardStatus {
     pub total_missing: i64,
+    pub total_missing_start_at_utc: i64,
+    pub total_missing_end_at_utc: i64,
     pub households: Vec<HouseholdBackfillStatus>,
 }
 
-pub fn format_guard_failure(total_missing: i64) -> String {
-    format!(
-        "Backfill required: {total_missing} events missing UTC values. Run backfill --apply before continuing."
-    )
+impl BackfillGuardStatus {
+    #[inline]
+    pub fn is_ready(&self) -> bool {
+        self.total_missing == 0
+    }
+
+    fn summarize_households(&self, limit: usize) -> (Vec<String>, usize) {
+        let mut summaries = Vec::new();
+        for household in self.households.iter().take(limit) {
+            let mut parts = Vec::new();
+            if household.missing_start_at_utc > 0 {
+                parts.push(format!(
+                    "start_at_utc missing {}",
+                    household.missing_start_at_utc
+                ));
+            }
+            if household.missing_end_at_utc > 0 {
+                parts.push(format!(
+                    "end_at_utc missing {}",
+                    household.missing_end_at_utc
+                ));
+            }
+            if parts.is_empty() {
+                // We should never reach this branch (a household entry implies missing rows),
+                // but keep a defensive label in case of future query changes.
+                parts.push("pending counts unavailable".to_string());
+            }
+            summaries.push(format!("{} ({})", household.household_id, parts.join(", ")));
+        }
+
+        (
+            summaries,
+            self.households.len().saturating_sub(summaries.len()),
+        )
+    }
+}
+
+pub fn format_guard_failure(status: &BackfillGuardStatus) -> String {
+    let event_word = if status.total_missing == 1 {
+        "event"
+    } else {
+        "events"
+    };
+    let mut message = format!(
+        "Backfill required: {} {} missing UTC values",
+        status.total_missing, event_word
+    );
+
+    let mut breakdown = Vec::new();
+    if status.total_missing_start_at_utc > 0 {
+        let word = if status.total_missing_start_at_utc == 1 {
+            "event"
+        } else {
+            "events"
+        };
+        breakdown.push(format!(
+            "{} {} missing start_at_utc",
+            status.total_missing_start_at_utc, word
+        ));
+    }
+    if status.total_missing_end_at_utc > 0 {
+        let word = if status.total_missing_end_at_utc == 1 {
+            "event"
+        } else {
+            "events"
+        };
+        breakdown.push(format!(
+            "{} {} missing end_at_utc",
+            status.total_missing_end_at_utc, word
+        ));
+    }
+    if !breakdown.is_empty() {
+        message.push_str(&format!(" ({})", breakdown.join(", ")));
+    }
+    message.push('.');
+
+    if !status.households.is_empty() {
+        let (households, additional) = status.summarize_households(5);
+        message.push(' ');
+        message.push_str("Affected households: ");
+        message.push_str(&households.join("; "));
+        if additional > 0 {
+            message.push_str(&format!("; +{} more", additional));
+        }
+        message.push('.');
+    }
+
+    message.push(' ');
+    message.push_str("Run backfill --apply before continuing.");
+    message
 }
 
 fn guard_bypass_enabled() -> bool {
@@ -96,19 +184,23 @@ pub async fn check_events_backfill(pool: &SqlitePool) -> Result<BackfillGuardSta
           WHERE start_at_utc IS NULL
              OR (end_at IS NOT NULL AND end_at_utc IS NULL)
           GROUP BY household_id
-          ORDER BY household_id",
+          ORDER BY missing_total DESC, household_id",
     )
     .fetch_all(pool)
     .await?;
 
     let mut households = Vec::with_capacity(rows.len());
     let mut total_missing = 0i64;
+    let mut missing_start_total = 0i64;
+    let mut missing_end_total = 0i64;
     for row in rows {
         let household_id: String = row.try_get("household_id")?;
         let missing_start: i64 = row.try_get("missing_start")?;
         let missing_end: i64 = row.try_get("missing_end")?;
         let missing_total: i64 = row.try_get("missing_total")?;
         total_missing += missing_total;
+        missing_start_total += missing_start;
+        missing_end_total += missing_end;
         households.push(HouseholdBackfillStatus {
             household_id,
             missing_start_at_utc: missing_start,
@@ -119,24 +211,27 @@ pub async fn check_events_backfill(pool: &SqlitePool) -> Result<BackfillGuardSta
 
     Ok(BackfillGuardStatus {
         total_missing,
+        total_missing_start_at_utc: missing_start_total,
+        total_missing_end_at_utc: missing_end_total,
         households,
     })
 }
 
 pub async fn enforce_events_backfill_guard(pool: &SqlitePool) -> Result<BackfillGuardStatus> {
     let status = check_events_backfill(pool).await?;
-    let pending_details: Vec<String> = status
-        .households
-        .iter()
-        .map(|h| format!("{}:{}", h.household_id, h.missing_total))
-        .collect();
+    let (pending_details, pending_additional) = status.summarize_households(5);
+    let ready = status.is_ready();
 
     info!(
         target: "arklowdun",
         event = "backfill_guard_status",
+        ready,
         total_missing = status.total_missing,
+        missing_start_total = status.total_missing_start_at_utc,
+        missing_end_total = status.total_missing_end_at_utc,
         households_with_pending = status.households.len(),
-        pending = %pending_details.join(", ")
+        pending = %pending_details.join("; "),
+        pending_additional
     );
 
     if guard_bypass_enabled() {
@@ -150,11 +245,13 @@ pub async fn enforce_events_backfill_guard(pool: &SqlitePool) -> Result<Backfill
     }
 
     if status.total_missing > 0 {
-        let message = format_guard_failure(status.total_missing);
+        let message = format_guard_failure(&status);
         error!(
             target: "arklowdun",
             event = "backfill_guard_blocked",
             total_missing = status.total_missing,
+            missing_start_total = status.total_missing_start_at_utc,
+            missing_end_total = status.total_missing_end_at_utc,
             message = %message
         );
         return Err(anyhow!(message));
