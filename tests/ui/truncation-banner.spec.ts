@@ -1,35 +1,8 @@
 import { expect, test } from '@playwright/test';
-import type { Page } from '@playwright/test';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 
-async function updateCalendarSnapshot(
-  page: Page,
-  options: { count: number; truncated: boolean; ts: number },
-) {
-  await page.evaluate(async ({ count, truncated, ts }) => {
-    const { actions } = await import('/src/store/index.ts');
-    const now = Date.now();
-    const items = Array.from({ length: count }, (_, index) => ({
-      id: `event-${ts}-${index}`,
-      household_id: 'playwright-household',
-      title: `Event ${index + 1}`,
-      start_at: now + index * 60_000,
-      end_at: now + index * 60_000 + 30_000,
-      start_at_utc: now + index * 60_000,
-      end_at_utc: now + index * 60_000 + 30_000,
-      created_at: now,
-      updated_at: now,
-    }));
-    actions.events.updateSnapshot({
-      items,
-      ts,
-      window: { start: now - 86_400_000, end: now + 86_400_000 },
-      source: 'playwright-truncation-test',
-      truncated,
-    });
-  }, options);
-}
+import { createUtcEvents, seedCalendarSnapshot } from '../support/calendar';
 
 test.describe('Truncation banner', () => {
   test('calendar only shows banner when results are truncated', async ({ page }) => {
@@ -39,24 +12,55 @@ test.describe('Truncation banner', () => {
     const banner = page.locator('[data-ui="truncation-banner"]');
     await expect(banner).toBeHidden();
 
-    const baselineTs = Date.now();
-    await updateCalendarSnapshot(page, {
-      count: 200,
+    const baseNow = Date.UTC(2024, 4, 15, 15, 0, 0);
+    const calendarWindow = {
+      start: baseNow - 86_400_000,
+      end: baseNow + 86_400_000,
+    };
+
+    const baselineSnapshot = {
+      ts: baseNow - 1_000,
       truncated: false,
-      ts: baselineTs,
+      events: createUtcEvents({
+        baseTs: baseNow,
+        count: 200,
+        idSeed: 'baseline-utc',
+      }),
+    } as const;
+
+    await seedCalendarSnapshot(page, {
+      events: baselineSnapshot.events,
+      truncated: baselineSnapshot.truncated,
+      ts: baselineSnapshot.ts,
+      window: calendarWindow,
+      source: 'playwright-truncation-test',
     });
     await expect(banner).toBeHidden();
 
-    const truncatedTs = baselineTs + 1_000;
-    await updateCalendarSnapshot(page, {
-      count: 600,
+    const truncatedSnapshot = {
+      ts: baseNow + 1_000,
       truncated: true,
-      ts: truncatedTs,
+      events: createUtcEvents({
+        baseTs: baseNow,
+        count: 600,
+        idSeed: 'truncated-utc',
+      }),
+    } as const;
+
+    await seedCalendarSnapshot(page, {
+      events: truncatedSnapshot.events,
+      truncated: truncatedSnapshot.truncated,
+      ts: truncatedSnapshot.ts,
+      window: calendarWindow,
+      source: 'playwright-truncation-test',
     });
 
     await expect(banner).toBeVisible();
-    const formatted = await page.evaluate((value) => value.toLocaleString(), 600);
-    await expect(banner).toContainText(`first ${formatted} results`);
+    const formattedCount = await page.evaluate(
+      (count) => new Intl.NumberFormat().format(count),
+      truncatedSnapshot.events.length,
+    );
+    await expect(banner).toContainText(`first ${formattedCount} results`);
 
     const screenshotPath = test.info().outputPath('truncation-banner.png');
     await page.screenshot({ path: screenshotPath });
@@ -67,17 +71,31 @@ test.describe('Truncation banner', () => {
     await banner.locator('button').click();
     await expect(banner).toBeHidden();
 
-    await updateCalendarSnapshot(page, {
-      count: 600,
-      truncated: true,
-      ts: truncatedTs,
+    await seedCalendarSnapshot(page, {
+      events: truncatedSnapshot.events,
+      truncated: truncatedSnapshot.truncated,
+      ts: truncatedSnapshot.ts,
+      window: calendarWindow,
+      source: 'playwright-truncation-test',
     });
     await expect(banner).toBeHidden();
 
-    await updateCalendarSnapshot(page, {
-      count: 600,
+    const refreshedSnapshot = {
+      ts: truncatedSnapshot.ts + 1,
       truncated: true,
-      ts: truncatedTs + 1,
+      events: createUtcEvents({
+        baseTs: baseNow,
+        count: 600,
+        idSeed: 'truncated-utc-next',
+      }),
+    } as const;
+
+    await seedCalendarSnapshot(page, {
+      events: refreshedSnapshot.events,
+      truncated: refreshedSnapshot.truncated,
+      ts: refreshedSnapshot.ts,
+      window: calendarWindow,
+      source: 'playwright-truncation-test',
     });
     await expect(banner).toBeVisible();
   });
