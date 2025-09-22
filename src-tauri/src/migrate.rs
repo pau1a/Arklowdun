@@ -370,10 +370,25 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
                 };
 
                 if src_col != "datetime" {
-                    let select_regex = Regex::new(r"(?is)SELECT\s+id,\s*title,\s*datetime")
-                        .context("compile datetime select regex")?;
-                    if select_regex.is_match(&stmt_to_run) {
-                        stmt_to_run = select_regex
+                    // Handle both `datetime AS datetime` and bare `datetime` projections,
+                    // rewriting them once to use the selected source column.
+                    let select_regex_as = Regex::new(
+                        r"(?is)SELECT\s+id,\s*title,\s*datetime\s+AS\s+datetime",
+                    )
+                    .context("compile datetime-as select regex")?;
+                    let select_regex_plain =
+                        Regex::new(r"(?is)SELECT\s+id,\s*title,\s*datetime\b")
+                            .context("compile datetime select regex")?;
+
+                    if select_regex_as.is_match(&stmt_to_run) {
+                        stmt_to_run = select_regex_as
+                            .replace(
+                                &stmt_to_run,
+                                format!("SELECT id, title, {src} AS datetime", src = src_col),
+                            )
+                            .into_owned();
+                    } else if select_regex_plain.is_match(&stmt_to_run) {
+                        stmt_to_run = select_regex_plain
                             .replace(
                                 &stmt_to_run,
                                 format!("SELECT id, title, {src} AS datetime", src = src_col),
