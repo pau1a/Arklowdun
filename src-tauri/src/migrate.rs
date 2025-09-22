@@ -577,54 +577,7 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::rewrite_events_datetime_select;
-
-    #[test]
-    fn rewrite_select_without_alias_adds_one() {
-        let stmt = "INSERT INTO events_new SELECT id, title, datetime, reminder FROM events";
-        let rewritten = rewrite_events_datetime_select(stmt, "start_at")
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            rewritten,
-            "INSERT INTO events_new SELECT id, title, start_at AS datetime, reminder FROM events"
-        );
-    }
-
-    #[test]
-    fn rewrite_select_with_alias_preserves_single_alias() {
-        let stmt =
-            "INSERT INTO events_new SELECT id, title, datetime AS datetime, reminder FROM events";
-        let rewritten = rewrite_events_datetime_select(stmt, "start_at")
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            rewritten,
-            "INSERT INTO events_new SELECT id, title, start_at AS datetime, reminder FROM events"
-        );
-    }
-
-    #[test]
-    fn rewrite_select_handles_whitespace_and_case() {
-        let stmt = "INSERT INTO events_new \nSELECT\n    id,\n    title,\n    datetime AS datetime,\n    reminder\nFROM events";
-        let rewritten = rewrite_events_datetime_select(stmt, "starts_at")
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            rewritten,
-            "INSERT INTO events_new \nSELECT\n    id,\n    title,\n    starts_at AS datetime,\n    reminder\nFROM events"
-        );
-    }
-
-    #[test]
-    fn rewrite_returns_none_when_pattern_missing() {
-        let stmt = "INSERT INTO something_else SELECT datetime FROM events";
-        let rewritten = rewrite_events_datetime_select(stmt, "start_at").unwrap();
-        assert!(rewritten.is_none());
-    }
-}
+// (moved tests to end of file to satisfy clippy::items-after-test-module)
 
 #[allow(dead_code)]
 // TXN: domain=OUT OF SCOPE tables=schema_migrations
@@ -690,4 +643,53 @@ pub async fn revert_last_migration(pool: &SqlitePool) -> anyhow::Result<()> {
         info!(target: "arklowdun", event = "migration_tx_commit", file = %version, elapsed = ?start.elapsed());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rewrite_events_datetime_select;
+
+    #[test]
+    fn rewrite_select_without_alias_adds_one() {
+        let stmt = "INSERT INTO events_new SELECT id, title, datetime, reminder FROM events";
+        let rewritten = rewrite_events_datetime_select(stmt, "start_at")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            rewritten,
+            "INSERT INTO events_new SELECT id, title, start_at AS datetime, reminder FROM events"
+        );
+    }
+
+    #[test]
+    fn rewrite_select_with_alias_preserves_single_alias() {
+        let stmt =
+            "INSERT INTO events_new SELECT id, title, datetime AS datetime, reminder FROM events";
+        let rewritten = rewrite_events_datetime_select(stmt, "start_at")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            rewritten,
+            "INSERT INTO events_new SELECT id, title, start_at AS datetime, reminder FROM events"
+        );
+    }
+
+    #[test]
+    fn rewrite_select_handles_whitespace_and_case() {
+        let stmt = "INSERT INTO events_new \nSELECT\n    id,\n    title,\n    datetime AS datetime,\n    reminder\nFROM events";
+        let rewritten = rewrite_events_datetime_select(stmt, "starts_at")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            rewritten,
+            "INSERT INTO events_new \nSELECT\n    id,\n    title,\n    starts_at AS datetime,\n    reminder\nFROM events"
+        );
+    }
+
+    #[test]
+    fn rewrite_returns_none_when_pattern_missing() {
+        let stmt = "INSERT INTO something_else SELECT datetime FROM events";
+        let rewritten = rewrite_events_datetime_select(stmt, "start_at").unwrap();
+        assert!(rewritten.is_none());
+    }
 }

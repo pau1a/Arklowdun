@@ -82,7 +82,7 @@ fn panic_is_converted_to_error() {
 
     let logs = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
     assert!(
-        logs.contains(&format!("\"event\":\"panic_caught\"")),
+        logs.contains("\"event\":\"panic_caught\""),
         "panic log missing: {logs}"
     );
     assert!(

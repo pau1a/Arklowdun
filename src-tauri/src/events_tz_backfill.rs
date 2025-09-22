@@ -746,7 +746,7 @@ fn map_row_error(
     app_err
 }
 
-#[allow(clippy::result_large_err)]
+#[allow(clippy::result_large_err, clippy::too_many_arguments)]
 async fn run_dry_run(
     pool: &SqlitePool,
     options: &BackfillOptions,

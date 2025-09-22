@@ -236,7 +236,7 @@ fn wait_for_current_run(logs_dir: &Path, run: &str) {
         if let Ok(file) = fs::File::open(&current) {
             let reader = BufReader::new(file);
             let mut found = false;
-            for line in reader.lines().flatten() {
+            for line in reader.lines().map_while(Result::ok) {
                 if line.contains(&format!("\"run\":\"{}\"", run)) {
                     found = true;
                 }
