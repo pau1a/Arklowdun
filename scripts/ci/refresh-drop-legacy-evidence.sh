@@ -13,8 +13,7 @@ WORK_DIR="$ROOT/target/drop-legacy-evidence"
 mkdir -p "$WORK_DIR"
 
 FAIL_DB="$WORK_DIR/fail.sqlite"
-PASS_DB="$WORK_DIR/pass.sqlite"
-rm -f "$FAIL_DB" "$PASS_DB"
+rm -f "$FAIL_DB"
 
 FAIL_LOG="$OUT_DIR/migration-fail.log"
 PASS_LOG="$OUT_DIR/migration-pass.log"
@@ -30,7 +29,7 @@ SCHEMA_AFTER_SHA="$OUT_DIR/schema-after.sha256"
 : >"$GUARD_LOG"
 
 relpath() {
-  python - <<'PY' "$ROOT" "$1"
+  python3 - <<'PY' "$ROOT" "$1"
 import os, sys
 root = os.path.abspath(sys.argv[1])
 path = os.path.abspath(sys.argv[2])
@@ -83,9 +82,6 @@ CARGO_BASE=(cargo run --locked --quiet --manifest-path "$ROOT/src-tauri/Cargo.to
 
 # Pre-build the migrate binary to keep logs stable.
 cargo build --locked --manifest-path "$ROOT/src-tauri/Cargo.toml" --bin migrate >/dev/null
-
-FAIL_DB_REL=$(relpath "$FAIL_DB")
-PASS_DB_REL=$(relpath "$PASS_DB")
 
 # Fail scenario: apply through 0022, seed bad data, and confirm 0023 blocks.
 run_success "$FAIL_LOG" "${CARGO_BASE[@]}" --db "$FAIL_DB" up --to 0022

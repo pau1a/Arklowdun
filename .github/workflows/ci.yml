@@ -225,7 +225,9 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y sqlite3
+          sudo apt-get install -y \
+            python3 \
+            sqlite3
       - name: Refresh drop-legacy evidence
         run: scripts/ci/refresh-drop-legacy-evidence.sh
       - name: Validate evidence outputs

@@ -383,7 +383,6 @@ async fn guard_check(db: &Path) -> Result<()> {
         Err(err) => {
             if let Some(guard) = err.downcast_ref::<GuardError>() {
                 println!("Legacy events columns: {}", guard.operator_message());
-                println!("Error: {}", guard.user_message());
             } else {
                 println!("Legacy events columns: {}", err);
             }

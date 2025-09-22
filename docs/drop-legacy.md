@@ -23,7 +23,7 @@
      backfill --db /path/to/arklowdun.sqlite3 --household <HOUSEHOLD_ID> \
      --resume --chunk-size 500 --progress-interval 0
    ```
-   See [docs/ops/backfill-guard.md](ops/backfill-guard.md) for guidance on selecting the household scope and default timezone.
+   See [ops/backfill-guard.md](ops/backfill-guard.md) for guidance on selecting the household scope and default timezone.
 3. After success, refresh the canonical schema snapshot if required:
    ```bash
    npm run schema:update
