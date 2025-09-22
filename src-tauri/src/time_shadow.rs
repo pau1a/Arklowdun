@@ -119,7 +119,23 @@ impl ShadowAudit {
 }
 
 pub fn is_shadow_read_enabled() -> bool {
-    read_flag()
+    match std::env::var(ENV_VAR) {
+        Ok(raw) => match parse_flag(&raw) {
+            Some(mode) => mode,
+            None => {
+                if INVALID_FLAG_LOGGED.set(()).is_ok() {
+                    tracing::warn!(
+                        target: "arklowdun",
+                        event = "time_shadow_flag_invalid",
+                        value = %raw,
+                        default = "on"
+                    );
+                }
+                true
+            }
+        },
+        Err(_) => true,
+    }
 }
 
 pub async fn load_summary(pool: &SqlitePool) -> Result<ShadowSummary, sqlx::Error> {
@@ -310,34 +326,14 @@ fn clamp_u64(value: i64) -> u64 {
     }
 }
 
-fn read_flag() -> bool {
-    match std::env::var(ENV_VAR) {
-        Ok(raw) => match parse_flag(&raw) {
-            Some(mode) => mode,
-            None => {
-                if INVALID_FLAG_LOGGED.set(()).is_ok() {
-                    tracing::warn!(
-                        target: "arklowdun",
-                        event = "time_shadow_flag_invalid",
-                        value = %raw,
-                        default = "on"
-                    );
-                }
-                true
-            }
-        },
-        Err(_) => true,
-    }
-}
-
 fn parse_flag(raw: &str) -> Option<bool> {
     let normalized = raw.trim().to_ascii_lowercase();
     if normalized.is_empty() {
         return None;
     }
     match normalized.as_str() {
-        "on" => Some(true),
-        "off" => Some(false),
+        "on" | "true" | "yes" | "1" => Some(true),
+        "off" | "false" | "no" | "0" => Some(false),
         _ => None,
     }
 }
@@ -357,7 +353,13 @@ mod tests {
     #[test]
     fn parse_flag_recognizes_on_off() {
         assert_eq!(parse_flag("on"), Some(true));
+        assert_eq!(parse_flag("TRUE"), Some(true));
+        assert_eq!(parse_flag("Yes"), Some(true));
+        assert_eq!(parse_flag("1"), Some(true));
         assert_eq!(parse_flag("OFF"), Some(false));
+        assert_eq!(parse_flag("false"), Some(false));
+        assert_eq!(parse_flag("No"), Some(false));
+        assert_eq!(parse_flag("0"), Some(false));
         assert_eq!(parse_flag(""), None);
         assert_eq!(parse_flag("maybe"), None);
     }
