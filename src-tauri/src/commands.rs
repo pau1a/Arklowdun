@@ -7,7 +7,7 @@ use crate::{
     repo,
     time::now_ms,
     time_errors::TimeErrorCode,
-    time_shadow::ShadowAudit,
+    time_shadow::{self, ShadowAudit, ShadowAuditSkipReason},
     AppError, AppResult, Event, EventsListRangeResponse,
 };
 use chrono::{DateTime, Duration, Utc};
@@ -20,8 +20,10 @@ struct EventRow {
     id: String,
     household_id: String,
     title: String,
-    start_at: i64,
-    end_at: Option<i64>,
+    /// Legacy columns remain optional even if the historical schema declared them NOT NULL,
+    /// because the dynamic projections substitute NULL once the columns disappear.
+    legacy_start_at: Option<i64>,
+    legacy_end_at: Option<i64>,
     tz: Option<String>,
     start_at_utc: i64,
     end_at_utc: Option<i64>,
@@ -761,13 +763,42 @@ pub async fn events_list_range_command(
 ) -> AppResult<EventsListRangeResponse> {
     let hh = repo::require_household(household_id)
         .map_err(|err| AppError::from(err).with_context("operation", "events_list_range"))?;
-    let rows = sqlx::query_as::<_, EventRow>(
+    let legacy_columns = match time_shadow::detect_legacy_event_columns(pool).await {
+        Ok(cols) => cols,
+        Err(err) => {
+            tracing::debug!(
+                target: "arklowdun",
+                event = "time_shadow_column_probe_failed",
+                error = %err
+            );
+            Default::default()
+        }
+    };
+
+    let mut shadow_audit = ShadowAudit::new();
+    if !legacy_columns.has_full_legacy() {
+        shadow_audit.skip(ShadowAuditSkipReason::MissingLegacyColumns, legacy_columns);
+    }
+
+    let legacy_start_projection = if legacy_columns.has_start_at {
+        "start_at AS legacy_start_at"
+    } else {
+        "NULL AS legacy_start_at"
+    };
+    let legacy_end_projection = if legacy_columns.has_end_at {
+        "end_at AS legacy_end_at"
+    } else {
+        "NULL AS legacy_end_at"
+    };
+    // NOTE: Only interpolating fixed projection fragments; all user inputs are bound via `.bind()`
+    // calls below.
+    let query = format!(
         r#"
         SELECT id,
                household_id,
                title,
-               start_at_utc AS start_at,
-               end_at_utc   AS end_at,
+               {legacy_start_projection},
+               {legacy_end_projection},
                tz,
                start_at_utc,
                end_at_utc,
@@ -785,22 +816,21 @@ pub async fn events_list_range_command(
             OR rrule IS NOT NULL
           )
         ORDER BY start_at_utc, id
-        "#,
-    )
-    .bind(hh)
-    .bind(start)
-    .bind(end)
-    .fetch_all(pool)
-    .await
-    .map_err(|err| {
-        AppError::from(err)
-            .with_context("operation", "events_list_range")
-            .with_context("household_id", household_id.to_string())
-            .with_context("start", start.to_string())
-            .with_context("end", end.to_string())
-    })?;
-
-    let mut shadow_audit = ShadowAudit::new();
+        "#
+    );
+    let rows = sqlx::query_as::<_, EventRow>(&query)
+        .bind(hh)
+        .bind(start)
+        .bind(end)
+        .fetch_all(pool)
+        .await
+        .map_err(|err| {
+            AppError::from(err)
+                .with_context("operation", "events_list_range")
+                .with_context("household_id", household_id.to_string())
+                .with_context("start", start.to_string())
+                .with_context("end", end.to_string())
+        })?;
 
     const PER_SERIES_LIMIT: usize = 500;
     const TOTAL_LIMIT: usize = 10_000;
@@ -824,8 +854,8 @@ pub async fn events_list_range_command(
             &row.id,
             &row.household_id,
             row.tz.as_deref(),
-            Some(row.start_at),
-            row.end_at,
+            row.legacy_start_at,
+            row.legacy_end_at,
             Some(row.start_at_utc),
             row.end_at_utc,
         );
@@ -985,6 +1015,7 @@ pub async fn events_list_range_command(
         }
     }
 
+    // Persist the per-query audit summary after we've observed every row.
     shadow_audit.finalize(pool).await;
 
     out.sort_by(|a, b| {
