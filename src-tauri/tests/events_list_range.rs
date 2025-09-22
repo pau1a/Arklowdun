@@ -2,7 +2,7 @@ use arklowdun_lib::{commands, time_shadow};
 use once_cell::sync::Lazy;
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 use std::io::Write;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use tracing::subscriber;
 use tracing_subscriber::EnvFilter;
 
@@ -12,59 +12,6 @@ const CREATE_EVENTS_TABLE: &str = "\
         household_id TEXT NOT NULL,\
         title TEXT NOT NULL,\
         start_at INTEGER NOT NULL,\
-        end_at INTEGER,\
-        tz TEXT,\
-        start_at_utc INTEGER,\
-        end_at_utc INTEGER,\
-        rrule TEXT,\
-        exdates TEXT,\
-        reminder INTEGER,\
-        created_at INTEGER NOT NULL,\
-        updated_at INTEGER NOT NULL,\
-        deleted_at INTEGER\
-    )\
-";
-
-const CREATE_EVENTS_TABLE_NO_LEGACY: &str = "\
-    CREATE TABLE events (\
-        id TEXT PRIMARY KEY,\
-        household_id TEXT NOT NULL,\
-        title TEXT NOT NULL,\
-        tz TEXT,\
-        start_at_utc INTEGER,\
-        end_at_utc INTEGER,\
-        rrule TEXT,\
-        exdates TEXT,\
-        reminder INTEGER,\
-        created_at INTEGER NOT NULL,\
-        updated_at INTEGER NOT NULL,\
-        deleted_at INTEGER\
-    )\
-";
-
-const CREATE_EVENTS_TABLE_LEGACY_START_ONLY: &str = "\
-    CREATE TABLE events (\
-        id TEXT PRIMARY KEY,\
-        household_id TEXT NOT NULL,\
-        title TEXT NOT NULL,\
-        start_at INTEGER NOT NULL,\
-        tz TEXT,\
-        start_at_utc INTEGER,\
-        end_at_utc INTEGER,\
-        rrule TEXT,\
-        exdates TEXT,\
-        reminder INTEGER,\
-        created_at INTEGER NOT NULL,\
-        updated_at INTEGER NOT NULL,\
-        deleted_at INTEGER\
-    )\
-";
-
-const CREATE_EVENTS_TABLE_LEGACY_END_ONLY: &str = "\
-    CREATE TABLE events (\
-        id TEXT PRIMARY KEY,\
-        household_id TEXT NOT NULL,\
-        title TEXT NOT NULL,\
         end_at INTEGER,\
         tz TEXT,\
         start_at_utc INTEGER,\
@@ -98,53 +45,16 @@ const CREATE_SHADOW_TABLE: &str = "\
 
 static ENV_GUARD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
-fn lock_env_guard() -> MutexGuard<'static, ()> {
-    ENV_GUARD
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-}
-
-struct EnvVarGuard {
-    key: &'static str,
-}
-
-impl EnvVarGuard {
-    fn set(key: &'static str, value: &str) -> Self {
-        std::env::set_var(key, value);
-        Self { key }
-    }
-}
-
-impl Drop for EnvVarGuard {
-    fn drop(&mut self) {
-        std::env::remove_var(self.key);
-    }
-}
-
 async fn setup_pool() -> SqlitePool {
-    setup_pool_with_schema(CREATE_EVENTS_TABLE).await
-}
-
-async fn setup_pool_without_legacy_columns() -> SqlitePool {
-    setup_pool_with_schema(CREATE_EVENTS_TABLE_NO_LEGACY).await
-}
-
-async fn setup_pool_with_legacy_start_only() -> SqlitePool {
-    setup_pool_with_schema(CREATE_EVENTS_TABLE_LEGACY_START_ONLY).await
-}
-
-async fn setup_pool_with_legacy_end_only() -> SqlitePool {
-    setup_pool_with_schema(CREATE_EVENTS_TABLE_LEGACY_END_ONLY).await
-}
-
-async fn setup_pool_with_schema(create_events_sql: &str) -> SqlitePool {
-    time_shadow::invalidate_legacy_probe();
     let pool: SqlitePool = SqlitePoolOptions::new()
         .max_connections(1)
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::query(create_events_sql).execute(&pool).await.unwrap();
+    sqlx::query(CREATE_EVENTS_TABLE)
+        .execute(&pool)
+        .await
+        .unwrap();
     sqlx::query(CREATE_SHADOW_TABLE)
         .execute(&pool)
         .await
@@ -324,9 +234,9 @@ async fn unsupported_rrule_surfaces_taxonomy_error() {
 }
 
 #[tokio::test]
-async fn shadow_audit_detects_discrepancy_when_legacy_columns_present() {
-    let _guard = lock_env_guard();
-    let _env = EnvVarGuard::set("ARK_TIME_SHADOW_READ", "on");
+async fn shadow_read_counts_discrepancies_and_logs() {
+    let _guard = ENV_GUARD.lock().unwrap();
+    std::env::set_var("ARK_TIME_SHADOW_READ", "on");
 
     let buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
     let writer = buffer.clone();
@@ -362,136 +272,14 @@ async fn shadow_audit_detects_discrepancy_when_legacy_columns_present() {
     let log = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
     assert!(log.contains("\"event\":\"time_shadow_discrepancy\""));
     assert!(log.contains("\"start_delta_ms\":60000"));
-}
 
-#[tokio::test]
-async fn shadow_audit_is_skipped_when_legacy_columns_absent() {
-    let _guard = lock_env_guard();
-    let _env = EnvVarGuard::set("ARK_TIME_SHADOW_READ", "on");
-
-    let buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
-    let writer = buffer.clone();
-    let subscriber = tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::new("arklowdun=info"))
-        .with_writer(move || BufferWriter(writer.clone()))
-        .json()
-        .finish();
-    let _subscriber_guard = subscriber::set_default(subscriber);
-
-    let pool = setup_pool_without_legacy_columns().await;
-    sqlx::query(
-        "INSERT INTO events (id, household_id, title, tz, start_at_utc, end_at_utc, created_at, updated_at) \
-         VALUES ('shadow-skip', 'HH', 'shadow', 'UTC', 60_000, 3_660_000, 0, 0)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-
-    let res = commands::events_list_range_command(&pool, "HH", -1, 120_000)
-        .await
-        .unwrap();
-    assert_eq!(res.items.len(), 1);
-
-    let summary = time_shadow::load_summary(&pool).await.unwrap();
-    assert_eq!(summary.total_rows, 0);
-    assert_eq!(summary.discrepancies, 0);
-    assert!(summary.last.is_none());
-
-    let log = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
-    assert!(log.contains("\"event\":\"time_shadow_audit_skipped\""));
-    assert!(log.contains("\"reason\":\"missing_legacy_columns\""));
-    assert!(log.contains("\"legacy_has_start_at\":false"));
-    assert!(log.contains("\"legacy_has_end_at\":false"));
-    assert!(log.contains("\"total_rows\":0"));
-    assert!(log.contains("\"discrepancies\":0"));
-}
-
-#[tokio::test]
-async fn shadow_audit_skips_when_only_start_at_present() {
-    let _guard = lock_env_guard();
-    let _env = EnvVarGuard::set("ARK_TIME_SHADOW_READ", "on");
-
-    let buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
-    let writer = buffer.clone();
-    let subscriber = tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::new("arklowdun=info"))
-        .with_writer(move || BufferWriter(writer.clone()))
-        .json()
-        .finish();
-    let _subscriber_guard = subscriber::set_default(subscriber);
-
-    let pool = setup_pool_with_legacy_start_only().await;
-    sqlx::query(
-        "INSERT INTO events (id, household_id, title, start_at, tz, start_at_utc, end_at_utc, created_at, updated_at) \
-         VALUES ('shadow-start-only', 'HH', 'shadow', 0, 'UTC', 60_000, 3_660_000, 0, 0)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-
-    let res = commands::events_list_range_command(&pool, "HH", -1, 120_000)
-        .await
-        .unwrap();
-    assert_eq!(res.items.len(), 1);
-
-    let summary = time_shadow::load_summary(&pool).await.unwrap();
-    assert_eq!(summary.total_rows, 0);
-    assert_eq!(summary.discrepancies, 0);
-
-    let log = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
-    assert!(log.contains("\"event\":\"time_shadow_audit_skipped\""));
-    assert!(log.contains("\"reason\":\"missing_legacy_columns\""));
-    assert!(log.contains("\"legacy_has_start_at\":true"));
-    assert!(log.contains("\"legacy_has_end_at\":false"));
-    assert!(log.contains("\"total_rows\":0"));
-    assert!(log.contains("\"discrepancies\":0"));
-}
-
-#[tokio::test]
-async fn shadow_audit_skips_when_only_end_at_present() {
-    let _guard = lock_env_guard();
-    let _env = EnvVarGuard::set("ARK_TIME_SHADOW_READ", "on");
-
-    let buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
-    let writer = buffer.clone();
-    let subscriber = tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::new("arklowdun=info"))
-        .with_writer(move || BufferWriter(writer.clone()))
-        .json()
-        .finish();
-    let _subscriber_guard = subscriber::set_default(subscriber);
-
-    let pool = setup_pool_with_legacy_end_only().await;
-    sqlx::query(
-        "INSERT INTO events (id, household_id, title, end_at, tz, start_at_utc, end_at_utc, created_at, updated_at) \
-         VALUES ('shadow-end-only', 'HH', 'shadow', 3_660_000, 'UTC', 60_000, 3_660_000, 0, 0)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-
-    let res = commands::events_list_range_command(&pool, "HH", -1, 120_000)
-        .await
-        .unwrap();
-    assert_eq!(res.items.len(), 1);
-
-    let summary = time_shadow::load_summary(&pool).await.unwrap();
-    assert_eq!(summary.total_rows, 0);
-    assert_eq!(summary.discrepancies, 0);
-
-    let log = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
-    assert!(log.contains("\"event\":\"time_shadow_audit_skipped\""));
-    assert!(log.contains("\"reason\":\"missing_legacy_columns\""));
-    assert!(log.contains("\"legacy_has_start_at\":false"));
-    assert!(log.contains("\"legacy_has_end_at\":true"));
-    assert!(log.contains("\"total_rows\":0"));
-    assert!(log.contains("\"discrepancies\":0"));
+    std::env::remove_var("ARK_TIME_SHADOW_READ");
 }
 
 #[tokio::test]
 async fn shadow_read_disabled_skips_audit() {
-    let _guard = lock_env_guard();
-    let _env = EnvVarGuard::set("ARK_TIME_SHADOW_READ", "off");
+    let _guard = ENV_GUARD.lock().unwrap();
+    std::env::set_var("ARK_TIME_SHADOW_READ", "off");
 
     let pool = setup_pool().await;
     sqlx::query(
@@ -510,6 +298,8 @@ async fn shadow_read_disabled_skips_audit() {
     let summary = time_shadow::load_summary(&pool).await.unwrap();
     assert_eq!(summary.total_rows, 0);
     assert_eq!(summary.discrepancies, 0);
+
+    std::env::remove_var("ARK_TIME_SHADOW_READ");
 }
 
 struct BufferWriter(Arc<Mutex<Vec<u8>>>);

@@ -75,7 +75,7 @@ async fn migrate_fixture_sample_db() -> Result<()> {
         assert!(cols.iter().any(|c| c == expected), "missing `{expected}`");
     }
 
-    // event data preserved (works pre- and post-0023)
+    // event data preserved (pre- and post-0023)
     let start_ms: i64 = sqlx::query_scalar(
         "SELECT COALESCE(start_at, start_at_utc) FROM events WHERE id='e1'",
     )

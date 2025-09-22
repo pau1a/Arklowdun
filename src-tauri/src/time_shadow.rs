@@ -1,4 +1,4 @@
-use std::sync::{OnceLock, RwLock};
+use std::sync::OnceLock;
 
 use chrono::{LocalResult, NaiveDateTime, Offset, TimeZone, Utc};
 use chrono_tz::Tz as ChronoTz;
@@ -9,38 +9,11 @@ use crate::time::now_ms;
 const ENV_VAR: &str = "ARK_TIME_SHADOW_READ";
 
 static INVALID_FLAG_LOGGED: OnceLock<()> = OnceLock::new();
-static LEGACY_COLS_CACHE: OnceLock<RwLock<Option<LegacyEventColumns>>> = OnceLock::new();
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct LegacyEventColumns {
-    pub has_start_at: bool,
-    pub has_end_at: bool,
-}
-
-impl LegacyEventColumns {
-    pub fn has_full_legacy(&self) -> bool {
-        self.has_start_at && self.has_end_at
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ShadowAuditSkipReason {
-    MissingLegacyColumns,
-}
-
-impl ShadowAuditSkipReason {
-    fn as_str(self) -> &'static str {
-        match self {
-            ShadowAuditSkipReason::MissingLegacyColumns => "missing_legacy_columns",
-        }
-    }
-}
 
 /// Tracks per-query metrics for shadow-read comparisons.
 #[derive(Debug, Clone)]
 pub struct ShadowAudit {
     enabled: bool,
-    skip_reason: Option<ShadowAuditSkipReason>,
     total_rows: u64,
     discrepancies: u64,
     last: Option<ShadowDiscrepancyRecord>,
@@ -85,7 +58,6 @@ impl ShadowAudit {
     pub fn new() -> Self {
         Self {
             enabled: is_shadow_read_enabled(),
-            skip_reason: None,
             total_rows: 0,
             discrepancies: 0,
             last: None,
@@ -103,7 +75,7 @@ impl ShadowAudit {
         utc_start_ms: Option<i64>,
         utc_end_ms: Option<i64>,
     ) {
-        if !self.is_active() {
+        if !self.enabled {
             return;
         }
         self.total_rows = self.total_rows.saturating_add(1);
@@ -125,7 +97,7 @@ impl ShadowAudit {
     }
 
     pub async fn finalize(self, pool: &SqlitePool) {
-        if !self.is_active() || (self.total_rows == 0 && self.discrepancies == 0) {
+        if !self.enabled || (self.total_rows == 0 && self.discrepancies == 0) {
             return;
         }
         if let Err(err) = persist_summary(pool, &self).await {
@@ -146,62 +118,8 @@ impl ShadowAudit {
     }
 }
 
-impl ShadowAudit {
-    fn is_active(&self) -> bool {
-        self.enabled && self.skip_reason.is_none()
-    }
-
-    pub fn skip(&mut self, reason: ShadowAuditSkipReason, legacy_columns: LegacyEventColumns) {
-        if !self.enabled || self.skip_reason.is_some() {
-            return;
-        }
-        self.skip_reason = Some(reason);
-        tracing::info!(
-            target: "arklowdun",
-            event = "time_shadow_audit_skipped",
-            reason = reason.as_str(),
-            legacy_has_start_at = legacy_columns.has_start_at,
-            legacy_has_end_at = legacy_columns.has_end_at,
-            total_rows = self.total_rows,
-            discrepancies = self.discrepancies
-        );
-    }
-}
-
-pub async fn detect_legacy_event_columns(
-    pool: &SqlitePool,
-) -> Result<LegacyEventColumns, sqlx::Error> {
-    if let Some(cache) = LEGACY_COLS_CACHE.get() {
-        let guard = cache.read().unwrap_or_else(|poison| poison.into_inner());
-        if let Some(cols) = *guard {
-            return Ok(cols);
-        }
-    }
-    let rows = sqlx::query("PRAGMA table_info('events')")
-        .fetch_all(pool)
-        .await?;
-    let mut state = LegacyEventColumns::default();
-    for row in rows {
-        let name: String = row.try_get("name")?;
-        match name.as_str() {
-            "start_at" => state.has_start_at = true,
-            "end_at" => state.has_end_at = true,
-            _ => {}
-        }
-    }
-    let cache = LEGACY_COLS_CACHE.get_or_init(|| RwLock::new(None));
-    *cache.write().unwrap_or_else(|poison| poison.into_inner()) = Some(state);
-    Ok(state)
-}
-
 pub fn is_shadow_read_enabled() -> bool {
     read_flag()
-}
-
-pub fn invalidate_legacy_probe() {
-    if let Some(cache) = LEGACY_COLS_CACHE.get() {
-        *cache.write().unwrap_or_else(|poison| poison.into_inner()) = None;
-    }
 }
 
 pub async fn load_summary(pool: &SqlitePool) -> Result<ShadowSummary, sqlx::Error> {

@@ -232,6 +232,8 @@ async fn seed_event(pool: &SqlitePool, scenario: &ScenarioConfig) -> Result<()> 
     let end_naive = parse_local(&scenario.local_end)?;
     let start_local = resolve_local(&tz, start_naive);
     let end_local = resolve_local(&tz, end_naive);
+    let start_at_local = start_local.naive_local().and_utc().timestamp_millis();
+    let end_at_local = end_local.naive_local().and_utc().timestamp_millis();
     let start_at_utc = start_local.with_timezone(&Utc).timestamp_millis();
     let end_at_utc = end_local.with_timezone(&Utc).timestamp_millis();
     let hh_id = format!("HH-{}", scenario.name);
@@ -254,11 +256,13 @@ async fn seed_event(pool: &SqlitePool, scenario: &ScenarioConfig) -> Result<()> 
     };
 
     sqlx::query(
-        "INSERT INTO events (id, household_id, title, tz, start_at_utc, end_at_utc, rrule, exdates, reminder, created_at, updated_at, deleted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, 0, 0, NULL)",
+        "INSERT INTO events (id, household_id, title, start_at, end_at, tz, start_at_utc, end_at_utc, rrule, exdates, reminder, created_at, updated_at, deleted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, 0, 0, NULL)",
     )
     .bind(&event_id)
     .bind(&hh_id)
     .bind(format!("Scenario {}", scenario.name))
+    .bind(start_at_local)
+    .bind(end_at_local)
     .bind(&scenario.timezone)
     .bind(start_at_utc)
     .bind(end_at_utc)

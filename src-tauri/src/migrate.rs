@@ -225,51 +225,12 @@ async fn should_skip_stmt(conn: &mut SqliteConnection, stmt: &str) -> anyhow::Re
 async fn ensure_events_utc_time_columns_clean(
     tx: &mut Transaction<'_, sqlx::Sqlite>,
 ) -> anyhow::Result<()> {
-    async fn has_col(tx: &mut Transaction<'_, sqlx::Sqlite>, name: &str) -> anyhow::Result<bool> {
-        let sql = "SELECT 1 FROM pragma_table_info('events') WHERE name = ?";
-        Ok(sqlx::query_scalar::<_, i64>(sql)
-            .bind(name)
-            .fetch_optional(tx.as_mut())
-            .await?
-            .is_some())
-    }
-
-    async fn first_existing<'a>(
-        tx: &mut Transaction<'a, sqlx::Sqlite>,
-        candidates: &[&'static str],
-    ) -> anyhow::Result<Option<&'static str>> {
-        for &candidate in candidates {
-            if has_col(tx, candidate).await? {
-                return Ok(Some(candidate));
-            }
-        }
-        Ok(None)
-    }
-
-    let legacy_start_src = first_existing(tx, &["datetime", "start_at", "starts_at"]).await?;
-    let legacy_end_src = first_existing(tx, &["end_at", "ends_at"]).await?;
-
-    if let Some(src) = legacy_start_src {
-        let sql = format!(
-            "UPDATE events SET start_at_utc = {src} \
-             WHERE start_at_utc IS NULL AND {src} IS NOT NULL",
-        );
-        let _ = sqlx::query(&sql).execute(tx.as_mut()).await;
-    }
-
-    if let Some(src) = legacy_end_src {
-        let sql = format!(
-            "UPDATE events SET end_at_utc = {src} \
-             WHERE {src} IS NOT NULL AND end_at_utc IS NULL",
-        );
-        let _ = sqlx::query(&sql).execute(tx.as_mut()).await;
-    }
-
-    let missing_start_utc: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM events WHERE start_at_utc IS NULL")
-            .fetch_one(tx.as_mut())
-            .await
-            .context("precheck: count NULL start_at_utc values")?;
+    let missing_start_utc: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM events WHERE start_at_utc IS NULL",
+    )
+    .fetch_one(tx.as_mut())
+    .await
+    .context("precheck: count NULL start_at_utc values")?;
 
     if missing_start_utc > 0 {
         bail!(
@@ -277,16 +238,12 @@ async fn ensure_events_utc_time_columns_clean(
         );
     }
 
-    let missing_end_utc: i64 = if let Some(src) = legacy_end_src {
-        let sql =
-            format!("SELECT COUNT(*) FROM events WHERE {src} IS NOT NULL AND end_at_utc IS NULL",);
-        sqlx::query_scalar(&sql)
-            .fetch_one(tx.as_mut())
-            .await
-            .context("precheck: count legacy end_at rows missing end_at_utc")?
-    } else {
-        0
-    };
+    let missing_end_utc: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM events WHERE end_at IS NOT NULL AND end_at_utc IS NULL",
+    )
+    .fetch_one(tx.as_mut())
+    .await
+    .context("precheck: count legacy end_at rows missing end_at_utc")?;
 
     if missing_end_utc > 0 {
         bail!(
@@ -414,23 +371,10 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
                 };
 
                 if src_col != "datetime" {
-                    // Handle both `datetime AS datetime` and bare `datetime` projections,
-                    // rewriting them once to use the selected source column.
-                    let select_regex_as =
-                        Regex::new(r"(?is)SELECT\s+id,\s*title,\s*datetime\s+AS\s+datetime")
-                            .context("compile datetime-as select regex")?;
-                    let select_regex_plain = Regex::new(r"(?is)SELECT\s+id,\s*title,\s*datetime\b")
+                    let select_regex = Regex::new(r"(?is)SELECT\s+id,\s*title,\s*datetime")
                         .context("compile datetime select regex")?;
-
-                    if select_regex_as.is_match(&stmt_to_run) {
-                        stmt_to_run = select_regex_as
-                            .replace(
-                                &stmt_to_run,
-                                format!("SELECT id, title, {src} AS datetime", src = src_col),
-                            )
-                            .into_owned();
-                    } else if select_regex_plain.is_match(&stmt_to_run) {
-                        stmt_to_run = select_regex_plain
+                    if select_regex.is_match(&stmt_to_run) {
+                        stmt_to_run = select_regex
                             .replace(
                                 &stmt_to_run,
                                 format!("SELECT id, title, {src} AS datetime", src = src_col),
