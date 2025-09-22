@@ -1858,27 +1858,25 @@ pub fn run() {
             }
             #[allow(clippy::needless_borrow)]
             let pool = tauri::async_runtime::block_on(crate::db::open_sqlite_pool(&handle))?;
+            // ORDER MATTERS: 1) apply schema; 2) ensure idx; 3) refuse missing UTC; 4) refuse legacy cols.
             tauri::async_runtime::block_on(crate::db::apply_migrations(&pool))?;
             tauri::async_runtime::block_on(crate::migration_guard::ensure_events_indexes(&pool))
                 .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
-            tauri::async_runtime::block_on(crate::migration_guard::enforce_events_backfill_guard(&pool))
-                .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
-            tauri::async_runtime::block_on(async {
-                if let Ok(cols) = sqlx::query("PRAGMA table_info(events);").fetch_all(&pool).await {
-                    let names: Vec<String> = cols
-                        .into_iter()
-                        .filter_map(|r| r.try_get::<String, _>("name").ok())
-                        .collect();
-                    let has_start = names.iter().any(|n| n == "start_at");
-                    let has_end = names.iter().any(|n| n == "end_at");
-                    tracing::info!(target: "arklowdun", event = "events_table_columns", has_start_at=%has_start, has_end_at=%has_end);
-                }
-            });
+            tauri::async_runtime::block_on(crate::migration_guard::enforce_events_backfill_guard(
+                &pool,
+            ))
+            .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
+            tauri::async_runtime::block_on(
+                crate::migration_guard::enforce_events_legacy_columns_removed(&pool),
+            )
+            .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
             let hh = tauri::async_runtime::block_on(crate::household::default_household_id(&pool))?;
             app.manage(crate::state::AppState {
                 pool: pool.clone(),
                 default_household_id: Arc::new(Mutex::new(hh)),
-                backfill: Arc::new(Mutex::new(crate::events_tz_backfill::BackfillCoordinator::new())),
+                backfill: Arc::new(Mutex::new(
+                    crate::events_tz_backfill::BackfillCoordinator::new(),
+                )),
             });
             Ok(())
         })

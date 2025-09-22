@@ -1,0 +1,26 @@
+# Source DB: target/drop-legacy-evidence/fail.sqlite
+# Dump command: sqlite3 <DB> "WITH ordered AS (SELECT 0 AS ord, name, sql FROM sqlite_master WHERE type='table' AND name='events' AND sql IS NOT NULL UNION ALL SELECT 1 AS ord, name, sql FROM sqlite_master WHERE type='index' AND tbl_name='events' AND sql IS NOT NULL) SELECT sql || ';' FROM ordered ORDER BY ord, name;"
+# SQLite version: 3.45.1 2024-01-30 16:01:20 e876e51a0ed5c5b3126f52e532044363a014bc594cfefa87ffb5b82257ccalt1 (64-bit)
+--- schema-before.sql
++++ schema-after.sql
+@@ -1,13 +1,17 @@
+ CREATE TABLE "events" (
+   id TEXT PRIMARY KEY,
+   title TEXT NOT NULL,
+-  start_at INTEGER NOT NULL,
+   reminder INTEGER,
+   household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+   created_at INTEGER NOT NULL,
+   updated_at INTEGER NOT NULL,
+-  deleted_at INTEGER
+-, end_at INTEGER, tz TEXT, start_at_utc INTEGER, end_at_utc INTEGER, rrule TEXT, exdates TEXT);
++  deleted_at INTEGER,
++  tz TEXT,
++  start_at_utc INTEGER NOT NULL,
++  end_at_utc INTEGER,
++  rrule TEXT,
++  exdates TEXT
++);
+ CREATE INDEX events_household_end_at_utc_idx ON events(household_id, end_at_utc);
+ CREATE INDEX events_household_start_at_utc_idx ON events(household_id, start_at_utc);
+ CREATE INDEX events_household_updated_idx ON events(household_id, updated_at);

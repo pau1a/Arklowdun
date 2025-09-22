@@ -1,11 +1,11 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use anyhow::{anyhow, Context, Result};
-use arklowdun_lib::migration_guard;
+use arklowdun_lib::migration_guard::{self, GuardError};
 use clap::{Parser, Subcommand};
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
-    ConnectOptions, Row, SqlitePool,
+    ConnectOptions, Row, SqliteConnection, SqlitePool,
 };
 use std::{
     collections::HashSet,
@@ -240,6 +240,9 @@ async fn up(db: &Path, dry: bool, to: Option<&str>) -> Result<()> {
         sqlx::query("PRAGMA foreign_keys=ON")
             .execute(&mut *tx)
             .await?;
+        if filename == "0023_events_drop_legacy_time.up.sql" {
+            ensure_events_utc_time_columns_clean(tx.as_mut()).await?;
+        }
         let start = Instant::now();
         for stmt in split_stmts(&sql) {
             sqlx::query(&stmt)
@@ -261,6 +264,30 @@ async fn up(db: &Path, dry: bool, to: Option<&str>) -> Result<()> {
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
+        if filename == "0023_events_drop_legacy_time.up.sql" {
+            let rows: Vec<String> = sqlx::query_scalar("PRAGMA integrity_check;")
+                .fetch_all(&pool)
+                .await?;
+            let status = if rows.is_empty() {
+                "no_result".to_string()
+            } else {
+                rows.join("; ")
+            };
+            if status == "ok" {
+                tracing::info!(
+                    target: "arklowdun",
+                    event = "sqlite_integrity_check",
+                    status = "ok"
+                );
+            } else {
+                tracing::warn!(
+                    target: "arklowdun",
+                    event = "sqlite_integrity_check",
+                    status = %status
+                );
+            }
+            migration_guard::ensure_events_indexes(&pool).await?;
+        }
         log::info!("migration success {} in {:?}", filename, start.elapsed());
         if let Some(target) = to {
             if filename.split('_').next() == Some(target) {
@@ -346,10 +373,27 @@ async fn guard_check(db: &Path) -> Result<()> {
         anyhow::bail!("database not found: {}", db.display());
     }
     let pool = open_pool(db, false).await?;
+    println!("Database: {}", db.display());
+    match migration_guard::enforce_events_legacy_columns_removed(&pool).await {
+        Ok(status) => {
+            if status.is_clear() {
+                println!("Legacy events columns: OK (start_at/end_at dropped).");
+            }
+        }
+        Err(err) => {
+            if let Some(guard) = err.downcast_ref::<GuardError>() {
+                println!("Legacy events columns: {}", guard.operator_message());
+                println!("Error: {}", guard.user_message());
+            } else {
+                println!("Legacy events columns: {}", err);
+            }
+            return Err(err);
+        }
+    }
+
     migration_guard::ensure_events_indexes(&pool).await?;
     let status = migration_guard::check_events_backfill(&pool).await?;
 
-    println!("Database: {}", db.display());
     if status.total_missing == 0 {
         println!("All events have UTC timestamps. Backfill guard OK.");
         return Ok(());
@@ -395,4 +439,27 @@ fn stmt_preview(s: &str) -> String {
     } else {
         s
     }
+}
+
+async fn ensure_events_utc_time_columns_clean(conn: &mut SqliteConnection) -> Result<()> {
+    let missing_start_utc: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM events WHERE start_at_utc IS NULL")
+            .fetch_one(&mut *conn)
+            .await
+            .context("precheck: count NULL start_at_utc values")?;
+
+    let missing_end_utc: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM events WHERE end_at IS NOT NULL AND end_at_utc IS NULL",
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .context("precheck: count legacy end_at rows missing end_at_utc")?;
+
+    if missing_start_utc > 0 || missing_end_utc > 0 {
+        anyhow::bail!(format!(
+            "Migration 0023 blocked: {missing_start_utc} rows have NULL start_at_utc and {missing_end_utc} rows still rely on legacy end_at without end_at_utc. Run the timezone backfill before dropping start_at/end_at."
+        ));
+    }
+
+    Ok(())
 }

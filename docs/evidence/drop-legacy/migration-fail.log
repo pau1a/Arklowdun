@@ -1,0 +1,38 @@
+$ cargo run --locked --quiet --manifest-path /workspace/Arklowdun/src-tauri/Cargo.toml --bin migrate -- --db /workspace/Arklowdun/target/drop-legacy-evidence/fail.sqlite up --to 0022
+Plan (up):
+  0001_initial.up.sql
+  0002_household.up.sql
+  0003_domain_tables.up.sql
+  0004_add_deleted_at.up.sql
+  0005_add_positions.up.sql
+  0006_add_file_paths.up.sql
+  0007_import_id_map.up.sql
+  0008_explicit_fk_actions.up.sql
+  0009_soft_delete_notes_shopping.up.sql
+  0010_notes_z_index.up.sql
+  0011_events_start_idx.up.sql
+  0012_household_add_tz.up.sql
+  0013_events_add_tz_and_utc.up.sql
+  0014_events_start_at_utc_index.up.sql
+  0015_vehicles_rework.up.sql
+  0016_idx_bills_household_due.up.sql
+  0017_events_add_rrule_exdates.up.sql
+  0018_search_indexes.up.sql
+  0019_files_index.up.sql
+  0020_files_index_fks.up.sql
+  0021_events_end_at_utc_index.up.sql
+  0022_shadow_read_audit.up.sql
+exit status: 0
+$ sqlite3 /workspace/Arklowdun/target/drop-legacy-evidence/fail.sqlite INSERT\ INTO\ household\ \(id\,\ name\,\ created_at\,\ updated_at\)\ VALUES\ \(\'hh\'\,\ \'Household\'\,\ 0\,\ 0\)\;
+exit status: 0
+$ sqlite3 /workspace/Arklowdun/target/drop-legacy-evidence/fail.sqlite INSERT\ INTO\ events\ \(id\,\ title\,\ start_at\,\ household_id\,\ created_at\,\ updated_at\)\ VALUES\ \(\'evt-start\'\,\ \'Missing\ start\ UTC\'\,\ 0\,\ \'hh\'\,\ 0\,\ 0\)\;
+exit status: 0
+$ sqlite3 /workspace/Arklowdun/target/drop-legacy-evidence/fail.sqlite INSERT\ INTO\ events\ \(id\,\ title\,\ start_at\,\ start_at_utc\,\ end_at\,\ household_id\,\ created_at\,\ updated_at\)\ VALUES\ \(\'evt-end\'\,\ \'Missing\ end\ UTC\'\,\ 0\,\ 0\,\ 60000\,\ \'hh\'\,\ 0\,\ 0\)\;
+exit status: 0
+$ sqlite3 /workspace/Arklowdun/target/drop-legacy-evidence/fail.sqlite UPDATE\ events\ SET\ start_at_utc\ =\ NULL\ WHERE\ id\ =\ \'evt-start\'\;
+exit status: 0
+$ cargo run --locked --quiet --manifest-path /workspace/Arklowdun/src-tauri/Cargo.toml --bin migrate -- --db /workspace/Arklowdun/target/drop-legacy-evidence/fail.sqlite up
+Plan (up):
+  0023_events_drop_legacy_time.up.sql
+Error: Migration 0023 blocked: 1 rows have NULL start_at_utc and 1 rows still rely on legacy end_at without end_at_utc. Run the timezone backfill before dropping start_at/end_at.
+exit status: 1

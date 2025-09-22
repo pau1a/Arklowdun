@@ -211,6 +211,26 @@ jobs:
           set -euxo pipefail
           cargo run --locked --bin time -- backfill-bench --rows 1000 --chunk-size 500 --progress-interval 0
 
+  gate_drop_legacy_evidence:
+    name: gate/drop-legacy-evidence
+    runs-on: ubuntu-latest
+    needs: [lint, unit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sqlite3
+      - name: Refresh drop-legacy evidence
+        run: scripts/ci/refresh-drop-legacy-evidence.sh
+      - name: Ensure evidence bundle is current
+        run: git diff --exit-code docs/evidence/drop-legacy
+
   lint:
     runs-on: ubuntu-latest
     steps:

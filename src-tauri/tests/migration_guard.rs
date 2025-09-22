@@ -53,7 +53,9 @@ async fn guard_detects_pending_events() -> Result<()> {
     let err = migration_guard::enforce_events_backfill_guard(&pool)
         .await
         .expect_err("guard should block when UTC values missing");
-    assert_eq!(err.to_string(), expected_message);
+    let guard = err.downcast::<migration_guard::GuardError>().unwrap();
+    assert_eq!(guard.operator_message(), expected_message);
+    assert_eq!(guard.user_message(), migration_guard::USER_RECOVERY_MESSAGE);
     Ok(())
 }
 

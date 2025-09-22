@@ -1,9 +1,43 @@
 use anyhow::{anyhow, Result};
 use sqlx::{Row, SqlitePool};
-use std::collections::HashSet;
+use std::{collections::HashSet, fmt};
 use tracing::{error, info, warn};
 
 pub const BACKFILL_GUARD_BYPASS_ENV: &str = "ARKLOWDUN_SKIP_BACKFILL_GUARD";
+
+pub const USER_RECOVERY_MESSAGE: &str =
+    "Arklowdun needs to finish a database update. Close the app and run the migration tool from Settings → Maintenance.";
+
+#[derive(Debug)]
+pub struct GuardError {
+    user_message: &'static str,
+    operator_message: String,
+}
+
+impl GuardError {
+    pub fn new(user_message: &'static str, operator_message: String) -> Self {
+        Self {
+            user_message,
+            operator_message,
+        }
+    }
+
+    pub fn user_message(&self) -> &'static str {
+        self.user_message
+    }
+
+    pub fn operator_message(&self) -> &str {
+        &self.operator_message
+    }
+}
+
+impl fmt::Display for GuardError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.user_message)
+    }
+}
+
+impl std::error::Error for GuardError {}
 
 #[derive(Debug, Clone)]
 pub struct HouseholdBackfillStatus {
@@ -53,6 +87,30 @@ impl BackfillGuardStatus {
 
         let additional = self.households.len().saturating_sub(summaries.len());
         (summaries, additional)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LegacyEventsColumnsStatus {
+    pub has_start_at: bool,
+    pub has_end_at: bool,
+}
+
+impl LegacyEventsColumnsStatus {
+    #[inline]
+    pub fn is_clear(&self) -> bool {
+        !self.has_start_at && !self.has_end_at
+    }
+
+    pub fn legacy_columns(&self) -> Vec<&'static str> {
+        let mut cols = Vec::new();
+        if self.has_start_at {
+            cols.push("start_at");
+        }
+        if self.has_end_at {
+            cols.push("end_at");
+        }
+        cols
     }
 }
 
@@ -132,7 +190,22 @@ fn guard_bypass_enabled() -> bool {
     }
 }
 
+/// Ensures the rebuilt events table still carries the supporting UTC indexes.
 pub async fn ensure_events_indexes(pool: &SqlitePool) -> Result<()> {
+    // Idempotently create the required indexes; existing ones are preserved.
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS events_household_start_at_utc_idx \
+         ON events(household_id, start_at_utc)",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS events_household_end_at_utc_idx \
+         ON events(household_id, end_at_utc)",
+    )
+    .execute(pool)
+    .await?;
+
     let rows = sqlx::query("PRAGMA index_list('events');")
         .fetch_all(pool)
         .await?;
@@ -172,6 +245,7 @@ pub async fn ensure_events_indexes(pool: &SqlitePool) -> Result<()> {
     }
 }
 
+/// Computes aggregate counts of events that still need UTC backfill work.
 pub async fn check_events_backfill(pool: &SqlitePool) -> Result<BackfillGuardStatus> {
     let legacy_end_present = sqlx::query_scalar::<_, i64>(
         "SELECT 1 FROM pragma_table_info('events') WHERE name='end_at'",
@@ -233,6 +307,7 @@ pub async fn check_events_backfill(pool: &SqlitePool) -> Result<BackfillGuardSta
     })
 }
 
+/// Fails fast when any events still lack canonical UTC timestamps.
 pub async fn enforce_events_backfill_guard(pool: &SqlitePool) -> Result<BackfillGuardStatus> {
     let status = check_events_backfill(pool).await?;
     let (pending_details, pending_additional) = status.summarize_households(5);
@@ -270,8 +345,166 @@ pub async fn enforce_events_backfill_guard(pool: &SqlitePool) -> Result<Backfill
             missing_end_total = status.total_missing_end_at_utc,
             message = %message
         );
-        return Err(anyhow!(message));
+        return Err(GuardError::new(USER_RECOVERY_MESSAGE, message).into());
     }
 
     Ok(status)
+}
+
+/// Verifies whether any legacy `start_at` / `end_at` columns remain on the events table.
+pub async fn check_events_legacy_columns(pool: &SqlitePool) -> Result<LegacyEventsColumnsStatus> {
+    let rows = sqlx::query("PRAGMA table_info('events');")
+        .fetch_all(pool)
+        .await?;
+    let mut has_start_at = false;
+    let mut has_end_at = false;
+    for row in rows {
+        let name: String = row.try_get("name")?;
+        match name.as_str() {
+            "start_at" => has_start_at = true,
+            "end_at" => has_end_at = true,
+            _ => {}
+        }
+    }
+    Ok(LegacyEventsColumnsStatus {
+        has_start_at,
+        has_end_at,
+    })
+}
+
+/// Fails when the legacy wall-clock columns persist after the rebuild.
+pub async fn enforce_events_legacy_columns_removed(
+    pool: &SqlitePool,
+) -> Result<LegacyEventsColumnsStatus> {
+    let status = check_events_legacy_columns(pool).await?;
+    let legacy_columns = status.legacy_columns();
+    let ready = status.is_clear();
+
+    info!(
+        target: "arklowdun",
+        event = "events_legacy_column_check",
+        ready,
+        has_start_at = status.has_start_at,
+        has_end_at = status.has_end_at,
+        legacy_columns = %legacy_columns.join(", ")
+    );
+
+    if ready {
+        return Ok(status);
+    }
+
+    error!(
+        target: "arklowdun",
+        event = "events_legacy_columns_present",
+        legacy_columns = %legacy_columns.join(", ")
+    );
+
+    let message = if legacy_columns.len() == 1 {
+        format!(
+            "Legacy events column still exists: {}. Run migrations before launching the desktop app.",
+            legacy_columns[0]
+        )
+    } else {
+        format!(
+            "Legacy events columns still exist: {}. Run migrations before launching the desktop app.",
+            legacy_columns.join(", ")
+        )
+    };
+
+    Err(GuardError::new(USER_RECOVERY_MESSAGE, message).into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+
+    async fn memory_db() -> SqlitePool {
+        SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn detects_legacy_columns() {
+        let pool = memory_db().await;
+        sqlx::query(
+            "CREATE TABLE events (id TEXT PRIMARY KEY, start_at INTEGER, end_at INTEGER, start_at_utc INTEGER, end_at_utc INTEGER)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let status = check_events_legacy_columns(&pool).await.unwrap();
+        assert!(status.has_start_at);
+        assert!(status.has_end_at);
+        assert!(!status.is_clear());
+        let err = enforce_events_legacy_columns_removed(&pool)
+            .await
+            .unwrap_err();
+        let guard = err.downcast::<GuardError>().unwrap();
+        assert_eq!(
+            guard.operator_message(),
+            "Legacy events columns still exist: start_at, end_at. Run migrations before launching the desktop app."
+        );
+        assert_eq!(guard.user_message(), USER_RECOVERY_MESSAGE);
+    }
+
+    #[tokio::test]
+    async fn passes_when_legacy_columns_removed() {
+        let pool = memory_db().await;
+        sqlx::query(
+            "CREATE TABLE events (id TEXT PRIMARY KEY, start_at_utc INTEGER NOT NULL, end_at_utc INTEGER)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let status = enforce_events_legacy_columns_removed(&pool)
+            .await
+            .expect("guard should pass");
+        assert!(status.is_clear());
+    }
+
+    #[tokio::test]
+    async fn flags_when_only_start_at_remains() {
+        let pool = memory_db().await;
+        sqlx::query(
+            "CREATE TABLE events (id TEXT PRIMARY KEY, start_at INTEGER, start_at_utc INTEGER NOT NULL, end_at_utc INTEGER)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let err = enforce_events_legacy_columns_removed(&pool)
+            .await
+            .expect_err("guard should flag start_at");
+        let guard = err.downcast::<GuardError>().unwrap();
+        assert_eq!(
+            guard.operator_message(),
+            "Legacy events column still exists: start_at. Run migrations before launching the desktop app."
+        );
+    }
+
+    #[tokio::test]
+    async fn flags_when_only_end_at_remains() {
+        let pool = memory_db().await;
+        sqlx::query(
+            "CREATE TABLE events (id TEXT PRIMARY KEY, end_at INTEGER, start_at_utc INTEGER NOT NULL, end_at_utc INTEGER)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let err = enforce_events_legacy_columns_removed(&pool)
+            .await
+            .expect_err("guard should flag end_at");
+        let guard = err.downcast::<GuardError>().unwrap();
+        assert_eq!(
+            guard.operator_message(),
+            "Legacy events column still exists: end_at. Run migrations before launching the desktop app."
+        );
+    }
 }

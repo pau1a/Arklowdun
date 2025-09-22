@@ -1,0 +1,17 @@
+$ sqlite3 /workspace/Arklowdun/target/drop-legacy-evidence/fail.sqlite UPDATE\ events\ SET\ start_at_utc\ =\ start_at\ WHERE\ start_at_utc\ IS\ NULL\;
+exit status: 0
+$ sqlite3 /workspace/Arklowdun/target/drop-legacy-evidence/fail.sqlite UPDATE\ events\ SET\ end_at_utc\ =\ end_at\ WHERE\ end_at\ IS\ NOT\ NULL\ AND\ end_at_utc\ IS\ NULL\;
+exit status: 0
+$ cargo run --locked --quiet --manifest-path /workspace/Arklowdun/src-tauri/Cargo.toml --bin migrate -- --db /workspace/Arklowdun/target/drop-legacy-evidence/fail.sqlite up
+Plan (up):
+  0023_events_drop_legacy_time.up.sql
+{"timestamp":"2025-09-22T09:31:50.444091791Z","level":"INFO","fields":{"event":"sqlite_integrity_check","status":"ok"},"target":"arklowdun"}
+{"timestamp":"2025-09-22T09:31:50.449976225Z","level":"INFO","fields":{"event":"events_index_check","has_start_at_utc":true,"has_end_at_utc":true},"target":"arklowdun"}
+exit status: 0
+$ cargo run --locked --quiet --manifest-path /workspace/Arklowdun/src-tauri/Cargo.toml --bin migrate -- --db /workspace/Arklowdun/target/drop-legacy-evidence/fail.sqlite check
+Database: /workspace/Arklowdun/target/drop-legacy-evidence/fail.sqlite
+{"timestamp":"2025-09-22T09:33:07.201423849Z","level":"INFO","fields":{"event":"events_legacy_column_check","ready":true,"has_start_at":false,"has_end_at":false,"legacy_columns":""},"target":"arklowdun"}
+Legacy events columns: OK (start_at/end_at dropped).
+{"timestamp":"2025-09-22T09:33:07.203044626Z","level":"INFO","fields":{"event":"events_index_check","has_start_at_utc":true,"has_end_at_utc":true},"target":"arklowdun"}
+All events have UTC timestamps. Backfill guard OK.
+exit status: 0

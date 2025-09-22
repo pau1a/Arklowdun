@@ -7,7 +7,7 @@ use sqlx::{Executor, Row, SqlitePool, Transaction};
 use std::collections::HashSet;
 use std::time::Instant;
 
-use crate::time::now_ms;
+use crate::{migration_guard, time::now_ms};
 use tracing::{debug, error, info, warn};
 // The `log` crate macros are used via fully-qualified paths for persistence.
 
@@ -225,18 +225,11 @@ async fn should_skip_stmt(conn: &mut SqliteConnection, stmt: &str) -> anyhow::Re
 async fn ensure_events_utc_time_columns_clean(
     tx: &mut Transaction<'_, sqlx::Sqlite>,
 ) -> anyhow::Result<()> {
-    let missing_start_utc: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM events WHERE start_at_utc IS NULL",
-    )
-    .fetch_one(tx.as_mut())
-    .await
-    .context("precheck: count NULL start_at_utc values")?;
-
-    if missing_start_utc > 0 {
-        bail!(
-            "Migration 0023 blocked: events.start_at_utc contains NULL values. Run the timezone backfill before dropping start_at/end_at."
-        );
-    }
+    let missing_start_utc: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM events WHERE start_at_utc IS NULL")
+            .fetch_one(tx.as_mut())
+            .await
+            .context("precheck: count NULL start_at_utc values")?;
 
     let missing_end_utc: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM events WHERE end_at IS NOT NULL AND end_at_utc IS NULL",
@@ -245,10 +238,10 @@ async fn ensure_events_utc_time_columns_clean(
     .await
     .context("precheck: count legacy end_at rows missing end_at_utc")?;
 
-    if missing_end_utc > 0 {
-        bail!(
-            "Migration 0023 blocked: events.end_at_utc contains NULL values for rows that have legacy end_at. Run the timezone backfill before dropping start_at/end_at."
-        );
+    if missing_start_utc > 0 || missing_end_utc > 0 {
+        bail!(format!(
+            "Migration 0023 blocked: {missing_start_utc} rows have NULL start_at_utc and {missing_end_utc} rows still rely on legacy end_at without end_at_utc. Run the timezone backfill before dropping start_at/end_at."
+        ));
     }
 
     Ok(())
@@ -333,7 +326,8 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             .execute(&mut *tx)
             .await?;
 
-        if version == "0023" && name == "events_drop_legacy_time" {
+        let is_events_rebuild = version == "0023" && name == "events_drop_legacy_time";
+        if is_events_rebuild {
             ensure_events_utc_time_columns_clean(&mut tx).await?;
         }
 
@@ -439,6 +433,31 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             file = %filename,
             elapsed = ?start.elapsed()
         );
+
+        if is_events_rebuild {
+            let integrity = sqlx::query_scalar::<_, String>("PRAGMA integrity_check;")
+                .fetch_all(pool)
+                .await?;
+            let status = if integrity.is_empty() {
+                "no_result".to_string()
+            } else {
+                integrity.join("; ")
+            };
+            if status == "ok" {
+                info!(
+                    target: "arklowdun",
+                    event = "sqlite_integrity_check",
+                    status = "ok"
+                );
+            } else {
+                warn!(
+                    target: "arklowdun",
+                    event = "sqlite_integrity_check",
+                    status = %status
+                );
+            }
+            migration_guard::ensure_events_indexes(pool).await?;
+        }
     }
 
     if sqlx::query_scalar::<_, i64>(
