@@ -25,6 +25,59 @@ const CREATE_EVENTS_TABLE: &str = "\
     )\
 ";
 
+const CREATE_EVENTS_TABLE_START_ONLY: &str = "\
+    CREATE TABLE events (\
+        id TEXT PRIMARY KEY,\
+        household_id TEXT NOT NULL,\
+        title TEXT NOT NULL,\
+        start_at INTEGER NOT NULL,\
+        tz TEXT,\
+        start_at_utc INTEGER,\
+        end_at_utc INTEGER,\
+        rrule TEXT,\
+        exdates TEXT,\
+        reminder INTEGER,\
+        created_at INTEGER NOT NULL,\
+        updated_at INTEGER NOT NULL,\
+        deleted_at INTEGER\
+    )\
+";
+
+const CREATE_EVENTS_TABLE_END_ONLY: &str = "\
+    CREATE TABLE events (\
+        id TEXT PRIMARY KEY,\
+        household_id TEXT NOT NULL,\
+        title TEXT NOT NULL,\
+        end_at INTEGER,\
+        tz TEXT,\
+        start_at_utc INTEGER,\
+        end_at_utc INTEGER,\
+        rrule TEXT,\
+        exdates TEXT,\
+        reminder INTEGER,\
+        created_at INTEGER NOT NULL,\
+        updated_at INTEGER NOT NULL,\
+        deleted_at INTEGER\
+    )\
+";
+
+const CREATE_EVENTS_TABLE_NO_LEGACY: &str = "\
+    CREATE TABLE events (\
+        id TEXT PRIMARY KEY,\
+        household_id TEXT NOT NULL,\
+        title TEXT NOT NULL,\
+        tz TEXT,\
+        start_at_utc INTEGER NOT NULL,\
+        end_at_utc INTEGER,\
+        rrule TEXT,\
+        exdates TEXT,\
+        reminder INTEGER,\
+        created_at INTEGER NOT NULL,\
+        updated_at INTEGER NOT NULL,\
+        deleted_at INTEGER\
+    )\
+";
+
 const CREATE_SHADOW_TABLE: &str = "\
     CREATE TABLE shadow_read_audit (\
         id INTEGER PRIMARY KEY CHECK (id = 1),\
@@ -45,21 +98,22 @@ const CREATE_SHADOW_TABLE: &str = "\
 
 static ENV_GUARD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
-async fn setup_pool() -> SqlitePool {
+async fn setup_pool_with_schema(schema: &str) -> SqlitePool {
     let pool: SqlitePool = SqlitePoolOptions::new()
         .max_connections(1)
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::query(CREATE_EVENTS_TABLE)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(schema).execute(&pool).await.unwrap();
     sqlx::query(CREATE_SHADOW_TABLE)
         .execute(&pool)
         .await
         .unwrap();
     pool
+}
+
+async fn setup_pool() -> SqlitePool {
+    setup_pool_with_schema(CREATE_EVENTS_TABLE).await
 }
 
 #[tokio::test]
@@ -285,6 +339,97 @@ async fn shadow_read_disabled_skips_audit() {
     sqlx::query(
         "INSERT INTO events (id, household_id, title, start_at, end_at, tz, start_at_utc, end_at_utc, created_at, updated_at) \
          VALUES ('shadow-off', 'HH', 'shadow', 0, 3_600_000, 'UTC', 60_000, 3_660_000, 0, 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let res = commands::events_list_range_command(&pool, "HH", -1, 120_000)
+        .await
+        .unwrap();
+    assert_eq!(res.items.len(), 1);
+
+    let summary = time_shadow::load_summary(&pool).await.unwrap();
+    assert_eq!(summary.total_rows, 0);
+    assert_eq!(summary.discrepancies, 0);
+
+    std::env::remove_var("ARK_TIME_SHADOW_READ");
+}
+
+#[tokio::test]
+async fn shadow_read_skips_when_legacy_columns_absent() {
+    let _guard = ENV_GUARD.lock().unwrap();
+    std::env::set_var("ARK_TIME_SHADOW_READ", "on");
+
+    let buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+    let writer = buffer.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::new("arklowdun=info"))
+        .with_writer(move || BufferWriter(writer.clone()))
+        .json()
+        .finish();
+    let _subscriber_guard = subscriber::set_default(subscriber);
+
+    let pool = setup_pool_with_schema(CREATE_EVENTS_TABLE_NO_LEGACY).await;
+    sqlx::query(
+        "INSERT INTO events (id, household_id, title, tz, start_at_utc, end_at_utc, created_at, updated_at) \
+         VALUES ('utc-only', 'HH', 'shadow', 'UTC', 60_000, 3_660_000, 0, 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let res = commands::events_list_range_command(&pool, "HH", -1, 120_000)
+        .await
+        .unwrap();
+    assert_eq!(res.items.len(), 1);
+
+    let summary = time_shadow::load_summary(&pool).await.unwrap();
+    assert_eq!(summary.total_rows, 0);
+    assert_eq!(summary.discrepancies, 0);
+
+    let log = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
+    assert!(log.contains("\"event\":\"time_shadow_audit_skipped\""));
+    assert!(log.contains("\"reason\":\"missing_legacy_columns\""));
+
+    std::env::remove_var("ARK_TIME_SHADOW_READ");
+}
+
+#[tokio::test]
+async fn shadow_read_skips_when_only_start_at_present() {
+    let _guard = ENV_GUARD.lock().unwrap();
+    std::env::set_var("ARK_TIME_SHADOW_READ", "on");
+
+    let pool = setup_pool_with_schema(CREATE_EVENTS_TABLE_START_ONLY).await;
+    sqlx::query(
+        "INSERT INTO events (id, household_id, title, start_at, tz, start_at_utc, end_at_utc, created_at, updated_at) \
+         VALUES ('legacy-start', 'HH', 'shadow', 0, 'UTC', 60_000, 3_660_000, 0, 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let res = commands::events_list_range_command(&pool, "HH", -1, 120_000)
+        .await
+        .unwrap();
+    assert_eq!(res.items.len(), 1);
+
+    let summary = time_shadow::load_summary(&pool).await.unwrap();
+    assert_eq!(summary.total_rows, 0);
+    assert_eq!(summary.discrepancies, 0);
+
+    std::env::remove_var("ARK_TIME_SHADOW_READ");
+}
+
+#[tokio::test]
+async fn shadow_read_skips_when_only_end_at_present() {
+    let _guard = ENV_GUARD.lock().unwrap();
+    std::env::set_var("ARK_TIME_SHADOW_READ", "on");
+
+    let pool = setup_pool_with_schema(CREATE_EVENTS_TABLE_END_ONLY).await;
+    sqlx::query(
+        "INSERT INTO events (id, household_id, title, end_at, tz, start_at_utc, end_at_utc, created_at, updated_at) \
+         VALUES ('legacy-end', 'HH', 'shadow', 3_660_000, 'UTC', 60_000, 3_660_000, 0, 0)",
     )
     .execute(&pool)
     .await

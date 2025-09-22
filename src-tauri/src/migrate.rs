@@ -225,12 +225,11 @@ async fn should_skip_stmt(conn: &mut SqliteConnection, stmt: &str) -> anyhow::Re
 async fn ensure_events_utc_time_columns_clean(
     tx: &mut Transaction<'_, sqlx::Sqlite>,
 ) -> anyhow::Result<()> {
-    let missing_start_utc: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM events WHERE start_at_utc IS NULL",
-    )
-    .fetch_one(tx.as_mut())
-    .await
-    .context("precheck: count NULL start_at_utc values")?;
+    let missing_start_utc: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM events WHERE start_at_utc IS NULL")
+            .fetch_one(tx.as_mut())
+            .await
+            .context("precheck: count NULL start_at_utc values")?;
 
     if missing_start_utc > 0 {
         bail!(

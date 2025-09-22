@@ -76,11 +76,10 @@ async fn migrate_fixture_sample_db() -> Result<()> {
     }
 
     // event data preserved (pre- and post-0023)
-    let start_ms: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(start_at, start_at_utc) FROM events WHERE id='e1'",
-    )
-    .fetch_one(&pool)
-    .await?;
+    let start_ms: i64 =
+        sqlx::query_scalar("SELECT COALESCE(start_at, start_at_utc) FROM events WHERE id='e1'")
+            .fetch_one(&pool)
+            .await?;
     assert_eq!(start_ms, 1000);
 
     // bills positions dense 0-based

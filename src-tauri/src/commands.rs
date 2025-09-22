@@ -7,7 +7,9 @@ use crate::{
     repo,
     time::now_ms,
     time_errors::TimeErrorCode,
-    time_shadow::ShadowAudit,
+    time_shadow::{
+        detect_legacy_event_columns, LegacyEventColumns, ShadowAudit, ShadowAuditSkipReason,
+    },
     AppError, AppResult, Event, EventsListRangeResponse,
 };
 use chrono::{DateTime, Duration, Utc};
@@ -20,8 +22,11 @@ struct EventRow {
     id: String,
     household_id: String,
     title: String,
-    start_at: i64,
-    end_at: Option<i64>,
+    /// Legacy wall-clock fields become `NULL` projections once the schema drops
+    /// them, so they remain optional even when the historical table declared
+    /// them `NOT NULL`.
+    legacy_start_at: Option<i64>,
+    legacy_end_at: Option<i64>,
     tz: Option<String>,
     start_at_utc: i64,
     end_at_utc: Option<i64>,
@@ -761,13 +766,50 @@ pub async fn events_list_range_command(
 ) -> AppResult<EventsListRangeResponse> {
     let hh = repo::require_household(household_id)
         .map_err(|err| AppError::from(err).with_context("operation", "events_list_range"))?;
-    let rows = sqlx::query_as::<_, EventRow>(
+    let mut shadow_audit = ShadowAudit::new();
+
+    let (legacy_start_projection, legacy_end_projection) =
+        match detect_legacy_event_columns(pool).await {
+            Ok(cols) => {
+                if !cols.has_full_legacy() {
+                    shadow_audit.skip(ShadowAuditSkipReason::MissingLegacyColumns, cols);
+                }
+                (
+                    if cols.has_start_at {
+                        "start_at".to_string()
+                    } else {
+                        "NULL".to_string()
+                    },
+                    if cols.has_end_at {
+                        "end_at".to_string()
+                    } else {
+                        "NULL".to_string()
+                    },
+                )
+            }
+            Err(err) => {
+                tracing::debug!(
+                    target: "arklowdun",
+                    event = "time_shadow_column_probe_failed",
+                    error = %err
+                );
+                shadow_audit.skip(
+                    ShadowAuditSkipReason::ColumnProbeFailed,
+                    LegacyEventColumns::default(),
+                );
+                ("NULL".to_string(), "NULL".to_string())
+            }
+        };
+
+    // NOTE: Only fixed column names or NULL placeholders are interpolated here; all
+    // caller-provided values remain bound parameters below.
+    let query = format!(
         r#"
         SELECT id,
                household_id,
                title,
-               start_at,
-               end_at,
+               {legacy_start} AS legacy_start_at,
+               {legacy_end} AS legacy_end_at,
                tz,
                start_at_utc,
                end_at_utc,
@@ -786,21 +828,23 @@ pub async fn events_list_range_command(
           )
         ORDER BY start_at_utc, id
         "#,
-    )
-    .bind(hh)
-    .bind(start)
-    .bind(end)
-    .fetch_all(pool)
-    .await
-    .map_err(|err| {
-        AppError::from(err)
-            .with_context("operation", "events_list_range")
-            .with_context("household_id", household_id.to_string())
-            .with_context("start", start.to_string())
-            .with_context("end", end.to_string())
-    })?;
+        legacy_start = legacy_start_projection,
+        legacy_end = legacy_end_projection,
+    );
 
-    let mut shadow_audit = ShadowAudit::new();
+    let rows = sqlx::query_as::<_, EventRow>(&query)
+        .bind(hh)
+        .bind(start)
+        .bind(end)
+        .fetch_all(pool)
+        .await
+        .map_err(|err| {
+            AppError::from(err)
+                .with_context("operation", "events_list_range")
+                .with_context("household_id", household_id.to_string())
+                .with_context("start", start.to_string())
+                .with_context("end", end.to_string())
+        })?;
 
     const PER_SERIES_LIMIT: usize = 500;
     const TOTAL_LIMIT: usize = 10_000;
@@ -824,8 +868,8 @@ pub async fn events_list_range_command(
             &row.id,
             &row.household_id,
             row.tz.as_deref(),
-            Some(row.start_at),
-            row.end_at,
+            row.legacy_start_at,
+            row.legacy_end_at,
             Some(row.start_at_utc),
             row.end_at_utc,
         );
