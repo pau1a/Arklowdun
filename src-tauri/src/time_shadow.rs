@@ -10,6 +10,33 @@ const ENV_VAR: &str = "ARK_TIME_SHADOW_READ";
 
 static INVALID_FLAG_LOGGED: OnceLock<()> = OnceLock::new();
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LegacyEventColumns {
+    pub has_start_at: bool,
+    pub has_end_at: bool,
+}
+
+impl LegacyEventColumns {
+    pub fn has_full_legacy(self) -> bool {
+        self.has_start_at && self.has_end_at
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ShadowAuditSkipReason {
+    MissingLegacyColumns,
+    ColumnProbeFailed,
+}
+
+impl ShadowAuditSkipReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ShadowAuditSkipReason::MissingLegacyColumns => "missing_legacy_columns",
+            ShadowAuditSkipReason::ColumnProbeFailed => "column_probe_failed",
+        }
+    }
+}
+
 /// Tracks per-query metrics for shadow-read comparisons.
 #[derive(Debug, Clone)]
 pub struct ShadowAudit {
@@ -17,6 +44,7 @@ pub struct ShadowAudit {
     total_rows: u64,
     discrepancies: u64,
     last: Option<ShadowDiscrepancyRecord>,
+    skip_reason: Option<ShadowAuditSkipReason>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -61,6 +89,7 @@ impl ShadowAudit {
             total_rows: 0,
             discrepancies: 0,
             last: None,
+            skip_reason: None,
         }
     }
 
@@ -75,7 +104,7 @@ impl ShadowAudit {
         utc_start_ms: Option<i64>,
         utc_end_ms: Option<i64>,
     ) {
-        if !self.enabled {
+        if !self.enabled || self.skip_reason.is_some() {
             return;
         }
         self.total_rows = self.total_rows.saturating_add(1);
@@ -96,8 +125,27 @@ impl ShadowAudit {
         }
     }
 
+    pub fn skip(&mut self, reason: ShadowAuditSkipReason, legacy_columns: LegacyEventColumns) {
+        if !self.enabled || self.skip_reason.is_some() {
+            return;
+        }
+        self.skip_reason = Some(reason);
+        tracing::info!(
+            target: "arklowdun",
+            event = "time_shadow_audit_skipped",
+            reason = reason.as_str(),
+            legacy_has_start_at = legacy_columns.has_start_at,
+            legacy_has_end_at = legacy_columns.has_end_at,
+            total_rows = self.total_rows,
+            discrepancies = self.discrepancies
+        );
+    }
+
     pub async fn finalize(self, pool: &SqlitePool) {
-        if !self.enabled || (self.total_rows == 0 && self.discrepancies == 0) {
+        if !self.enabled
+            || self.skip_reason.is_some()
+            || (self.total_rows == 0 && self.discrepancies == 0)
+        {
             return;
         }
         if let Err(err) = persist_summary(pool, &self).await {
@@ -119,7 +167,23 @@ impl ShadowAudit {
 }
 
 pub fn is_shadow_read_enabled() -> bool {
-    read_flag()
+    match std::env::var(ENV_VAR) {
+        Ok(raw) => match parse_flag(&raw) {
+            Some(mode) => mode,
+            None => {
+                if INVALID_FLAG_LOGGED.set(()).is_ok() {
+                    tracing::warn!(
+                        target: "arklowdun",
+                        event = "time_shadow_flag_invalid",
+                        value = %raw,
+                        default = "on"
+                    );
+                }
+                true
+            }
+        },
+        Err(_) => true,
+    }
 }
 
 pub async fn load_summary(pool: &SqlitePool) -> Result<ShadowSummary, sqlx::Error> {
@@ -310,34 +374,14 @@ fn clamp_u64(value: i64) -> u64 {
     }
 }
 
-fn read_flag() -> bool {
-    match std::env::var(ENV_VAR) {
-        Ok(raw) => match parse_flag(&raw) {
-            Some(mode) => mode,
-            None => {
-                if INVALID_FLAG_LOGGED.set(()).is_ok() {
-                    tracing::warn!(
-                        target: "arklowdun",
-                        event = "time_shadow_flag_invalid",
-                        value = %raw,
-                        default = "on"
-                    );
-                }
-                true
-            }
-        },
-        Err(_) => true,
-    }
-}
-
 fn parse_flag(raw: &str) -> Option<bool> {
     let normalized = raw.trim().to_ascii_lowercase();
     if normalized.is_empty() {
         return None;
     }
     match normalized.as_str() {
-        "on" => Some(true),
-        "off" => Some(false),
+        "on" | "true" | "yes" | "1" => Some(true),
+        "off" | "false" | "no" | "0" => Some(false),
         _ => None,
     }
 }
@@ -350,6 +394,26 @@ fn is_missing_table(err: &sqlx::Error) -> bool {
     )
 }
 
+pub async fn detect_legacy_event_columns(
+    pool: &SqlitePool,
+) -> Result<LegacyEventColumns, sqlx::Error> {
+    let rows = sqlx::query("PRAGMA table_info('events')")
+        .fetch_all(pool)
+        .await?;
+
+    let mut state = LegacyEventColumns::default();
+    for row in rows {
+        let name: String = row.try_get("name")?;
+        match name.as_str() {
+            "start_at" => state.has_start_at = true,
+            "end_at" => state.has_end_at = true,
+            _ => {}
+        }
+    }
+
+    Ok(state)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -357,7 +421,13 @@ mod tests {
     #[test]
     fn parse_flag_recognizes_on_off() {
         assert_eq!(parse_flag("on"), Some(true));
+        assert_eq!(parse_flag("TRUE"), Some(true));
+        assert_eq!(parse_flag("Yes"), Some(true));
+        assert_eq!(parse_flag("1"), Some(true));
         assert_eq!(parse_flag("OFF"), Some(false));
+        assert_eq!(parse_flag("false"), Some(false));
+        assert_eq!(parse_flag("No"), Some(false));
+        assert_eq!(parse_flag("0"), Some(false));
         assert_eq!(parse_flag(""), None);
         assert_eq!(parse_flag("maybe"), None);
     }

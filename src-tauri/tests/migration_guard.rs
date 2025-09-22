@@ -20,20 +20,78 @@ async fn setup_pool() -> Result<SqlitePool> {
     Ok(pool)
 }
 
-#[tokio::test]
-async fn guard_detects_pending_events() -> Result<()> {
-    let pool = setup_pool().await?;
+async fn setup_legacy_pool() -> Result<SqlitePool> {
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await?;
+    sqlx::query("PRAGMA foreign_keys=ON;")
+        .execute(&pool)
+        .await?;
 
     sqlx::query(
-        "INSERT INTO events (id, title, start_at, household_id, created_at, updated_at)
-         VALUES ('evt', 'Test', 0, 'hh', 0, 0)",
+        "CREATE TABLE household (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        )",
     )
     .execute(&pool)
     .await?;
 
     sqlx::query(
-        "INSERT INTO events (id, title, start_at, start_at_utc, end_at, household_id, created_at, updated_at)
-         VALUES ('evt_end', 'Test End', 0, 0, 60000, 'hh', 0, 0)",
+        "CREATE TABLE events (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            start_at INTEGER,
+            end_at INTEGER,
+            tz TEXT,
+            household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            deleted_at INTEGER,
+            start_at_utc INTEGER,
+            end_at_utc INTEGER
+        )",
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS events_household_start_at_utc_idx ON events(household_id, start_at_utc)",
+    )
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS events_household_end_at_utc_idx ON events(household_id, end_at_utc)",
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO household (id, name, created_at, updated_at) VALUES ('hh', 'Household', 0, 0)",
+    )
+    .execute(&pool)
+    .await?;
+
+    Ok(pool)
+}
+
+#[tokio::test]
+async fn guard_detects_pending_events() -> Result<()> {
+    let pool = setup_legacy_pool().await?;
+
+    sqlx::query(
+        "INSERT INTO events (id, title, start_at, start_at_utc, household_id, created_at, updated_at)
+         VALUES ('evt', 'Test', 0, NULL, 'hh', 0, 0)",
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO events (id, title, start_at, start_at_utc, end_at, end_at_utc, household_id, created_at, updated_at)
+         VALUES ('evt_end', 'Test End', 0, 0, 60000, NULL, 'hh', 0, 0)",
     )
     .execute(&pool)
     .await?;
@@ -62,8 +120,8 @@ async fn guard_allows_clean_database() -> Result<()> {
     let pool = setup_pool().await?;
 
     sqlx::query(
-        "INSERT INTO events (id, title, start_at, start_at_utc, household_id, created_at, updated_at)
-         VALUES ('evt', 'Test', 0, 0, 'hh', 0, 0)",
+        "INSERT INTO events (id, title, start_at_utc, household_id, created_at, updated_at)
+         VALUES ('evt', 'Test', 0, 'hh', 0, 0)",
     )
     .execute(&pool)
     .await?;

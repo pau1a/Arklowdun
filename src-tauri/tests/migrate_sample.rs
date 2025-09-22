@@ -75,11 +75,22 @@ async fn migrate_fixture_sample_db() -> Result<()> {
         assert!(cols.iter().any(|c| c == expected), "missing `{expected}`");
     }
 
-    // event data preserved
-    let start_at: i64 = sqlx::query_scalar("SELECT start_at FROM events WHERE id='e1'")
-        .fetch_one(&pool)
-        .await?;
-    assert_eq!(start_at, 1000);
+    // event data preserved (pre- and post-0023)
+    let has_legacy_start = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM pragma_table_info('events') WHERE name='start_at'",
+    )
+    .fetch_optional(&pool)
+    .await?
+    .is_some();
+
+    let start_query = if has_legacy_start {
+        "SELECT COALESCE(start_at, start_at_utc) FROM events WHERE id='e1'"
+    } else {
+        "SELECT start_at_utc FROM events WHERE id='e1'"
+    };
+
+    let start_ms: i64 = sqlx::query_scalar(start_query).fetch_one(&pool).await?;
+    assert_eq!(start_ms, 1000);
 
     // bills positions dense 0-based
     let positions: Vec<i64> = sqlx::query_scalar(
