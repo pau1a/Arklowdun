@@ -1,6 +1,3 @@
-Here you go — everything restated in **raw Markdown**, ready to drop into your repo.
-
-```markdown
 # Data Safety & Recovery Roadmap
 
 This document defines the phased plan and pull request breakdown for implementing robust data safety and recovery in the app.
@@ -179,7 +176,3 @@ This document defines the phased plan and pull request breakdown for implementin
 
 **Exit Condition for Phase 3 (Data Safety & Recovery):**  
 App can detect corruption, repair without loss, and export/import reliably.
-```
-
-Would you like me to also create **10 ready-to-use PR description templates** in this same style (checklists, acceptance criteria, risks, rollout) so Ged can paste them straight into GitHub?
-
