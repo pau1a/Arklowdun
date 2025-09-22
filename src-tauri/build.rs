@@ -83,7 +83,7 @@ fn emit_chrono_tz_metadata() {
     ];
 
     let mut version = env::var("DEP_CHRONO_TZ_VERSION").ok();
-    if version.as_deref().map_or(true, |value| value.is_empty()) {
+    if version.as_deref().is_none_or(|value| value.is_empty()) {
         for candidate in &lock_candidates {
             if let Some(lock_version) = chrono_tz_version_from_lock(candidate) {
                 println!("cargo:rerun-if-changed={}", candidate.display());

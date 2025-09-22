@@ -166,6 +166,12 @@ impl ShadowAudit {
     }
 }
 
+impl Default for ShadowAudit {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub fn is_shadow_read_enabled() -> bool {
     match std::env::var(ENV_VAR) {
         Ok(raw) => match parse_flag(&raw) {

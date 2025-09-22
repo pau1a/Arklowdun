@@ -1,3 +1,4 @@
+#![allow(clippy::await_holding_lock)]
 use arklowdun_lib::{commands, time_shadow};
 use once_cell::sync::Lazy;
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
