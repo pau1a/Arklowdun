@@ -225,36 +225,44 @@ async fn should_skip_stmt(conn: &mut SqliteConnection, stmt: &str) -> anyhow::Re
 async fn ensure_events_utc_time_columns_clean(
     tx: &mut Transaction<'_, sqlx::Sqlite>,
 ) -> anyhow::Result<()> {
-    let has_start_at =
-        sqlx::query_scalar::<_, i64>("SELECT 1 FROM pragma_table_info('events') WHERE name = ?")
-            .bind("start_at")
+    async fn has_col(tx: &mut Transaction<'_, sqlx::Sqlite>, name: &str) -> anyhow::Result<bool> {
+        let sql = "SELECT 1 FROM pragma_table_info('events') WHERE name = ?";
+        Ok(sqlx::query_scalar::<_, i64>(sql)
+            .bind(name)
             .fetch_optional(tx.as_mut())
             .await?
-            .is_some();
-
-    let has_end_at =
-        sqlx::query_scalar::<_, i64>("SELECT 1 FROM pragma_table_info('events') WHERE name = ?")
-            .bind("end_at")
-            .fetch_optional(tx.as_mut())
-            .await?
-            .is_some();
-
-    if has_start_at {
-        let _ = sqlx::query(
-            "UPDATE events SET start_at_utc = start_at \
-             WHERE start_at_utc IS NULL AND start_at IS NOT NULL",
-        )
-        .execute(tx.as_mut())
-        .await;
+            .is_some())
     }
 
-    if has_end_at {
-        let _ = sqlx::query(
-            "UPDATE events SET end_at_utc = end_at \
-             WHERE end_at IS NOT NULL AND end_at_utc IS NULL",
-        )
-        .execute(tx.as_mut())
-        .await;
+    async fn first_existing<'a>(
+        tx: &mut Transaction<'a, sqlx::Sqlite>,
+        candidates: &[&'static str],
+    ) -> anyhow::Result<Option<&'static str>> {
+        for &candidate in candidates {
+            if has_col(tx, candidate).await? {
+                return Ok(Some(candidate));
+            }
+        }
+        Ok(None)
+    }
+
+    let legacy_start_src = first_existing(tx, &["datetime", "start_at", "starts_at"]).await?;
+    let legacy_end_src = first_existing(tx, &["end_at", "ends_at"]).await?;
+
+    if let Some(src) = legacy_start_src {
+        let sql = format!(
+            "UPDATE events SET start_at_utc = {src} \
+             WHERE start_at_utc IS NULL AND {src} IS NOT NULL",
+        );
+        let _ = sqlx::query(&sql).execute(tx.as_mut()).await;
+    }
+
+    if let Some(src) = legacy_end_src {
+        let sql = format!(
+            "UPDATE events SET end_at_utc = {src} \
+             WHERE {src} IS NOT NULL AND end_at_utc IS NULL",
+        );
+        let _ = sqlx::query(&sql).execute(tx.as_mut()).await;
     }
 
     let missing_start_utc: i64 =
@@ -269,12 +277,16 @@ async fn ensure_events_utc_time_columns_clean(
         );
     }
 
-    let missing_end_utc: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM events WHERE end_at IS NOT NULL AND end_at_utc IS NULL",
-    )
-    .fetch_one(tx.as_mut())
-    .await
-    .context("precheck: count legacy end_at rows missing end_at_utc")?;
+    let missing_end_utc: i64 = if let Some(src) = legacy_end_src {
+        let sql =
+            format!("SELECT COUNT(*) FROM events WHERE {src} IS NOT NULL AND end_at_utc IS NULL",);
+        sqlx::query_scalar(&sql)
+            .fetch_one(tx.as_mut())
+            .await
+            .context("precheck: count legacy end_at rows missing end_at_utc")?
+    } else {
+        0
+    };
 
     if missing_end_utc > 0 {
         bail!(
