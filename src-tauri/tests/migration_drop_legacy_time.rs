@@ -92,7 +92,7 @@ fn has_column(rows: &[sqlx::sqlite::SqliteRow], name: &str) -> bool {
 }
 
 #[tokio::test]
-async fn migration_aborts_when_start_at_utc_missing() -> Result<()> {
+async fn migration_backfills_when_start_at_utc_missing_sources_exist() -> Result<()> {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
         .connect("sqlite::memory:")
@@ -107,26 +107,26 @@ async fn migration_aborts_when_start_at_utc_missing() -> Result<()> {
     .execute(&pool)
     .await?;
 
-    let err = run_migration(&pool)
-        .await
-        .expect_err("migration should fail when start_at_utc is NULL");
-    assert_eq!(
-        err.to_string(),
-        "Migration 0023 blocked: events.start_at_utc contains NULL values. Run the timezone backfill before dropping start_at/end_at."
-    );
+    run_migration(&pool).await?;
 
     let columns = sqlx::query("PRAGMA table_info(events);")
         .fetch_all(&pool)
         .await?;
     assert!(
-        has_column(&columns, "start_at"),
-        "failed migration must leave legacy column in place"
+        !has_column(&columns, "start_at"),
+        "start_at should be dropped after successful migration"
     );
+
+    let start_at_utc: i64 =
+        sqlx::query_scalar("SELECT start_at_utc FROM events WHERE id='evt-start'")
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(start_at_utc, 0);
     Ok(())
 }
 
 #[tokio::test]
-async fn migration_aborts_when_end_at_utc_missing() -> Result<()> {
+async fn migration_backfills_when_end_at_utc_missing_sources_exist() -> Result<()> {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
         .connect("sqlite::memory:")
@@ -141,21 +141,20 @@ async fn migration_aborts_when_end_at_utc_missing() -> Result<()> {
     .execute(&pool)
     .await?;
 
-    let err = run_migration(&pool)
-        .await
-        .expect_err("migration should fail when end_at has no UTC value");
-    assert_eq!(
-        err.to_string(),
-        "Migration 0023 blocked: events.end_at_utc contains NULL values for rows that have legacy end_at. Run the timezone backfill before dropping start_at/end_at."
-    );
+    run_migration(&pool).await?;
 
     let columns = sqlx::query("PRAGMA table_info(events);")
         .fetch_all(&pool)
         .await?;
     assert!(
-        has_column(&columns, "end_at"),
-        "failed migration must leave legacy column in place"
+        !has_column(&columns, "end_at"),
+        "end_at should be dropped after successful migration"
     );
+
+    let end_at_utc: i64 = sqlx::query_scalar("SELECT end_at_utc FROM events WHERE id='evt-end'")
+        .fetch_one(&pool)
+        .await?;
+    assert_eq!(end_at_utc, 60_000);
     Ok(())
 }
 
@@ -199,6 +198,47 @@ async fn migration_succeeds_when_clean() -> Result<()> {
         .fetch_one(&pool)
         .await?;
     assert_eq!(start_at_utc, 0);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn migration_backfills_from_legacy_columns() -> Result<()> {
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await?;
+
+    setup_pre_migration_schema(&pool).await?;
+
+    sqlx::query(
+        "INSERT INTO events (id, title, start_at, reminder, household_id, created_at, updated_at, end_at, tz, start_at_utc, end_at_utc, rrule, exdates)\
+         VALUES ('evt-backfill', 'Needs backfill', 1, NULL, 'hh', 0, 0, 61, 'UTC', NULL, NULL, NULL, NULL)",
+    )
+    .execute(&pool)
+    .await?;
+
+    run_migration(&pool).await?;
+
+    let columns = sqlx::query("PRAGMA table_info(events);")
+        .fetch_all(&pool)
+        .await?;
+    assert!(
+        !has_column(&columns, "start_at"),
+        "start_at should be dropped after backfill"
+    );
+    assert!(
+        !has_column(&columns, "end_at"),
+        "end_at should be dropped after backfill"
+    );
+
+    let (start_at_utc, end_at_utc): (i64, i64) =
+        sqlx::query_as("SELECT start_at_utc, end_at_utc FROM events WHERE id='evt-backfill'")
+            .fetch_one(&pool)
+            .await?;
+
+    assert_eq!(start_at_utc, 1);
+    assert_eq!(end_at_utc, 61);
 
     Ok(())
 }

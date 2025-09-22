@@ -54,6 +54,42 @@ fn preview(sql: &str) -> String {
     }
 }
 
+fn quoted_ident(ident: &str) -> String {
+    let escaped = ident.replace('"', "\"\"");
+    format!("\"{}\"", escaped)
+}
+
+fn events_datetime_select_regex() -> anyhow::Result<&'static Regex> {
+    static DATETIME_RE: OnceCell<Regex> = OnceCell::new();
+    DATETIME_RE
+        .get_or_try_init(|| {
+            Regex::new(r"(?is)(SELECT\s+id\s*,\s*title\s*,\s*)(datetime)(\s+AS\s+datetime\b)?")
+        })
+        .map_err(|err| anyhow!("invalid events datetime rewrite regex: {err}"))
+}
+
+fn rewrite_events_datetime_select(stmt: &str, src_col: &str) -> anyhow::Result<Option<String>> {
+    let select_regex = events_datetime_select_regex()?;
+    if let Some(captures) = select_regex.captures(stmt) {
+        let prefix = captures
+            .get(1)
+            .expect("regex ensures prefix capture")
+            .as_str();
+        let alias = captures
+            .get(3)
+            .map(|m| m.as_str())
+            .unwrap_or(" AS datetime");
+        let replacement = format!("{prefix}{src_col}{alias}");
+        Ok(Some(
+            select_regex
+                .replacen(stmt, 1, replacement.as_str())
+                .into_owned(),
+        ))
+    } else {
+        Ok(None)
+    }
+}
+
 fn load_migrations() -> anyhow::Result<Vec<(String, String, String)>> {
     let mut entries = Vec::new();
     for file in MIGRATIONS_DIR.files() {
@@ -222,6 +258,71 @@ async fn should_skip_stmt(conn: &mut SqliteConnection, stmt: &str) -> anyhow::Re
     Ok(false)
 }
 
+async fn opportunistic_events_utc_backfill(
+    tx: &mut Transaction<'_, sqlx::Sqlite>,
+) -> anyhow::Result<()> {
+    let columns: HashSet<String> = sqlx::query("PRAGMA table_info('events')")
+        .fetch_all(tx.as_mut())
+        .await?
+        .into_iter()
+        .filter_map(|row| row.try_get::<String, _>("name").ok())
+        .collect();
+
+    if columns.contains("start_at_utc") {
+        let start_src = if columns.contains("datetime") {
+            Some("datetime")
+        } else if columns.contains("start_at") {
+            Some("start_at")
+        } else if columns.contains("starts_at") {
+            Some("starts_at")
+        } else {
+            None
+        };
+
+        debug!(
+            target: "arklowdun",
+            event = "events_utc_backfill_source",
+            start_source = ?start_src
+        );
+
+        if let Some(src) = start_src {
+            let quoted_src = quoted_ident(src);
+            let sql = format!(
+                "UPDATE events SET start_at_utc = {src} WHERE start_at_utc IS NULL AND {src} IS NOT NULL",
+                src = quoted_src
+            );
+            sqlx::query(&sql).execute(tx.as_mut()).await?;
+        }
+    }
+
+    if columns.contains("end_at_utc") {
+        let end_src = if columns.contains("end_at") {
+            Some("end_at")
+        } else if columns.contains("ends_at") {
+            Some("ends_at")
+        } else {
+            None
+        };
+
+        debug!(
+            target: "arklowdun",
+            event = "events_utc_backfill_source",
+            end_source = ?end_src
+        );
+
+        if let Some(src) = end_src {
+            let quoted_src = quoted_ident(src);
+            let sql = format!(
+                "UPDATE events SET end_at_utc = {src} WHERE end_at_utc IS NULL AND {src} IS NOT NULL",
+                src = quoted_src
+            );
+            sqlx::query(&sql).execute(tx.as_mut()).await?;
+        }
+    }
+
+    Ok(())
+}
+
 async fn ensure_events_utc_time_columns_clean(
     tx: &mut Transaction<'_, sqlx::Sqlite>,
 ) -> anyhow::Result<()> {
@@ -333,6 +434,7 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             .await?;
 
         if version == "0023" && name == "events_drop_legacy_time" {
+            opportunistic_events_utc_backfill(&mut tx).await?;
             ensure_events_utc_time_columns_clean(&mut tx).await?;
         }
 
@@ -370,15 +472,9 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
                 };
 
                 if src_col != "datetime" {
-                    let select_regex = Regex::new(r"(?is)SELECT\s+id,\s*title,\s*datetime")
-                        .context("compile datetime select regex")?;
-                    if select_regex.is_match(&stmt_to_run) {
-                        stmt_to_run = select_regex
-                            .replace(
-                                &stmt_to_run,
-                                format!("SELECT id, title, {src} AS datetime", src = src_col),
-                            )
-                            .into_owned();
+                    if let Some(rewritten) = rewrite_events_datetime_select(&stmt_to_run, src_col)?
+                    {
+                        stmt_to_run = rewritten;
                     } else {
                         stmt_to_run = format!(
                             "INSERT INTO events_new \
@@ -405,7 +501,7 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
                 log::error!("migration failed {name} {version}: {e}");
                 error!(target: "arklowdun", event = "migration_stmt_error", file = %filename, sql = %preview(&stmt_to_run), error = %e);
                 warn!(target: "arklowdun", event = "migration_tx_rollback", file = %filename);
-                return Err(e.into());
+                return Err(anyhow!("migration statement failed: {}: {e}", stmt_to_run));
             }
         }
         let fk_rows = sqlx::query("PRAGMA foreign_key_check;")
@@ -479,6 +575,55 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     crate::exdate::normalize_existing_exdates(pool).await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rewrite_events_datetime_select;
+
+    #[test]
+    fn rewrite_select_without_alias_adds_one() {
+        let stmt = "INSERT INTO events_new SELECT id, title, datetime, reminder FROM events";
+        let rewritten = rewrite_events_datetime_select(stmt, "start_at")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            rewritten,
+            "INSERT INTO events_new SELECT id, title, start_at AS datetime, reminder FROM events"
+        );
+    }
+
+    #[test]
+    fn rewrite_select_with_alias_preserves_single_alias() {
+        let stmt =
+            "INSERT INTO events_new SELECT id, title, datetime AS datetime, reminder FROM events";
+        let rewritten = rewrite_events_datetime_select(stmt, "start_at")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            rewritten,
+            "INSERT INTO events_new SELECT id, title, start_at AS datetime, reminder FROM events"
+        );
+    }
+
+    #[test]
+    fn rewrite_select_handles_whitespace_and_case() {
+        let stmt = "INSERT INTO events_new \nSELECT\n    id,\n    title,\n    datetime AS datetime,\n    reminder\nFROM events";
+        let rewritten = rewrite_events_datetime_select(stmt, "starts_at")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            rewritten,
+            "INSERT INTO events_new \nSELECT\n    id,\n    title,\n    starts_at AS datetime,\n    reminder\nFROM events"
+        );
+    }
+
+    #[test]
+    fn rewrite_returns_none_when_pattern_missing() {
+        let stmt = "INSERT INTO something_else SELECT datetime FROM events";
+        let rewritten = rewrite_events_datetime_select(stmt, "start_at").unwrap();
+        assert!(rewritten.is_none());
+    }
 }
 
 #[allow(dead_code)]
