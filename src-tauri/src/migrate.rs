@@ -225,6 +225,38 @@ async fn should_skip_stmt(conn: &mut SqliteConnection, stmt: &str) -> anyhow::Re
 async fn ensure_events_utc_time_columns_clean(
     tx: &mut Transaction<'_, sqlx::Sqlite>,
 ) -> anyhow::Result<()> {
+    let has_start_at =
+        sqlx::query_scalar::<_, i64>("SELECT 1 FROM pragma_table_info('events') WHERE name = ?")
+            .bind("start_at")
+            .fetch_optional(tx.as_mut())
+            .await?
+            .is_some();
+
+    let has_end_at =
+        sqlx::query_scalar::<_, i64>("SELECT 1 FROM pragma_table_info('events') WHERE name = ?")
+            .bind("end_at")
+            .fetch_optional(tx.as_mut())
+            .await?
+            .is_some();
+
+    if has_start_at {
+        let _ = sqlx::query(
+            "UPDATE events SET start_at_utc = start_at \
+             WHERE start_at_utc IS NULL AND start_at IS NOT NULL",
+        )
+        .execute(tx.as_mut())
+        .await;
+    }
+
+    if has_end_at {
+        let _ = sqlx::query(
+            "UPDATE events SET end_at_utc = end_at \
+             WHERE end_at IS NOT NULL AND end_at_utc IS NULL",
+        )
+        .execute(tx.as_mut())
+        .await;
+    }
+
     let missing_start_utc: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM events WHERE start_at_utc IS NULL")
             .fetch_one(tx.as_mut())
@@ -372,13 +404,11 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
                 if src_col != "datetime" {
                     // Handle both `datetime AS datetime` and bare `datetime` projections,
                     // rewriting them once to use the selected source column.
-                    let select_regex_as = Regex::new(
-                        r"(?is)SELECT\s+id,\s*title,\s*datetime\s+AS\s+datetime",
-                    )
-                    .context("compile datetime-as select regex")?;
-                    let select_regex_plain =
-                        Regex::new(r"(?is)SELECT\s+id,\s*title,\s*datetime\b")
-                            .context("compile datetime select regex")?;
+                    let select_regex_as =
+                        Regex::new(r"(?is)SELECT\s+id,\s*title,\s*datetime\s+AS\s+datetime")
+                            .context("compile datetime-as select regex")?;
+                    let select_regex_plain = Regex::new(r"(?is)SELECT\s+id,\s*title,\s*datetime\b")
+                        .context("compile datetime select regex")?;
 
                     if select_regex_as.is_match(&stmt_to_run) {
                         stmt_to_run = select_regex_as
