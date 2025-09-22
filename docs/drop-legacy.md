@@ -76,7 +76,11 @@ Run the following after applying the migration:
      WHERE household_id = ?
        AND start_at_utc BETWEEN ? AND ?;
   ```
-  Expect the output to reference `events_household_start_at_utc_idx`.
+  Expect the output to reference `events_household_start_at_utc_idx`, for example:
+  ```
+  QUERY PLAN
+  `--SEARCH events USING INDEX events_household_start_at_utc_idx (household_id=? AND start_at_utc>? AND start_at_utc<?)
+  ```
 
 ## Guard behaviour
 - On application start, `enforce_events_legacy_columns_removed` logs `events_legacy_column_check` and blocks launch with `events_legacy_columns_present` when the legacy schema persists.

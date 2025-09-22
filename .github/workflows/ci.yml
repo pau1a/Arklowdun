@@ -228,6 +228,12 @@ jobs:
           sudo apt-get install -y sqlite3
       - name: Refresh drop-legacy evidence
         run: scripts/ci/refresh-drop-legacy-evidence.sh
+      - name: Validate evidence outputs
+        run: |
+          set -euxo pipefail
+          test -s docs/evidence/drop-legacy/schema-before.sha256 -a -s docs/evidence/drop-legacy/schema-after.sha256
+          grep -F "sqlite_integrity_check" docs/evidence/drop-legacy/migration-pass.log
+          grep -F "Migration 0023 blocked:" docs/evidence/drop-legacy/migration-fail.log
       - name: Ensure evidence bundle is current
         run: git diff --exit-code docs/evidence/drop-legacy
 

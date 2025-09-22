@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export TZ=UTC
+export LC_ALL=C
+export SOURCE_DATE_EPOCH=1704067200
+
 ROOT=$(git rev-parse --show-toplevel)
 cd "$ROOT"
 

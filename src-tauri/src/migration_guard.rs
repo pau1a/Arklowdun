@@ -419,6 +419,14 @@ mod tests {
     use super::*;
     use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 
+    #[test]
+    fn guard_error_exposes_messages() {
+        let error = GuardError::new("user", "operator details".into());
+        assert_eq!(error.user_message(), "user");
+        assert_eq!(error.operator_message(), "operator details");
+        assert_eq!(error.to_string(), "user");
+    }
+
     async fn memory_db() -> SqlitePool {
         SqlitePoolOptions::new()
             .max_connections(1)

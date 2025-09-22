@@ -66,3 +66,31 @@ async fn up_and_down_roundtrip() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn check_reports_legacy_columns_guard() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let db = dir.path().join("legacy.sqlite");
+    let db_arg = db.to_str().unwrap();
+
+    let status = Command::new(bin())
+        .args(["--db", db_arg, "up", "--to", "0022"])
+        .status()?;
+    assert!(status.success());
+
+    let output = Command::new(bin())
+        .args(["--db", db_arg, "check"])
+        .output()?;
+    assert!(!output.status.success());
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(combined.contains("Legacy events columns still exist: start_at, end_at."));
+    assert!(combined.contains(
+        "Error: Arklowdun needs to finish a database update. Close the app and run the migration tool from Settings → Maintenance."
+    ));
+
+    Ok(())
+}
