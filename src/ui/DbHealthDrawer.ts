@@ -12,6 +12,7 @@ export interface DbHealthDrawerProps {
   error?: AppError | null;
   lastUpdated?: number | null;
   onOpenChange?: (open: boolean) => void;
+  onRecheck?: () => void | Promise<void>;
 }
 
 export interface DbHealthDrawerInstance {
@@ -65,6 +66,7 @@ export function createDbHealthDrawer(
   let currentError: AppError | null = props.error ?? null;
   let currentLastUpdated: number | null = props.lastUpdated ?? null;
   let currentOnOpenChange = props.onOpenChange ?? null;
+  let currentOnRecheck = props.onRecheck ?? null;
 
   const summary = document.createElement('p');
   summary.id = summaryId;
@@ -117,6 +119,16 @@ export function createDbHealthDrawer(
 
   heading.append(title, statusLine, summary);
 
+  const controls = document.createElement('div');
+  controls.className = 'db-health-drawer__controls';
+
+  const recheckButton = createButton({
+    label: 'Run health check',
+    variant: 'primary',
+    size: 'sm',
+    className: 'db-health-drawer__recheck',
+  });
+
   const closeButton = createButton({
     label: 'Close',
     variant: 'ghost',
@@ -128,7 +140,48 @@ export function createDbHealthDrawer(
     },
   });
 
-  header.append(heading, closeButton);
+  controls.append(recheckButton, closeButton);
+  header.append(heading, controls);
+
+  let recheckInFlight = false;
+
+  const syncControls = () => {
+    const hasHandler = typeof currentOnRecheck === 'function';
+    if (!hasHandler) {
+      recheckButton.hidden = true;
+      recheckButton.update({ disabled: true, label: 'Run health check' });
+      return;
+    }
+
+    recheckButton.hidden = false;
+    const baseLabel = currentReport ? 'Re-run health check' : 'Run health check';
+    const pendingLabel = currentReport ? 'Re-checking…' : 'Checking…';
+    const disable = recheckInFlight || currentPhase === 'pending';
+    recheckButton.update({
+      label: disable ? pendingLabel : baseLabel,
+      disabled: disable,
+    });
+  };
+
+  const triggerRecheck = async () => {
+    if (typeof currentOnRecheck !== 'function') return;
+    if (recheckInFlight) return;
+    recheckInFlight = true;
+    syncControls();
+    try {
+      await currentOnRecheck();
+    } catch {
+      // Errors are surfaced through store state updates.
+    } finally {
+      recheckInFlight = false;
+      syncControls();
+    }
+  };
+
+  recheckButton.addEventListener('click', (event) => {
+    event.preventDefault();
+    void triggerRecheck();
+  });
 
   const errorAlert = document.createElement('div');
   errorAlert.className = 'db-health-drawer__error';
@@ -380,6 +433,7 @@ export function createDbHealthDrawer(
       modal.setOpen(currentOpen);
     }
     syncStatus();
+    syncControls();
     syncSummary();
     syncError();
     syncChecks();
@@ -404,6 +458,8 @@ export function createDbHealthDrawer(
         currentLastUpdated = next.lastUpdated ?? null;
       if (next.onOpenChange !== undefined)
         currentOnOpenChange = next.onOpenChange ?? null;
+      if (next.onRecheck !== undefined)
+        currentOnRecheck = next.onRecheck ?? null;
       if (next.open !== undefined) currentOpen = next.open;
       sync();
     },

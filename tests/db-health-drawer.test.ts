@@ -77,15 +77,34 @@ test('DbHealthDrawer renders report details and spinner state', async () => {
     generated_at: generatedAt,
   };
 
+  let recheckCalls = 0;
   const drawer = createDbHealthDrawer({
     open: false,
     phase: 'idle',
     report: null,
     error: null,
     lastUpdated: null,
+    onRecheck: async () => {
+      recheckCalls += 1;
+    },
   });
 
+  const recheckButton = drawer.dialog.querySelector(
+    '.db-health-drawer__recheck',
+  ) as HTMLButtonElement | null;
+  assert.ok(recheckButton, 're-check button should render');
+  assert.equal(recheckButton?.textContent, 'Run health check');
+  assert.equal(recheckButton?.disabled, false);
+
+  recheckButton?.click();
+  await flush();
+  assert.equal(recheckCalls, 1, 're-check handler should run');
+
   drawer.update({ report, phase: 'idle', lastUpdated: Date.now() });
+  await flush();
+  assert.equal(recheckButton?.textContent, 'Re-run health check');
+  assert.equal(recheckButton?.disabled, false);
+
   drawer.setOpen(true);
   await flush();
 
@@ -118,6 +137,21 @@ test('DbHealthDrawer renders report details and spinner state', async () => {
   const spinner = drawer.dialog.querySelector('.db-health-drawer__spinner');
   assert.ok(spinner, 'spinner should render in pending state');
   assert.equal(spinner?.hasAttribute('hidden'), false);
+
+  assert.equal(recheckButton?.disabled, true, 're-check disabled while pending');
+  assert.equal(recheckButton?.textContent, 'Re-checking…');
+
+  recheckButton?.click();
+  await flush();
+  assert.equal(
+    recheckCalls,
+    1,
+    'clicks during pending state should not trigger handler again',
+  );
+
+  drawer.update({ phase: 'idle' });
+  await flush();
+  assert.equal(recheckButton?.disabled, false);
 
   drawer.setOpen(false);
   await flush();

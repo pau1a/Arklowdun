@@ -35,7 +35,7 @@ import { emit } from "./store/events";
 import { runViewCleanups } from "./utils/viewLifecycle";
 import { initTheme } from "@ui/ThemeToggle";
 import { getStartupWindow } from "@lib/ipc/startup";
-import { ensureDbHealthReport } from "./services/dbHealth";
+import { ensureDbHealthReport, recheckDbHealth } from "./services/dbHealth";
 
 const appWindow = getStartupWindow();
 
@@ -181,12 +181,21 @@ function syncDbHealthUi(
 function ensureDbHealthUi(content: ContentInstance): DbHealthUiContext {
   if (dbHealthUi) return dbHealthUi;
 
+  const handleRecheck = async () => {
+    try {
+      await recheckDbHealth();
+    } catch (error) {
+      console.error("Failed to re-run database health check", error);
+    }
+  };
+
   const drawer = createDbHealthDrawer({
     open: false,
     phase: "idle",
     report: null,
     error: null,
     lastUpdated: null,
+    onRecheck: handleRecheck,
   });
 
   const banner = createDbHealthBanner({

@@ -49,6 +49,9 @@ test.describe('Database health banner', () => {
     const drawer = page.locator('[data-ui="db-health-drawer"]');
     await expect(drawer).toBeVisible();
     await expect(drawer).toContainText('Needs attention');
+    await expect(
+      drawer.getByRole('button', { name: 'Re-run health check' }),
+    ).toBeEnabled();
     await expect(drawer).toContainText('missing household id');
 
     await drawer.getByRole('button', { name: 'Close' }).click();

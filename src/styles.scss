@@ -2037,6 +2037,20 @@ mark.search-hit {
   gap: var(--space-2);
 }
 
+.db-health-drawer__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.db-health-drawer__controls .btn,
+.db-health-drawer__recheck,
+.db-health-drawer__close {
+  white-space: nowrap;
+}
+
 .db-health-drawer__heading {
   display: flex;
   flex-direction: column;
