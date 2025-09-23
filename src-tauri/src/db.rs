@@ -7,10 +7,13 @@ use std::fmt;
 use std::fs::{self, File};
 use std::future::Future;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::str::FromStr;
 use tauri::{AppHandle, Manager};
+
+#[path = "db/health.rs"]
+pub mod health;
 
 #[allow(dead_code)]
 pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
@@ -103,8 +106,7 @@ where
 }
 
 // TXN: domain=OUT OF SCOPE tables=PRAGMA
-#[allow(dead_code)]
-pub async fn open_sqlite_pool(app: &AppHandle) -> Result<Pool<Sqlite>> {
+pub async fn open_sqlite_pool(app: &AppHandle) -> Result<(Pool<Sqlite>, PathBuf)> {
     let app_dir = app
         .path()
         .app_data_dir()
@@ -153,7 +155,7 @@ pub async fn open_sqlite_pool(app: &AppHandle) -> Result<Pool<Sqlite>> {
 
     log_effective_pragmas(&pool).await;
 
-    Ok(pool)
+    Ok((pool, db_path))
 }
 
 #[allow(dead_code)]

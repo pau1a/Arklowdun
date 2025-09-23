@@ -20,7 +20,10 @@ use tracing_subscriber::{
 };
 use ts_rs::TS;
 
-use crate::state::AppState;
+use crate::{
+    db::health::{DbHealthReport, DbHealthStatus},
+    state::AppState,
+};
 
 const FILES_INDEX_VERSION: i64 = 1;
 
@@ -1147,6 +1150,45 @@ async fn db_has_pet_columns(state: State<'_, AppState>) -> AppResult<bool> {
     .await
 }
 
+#[tauri::command(rename = "db.getHealthReport")]
+async fn db_get_health_report(state: State<'_, AppState>) -> AppResult<DbHealthReport> {
+    let report = state
+        .db_health
+        .lock()
+        .expect("db health cache poisoned")
+        .clone();
+    Ok(report)
+}
+
+#[tauri::command(rename = "db.recheck")]
+async fn db_recheck(state: State<'_, AppState>) -> AppResult<DbHealthReport> {
+    let pool = state.pool.clone();
+    let db_path = state.db_path.clone();
+    let cache = state.db_health.clone();
+    dispatch_async_app_result(move || {
+        let db_path = db_path.clone();
+        let cache = cache.clone();
+        async move {
+            let report = crate::db::health::run_health_checks(&pool, &db_path)
+                .await
+                .map_err(|err| AppError::from(err).with_context("operation", "db.recheck"))?;
+            if matches!(report.status, DbHealthStatus::Ok) {
+                tracing::info!(target: "arklowdun", "[DB_HEALTH_OK]");
+            } else {
+                tracing::warn!(
+                    target: "arklowdun",
+                    event = "db_health_failed",
+                    status = ?report.status
+                );
+            }
+            let mut guard = cache.lock().expect("db health cache poisoned");
+            *guard = report.clone();
+            Ok(report)
+        }
+    })
+    .await
+}
+
 /// Return the set of column names for a given table.
 async fn table_columns(pool: &sqlx::SqlitePool, table: &str) -> std::collections::HashSet<String> {
     let mut out = std::collections::HashSet::new();
@@ -1857,7 +1899,8 @@ pub fn run() {
                 );
             }
             #[allow(clippy::needless_borrow)]
-            let pool = tauri::async_runtime::block_on(crate::db::open_sqlite_pool(&handle))?;
+            let (pool, db_path) =
+                tauri::async_runtime::block_on(crate::db::open_sqlite_pool(&handle))?;
             // ORDER MATTERS: 1) apply schema; 2) ensure idx; 3) refuse missing UTC; 4) refuse legacy cols.
             tauri::async_runtime::block_on(crate::db::apply_migrations(&pool))?;
             tauri::async_runtime::block_on(crate::migration_guard::ensure_events_indexes(&pool))
@@ -1870,13 +1913,29 @@ pub fn run() {
                 crate::migration_guard::enforce_events_legacy_columns_removed(&pool),
             )
             .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
+            let health_report = tauri::async_runtime::block_on(
+                crate::db::health::run_health_checks(&pool, &db_path),
+            )?;
+            if matches!(health_report.status, DbHealthStatus::Ok) {
+                tracing::info!(target: "arklowdun", "[DB_HEALTH_OK]");
+            } else {
+                tracing::warn!(
+                    target: "arklowdun",
+                    event = "db_health_failed",
+                    status = ?health_report.status
+                );
+            }
             let hh = tauri::async_runtime::block_on(crate::household::default_household_id(&pool))?;
+            let db_health = Arc::new(Mutex::new(health_report));
+            let db_path = Arc::new(db_path);
             app.manage(crate::state::AppState {
                 pool: pool.clone(),
                 default_household_id: Arc::new(Mutex::new(hh)),
                 backfill: Arc::new(Mutex::new(
                     crate::events_tz_backfill::BackfillCoordinator::new(),
                 )),
+                db_health,
+                db_path,
             });
             Ok(())
         })
@@ -1890,7 +1949,9 @@ pub fn run() {
             db_has_files_index,
             db_files_index_ready,
             db_has_vehicle_columns,
-            db_has_pet_columns
+            db_has_pet_columns,
+            db_get_health_report,
+            db_recheck
         ])
         .run(tauri::generate_context!("tauri.conf.json5"))
         .unwrap_or_else(|e| {
