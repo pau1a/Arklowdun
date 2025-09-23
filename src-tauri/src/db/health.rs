@@ -15,6 +15,8 @@ const EXPECTED_JOURNAL_MODE: &str = "wal";
 const EXPECTED_PAGE_SIZE: i64 = 4096;
 const WAL_HEADER_MAGIC: &[u8; 4] = b"WAL\0";
 
+pub const STORAGE_SANITY_HEAL_NOTE: &str = "wal header healed after checkpoint";
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DbHealthStatus {
@@ -263,7 +265,7 @@ async fn run_storage_sanity(conn: &mut PoolConnection<Sqlite>, db_path: &Path) -
         }
     }
 
-    let wal_message = match page_size {
+    match page_size {
         Ok(size) => {
             if size != EXPECTED_PAGE_SIZE {
                 check.passed = false;
@@ -273,20 +275,64 @@ async fn run_storage_sanity(conn: &mut PoolConnection<Sqlite>, db_path: &Path) -
             } else {
                 messages.push(format!("page_size={size}"));
             }
-            Some(inspect_wal_file(db_path, size))
+
+            let mut wal_outcome = inspect_wal_file(db_path, size);
+            let mut heal_summary: Option<WalHealSummary> = None;
+            let mut wal_checkpoint_error: Option<String> = None;
+
+            if !wal_outcome.passed && wal_outcome.healable {
+                messages.push(format!("wal anomaly detected: {}", wal_outcome.details));
+                match attempt_wal_self_heal(conn).await {
+                    Ok(summary) => {
+                        if let Some(ref full_error) = summary.full_error {
+                            messages.push(format!(
+                                "wal checkpoint FULL failed: {full_error}; applied TRUNCATE fallback"
+                            ));
+                        }
+                        wal_outcome = inspect_wal_file(db_path, size);
+                        heal_summary = Some(summary);
+                    }
+                    Err(err) => {
+                        wal_checkpoint_error = Some(format!("wal checkpoint repair failed: {err}"));
+                    }
+                }
+            } else if !wal_outcome.passed {
+                check.passed = false;
+            }
+
+            if let Some(error) = wal_checkpoint_error {
+                messages.push(error);
+                check.passed = false;
+            }
+
+            let final_message = if let Some(summary) = heal_summary.as_ref() {
+                let method = summary.method();
+                if wal_outcome.passed {
+                    format!(
+                        "{STORAGE_SANITY_HEAL_NOTE} ({method}); final wal state: {}",
+                        wal_outcome.details
+                    )
+                } else {
+                    check.passed = false;
+                    format!(
+                        "wal anomaly persists after checkpoint ({method}); final wal state: {}",
+                        wal_outcome.details
+                    )
+                }
+            } else {
+                wal_outcome.details.clone()
+            };
+
+            messages.push(final_message);
+
+            if !wal_outcome.passed {
+                check.passed = false;
+            }
         }
         Err(err) => {
             check.passed = false;
             messages.push(format!("page_size query failed: {err}"));
-            None
         }
-    };
-
-    if let Some(wal_outcome) = wal_message {
-        if !wal_outcome.passed {
-            check.passed = false;
-        }
-        messages.push(wal_outcome.details);
     }
 
     check.duration_ms = start.elapsed().as_millis() as u64;
@@ -299,6 +345,63 @@ async fn run_storage_sanity(conn: &mut PoolConnection<Sqlite>, db_path: &Path) -
 struct WalOutcome {
     passed: bool,
     details: String,
+    healable: bool,
+}
+
+#[derive(Clone)]
+struct WalHealSummary {
+    kind: WalHealKind,
+    full_error: Option<String>,
+}
+
+impl WalHealSummary {
+    fn method(&self) -> &'static str {
+        match self.kind {
+            WalHealKind::Full => "FULL",
+            WalHealKind::FullThenTruncate => "FULL+TRUNCATE",
+            WalHealKind::TruncateAfterFullError => "TRUNCATE (after FULL error)",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum WalHealKind {
+    Full,
+    FullThenTruncate,
+    TruncateAfterFullError,
+}
+
+async fn attempt_wal_self_heal(conn: &mut PoolConnection<Sqlite>) -> Result<WalHealSummary> {
+    match sqlx::query_as::<_, (i64, i64, i64)>("PRAGMA wal_checkpoint(FULL);")
+        .fetch_one(conn.as_mut())
+        .await
+    {
+        Ok((_, frames_after_full, _)) => {
+            if frames_after_full > 0 {
+                sqlx::query_as::<_, (i64, i64, i64)>("PRAGMA wal_checkpoint(TRUNCATE);")
+                    .fetch_one(conn.as_mut())
+                    .await?;
+                Ok(WalHealSummary {
+                    kind: WalHealKind::FullThenTruncate,
+                    full_error: None,
+                })
+            } else {
+                Ok(WalHealSummary {
+                    kind: WalHealKind::Full,
+                    full_error: None,
+                })
+            }
+        }
+        Err(err) => {
+            sqlx::query_as::<_, (i64, i64, i64)>("PRAGMA wal_checkpoint(TRUNCATE);")
+                .fetch_one(conn.as_mut())
+                .await?;
+            Ok(WalHealSummary {
+                kind: WalHealKind::TruncateAfterFullError,
+                full_error: Some(err.to_string()),
+            })
+        }
+    }
 }
 
 fn inspect_wal_file(db_path: &Path, page_size: i64) -> WalOutcome {
@@ -307,10 +410,12 @@ fn inspect_wal_file(db_path: &Path, page_size: i64) -> WalOutcome {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => WalOutcome {
             passed: true,
             details: "wal=absent".to_string(),
+            healable: false,
         },
         Err(err) => WalOutcome {
             passed: false,
             details: format!("wal metadata error: {err}"),
+            healable: false,
         },
         Ok(meta) => {
             let len = meta.len();
@@ -318,12 +423,14 @@ fn inspect_wal_file(db_path: &Path, page_size: i64) -> WalOutcome {
                 return WalOutcome {
                     passed: true,
                     details: "wal=empty".to_string(),
+                    healable: false,
                 };
             }
             if len < 32 {
                 return WalOutcome {
                     passed: false,
                     details: format!("wal too small: {len} bytes"),
+                    healable: true,
                 };
             }
 
@@ -332,6 +439,7 @@ fn inspect_wal_file(db_path: &Path, page_size: i64) -> WalOutcome {
                 return WalOutcome {
                     passed: false,
                     details: format!("wal read error: {err}"),
+                    healable: false,
                 };
             }
 
@@ -339,6 +447,7 @@ fn inspect_wal_file(db_path: &Path, page_size: i64) -> WalOutcome {
                 return WalOutcome {
                     passed: false,
                     details: "wal magic header mismatch".to_string(),
+                    healable: true,
                 };
             }
 
@@ -354,6 +463,7 @@ fn inspect_wal_file(db_path: &Path, page_size: i64) -> WalOutcome {
                     details: format!(
                         "wal page size mismatch: expected {page_size}, header {wal_page_size}"
                     ),
+                    healable: false,
                 };
             }
 
@@ -363,12 +473,14 @@ fn inspect_wal_file(db_path: &Path, page_size: i64) -> WalOutcome {
                 return WalOutcome {
                     passed: false,
                     details: format!("wal size misaligned: len={len}, frame_size={frame_size}"),
+                    healable: true,
                 };
             }
             let frames = payload / frame_size;
             WalOutcome {
                 passed: true,
                 details: format!("wal frames={frames}"),
+                healable: false,
             }
         }
     }

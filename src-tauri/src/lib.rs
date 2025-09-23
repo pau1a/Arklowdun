@@ -21,7 +21,7 @@ use tracing_subscriber::{
 use ts_rs::TS;
 
 use crate::{
-    db::health::{DbHealthReport, DbHealthStatus},
+    db::health::{DbHealthReport, DbHealthStatus, STORAGE_SANITY_HEAL_NOTE},
     state::AppState,
 };
 
@@ -1176,21 +1176,42 @@ async fn db_recheck(state: State<'_, AppState>) -> AppResult<DbHealthReport> {
             let report = crate::db::health::run_health_checks(&pool, &db_path)
                 .await
                 .map_err(|err| AppError::from(err).with_context("operation", "db_recheck"))?;
-            if matches!(report.status, DbHealthStatus::Ok) {
-                tracing::info!(target: "arklowdun", "[DB_HEALTH_OK]");
-            } else {
-                tracing::warn!(
-                    target: "arklowdun",
-                    event = "db_health_failed",
-                    status = ?report.status
-                );
-            }
+            log_db_health(&report);
             let mut guard = cache.lock().expect("db health cache poisoned");
             *guard = report.clone();
             Ok(report)
         }
     })
     .await
+}
+
+fn log_db_health(report: &DbHealthReport) {
+    if matches!(report.status, DbHealthStatus::Ok) {
+        if storage_sanity_was_healed(report) {
+            tracing::info!(
+                target: "arklowdun",
+                "[DB_HEALTH_OK] storage_sanity healed after checkpoint"
+            );
+        } else {
+            tracing::info!(target: "arklowdun", "[DB_HEALTH_OK]");
+        }
+    } else {
+        tracing::warn!(
+            target: "arklowdun",
+            event = "db_health_failed",
+            status = ?report.status
+        );
+    }
+}
+
+fn storage_sanity_was_healed(report: &DbHealthReport) -> bool {
+    report
+        .checks
+        .iter()
+        .find(|check| check.name == "storage_sanity")
+        .and_then(|check| check.details.as_deref())
+        .map(|details| details.contains(STORAGE_SANITY_HEAL_NOTE))
+        .unwrap_or(false)
 }
 
 /// Return the set of column names for a given table.
@@ -1920,15 +1941,7 @@ pub fn run() {
             let health_report = tauri::async_runtime::block_on(
                 crate::db::health::run_health_checks(&pool, &db_path),
             )?;
-            if matches!(health_report.status, DbHealthStatus::Ok) {
-                tracing::info!(target: "arklowdun", "[DB_HEALTH_OK]");
-            } else {
-                tracing::warn!(
-                    target: "arklowdun",
-                    event = "db_health_failed",
-                    status = ?health_report.status
-                );
-            }
+            log_db_health(&health_report);
             let hh = tauri::async_runtime::block_on(crate::household::default_household_id(&pool))?;
             let db_health = Arc::new(Mutex::new(health_report));
             let db_path = Arc::new(db_path);
@@ -2141,8 +2154,8 @@ mod db_health_command_tests {
         assert_eq!(initial.status, cached_report.status);
         assert_eq!(initial.schema_hash, cached_report.schema_hash);
 
-        let response = get_ipc_response(&window, invoke_request("db_recheck"))
-            .expect("db_recheck succeeds");
+        let response =
+            get_ipc_response(&window, invoke_request("db_recheck")).expect("db_recheck succeeds");
         let refreshed: DbHealthReport = response
             .deserialize()
             .expect("deserialize refreshed report");

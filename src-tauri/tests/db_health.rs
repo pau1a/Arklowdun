@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use arklowdun_lib::db::health::{run_health_checks, DbHealthStatus};
+use arklowdun_lib::db::health::{run_health_checks, DbHealthStatus, STORAGE_SANITY_HEAL_NOTE};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::SqlitePool;
 use tempfile::tempdir;
@@ -80,7 +80,7 @@ async fn foreign_key_violations_are_reported() {
 }
 
 #[tokio::test]
-async fn junk_wal_file_is_detected() {
+async fn junk_wal_file_is_healed_when_possible() {
     let dir = tempdir().expect("temp dir");
     let db_path = dir.path().join("wal.sqlite3");
     let pool = open_pool(&db_path).await;
@@ -92,13 +92,18 @@ async fn junk_wal_file_is_detected() {
     let report = run_health_checks(&pool, &db_path)
         .await
         .expect("health check succeeds");
-    assert_eq!(report.status, DbHealthStatus::Error);
+    assert_eq!(report.status, DbHealthStatus::Ok);
     let storage = report
         .checks
         .iter()
         .find(|c| c.name == "storage_sanity")
         .expect("storage check present");
-    assert!(!storage.passed);
+    assert!(storage.passed);
+    let details = storage.details.as_deref().expect("storage details present");
+    assert!(
+        details.contains(STORAGE_SANITY_HEAL_NOTE),
+        "expected heal note in storage_sanity details, got {details}"
+    );
 }
 
 #[tokio::test]
