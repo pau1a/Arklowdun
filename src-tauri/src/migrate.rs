@@ -164,7 +164,7 @@ async fn column_exists(
     );
     Ok(sqlx::query_scalar::<_, i64>(&q)
         .bind(col)
-        .fetch_optional(&mut *conn)
+        .fetch_optional(conn)
         .await?
         .is_some())
 }
@@ -212,7 +212,7 @@ async fn should_skip_stmt(conn: &mut SqliteConnection, stmt: &str) -> anyhow::Re
         let exists: Option<i64> =
             sqlx::query_scalar("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?")
                 .bind(&table)
-                .fetch_optional(&mut *conn)
+                .fetch_optional(conn)
                 .await?;
         if exists.is_none() {
             return Ok(true);
