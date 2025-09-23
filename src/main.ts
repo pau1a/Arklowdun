@@ -24,11 +24,18 @@ import { defaultHouseholdId } from "./db/household";
 import { log } from "./utils/logger";
 import { initCommandPalette } from "@ui/CommandPalette";
 import { initKeyboardMap } from "@ui/keys";
-import { actions, type AppPane } from "./store";
+import createDbHealthBanner, {
+  type DbHealthBannerElement,
+} from "@ui/DbHealthBanner";
+import createDbHealthDrawer, {
+  type DbHealthDrawerInstance,
+} from "@ui/DbHealthDrawer";
+import { actions, subscribe, selectors, type AppPane } from "./store";
 import { emit } from "./store/events";
 import { runViewCleanups } from "./utils/viewLifecycle";
 import { initTheme } from "@ui/ThemeToggle";
 import { getStartupWindow } from "@lib/ipc/startup";
+import { ensureDbHealthReport, recheckDbHealth } from "./services/dbHealth";
 
 const appWindow = getStartupWindow();
 
@@ -42,10 +49,18 @@ interface LayoutContext {
   toolbar: ToolbarInstance;
 }
 
+interface DbHealthUiContext {
+  banner: DbHealthBannerElement;
+  drawer: DbHealthDrawerInstance;
+  unsubscribe: () => void;
+}
+
 let layoutContext: LayoutContext | null = null;
 let layoutMounted = false;
 let currentRouteId: AppPane | null = null;
 let renderSequence = 0;
+let dbHealthUi: DbHealthUiContext | null = null;
+const numberFormatter = new Intl.NumberFormat();
 
 function toSidebarItem(route: RouteDefinition, section: "hub" | "primary"): SidebarItemConfig {
   const display = route.display;
@@ -83,6 +98,125 @@ function toFooterItem(route: RouteDefinition): FooterItemConfig {
   };
 }
 
+type DbHealthState = ReturnType<(typeof selectors)['db']['health']>;
+
+function formatDbHealthTimestamp(
+  value: string | number | null | undefined,
+): string | null {
+  if (value === null || value === undefined) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString();
+}
+
+function syncDbHealthUi(
+  health: DbHealthState,
+  banner: DbHealthBannerElement,
+  drawer: DbHealthDrawerInstance,
+  host: HTMLElement,
+): void {
+  const { phase, report, error, lastUpdated } = health;
+  const isPending = phase === "pending";
+  const hasReport = report !== null;
+  const isUnhealthy = report?.status === "error";
+  const hasError = phase === "error";
+
+  const shouldShowBanner = isPending || isUnhealthy || hasError;
+
+  let message: string | null = null;
+  if (isPending) {
+    message = hasReport
+      ? "Re-checking database health…"
+      : "Checking database health…";
+  } else if (hasError) {
+    message = error?.message ?? "Database health report unavailable.";
+  } else if (isUnhealthy) {
+    message = "Database health issues detected.";
+  } else {
+    message = "Database is healthy";
+  }
+
+  const descriptionParts: string[] = [];
+  const generatedLabel = formatDbHealthTimestamp(report?.generated_at ?? null);
+  if (generatedLabel) {
+    descriptionParts.push(`Generated ${generatedLabel}`);
+  }
+  const updatedLabel = formatDbHealthTimestamp(lastUpdated ?? null);
+  if (updatedLabel) {
+    descriptionParts.push(`Last updated ${updatedLabel}`);
+  }
+  if (isUnhealthy && report?.offenders?.length) {
+    descriptionParts.push(
+      `${numberFormatter.format(report.offenders.length)} violation(s) detected`,
+    );
+  }
+  if (hasError && error?.code) {
+    descriptionParts.push(error.code);
+  }
+
+  const description = descriptionParts.join(" • ");
+
+  host.hidden = !shouldShowBanner;
+  host.classList.toggle("is-hidden", !shouldShowBanner);
+  banner.update({
+    state: isPending
+      ? "running"
+      : isUnhealthy || hasError
+        ? "unhealthy"
+        : "healthy",
+    message,
+    description,
+    showSpinner: isPending,
+    hidden: !shouldShowBanner,
+  });
+
+  drawer.update({
+    phase,
+    report,
+    error: hasError ? error ?? null : null,
+    lastUpdated: lastUpdated ?? null,
+  });
+}
+
+function ensureDbHealthUi(content: ContentInstance): DbHealthUiContext {
+  if (dbHealthUi) return dbHealthUi;
+
+  const handleRecheck = async () => {
+    try {
+      await recheckDbHealth();
+    } catch (error) {
+      console.error("Failed to re-run database health check", error);
+    }
+  };
+
+  const drawer = createDbHealthDrawer({
+    open: false,
+    phase: "idle",
+    report: null,
+    error: null,
+    lastUpdated: null,
+    onRecheck: handleRecheck,
+  });
+
+  const banner = createDbHealthBanner({
+    state: "healthy",
+    hidden: true,
+    showSpinner: false,
+    onViewDetails: () => {
+      drawer.setOpen(true);
+    },
+  });
+
+  content.bannerHost.appendChild(banner);
+
+  const unsubscribe = subscribe(selectors.db.health, (health) => {
+    syncDbHealthUi(health, banner, drawer, content.bannerHost);
+  });
+
+  dbHealthUi = { banner, drawer, unsubscribe };
+  return dbHealthUi;
+}
+
 function ensureLayout(): LayoutContext {
   if (!layoutContext) {
     const sidebar = Sidebar({
@@ -100,6 +234,8 @@ function ensureLayout(): LayoutContext {
   if (!ctx) {
     throw new Error("Layout failed to initialise");
   }
+
+  ensureDbHealthUi(ctx.content);
 
   if (!layoutMounted) {
     ctx.page.mount();
@@ -128,7 +264,7 @@ async function renderApp({ route }: { route: RouteDefinition }) {
   }
 
   const sequence = ++renderSequence;
-  const container = context.content.element;
+  const container = context.content.view;
 
   actions.setActivePane(route.id);
   runViewCleanups(container);
@@ -263,6 +399,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
   void (async () => {
     await handleRouteChange();
+    void ensureDbHealthReport();
     const palette = initCommandPalette();
     initKeyboardMap({
       openCommandPalette: () => {
@@ -277,6 +414,10 @@ window.addEventListener("DOMContentLoaded", () => {
       setupDynamicMinSize();
     });
   })();
+});
+
+window.addEventListener("beforeunload", () => {
+  dbHealthUi?.unsubscribe?.();
 });
 
 // minimal debug handle without ts-expect-error

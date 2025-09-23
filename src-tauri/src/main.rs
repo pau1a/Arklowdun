@@ -7,6 +7,7 @@ use std::process;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
+use sqlx::ConnectOptions;
 use sqlx::SqlitePool;
 use sqlx::ConnectOptions;
 

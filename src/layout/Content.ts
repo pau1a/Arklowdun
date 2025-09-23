@@ -1,5 +1,7 @@
 export interface ContentInstance {
   element: HTMLElement;
+  bannerHost: HTMLElement;
+  view: HTMLElement;
 }
 
 export function Content(): ContentInstance {
@@ -7,6 +9,17 @@ export function Content(): ContentInstance {
   main.id = "view";
   main.className = "container";
   main.setAttribute("role", "main");
-  return { element: main };
+
+  const bannerHost = document.createElement("div");
+  bannerHost.className = "container__banner";
+  bannerHost.dataset.slot = "db-health-banner";
+  bannerHost.hidden = true;
+
+  const view = document.createElement("div");
+  view.className = "container__view";
+
+  main.append(bannerHost, view);
+
+  return { element: main, bannerHost, view };
 }
 

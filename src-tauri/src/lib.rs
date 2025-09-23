@@ -21,7 +21,7 @@ use tracing_subscriber::{
 use ts_rs::TS;
 
 use crate::{
-    db::health::{DbHealthReport, DbHealthStatus},
+    db::health::{DbHealthReport, DbHealthStatus, STORAGE_SANITY_HEAL_NOTE},
     state::AppState,
 };
 
@@ -1150,7 +1150,9 @@ async fn db_has_pet_columns(state: State<'_, AppState>) -> AppResult<bool> {
     .await
 }
 
-#[tauri::command(rename = "db.getHealthReport")]
+/// Surface the cached database health report over IPC using the
+/// `db_get_health_report` command string consumed by the frontend.
+#[tauri::command]
 async fn db_get_health_report(state: State<'_, AppState>) -> AppResult<DbHealthReport> {
     let report = state
         .db_health
@@ -1160,7 +1162,9 @@ async fn db_get_health_report(state: State<'_, AppState>) -> AppResult<DbHealthR
     Ok(report)
 }
 
-#[tauri::command(rename = "db.recheck")]
+/// Re-run the database health checks and return the fresh report via the
+/// `db_recheck` IPC command used by the UI.
+#[tauri::command]
 async fn db_recheck(state: State<'_, AppState>) -> AppResult<DbHealthReport> {
     let pool = state.pool.clone();
     let db_path = state.db_path.clone();
@@ -1171,22 +1175,43 @@ async fn db_recheck(state: State<'_, AppState>) -> AppResult<DbHealthReport> {
         async move {
             let report = crate::db::health::run_health_checks(&pool, &db_path)
                 .await
-                .map_err(|err| AppError::from(err).with_context("operation", "db.recheck"))?;
-            if matches!(report.status, DbHealthStatus::Ok) {
-                tracing::info!(target: "arklowdun", "[DB_HEALTH_OK]");
-            } else {
-                tracing::warn!(
-                    target: "arklowdun",
-                    event = "db_health_failed",
-                    status = ?report.status
-                );
-            }
+                .map_err(|err| AppError::from(err).with_context("operation", "db_recheck"))?;
+            log_db_health(&report);
             let mut guard = cache.lock().expect("db health cache poisoned");
             *guard = report.clone();
             Ok(report)
         }
     })
     .await
+}
+
+fn log_db_health(report: &DbHealthReport) {
+    if matches!(report.status, DbHealthStatus::Ok) {
+        if storage_sanity_was_healed(report) {
+            tracing::info!(
+                target: "arklowdun",
+                "[DB_HEALTH_OK] storage_sanity healed after checkpoint"
+            );
+        } else {
+            tracing::info!(target: "arklowdun", "[DB_HEALTH_OK]");
+        }
+    } else {
+        tracing::warn!(
+            target: "arklowdun",
+            event = "db_health_failed",
+            status = ?report.status
+        );
+    }
+}
+
+fn storage_sanity_was_healed(report: &DbHealthReport) -> bool {
+    report
+        .checks
+        .iter()
+        .find(|check| check.name == "storage_sanity")
+        .and_then(|check| check.details.as_deref())
+        .map(|details| details.contains(STORAGE_SANITY_HEAL_NOTE))
+        .unwrap_or(false)
 }
 
 /// Return the set of column names for a given table.
@@ -1916,15 +1941,7 @@ pub fn run() {
             let health_report = tauri::async_runtime::block_on(
                 crate::db::health::run_health_checks(&pool, &db_path),
             )?;
-            if matches!(health_report.status, DbHealthStatus::Ok) {
-                tracing::info!(target: "arklowdun", "[DB_HEALTH_OK]");
-            } else {
-                tracing::warn!(
-                    target: "arklowdun",
-                    event = "db_health_failed",
-                    status = ?health_report.status
-                );
-            }
+            log_db_health(&health_report);
             let hh = tauri::async_runtime::block_on(crate::household::default_household_id(&pool))?;
             let db_health = Arc::new(Mutex::new(health_report));
             let db_path = Arc::new(db_path);
@@ -1950,6 +1967,7 @@ pub fn run() {
             db_files_index_ready,
             db_has_vehicle_columns,
             db_has_pet_columns,
+            // Database health IPC commands consumed by the frontend shell.
             db_get_health_report,
             db_recheck
         ])
@@ -2040,5 +2058,114 @@ mod search_tests {
     #[test]
     fn like_escape_escapes_wildcards() {
         assert_eq!(like_escape("50%_\\test"), "50\\%\\_\\\\test");
+    }
+}
+
+#[cfg(test)]
+mod db_health_command_tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    use log::LevelFilter;
+    use sqlx::sqlite::{
+        SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
+    };
+    use sqlx::ConnectOptions;
+    use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
+    use tauri::webview::InvokeRequest;
+    use tempfile::tempdir;
+    use tokio::runtime::Runtime;
+
+    fn invoke_request(cmd: &str) -> InvokeRequest {
+        InvokeRequest {
+            cmd: cmd.into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: "http://tauri.localhost".parse().expect("valid url"),
+            body: tauri::ipc::InvokeBody::default(),
+            headers: Default::default(),
+            invoke_key: INVOKE_KEY.to_string(),
+        }
+    }
+
+    #[test]
+    fn db_health_commands_are_exposed_over_ipc() {
+        let dir = tempdir().expect("temp dir");
+        let db_path = dir.path().join("health.sqlite3");
+
+        let runtime = Runtime::new().expect("create runtime");
+        let (pool, cached_report) = runtime.block_on(async {
+            let mut options = SqliteConnectOptions::new()
+                .filename(&db_path)
+                .create_if_missing(true)
+                .journal_mode(SqliteJournalMode::Wal)
+                .synchronous(SqliteSynchronous::Full)
+                .foreign_keys(true);
+            options.log_statements(LevelFilter::Off);
+            let pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(options)
+                .await
+                .expect("connect sqlite");
+            sqlx::query("PRAGMA busy_timeout = 5000;")
+                .execute(&pool)
+                .await
+                .expect("set busy timeout");
+            sqlx::query("PRAGMA wal_autocheckpoint = 1000;")
+                .execute(&pool)
+                .await
+                .expect("set wal autocheckpoint");
+            crate::db::apply_migrations(&pool)
+                .await
+                .expect("apply migrations");
+            let report = crate::db::health::run_health_checks(&pool, &db_path)
+                .await
+                .expect("initial health report");
+            (pool, report)
+        });
+        drop(runtime);
+
+        let app_state = crate::state::AppState {
+            pool: pool.clone(),
+            default_household_id: Arc::new(Mutex::new(String::from("test-household"))),
+            backfill: Arc::new(Mutex::new(
+                crate::events_tz_backfill::BackfillCoordinator::new(),
+            )),
+            db_health: Arc::new(Mutex::new(cached_report.clone())),
+            db_path: Arc::new(db_path.clone()),
+        };
+
+        let app = mock_builder()
+            .manage(app_state)
+            .invoke_handler(tauri::generate_handler![
+                super::db_get_health_report,
+                super::db_recheck
+            ])
+            .build(mock_context(noop_assets()))
+            .expect("build tauri app");
+
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("create window");
+
+        let response = get_ipc_response(&window, invoke_request("db_get_health_report"))
+            .expect("db_get_health_report returns");
+        let initial: DbHealthReport = response.deserialize().expect("deserialize initial report");
+        assert_eq!(initial.status, cached_report.status);
+        assert_eq!(initial.schema_hash, cached_report.schema_hash);
+
+        let response =
+            get_ipc_response(&window, invoke_request("db_recheck")).expect("db_recheck succeeds");
+        let refreshed: DbHealthReport = response
+            .deserialize()
+            .expect("deserialize refreshed report");
+        assert_eq!(refreshed.status, DbHealthStatus::Ok);
+        assert!(!refreshed.generated_at.is_empty());
+
+        let response = get_ipc_response(&window, invoke_request("db_get_health_report"))
+            .expect("db_get_health_report after recheck");
+        let cached_after: DbHealthReport =
+            response.deserialize().expect("deserialize cached report");
+        assert_eq!(cached_after.generated_at, refreshed.generated_at);
     }
 }
