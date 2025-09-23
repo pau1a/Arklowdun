@@ -2042,3 +2042,112 @@ mod search_tests {
         assert_eq!(like_escape("50%_\\test"), "50\\%\\_\\\\test");
     }
 }
+
+#[cfg(test)]
+mod db_health_command_tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    use log::LevelFilter;
+    use sqlx::sqlite::{
+        SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
+    };
+    use sqlx::ConnectOptions;
+    use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
+    use tauri::webview::InvokeRequest;
+    use tempfile::tempdir;
+    use tokio::runtime::Runtime;
+
+    fn invoke_request(cmd: &str) -> InvokeRequest {
+        InvokeRequest {
+            cmd: cmd.into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: "http://tauri.localhost".parse().expect("valid url"),
+            body: tauri::ipc::InvokeBody::default(),
+            headers: Default::default(),
+            invoke_key: INVOKE_KEY.to_string(),
+        }
+    }
+
+    #[test]
+    fn db_health_commands_are_exposed_over_ipc() {
+        let dir = tempdir().expect("temp dir");
+        let db_path = dir.path().join("health.sqlite3");
+
+        let runtime = Runtime::new().expect("create runtime");
+        let (pool, cached_report) = runtime.block_on(async {
+            let mut options = SqliteConnectOptions::new()
+                .filename(&db_path)
+                .create_if_missing(true)
+                .journal_mode(SqliteJournalMode::Wal)
+                .synchronous(SqliteSynchronous::Full)
+                .foreign_keys(true);
+            options.log_statements(LevelFilter::Off);
+            let pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(options)
+                .await
+                .expect("connect sqlite");
+            sqlx::query("PRAGMA busy_timeout = 5000;")
+                .execute(&pool)
+                .await
+                .expect("set busy timeout");
+            sqlx::query("PRAGMA wal_autocheckpoint = 1000;")
+                .execute(&pool)
+                .await
+                .expect("set wal autocheckpoint");
+            crate::db::apply_migrations(&pool)
+                .await
+                .expect("apply migrations");
+            let report = crate::db::health::run_health_checks(&pool, &db_path)
+                .await
+                .expect("initial health report");
+            (pool, report)
+        });
+        drop(runtime);
+
+        let app_state = crate::state::AppState {
+            pool: pool.clone(),
+            default_household_id: Arc::new(Mutex::new(String::from("test-household"))),
+            backfill: Arc::new(Mutex::new(
+                crate::events_tz_backfill::BackfillCoordinator::new(),
+            )),
+            db_health: Arc::new(Mutex::new(cached_report.clone())),
+            db_path: Arc::new(db_path.clone()),
+        };
+
+        let app = mock_builder()
+            .manage(app_state)
+            .invoke_handler(tauri::generate_handler![
+                super::db_get_health_report,
+                super::db_recheck
+            ])
+            .build(mock_context(noop_assets()))
+            .expect("build tauri app");
+
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("create window");
+
+        let response = get_ipc_response(&window, invoke_request("db.getHealthReport"))
+            .expect("db.getHealthReport returns");
+        let initial: DbHealthReport = response.deserialize().expect("deserialize initial report");
+        assert_eq!(initial.status, cached_report.status);
+        assert_eq!(initial.schema_hash, cached_report.schema_hash);
+
+        let response =
+            get_ipc_response(&window, invoke_request("db.recheck")).expect("db.recheck succeeds");
+        let refreshed: DbHealthReport = response
+            .deserialize()
+            .expect("deserialize refreshed report");
+        assert_eq!(refreshed.status, DbHealthStatus::Ok);
+        assert!(!refreshed.generated_at.is_empty());
+
+        let response = get_ipc_response(&window, invoke_request("db.getHealthReport"))
+            .expect("db.getHealthReport after recheck");
+        let cached_after: DbHealthReport =
+            response.deserialize().expect("deserialize cached report");
+        assert_eq!(cached_after.generated_at, refreshed.generated_at);
+    }
+}
