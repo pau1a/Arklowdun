@@ -117,7 +117,7 @@ async fn run_quick_check(conn: &mut PoolConnection<Sqlite>) -> DbHealthCheck {
     };
 
     match sqlx::query_scalar::<_, String>("PRAGMA quick_check;")
-        .fetch_one(&mut *conn)
+        .fetch_one(conn.as_mut())
         .await
     {
         Ok(result) => {
@@ -146,7 +146,7 @@ async fn run_integrity_check(conn: &mut PoolConnection<Sqlite>) -> DbHealthCheck
     };
 
     match sqlx::query_scalar::<_, String>("PRAGMA integrity_check(1);")
-        .fetch_one(&mut *conn)
+        .fetch_one(conn.as_mut())
         .await
     {
         Ok(result) => {
@@ -175,7 +175,7 @@ async fn run_foreign_key_check(conn: &mut PoolConnection<Sqlite>) -> ForeignKeyC
     };
 
     let rows = sqlx::query("PRAGMA foreign_key_check;")
-        .fetch_all(&mut *conn)
+        .fetch_all(conn.as_mut())
         .await;
 
     let mut offenders = Vec::new();
@@ -240,10 +240,10 @@ async fn run_storage_sanity(conn: &mut PoolConnection<Sqlite>, db_path: &Path) -
     let mut messages: Vec<String> = Vec::new();
 
     let journal_mode = sqlx::query_scalar::<_, String>("PRAGMA journal_mode;")
-        .fetch_one(&mut *conn)
+        .fetch_one(conn.as_mut())
         .await;
     let page_size = sqlx::query_scalar::<_, i64>("PRAGMA page_size;")
-        .fetch_one(&mut *conn)
+        .fetch_one(conn.as_mut())
         .await;
 
     match journal_mode {
@@ -384,7 +384,7 @@ async fn compute_schema_hash(conn: &mut PoolConnection<Sqlite>) -> Result<String
     let rows = sqlx::query(
         "SELECT type, name, tbl_name, sql FROM sqlite_master\n         WHERE type IN ('table','index','trigger','view')\n         ORDER BY type, name",
     )
-    .fetch_all(&mut *conn)
+    .fetch_all(conn.as_mut())
     .await?;
 
     let mut hasher = Sha256::new();

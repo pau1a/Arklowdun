@@ -42,17 +42,17 @@ async fn foreign_key_violations_are_reported() {
     {
         let mut conn = pool.acquire().await.expect("acquire connection");
         sqlx::query("CREATE TABLE parent(id INTEGER PRIMARY KEY);")
-            .execute(&mut conn)
+            .execute(conn.as_mut())
             .await
             .expect("create parent");
         sqlx::query(
             "CREATE TABLE child(id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parent(id));",
         )
-        .execute(&mut conn)
+        .execute(conn.as_mut())
         .await
         .expect("create child");
         sqlx::query("INSERT INTO child(id, parent_id) VALUES (1, 999);")
-            .execute(&mut conn)
+            .execute(conn.as_mut())
             .await
             .expect("insert violating row");
     }
@@ -113,15 +113,15 @@ async fn page_size_mismatch_is_flagged() {
             .expect("init pool");
         let mut conn = pool.acquire().await.expect("acquire connection");
         sqlx::query("PRAGMA page_size=2048;")
-            .execute(&mut conn)
+            .execute(conn.as_mut())
             .await
             .expect("set page size");
         sqlx::query("VACUUM;")
-            .execute(&mut conn)
+            .execute(conn.as_mut())
             .await
             .expect("vacuum to apply page size");
         sqlx::query("CREATE TABLE t(id INTEGER PRIMARY KEY);")
-            .execute(&mut conn)
+            .execute(conn.as_mut())
             .await
             .expect("create table");
     }
