@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { DbHealthReport } from "@bindings/DbHealthReport";
 import type { AppError } from "@bindings/AppError";
+import { actions } from "@store/index";
 
 const FALLBACK_CODE = "APP/UNKNOWN";
 
@@ -53,13 +55,27 @@ export function normalizeError(error: unknown): AppError {
   return { code: FALLBACK_CODE, message: String(error), context: undefined };
 }
 
+const DB_HEALTH_COMMANDS = new Set(["db.getHealthReport", "db.recheck"]);
+
 export async function call<T>(
   cmd: string,
   args?: Record<string, unknown>,
 ): Promise<T> {
+  const trackDbHealth = DB_HEALTH_COMMANDS.has(cmd);
+  if (trackDbHealth) {
+    actions.db.health.beginCheck();
+  }
   try {
-    return await invoke<T>(cmd, args);
+    const result = await invoke<T>(cmd, args);
+    if (trackDbHealth) {
+      actions.db.health.receive(result as unknown as DbHealthReport);
+    }
+    return result;
   } catch (err) {
-    throw normalizeError(err);
+    const normalized = normalizeError(err);
+    if (trackDbHealth) {
+      actions.db.health.fail(normalized);
+    }
+    throw normalized;
   }
 }

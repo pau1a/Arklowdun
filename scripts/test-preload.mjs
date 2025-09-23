@@ -11,6 +11,7 @@ const TSCONFIG = join(PROJECT, 'tsconfig.json');
 // Make ts-node fast & deterministic under Node 22
 process.env.TS_NODE_TRANSPILE_ONLY = '1';
 process.env.TS_NODE_PROJECT = TSCONFIG;
+process.env.TS_NODE_SKIP_IGNORE = '1';
 
 // Avoid double registration across worker threads
 if (!globalThis.__TS_NODE_REGISTERED__) {

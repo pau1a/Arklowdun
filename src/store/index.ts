@@ -1,6 +1,7 @@
 import type { FsEntryLite as FsEntry } from "./types";
 import type { Note } from "@features/notes";
 import type { Event } from "../models";
+import type { DbHealthReport } from "@bindings/DbHealthReport";
 import type {
   FilesUpdatedPayload,
   EventsUpdatedPayload,
@@ -27,7 +28,23 @@ export type AppPane =
   | "settings"
   | "manage";
 
-export type AppError = { id: string; message: string; code?: string };
+export type AppError = {
+  message: string;
+  code?: string;
+  id?: string;
+  context?: Record<string, string>;
+  crash_id?: string;
+  cause?: unknown;
+};
+
+export type DbHealthPhase = "idle" | "pending" | "error";
+
+export interface DbHealthState {
+  phase: DbHealthPhase;
+  report: DbHealthReport | null;
+  lastUpdated: number | null;
+  error: AppError | null;
+}
 
 export type FileSnapshot = {
   items: FsEntry[];
@@ -65,6 +82,9 @@ export interface AppState {
   notes: {
     snapshot: NotesSnapshot | null;
   };
+  db: {
+    health: DbHealthState;
+  };
 }
 
 const initialState: AppState = {
@@ -76,6 +96,14 @@ const initialState: AppState = {
   files: { snapshot: null },
   events: { snapshot: null },
   notes: { snapshot: null },
+  db: {
+    health: {
+      phase: "idle",
+      report: null,
+      lastUpdated: null,
+      error: null,
+    },
+  },
 };
 
 let state: AppState = initialState;
@@ -182,6 +210,13 @@ export const selectors = {
     items: (s: AppState) => s.notes.snapshot?.items ?? [],
     ts: (s: AppState) => s.notes.snapshot?.ts ?? 0,
   },
+  db: {
+    health: (s: AppState) => s.db.health,
+    healthReport: (s: AppState) => s.db.health.report,
+    healthPhase: (s: AppState) => s.db.health.phase,
+    healthError: (s: AppState) => s.db.health.error,
+    healthLastUpdated: (s: AppState) => s.db.health.lastUpdated,
+  },
 };
 
 function withFilesSnapshot(snapshot: FileSnapshot | null): AppState {
@@ -218,6 +253,31 @@ function withNotesSnapshot(snapshot: NotesSnapshot | null): AppState {
       snapshot: setSnapshot(state.notes.snapshot, cloned),
     },
   };
+}
+
+function setDbHealthState(
+  updater: (current: DbHealthState) => DbHealthState,
+): void {
+  setState((prev) => {
+    const next = updater(prev.db.health);
+    const current = prev.db.health;
+    if (
+      next === current ||
+      (next.phase === current.phase &&
+        next.report === current.report &&
+        next.lastUpdated === current.lastUpdated &&
+        next.error === current.error)
+    ) {
+      return prev;
+    }
+    return {
+      ...prev,
+      db: {
+        ...prev.db,
+        health: next,
+      },
+    };
+  });
 }
 
 export const actions = {
@@ -269,6 +329,39 @@ export const actions = {
       const count = snapshot?.items.length ?? 0;
       const ts = snapshot?.ts ?? Date.now();
       return { count, ts };
+    },
+  },
+  db: {
+    health: {
+      beginCheck(): void {
+        setDbHealthState((current) => {
+          if (current.phase === "pending" && current.error === null) {
+            return current;
+          }
+          return { ...current, phase: "pending", error: null };
+        });
+      },
+      receive(report: DbHealthReport): void {
+        setDbHealthState(() => ({
+          phase: "idle",
+          report,
+          lastUpdated: Date.now(),
+          error: null,
+        }));
+      },
+      fail(error: AppError): void {
+        setDbHealthState((current) => ({
+          ...current,
+          phase: "error",
+          error,
+        }));
+      },
+      clearError(): void {
+        setDbHealthState((current) => {
+          if (!current.error) return current;
+          return { ...current, error: null };
+        });
+      },
     },
   },
 };
