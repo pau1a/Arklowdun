@@ -2095,13 +2095,13 @@ mod db_health_command_tests {
 
         let runtime = Runtime::new().expect("create runtime");
         let (pool, cached_report) = runtime.block_on(async {
-            let mut options = SqliteConnectOptions::new()
+            let options = SqliteConnectOptions::new()
                 .filename(&db_path)
                 .create_if_missing(true)
                 .journal_mode(SqliteJournalMode::Wal)
                 .synchronous(SqliteSynchronous::Full)
-                .foreign_keys(true);
-            options.log_statements(LevelFilter::Off);
+                .foreign_keys(true)
+                .log_statements(LevelFilter::Off);
             let pool = SqlitePoolOptions::new()
                 .max_connections(1)
                 .connect_with(options)

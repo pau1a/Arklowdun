@@ -9,7 +9,6 @@ use clap::{Parser, Subcommand};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::ConnectOptions;
 use sqlx::SqlitePool;
-use sqlx::ConnectOptions;
 
 use arklowdun_lib::db::health::{DbHealthReport, DbHealthStatus};
 
