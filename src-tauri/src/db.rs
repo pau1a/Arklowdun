@@ -142,10 +142,10 @@ pub async fn open_sqlite_pool(app: &AppHandle) -> Result<(Pool<Sqlite>, PathBuf)
         .after_connect(|conn, _| {
             Box::pin(async move {
                 sqlx::query("PRAGMA busy_timeout = 5000;")
-                    .execute(conn.as_mut())
+                    .execute(conn)
                     .await?;
                 sqlx::query("PRAGMA wal_autocheckpoint = 1000;")
-                    .execute(conn.as_mut())
+                    .execute(conn)
                     .await?;
                 Ok::<_, sqlx::Error>(())
             })
