@@ -86,13 +86,13 @@ fn file_sink_writes_json_lines() {
     };
 
     // event should exist and be a string
-    assert!(get(&line, "event").is_some());
-    assert_eq!(get(&line, "level").as_deref(), Some("INFO"));
+    assert!(get(line, "event").is_some());
+    assert_eq!(get(line, "level").as_deref(), Some("INFO"));
     assert!(
         line.get("timestamp").and_then(|v| v.as_str()).is_some(),
         "timestamp must be present"
     );
-    let target_binding = get(&line, "target");
+    let target_binding = get(line, "target");
     let target = target_binding.as_deref();
     assert!(
         matches!(target, Some("arklowdun") | Some("arklowdun_lib")),

@@ -74,8 +74,7 @@ mod tests {
     #[test]
     fn dispatch_with_fence_catches_str_panic() {
         let err = dispatch_with_fence(|| panic!("boom"))
-            .err()
-            .expect("should convert panic into error");
+            .expect_err("should convert panic into error");
         assert_eq!(err.code(), "RUNTIME/PANIC");
         assert_eq!(err.message(), "boom");
         assert!(err.crash_id().is_some());
@@ -85,8 +84,7 @@ mod tests {
     #[test]
     fn dispatch_with_fence_catches_string_panic() {
         let err = dispatch_with_fence(|| panic_any(String::from("kaboom")))
-            .err()
-            .expect("should convert panic into error");
+            .expect_err("should convert panic into error");
         assert_eq!(err.code(), "RUNTIME/PANIC");
         assert_eq!(err.message(), "kaboom");
         assert!(err.crash_id().is_some());
@@ -96,8 +94,7 @@ mod tests {
     #[test]
     fn dispatch_with_fence_catches_non_string_panic() {
         let err = dispatch_with_fence(|| panic_any(123_i32))
-            .err()
-            .expect("should convert panic into error");
+            .expect_err("should convert panic into error");
         assert_eq!(err.code(), "RUNTIME/PANIC");
         assert_eq!(err.message(), "unknown panic payload");
         assert!(err.crash_id().is_some());

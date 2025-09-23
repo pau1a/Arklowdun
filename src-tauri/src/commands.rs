@@ -179,6 +179,7 @@ fn parse_timezone_name(value: Option<&Value>) -> Option<String> {
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn canonicalize_timezone(tz_name: Option<String>) -> AppResult<(ChronoTz, String)> {
     let name = tz_name.unwrap_or_else(|| "UTC".to_string());
     let parsed: ChronoTz = name.parse().map_err(|_| {
@@ -189,6 +190,7 @@ fn canonicalize_timezone(tz_name: Option<String>) -> AppResult<(ChronoTz, String
     Ok((parsed, parsed.name().to_string()))
 }
 
+#[allow(clippy::result_large_err)]
 fn local_wallclock_ms(ms: i64, tz: &ChronoTz, field: &'static str) -> AppResult<i64> {
     DateTime::<Utc>::from_timestamp_millis(ms)
         .ok_or_else(|| {
@@ -207,6 +209,7 @@ fn local_wallclock_ms(ms: i64, tz: &ChronoTz, field: &'static str) -> AppResult<
         })
 }
 
+#[allow(clippy::result_large_err)]
 fn derive_event_wall_clock_for_create(data: &mut Map<String, Value>) -> AppResult<()> {
     let legacy_start_present = data.contains_key("start_at");
     let legacy_end_present = data.contains_key("end_at");
@@ -399,6 +402,7 @@ fn value_to_i64(value: Option<&Value>) -> Option<i64> {
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn optional_string(value: Option<&Value>, field: &'static str) -> AppResult<Option<String>> {
     match value {
         None | Some(Value::Null) => Ok(None),
@@ -416,6 +420,7 @@ fn optional_string(value: Option<&Value>, field: &'static str) -> AppResult<Opti
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn parse_exdate_input(value: &Value) -> AppResult<Vec<String>> {
     match value {
         Value::Null => Ok(Vec::new()),
@@ -446,6 +451,7 @@ fn parse_exdate_input(value: &Value) -> AppResult<Vec<String>> {
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn ensure_start_datetime(start_ms: Option<i64>, event_id: &str) -> AppResult<DateTime<Utc>> {
     let ms = start_ms.ok_or_else(|| {
         TimeErrorCode::ExdateOutOfRange
@@ -462,6 +468,7 @@ fn ensure_start_datetime(start_ms: Option<i64>, event_id: &str) -> AppResult<Dat
     })
 }
 
+#[allow(clippy::result_large_err)]
 fn normalize_event_exdates_for_create(data: &mut Map<String, Value>) -> AppResult<()> {
     let Some(exdates_value) = data.get("exdates").cloned() else {
         return Ok(());

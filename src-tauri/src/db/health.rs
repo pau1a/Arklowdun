@@ -498,15 +498,15 @@ async fn compute_schema_hash(conn: &mut PoolConnection<Sqlite>) -> Result<String
         let sql: Option<String> = row.try_get("sql").ok();
 
         hasher.update(ty.as_bytes());
-        hasher.update(&[0]);
+        hasher.update([0]);
         hasher.update(name.as_bytes());
-        hasher.update(&[0]);
+        hasher.update([0]);
         hasher.update(tbl.as_bytes());
-        hasher.update(&[0]);
+        hasher.update([0]);
         if let Some(sql) = sql {
             hasher.update(sql.as_bytes());
         }
-        hasher.update(&[0]);
+        hasher.update([0]);
     }
 
     Ok(format!("{:x}", hasher.finalize()))

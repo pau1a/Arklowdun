@@ -2,7 +2,8 @@ use arklowdun_lib::{commands, time_shadow};
 use once_cell::sync::Lazy;
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 use std::io::Write;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex as StdMutex};
+use tokio::sync::Mutex;
 use tracing::subscriber;
 use tracing_subscriber::EnvFilter;
 
@@ -235,10 +236,10 @@ async fn unsupported_rrule_surfaces_taxonomy_error() {
 
 #[tokio::test]
 async fn shadow_read_counts_discrepancies_and_logs() {
-    let _guard = ENV_GUARD.lock().unwrap();
+    let _env_guard = ENV_GUARD.lock().await;
     std::env::set_var("ARK_TIME_SHADOW_READ", "on");
 
-    let buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+    let buffer: Arc<StdMutex<Vec<u8>>> = Arc::new(StdMutex::new(Vec::new()));
     let writer = buffer.clone();
     let subscriber = tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::new("arklowdun=info"))
@@ -278,7 +279,7 @@ async fn shadow_read_counts_discrepancies_and_logs() {
 
 #[tokio::test]
 async fn shadow_read_disabled_skips_audit() {
-    let _guard = ENV_GUARD.lock().unwrap();
+    let _env_guard = ENV_GUARD.lock().await;
     std::env::set_var("ARK_TIME_SHADOW_READ", "off");
 
     let pool = setup_pool().await;
@@ -302,7 +303,7 @@ async fn shadow_read_disabled_skips_audit() {
     std::env::remove_var("ARK_TIME_SHADOW_READ");
 }
 
-struct BufferWriter(Arc<Mutex<Vec<u8>>>);
+struct BufferWriter(Arc<StdMutex<Vec<u8>>>);
 
 impl Write for BufferWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {

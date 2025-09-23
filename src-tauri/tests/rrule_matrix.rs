@@ -261,7 +261,7 @@ async fn seed_event(pool: &SqlitePool, scenario: &Scenario) -> Result<()> {
     sqlx::query(
         "INSERT INTO household (id, name, tz, created_at, updated_at, deleted_at) VALUES (?1, ?2, ?3, 0, 0, NULL)",
     )
-    .bind(&scenario.household_id())
+    .bind(scenario.household_id())
     .bind(format!("Fixture household {}", scenario.name))
     .bind(scenario.timezone)
     .execute(pool)
@@ -287,8 +287,8 @@ async fn seed_event(pool: &SqlitePool, scenario: &Scenario) -> Result<()> {
                 "INSERT INTO events (id, household_id, title, start_at, end_at, tz, start_at_utc, end_at_utc, rrule, exdates, reminder, created_at, updated_at, deleted_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, NULL, 0, 0, NULL)",
             )
-            .bind(&scenario.event_id())
-            .bind(&scenario.household_id())
+            .bind(scenario.event_id())
+            .bind(scenario.household_id())
             .bind(format!("Scenario {}", scenario.name))
             .bind(start_at)
             .bind(end_at)
@@ -304,8 +304,8 @@ async fn seed_event(pool: &SqlitePool, scenario: &Scenario) -> Result<()> {
                 "INSERT INTO events (id, household_id, title, start_at, tz, start_at_utc, end_at_utc, rrule, exdates, reminder, created_at, updated_at, deleted_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL, 0, 0, NULL)",
             )
-            .bind(&scenario.event_id())
-            .bind(&scenario.household_id())
+            .bind(scenario.event_id())
+            .bind(scenario.household_id())
             .bind(format!("Scenario {}", scenario.name))
             .bind(start_at)
             .bind(scenario.timezone)
@@ -320,8 +320,8 @@ async fn seed_event(pool: &SqlitePool, scenario: &Scenario) -> Result<()> {
                 "INSERT INTO events (id, household_id, title, end_at, tz, start_at_utc, end_at_utc, rrule, exdates, reminder, created_at, updated_at, deleted_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL, 0, 0, NULL)",
             )
-            .bind(&scenario.event_id())
-            .bind(&scenario.household_id())
+            .bind(scenario.event_id())
+            .bind(scenario.household_id())
             .bind(format!("Scenario {}", scenario.name))
             .bind(end_at)
             .bind(scenario.timezone)
@@ -336,8 +336,8 @@ async fn seed_event(pool: &SqlitePool, scenario: &Scenario) -> Result<()> {
                 "INSERT INTO events (id, household_id, title, tz, start_at_utc, end_at_utc, rrule, exdates, reminder, created_at, updated_at, deleted_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, NULL, 0, 0, NULL)",
             )
-            .bind(&scenario.event_id())
-            .bind(&scenario.household_id())
+            .bind(scenario.event_id())
+            .bind(scenario.household_id())
             .bind(format!("Scenario {}", scenario.name))
             .bind(scenario.timezone)
             .bind(start_at_utc)

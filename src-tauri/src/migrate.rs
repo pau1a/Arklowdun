@@ -44,6 +44,13 @@ fn create_index_regex() -> anyhow::Result<&'static Regex> {
         .map_err(|err| anyhow!("invalid create index regex: {err}"))
 }
 
+fn datetime_select_regex() -> anyhow::Result<&'static Regex> {
+    static SELECT_RE: OnceCell<Regex> = OnceCell::new();
+    SELECT_RE
+        .get_or_try_init(|| Regex::new(r"(?is)SELECT\s+id,\s*title,\s*datetime"))
+        .map_err(|err| anyhow!("invalid datetime select regex: {err}"))
+}
+
 fn preview(sql: &str) -> String {
     let one_line = sql.replace(['\n', '\t'], " ");
     let trimmed = one_line.trim();
@@ -365,8 +372,7 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
                 };
 
                 if src_col != "datetime" {
-                    let select_regex = Regex::new(r"(?is)SELECT\s+id,\s*title,\s*datetime")
-                        .context("compile datetime select regex")?;
+                    let select_regex = datetime_select_regex()?;
                     if select_regex.is_match(&stmt_to_run) {
                         stmt_to_run = select_regex
                             .replace(

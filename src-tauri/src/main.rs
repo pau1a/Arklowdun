@@ -107,10 +107,7 @@ fn print_report_table(report: &DbHealthReport) {
     println!("Generated at : {}", report.generated_at);
 
     println!("\nChecks:");
-    println!(
-        "{:<20} {:<7} {:>13}  {}",
-        "Check", "Passed", "Duration (ms)", "Details"
-    );
+    println!("{:<20} {:<7} {:>13}  Details", "Check", "Passed", "Duration (ms)");
     for check in &report.checks {
         let passed = if check.passed { "yes" } else { "no" };
         let details = check
@@ -128,7 +125,7 @@ fn print_report_table(report: &DbHealthReport) {
         println!("\nOffenders: none");
     } else {
         println!("\nOffenders:");
-        println!("{:<20} {:>10}  {}", "Table", "RowID", "Message");
+        println!("{:<20} {:>10}  Message", "Table", "RowID");
         for offender in &report.offenders {
             println!(
                 "{:<20} {:>10}  {}",
