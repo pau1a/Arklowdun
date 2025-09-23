@@ -1150,6 +1150,8 @@ async fn db_has_pet_columns(state: State<'_, AppState>) -> AppResult<bool> {
     .await
 }
 
+/// Surface the cached database health report over IPC using the
+/// `db.getHealthReport` command string consumed by the frontend.
 #[tauri::command(rename = "db.getHealthReport")]
 async fn db_get_health_report(state: State<'_, AppState>) -> AppResult<DbHealthReport> {
     let report = state
@@ -1160,6 +1162,8 @@ async fn db_get_health_report(state: State<'_, AppState>) -> AppResult<DbHealthR
     Ok(report)
 }
 
+/// Re-run the database health checks and return the fresh report via the
+/// `db.recheck` IPC command used by the UI.
 #[tauri::command(rename = "db.recheck")]
 async fn db_recheck(state: State<'_, AppState>) -> AppResult<DbHealthReport> {
     let pool = state.pool.clone();
@@ -1950,6 +1954,7 @@ pub fn run() {
             db_files_index_ready,
             db_has_vehicle_columns,
             db_has_pet_columns,
+            // Database health IPC commands consumed by the frontend shell.
             db_get_health_report,
             db_recheck
         ])
