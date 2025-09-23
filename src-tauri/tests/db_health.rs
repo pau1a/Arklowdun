@@ -51,10 +51,18 @@ async fn foreign_key_violations_are_reported() {
         .execute(conn.as_mut())
         .await
         .expect("create child");
+        sqlx::query("PRAGMA foreign_keys = OFF;")
+            .execute(conn.as_mut())
+            .await
+            .expect("disable foreign keys");
         sqlx::query("INSERT INTO child(id, parent_id) VALUES (1, 999);")
             .execute(conn.as_mut())
             .await
             .expect("insert violating row");
+        sqlx::query("PRAGMA foreign_keys = ON;")
+            .execute(conn.as_mut())
+            .await
+            .expect("re-enable foreign keys");
     }
 
     let report = run_health_checks(&pool, &db_path)
