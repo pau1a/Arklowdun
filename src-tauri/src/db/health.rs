@@ -357,7 +357,6 @@ struct WalHealSummary {
 impl WalHealSummary {
     fn method(&self) -> &'static str {
         match self.kind {
-            WalHealKind::Full => "FULL",
             WalHealKind::FullThenTruncate => "FULL+TRUNCATE",
             WalHealKind::TruncateAfterFullError => "TRUNCATE (after FULL error)",
         }
@@ -366,7 +365,6 @@ impl WalHealSummary {
 
 #[derive(Clone, Copy)]
 enum WalHealKind {
-    Full,
     FullThenTruncate,
     TruncateAfterFullError,
 }
@@ -376,21 +374,14 @@ async fn attempt_wal_self_heal(conn: &mut PoolConnection<Sqlite>) -> Result<WalH
         .fetch_one(conn.as_mut())
         .await
     {
-        Ok((_, frames_after_full, _)) => {
-            if frames_after_full > 0 {
-                sqlx::query_as::<_, (i64, i64, i64)>("PRAGMA wal_checkpoint(TRUNCATE);")
-                    .fetch_one(conn.as_mut())
-                    .await?;
-                Ok(WalHealSummary {
-                    kind: WalHealKind::FullThenTruncate,
-                    full_error: None,
-                })
-            } else {
-                Ok(WalHealSummary {
-                    kind: WalHealKind::Full,
-                    full_error: None,
-                })
-            }
+        Ok(_) => {
+            sqlx::query_as::<_, (i64, i64, i64)>("PRAGMA wal_checkpoint(TRUNCATE);")
+                .fetch_one(conn.as_mut())
+                .await?;
+            Ok(WalHealSummary {
+                kind: WalHealKind::FullThenTruncate,
+                full_error: None,
+            })
         }
         Err(err) => {
             sqlx::query_as::<_, (i64, i64, i64)>("PRAGMA wal_checkpoint(TRUNCATE);")
