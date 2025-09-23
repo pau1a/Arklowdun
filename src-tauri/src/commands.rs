@@ -20,11 +20,15 @@ struct EventRow {
     id: String,
     household_id: String,
     title: String,
-    start_at: i64,
-    end_at: Option<i64>,
+    #[sqlx(rename = "start_at")]
+    _start_at: i64,
+    #[sqlx(rename = "end_at")]
+    _end_at: Option<i64>,
     tz: Option<String>,
     start_at_utc: i64,
     end_at_utc: Option<i64>,
+    legacy_start_at: Option<i64>,
+    legacy_end_at: Option<i64>,
     rrule: Option<String>,
     exdates: Option<String>,
     reminder: Option<i64>,
@@ -52,6 +56,114 @@ impl From<&EventRow> for Event {
         }
     }
 }
+
+const EVENTS_QUERY_LEGACY_BOTH: &str = r#"
+        SELECT id,
+               household_id,
+               title,
+               start_at_utc AS start_at,
+               end_at_utc   AS end_at,
+               tz,
+               start_at_utc,
+               end_at_utc,
+               start_at     AS legacy_start_at,
+               end_at       AS legacy_end_at,
+               rrule,
+               exdates,
+               reminder,
+               created_at,
+               updated_at,
+               deleted_at
+          FROM events
+         WHERE household_id = ? AND deleted_at IS NULL
+           AND start_at_utc IS NOT NULL
+           AND (
+             (rrule IS NULL AND COALESCE(end_at_utc, start_at_utc) >= ? AND start_at_utc <= ?)
+             OR rrule IS NOT NULL
+           )
+         ORDER BY start_at_utc, id
+"#;
+
+const EVENTS_QUERY_LEGACY_START_ONLY: &str = r#"
+        SELECT id,
+               household_id,
+               title,
+               start_at_utc AS start_at,
+               end_at_utc   AS end_at,
+               tz,
+               start_at_utc,
+               end_at_utc,
+               start_at     AS legacy_start_at,
+               NULL         AS legacy_end_at,
+               rrule,
+               exdates,
+               reminder,
+               created_at,
+               updated_at,
+               deleted_at
+          FROM events
+         WHERE household_id = ? AND deleted_at IS NULL
+           AND start_at_utc IS NOT NULL
+           AND (
+             (rrule IS NULL AND COALESCE(end_at_utc, start_at_utc) >= ? AND start_at_utc <= ?)
+             OR rrule IS NOT NULL
+           )
+         ORDER BY start_at_utc, id
+"#;
+
+const EVENTS_QUERY_LEGACY_END_ONLY: &str = r#"
+        SELECT id,
+               household_id,
+               title,
+               start_at_utc AS start_at,
+               end_at_utc   AS end_at,
+               tz,
+               start_at_utc,
+               end_at_utc,
+               NULL         AS legacy_start_at,
+               end_at       AS legacy_end_at,
+               rrule,
+               exdates,
+               reminder,
+               created_at,
+               updated_at,
+               deleted_at
+          FROM events
+         WHERE household_id = ? AND deleted_at IS NULL
+           AND start_at_utc IS NOT NULL
+           AND (
+             (rrule IS NULL AND COALESCE(end_at_utc, start_at_utc) >= ? AND start_at_utc <= ?)
+             OR rrule IS NOT NULL
+           )
+         ORDER BY start_at_utc, id
+"#;
+
+const EVENTS_QUERY_LEGACY_NONE: &str = r#"
+        SELECT id,
+               household_id,
+               title,
+               start_at_utc AS start_at,
+               end_at_utc   AS end_at,
+               tz,
+               start_at_utc,
+               end_at_utc,
+               NULL         AS legacy_start_at,
+               NULL         AS legacy_end_at,
+               rrule,
+               exdates,
+               reminder,
+               created_at,
+               updated_at,
+               deleted_at
+          FROM events
+         WHERE household_id = ? AND deleted_at IS NULL
+           AND start_at_utc IS NOT NULL
+           AND (
+             (rrule IS NULL AND COALESCE(end_at_utc, start_at_utc) >= ? AND start_at_utc <= ?)
+             OR rrule IS NOT NULL
+           )
+         ORDER BY start_at_utc, id
+"#;
 
 fn parse_timezone_name(value: Option<&Value>) -> Option<String> {
     match value {
@@ -761,44 +873,39 @@ pub async fn events_list_range_command(
 ) -> AppResult<EventsListRangeResponse> {
     let hh = repo::require_household(household_id)
         .map_err(|err| AppError::from(err).with_context("operation", "events_list_range"))?;
-    let rows = sqlx::query_as::<_, EventRow>(
-        r#"
-        SELECT id,
-               household_id,
-               title,
-               start_at_utc AS start_at,
-               end_at_utc   AS end_at,
-               tz,
-               start_at_utc,
-               end_at_utc,
-               rrule,
-               exdates,
-               reminder,
-               created_at,
-               updated_at,
-               deleted_at
-        FROM events
-        WHERE household_id = ? AND deleted_at IS NULL
-          AND start_at_utc IS NOT NULL
-          AND (
-            (rrule IS NULL AND COALESCE(end_at_utc, start_at_utc) >= ? AND start_at_utc <= ?)
-            OR rrule IS NOT NULL
-          )
-        ORDER BY start_at_utc, id
-        "#,
+    let has_legacy_start = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM pragma_table_info('events') WHERE name='start_at'",
     )
-    .bind(hh)
-    .bind(start)
-    .bind(end)
-    .fetch_all(pool)
-    .await
-    .map_err(|err| {
-        AppError::from(err)
-            .with_context("operation", "events_list_range")
-            .with_context("household_id", household_id.to_string())
-            .with_context("start", start.to_string())
-            .with_context("end", end.to_string())
-    })?;
+    .fetch_optional(pool)
+    .await?
+    .is_some();
+    let has_legacy_end = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM pragma_table_info('events') WHERE name='end_at'",
+    )
+    .fetch_optional(pool)
+    .await?
+    .is_some();
+
+    let events_query = match (has_legacy_start, has_legacy_end) {
+        (true, true) => EVENTS_QUERY_LEGACY_BOTH,
+        (true, false) => EVENTS_QUERY_LEGACY_START_ONLY,
+        (false, true) => EVENTS_QUERY_LEGACY_END_ONLY,
+        (false, false) => EVENTS_QUERY_LEGACY_NONE,
+    };
+
+    let rows = sqlx::query_as::<_, EventRow>(events_query)
+        .bind(hh)
+        .bind(start)
+        .bind(end)
+        .fetch_all(pool)
+        .await
+        .map_err(|err| {
+            AppError::from(err)
+                .with_context("operation", "events_list_range")
+                .with_context("household_id", household_id.to_string())
+                .with_context("start", start.to_string())
+                .with_context("end", end.to_string())
+        })?;
 
     let mut shadow_audit = ShadowAudit::new();
 
@@ -824,8 +931,8 @@ pub async fn events_list_range_command(
             &row.id,
             &row.household_id,
             row.tz.as_deref(),
-            Some(row.start_at),
-            row.end_at,
+            row.legacy_start_at,
+            row.legacy_end_at,
             Some(row.start_at_utc),
             row.end_at_utc,
         );

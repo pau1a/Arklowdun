@@ -268,21 +268,85 @@ async fn seed_event(pool: &SqlitePool, scenario: &Scenario) -> Result<()> {
     .await
     .with_context(|| format!("insert household for {}", scenario.name))?;
 
-    sqlx::query(
-        "INSERT INTO events (id, household_id, title, start_at, end_at, tz, start_at_utc, end_at_utc, rrule, exdates, reminder, created_at, updated_at, deleted_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, NULL, 0, 0, NULL)",
+    let has_start = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM pragma_table_info('events') WHERE name='start_at'",
     )
-    .bind(&scenario.event_id())
-    .bind(&scenario.household_id())
-    .bind(format!("Scenario {}", scenario.name))
-    .bind(start_at)
-    .bind(end_at)
-    .bind(scenario.timezone)
-    .bind(start_at_utc)
-    .bind(end_at_utc)
-    .bind(scenario.rrule)
-    .execute(pool)
-    .await
+    .fetch_optional(pool)
+    .await?
+    .is_some();
+    let has_end = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM pragma_table_info('events') WHERE name='end_at'",
+    )
+    .fetch_optional(pool)
+    .await?
+    .is_some();
+
+    match (has_start, has_end) {
+        (true, true) => {
+            sqlx::query(
+                "INSERT INTO events (id, household_id, title, start_at, end_at, tz, start_at_utc, end_at_utc, rrule, exdates, reminder, created_at, updated_at, deleted_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, NULL, 0, 0, NULL)",
+            )
+            .bind(&scenario.event_id())
+            .bind(&scenario.household_id())
+            .bind(format!("Scenario {}", scenario.name))
+            .bind(start_at)
+            .bind(end_at)
+            .bind(scenario.timezone)
+            .bind(start_at_utc)
+            .bind(end_at_utc)
+            .bind(scenario.rrule)
+            .execute(pool)
+            .await
+        }
+        (true, false) => {
+            sqlx::query(
+                "INSERT INTO events (id, household_id, title, start_at, tz, start_at_utc, end_at_utc, rrule, exdates, reminder, created_at, updated_at, deleted_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL, 0, 0, NULL)",
+            )
+            .bind(&scenario.event_id())
+            .bind(&scenario.household_id())
+            .bind(format!("Scenario {}", scenario.name))
+            .bind(start_at)
+            .bind(scenario.timezone)
+            .bind(start_at_utc)
+            .bind(end_at_utc)
+            .bind(scenario.rrule)
+            .execute(pool)
+            .await
+        }
+        (false, true) => {
+            sqlx::query(
+                "INSERT INTO events (id, household_id, title, end_at, tz, start_at_utc, end_at_utc, rrule, exdates, reminder, created_at, updated_at, deleted_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL, 0, 0, NULL)",
+            )
+            .bind(&scenario.event_id())
+            .bind(&scenario.household_id())
+            .bind(format!("Scenario {}", scenario.name))
+            .bind(end_at)
+            .bind(scenario.timezone)
+            .bind(start_at_utc)
+            .bind(end_at_utc)
+            .bind(scenario.rrule)
+            .execute(pool)
+            .await
+        }
+        (false, false) => {
+            sqlx::query(
+                "INSERT INTO events (id, household_id, title, tz, start_at_utc, end_at_utc, rrule, exdates, reminder, created_at, updated_at, deleted_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, NULL, 0, 0, NULL)",
+            )
+            .bind(&scenario.event_id())
+            .bind(&scenario.household_id())
+            .bind(format!("Scenario {}", scenario.name))
+            .bind(scenario.timezone)
+            .bind(start_at_utc)
+            .bind(end_at_utc)
+            .bind(scenario.rrule)
+            .execute(pool)
+            .await
+        }
+    }
     .with_context(|| format!("insert event for {}", scenario.name))?;
 
     Ok(())

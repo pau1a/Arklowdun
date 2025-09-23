@@ -29,7 +29,6 @@ async fn migrate_fixture_sample_db() -> Result<()> {
         let stmt = stmt.trim();
         if stmt.is_empty()
             || stmt.starts_with("--")
-            || stmt.contains("schema_migrations")
             || stmt.eq_ignore_ascii_case("BEGIN TRANSACTION")
             || stmt.eq_ignore_ascii_case("COMMIT")
             || stmt.starts_with("PRAGMA")
@@ -76,10 +75,10 @@ async fn migrate_fixture_sample_db() -> Result<()> {
     }
 
     // event data preserved
-    let start_at: i64 = sqlx::query_scalar("SELECT start_at FROM events WHERE id='e1'")
+    let start_at_utc: i64 = sqlx::query_scalar("SELECT start_at_utc FROM events WHERE id='e1'")
         .fetch_one(&pool)
         .await?;
-    assert_eq!(start_at, 1000);
+    assert_eq!(start_at_utc, 1000);
 
     // bills positions dense 0-based
     let positions: Vec<i64> = sqlx::query_scalar(

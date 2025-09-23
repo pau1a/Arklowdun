@@ -1,5 +1,5 @@
 use anyhow::Result;
-use arklowdun_lib::{migrate, migration_guard};
+use arklowdun_lib::migration_guard;
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::SqlitePool;
 
@@ -11,9 +11,38 @@ async fn setup_pool() -> Result<SqlitePool> {
     sqlx::query("PRAGMA foreign_keys=ON;")
         .execute(&pool)
         .await?;
-    migrate::apply_migrations(&pool).await?;
     sqlx::query(
-        "INSERT INTO household (id, name, created_at, updated_at) VALUES ('hh', 'Household', 0, 0)",
+        "CREATE TABLE household (\
+             id TEXT PRIMARY KEY,\
+             name TEXT NOT NULL,\
+             created_at INTEGER NOT NULL,\
+             updated_at INTEGER NOT NULL,\
+             deleted_at INTEGER\
+         )",
+    )
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        "CREATE TABLE events (\
+             id TEXT PRIMARY KEY,\
+             title TEXT NOT NULL,\
+             start_at INTEGER,\
+             end_at INTEGER,\
+             start_at_utc INTEGER,\
+             end_at_utc INTEGER,\
+             tz TEXT,\
+             rrule TEXT,\
+             exdates TEXT,\
+             household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE,\
+             created_at INTEGER NOT NULL,\
+             updated_at INTEGER NOT NULL,\
+             deleted_at INTEGER\
+         )",
+    )
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO household (id, name, created_at, updated_at, deleted_at) VALUES ('hh', 'Household', 0, 0, NULL)",
     )
     .execute(&pool)
     .await?;
@@ -25,15 +54,15 @@ async fn guard_detects_pending_events() -> Result<()> {
     let pool = setup_pool().await?;
 
     sqlx::query(
-        "INSERT INTO events (id, title, start_at, household_id, created_at, updated_at)
-         VALUES ('evt', 'Test', 0, 'hh', 0, 0)",
+        "INSERT INTO events (id, title, start_at, start_at_utc, household_id, created_at, updated_at)
+         VALUES ('evt', 'Test', 0, NULL, 'hh', 0, 0)",
     )
     .execute(&pool)
     .await?;
 
     sqlx::query(
-        "INSERT INTO events (id, title, start_at, start_at_utc, end_at, household_id, created_at, updated_at)
-         VALUES ('evt_end', 'Test End', 0, 0, 60000, 'hh', 0, 0)",
+        "INSERT INTO events (id, title, start_at, start_at_utc, end_at, end_at_utc, household_id, created_at, updated_at)
+         VALUES ('evt_end', 'Test End', 0, 0, 60000, NULL, 'hh', 0, 0)",
     )
     .execute(&pool)
     .await?;
@@ -64,8 +93,8 @@ async fn guard_allows_clean_database() -> Result<()> {
     let pool = setup_pool().await?;
 
     sqlx::query(
-        "INSERT INTO events (id, title, start_at, start_at_utc, household_id, created_at, updated_at)
-         VALUES ('evt', 'Test', 0, 0, 'hh', 0, 0)",
+        "INSERT INTO events (id, title, start_at, start_at_utc, end_at, end_at_utc, household_id, created_at, updated_at)
+         VALUES ('evt', 'Test', 0, 0, NULL, NULL, 'hh', 0, 0)",
     )
     .execute(&pool)
     .await?;

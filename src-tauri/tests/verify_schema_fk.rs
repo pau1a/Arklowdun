@@ -1,6 +1,7 @@
 #![allow(clippy::expect_used)]
 
 use assert_cmd::prelude::*; // for Command::cargo_bin
+use std::path::Path;
 use std::process::Command;
 use tempfile::tempdir;
 
@@ -29,8 +30,17 @@ fn fk_audit_fails_before_0020() {
     assert!(status.success(), "migrate up to 0019 failed");
 
     // run verify_schema --strict-fk (should fail and print missing FKs)
+    let schema = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("schema.sql");
     let out = bin_cmd("verify_schema")
-        .args(["--db", db.to_str().unwrap(), "--strict-fk"])
+        .args([
+            "--db",
+            db.to_str().unwrap(),
+            "--strict-fk",
+            "--schema",
+            schema.to_str().unwrap(),
+        ])
         .output()
         .expect("spawn verify_schema");
 
@@ -57,8 +67,17 @@ fn fk_audit_passes_after_0020() {
     assert!(status.success(), "migrate up failed");
 
     // verify strict-fk should succeed (and print [] or nothing)
+    let schema = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("schema.sql");
     let out = bin_cmd("verify_schema")
-        .args(["--db", db.to_str().unwrap(), "--strict-fk"])
+        .args([
+            "--db",
+            db.to_str().unwrap(),
+            "--strict-fk",
+            "--schema",
+            schema.to_str().unwrap(),
+        ])
         .output()
         .expect("spawn verify_schema");
     assert!(

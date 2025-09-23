@@ -112,7 +112,7 @@ async fn migration_aborts_when_start_at_utc_missing() -> Result<()> {
         .expect_err("migration should fail when start_at_utc is NULL");
     assert_eq!(
         err.to_string(),
-        "Migration 0023 blocked: events.start_at_utc contains NULL values. Run the timezone backfill before dropping start_at/end_at."
+        "Migration 0023 blocked: 1 rows have NULL start_at_utc and 0 rows still rely on legacy end_at without end_at_utc. Run the timezone backfill before dropping start_at/end_at."
     );
 
     let columns = sqlx::query("PRAGMA table_info(events);")
@@ -146,7 +146,7 @@ async fn migration_aborts_when_end_at_utc_missing() -> Result<()> {
         .expect_err("migration should fail when end_at has no UTC value");
     assert_eq!(
         err.to_string(),
-        "Migration 0023 blocked: events.end_at_utc contains NULL values for rows that have legacy end_at. Run the timezone backfill before dropping start_at/end_at."
+        "Migration 0023 blocked: 0 rows have NULL start_at_utc and 1 rows still rely on legacy end_at without end_at_utc. Run the timezone backfill before dropping start_at/end_at."
     );
 
     let columns = sqlx::query("PRAGMA table_info(events);")

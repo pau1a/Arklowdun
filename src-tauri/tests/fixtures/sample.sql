@@ -16,6 +16,17 @@ INSERT INTO schema_migrations VALUES('0009_soft_delete_notes_shopping.up.sql',0)
 INSERT INTO schema_migrations VALUES('0010_notes_z_index.up.sql',0);
 INSERT INTO schema_migrations VALUES('0011_events_start_idx.up.sql',0);
 INSERT INTO schema_migrations VALUES('0012_household_add_tz.up.sql',0);
+INSERT INTO schema_migrations VALUES('0013_events_add_tz_and_utc.up.sql',0);
+INSERT INTO schema_migrations VALUES('0014_events_start_at_utc_index.up.sql',0);
+INSERT INTO schema_migrations VALUES('0015_vehicles_rework.up.sql',0);
+INSERT INTO schema_migrations VALUES('0016_idx_bills_household_due.up.sql',0);
+INSERT INTO schema_migrations VALUES('0017_events_add_rrule_exdates.up.sql',0);
+INSERT INTO schema_migrations VALUES('0018_search_indexes.up.sql',0);
+INSERT INTO schema_migrations VALUES('0019_files_index.up.sql',0);
+INSERT INTO schema_migrations VALUES('0020_files_index_fks.up.sql',0);
+INSERT INTO schema_migrations VALUES('0021_events_end_at_utc_index.up.sql',0);
+INSERT INTO schema_migrations VALUES('0022_shadow_read_audit.up.sql',0);
+INSERT INTO schema_migrations VALUES('0023_events_drop_legacy_time.up.sql',0);
 CREATE TABLE household (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -33,14 +44,31 @@ CREATE TABLE import_id_map (
 CREATE TABLE IF NOT EXISTS "events" (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
-  starts_at INTEGER NOT NULL,
   reminder INTEGER,
   household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  deleted_at INTEGER
+  deleted_at INTEGER,
+  tz TEXT,
+  start_at_utc INTEGER NOT NULL,
+  end_at_utc INTEGER,
+  rrule TEXT,
+  exdates TEXT
 );
-INSERT INTO events VALUES('e1','Old Event',1000,NULL,'h1',0,0,NULL);
+INSERT INTO events (
+  id,
+  title,
+  reminder,
+  household_id,
+  created_at,
+  updated_at,
+  deleted_at,
+  tz,
+  start_at_utc,
+  end_at_utc,
+  rrule,
+  exdates
+) VALUES ('e1','Old Event',NULL,'h1',0,0,NULL,'UTC',1000,NULL,NULL,NULL);
 CREATE TABLE IF NOT EXISTS "bills" (
   id TEXT PRIMARY KEY,
   amount INTEGER NOT NULL,
@@ -111,9 +139,33 @@ CREATE TABLE IF NOT EXISTS "vehicles" (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER,
-  position INTEGER NOT NULL DEFAULT 0
+  position INTEGER NOT NULL DEFAULT 0,
+  make TEXT,
+  model TEXT,
+  reg TEXT,
+  vin TEXT,
+  next_mot_due INTEGER,
+  next_service_due INTEGER
 );
-INSERT INTO vehicles VALUES('v1','Car',1000,2000,NULL,NULL,'h1',0,0,NULL,0);
+INSERT INTO vehicles (
+  id,
+  name,
+  mot_date,
+  service_date,
+  mot_reminder,
+  service_reminder,
+  household_id,
+  created_at,
+  updated_at,
+  deleted_at,
+  position,
+  make,
+  model,
+  reg,
+  vin,
+  next_mot_due,
+  next_service_due
+) VALUES ('v1','Car',1000,2000,NULL,NULL,'h1',0,0,NULL,0,NULL,NULL,NULL,NULL,NULL,NULL);
 CREATE TABLE IF NOT EXISTS "vehicle_maintenance" (
   id TEXT PRIMARY KEY,
   vehicle_id TEXT NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -201,11 +253,50 @@ CREATE TABLE shopping_items (
   updated_at   INTEGER NOT NULL DEFAULT 0,
   deleted_at   INTEGER
 );
+CREATE TABLE IF NOT EXISTS "files_index" (
+  id INTEGER PRIMARY KEY,
+  household_id TEXT NOT NULL,
+  file_id TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  updated_at_utc TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  score_hint INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (household_id, file_id),
+  FOREIGN KEY (household_id) REFERENCES household(id)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
+);
+CREATE TABLE IF NOT EXISTS "files_index_meta" (
+  household_id TEXT PRIMARY KEY,
+  last_built_at_utc TEXT NOT NULL,
+  source_row_count INTEGER NOT NULL,
+  source_max_updated_utc TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  FOREIGN KEY (household_id) REFERENCES household(id)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
+);
+CREATE TABLE shadow_read_audit (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    total_rows INTEGER NOT NULL DEFAULT 0,
+    discrepancies INTEGER NOT NULL DEFAULT 0,
+    last_event_id TEXT,
+    last_household_id TEXT,
+    last_tz TEXT,
+    last_legacy_start_ms INTEGER,
+    last_utc_start_ms INTEGER,
+    last_start_delta_ms INTEGER,
+    last_legacy_end_ms INTEGER,
+    last_utc_end_ms INTEGER,
+    last_end_delta_ms INTEGER,
+    last_observed_at_ms INTEGER
+);
 CREATE INDEX events_household_updated_idx ON events(household_id, updated_at);
 CREATE INDEX idx_events_household_active ON events(household_id, updated_at) WHERE deleted_at IS NULL;
 CREATE INDEX bills_household_updated_idx ON bills(household_id, updated_at);
 CREATE UNIQUE INDEX bills_household_position_idx ON bills(household_id, position) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX bills_household_file_idx ON bills(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
+CREATE INDEX idx_bills_household_due ON bills(household_id, due_date);
 CREATE INDEX policies_household_updated_idx ON policies(household_id, updated_at);
 CREATE UNIQUE INDEX policies_household_position_idx ON policies(household_id, position) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX policies_household_file_idx ON policies(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
@@ -215,7 +306,8 @@ CREATE UNIQUE INDEX property_documents_household_file_idx ON property_documents(
 CREATE INDEX inventory_items_household_updated_idx ON inventory_items(household_id, updated_at);
 CREATE UNIQUE INDEX inventory_items_household_position_idx ON inventory_items(household_id, position) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX inventory_items_household_file_idx ON inventory_items(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
-CREATE INDEX vehicles_household_updated_idx ON vehicles(household_id, updated_at);
+CREATE INDEX idx_vehicles_household_updated
+  ON vehicles(household_id, updated_at);
 CREATE UNIQUE INDEX vehicles_household_position_idx ON vehicles(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX vehicle_maintenance_household_updated_idx ON vehicle_maintenance(household_id, updated_at);
 CREATE INDEX vehicle_maintenance_vehicle_date_idx ON vehicle_maintenance(vehicle_id, date);
@@ -242,9 +334,12 @@ CREATE UNIQUE INDEX shopping_household_position_idx
   ON shopping_items(household_id, position)
   WHERE deleted_at IS NULL;
 CREATE INDEX notes_scope_z_idx ON notes(household_id, deleted_at, z, position);
-CREATE INDEX events_household_start_idx ON events(household_id, starts_at);
-CREATE VIEW notes_live AS
+CREATE INDEX events_household_start_at_utc_idx ON events(household_id, start_at_utc);
+CREATE INDEX events_household_end_at_utc_idx ON events(household_id, end_at_utc);
+CREATE INDEX idx_events_household_rrule ON events(household_id, rrule);
+CREATE INDEX idx_events_household_title ON events(household_id, title);
+CREATE VIEW IF NOT EXISTS notes_live AS
   SELECT * FROM notes WHERE deleted_at IS NULL;
-CREATE VIEW shopping_live AS
+CREATE VIEW IF NOT EXISTS shopping_live AS
   SELECT * FROM shopping_items WHERE deleted_at IS NULL;
 COMMIT;

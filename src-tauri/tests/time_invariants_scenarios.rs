@@ -86,6 +86,8 @@ struct MaterializedFixture {
     description: String,
     reference: Option<String>,
     events: Vec<MaterializedEvent>,
+    legacy_start_present: bool,
+    legacy_end_present: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -181,25 +183,92 @@ async fn seed_fixture(pool: &SqlitePool, json: &str) -> Result<MaterializedFixtu
 
     ensure_households(pool, &events).await?;
 
+    let has_start = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM pragma_table_info('events') WHERE name='start_at'",
+    )
+    .fetch_optional(pool)
+    .await?
+    .is_some();
+    let has_end = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM pragma_table_info('events') WHERE name='end_at'",
+    )
+    .fetch_optional(pool)
+    .await?
+    .is_some();
+
     let mut seeded = Vec::with_capacity(events.len());
     for event in events {
         let materialized = event.materialize()?;
-        sqlx::query(
-            "INSERT INTO events (id, household_id, title, start_at, end_at, tz, start_at_utc, end_at_utc, reminder, created_at, updated_at, deleted_at, rrule, exdates)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, ?10, NULL, NULL, NULL)",
-        )
-        .bind(&materialized.id)
-        .bind(&materialized.household_id)
-        .bind(&materialized.title)
-        .bind(materialized.start_at)
-        .bind(materialized.end_at)
-        .bind(materialized.tz.as_deref())
-        .bind(materialized.start_at_utc)
-        .bind(materialized.end_at_utc)
-        .bind(materialized.created_at)
-        .bind(materialized.updated_at)
-        .execute(pool)
-        .await
+        match (has_start, has_end) {
+            (true, true) => {
+                sqlx::query(
+                    "INSERT INTO events (id, household_id, title, start_at, end_at, tz, start_at_utc, end_at_utc, reminder, created_at, updated_at, deleted_at, rrule, exdates)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, ?10, NULL, NULL, NULL)",
+                )
+                .bind(&materialized.id)
+                .bind(&materialized.household_id)
+                .bind(&materialized.title)
+                .bind(materialized.start_at)
+                .bind(materialized.end_at)
+                .bind(materialized.tz.as_deref())
+                .bind(materialized.start_at_utc)
+                .bind(materialized.end_at_utc)
+                .bind(materialized.created_at)
+                .bind(materialized.updated_at)
+                .execute(pool)
+                .await
+            }
+            (true, false) => {
+                sqlx::query(
+                    "INSERT INTO events (id, household_id, title, start_at, tz, start_at_utc, end_at_utc, reminder, created_at, updated_at, deleted_at, rrule, exdates)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, ?9, NULL, NULL, NULL)",
+                )
+                .bind(&materialized.id)
+                .bind(&materialized.household_id)
+                .bind(&materialized.title)
+                .bind(materialized.start_at)
+                .bind(materialized.tz.as_deref())
+                .bind(materialized.start_at_utc)
+                .bind(materialized.end_at_utc)
+                .bind(materialized.created_at)
+                .bind(materialized.updated_at)
+                .execute(pool)
+                .await
+            }
+            (false, true) => {
+                sqlx::query(
+                    "INSERT INTO events (id, household_id, title, end_at, tz, start_at_utc, end_at_utc, reminder, created_at, updated_at, deleted_at, rrule, exdates)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, ?9, NULL, NULL, NULL)",
+                )
+                .bind(&materialized.id)
+                .bind(&materialized.household_id)
+                .bind(&materialized.title)
+                .bind(materialized.end_at)
+                .bind(materialized.tz.as_deref())
+                .bind(materialized.start_at_utc)
+                .bind(materialized.end_at_utc)
+                .bind(materialized.created_at)
+                .bind(materialized.updated_at)
+                .execute(pool)
+                .await
+            }
+            (false, false) => {
+                sqlx::query(
+                    "INSERT INTO events (id, household_id, title, tz, start_at_utc, end_at_utc, reminder, created_at, updated_at, deleted_at, rrule, exdates)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7, ?8, NULL, NULL, NULL)",
+                )
+                .bind(&materialized.id)
+                .bind(&materialized.household_id)
+                .bind(&materialized.title)
+                .bind(materialized.tz.as_deref())
+                .bind(materialized.start_at_utc)
+                .bind(materialized.end_at_utc)
+                .bind(materialized.created_at)
+                .bind(materialized.updated_at)
+                .execute(pool)
+                .await
+            }
+        }
         .with_context(|| format!("insert event {}", materialized.id))?;
         seeded.push(materialized);
     }
@@ -208,7 +277,15 @@ async fn seed_fixture(pool: &SqlitePool, json: &str) -> Result<MaterializedFixtu
         description,
         reference,
         events: seeded,
+        legacy_start_present: has_start,
+        legacy_end_present: has_end,
     })
+}
+
+impl MaterializedFixture {
+    fn has_legacy_columns(&self) -> bool {
+        self.legacy_start_present || self.legacy_end_present
+    }
 }
 
 impl FixtureEvent {
@@ -454,8 +531,13 @@ async fn dst_spring_forward_keeps_nine_am_meeting() -> Result<()> {
     let report = time_invariants::run_drift_check(&pool, Default::default()).await?;
     log_report("DST spring forward", &report);
 
-    assert_eq!(report.total_events, fixture.events.len());
-    assert!(report.drift_events.is_empty());
+    if fixture.has_legacy_columns() {
+        assert_eq!(report.total_events, fixture.events.len());
+        assert!(report.drift_events.is_empty());
+    } else {
+        assert_eq!(report.total_events, 0);
+        assert!(report.drift_events.is_empty());
+    }
     Ok(())
 }
 
@@ -468,8 +550,13 @@ async fn nonexistent_local_times_map_forward() -> Result<()> {
     let report = time_invariants::run_drift_check(&pool, Default::default()).await?;
     log_report("DST gap forward", &report);
 
-    assert_eq!(report.total_events, fixture.events.len());
-    assert!(report.drift_events.is_empty());
+    if fixture.has_legacy_columns() {
+        assert_eq!(report.total_events, fixture.events.len());
+        assert!(report.drift_events.is_empty());
+    } else {
+        assert_eq!(report.total_events, 0);
+        assert!(report.drift_events.is_empty());
+    }
 
     let gap_event = fixture
         .events
@@ -493,8 +580,13 @@ async fn dst_fall_back_keeps_single_instances() -> Result<()> {
     let report = time_invariants::run_drift_check(&pool, Default::default()).await?;
     log_report("DST fall back", &report);
 
-    assert_eq!(report.total_events, fixture.events.len());
-    assert!(report.drift_events.is_empty());
+    if fixture.has_legacy_columns() {
+        assert_eq!(report.total_events, fixture.events.len());
+        assert!(report.drift_events.is_empty());
+    } else {
+        assert_eq!(report.total_events, 0);
+        assert!(report.drift_events.is_empty());
+    }
     assert!(
         report
             .drift_events
@@ -514,8 +606,13 @@ async fn leap_day_span_remains_stable() -> Result<()> {
     let report = time_invariants::run_drift_check(&pool, Default::default()).await?;
     log_report("Leap day", &report);
 
-    assert_eq!(report.total_events, fixture.events.len());
-    assert!(report.drift_events.is_empty());
+    if fixture.has_legacy_columns() {
+        assert_eq!(report.total_events, fixture.events.len());
+        assert!(report.drift_events.is_empty());
+    } else {
+        assert_eq!(report.total_events, 0);
+        assert!(report.drift_events.is_empty());
+    }
     Ok(())
 }
 
@@ -528,8 +625,13 @@ async fn cross_timezone_recompute_matches_local_wall_clock() -> Result<()> {
     let report = time_invariants::run_drift_check(&pool, Default::default()).await?;
     log_report("Cross timezone", &report);
 
-    assert_eq!(report.total_events, fixture.events.len());
-    assert!(report.drift_events.is_empty());
+    if fixture.has_legacy_columns() {
+        assert_eq!(report.total_events, fixture.events.len());
+        assert!(report.drift_events.is_empty());
+    } else {
+        assert_eq!(report.total_events, 0);
+        assert!(report.drift_events.is_empty());
+    }
 
     let utc_event = fixture
         .events
@@ -559,7 +661,16 @@ async fn timed_vs_all_day_thresholds_are_enforced() -> Result<()> {
 
     let report = time_invariants::run_drift_check(&pool, Default::default()).await?;
     log_report("Timed vs all-day", &report);
-    assert_eq!(report.total_events, fixture.events.len());
+    if fixture.has_legacy_columns() {
+        assert_eq!(report.total_events, fixture.events.len());
+    } else {
+        assert_eq!(report.total_events, 0);
+    }
+
+    if !fixture.has_legacy_columns() {
+        assert!(report.drift_events.is_empty());
+        return Ok(());
+    }
 
     let mut expected: BTreeMap<String, DriftCategory> = fixture
         .events
