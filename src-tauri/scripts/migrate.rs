@@ -443,14 +443,14 @@ fn stmt_preview(s: &str) -> String {
 async fn ensure_events_utc_time_columns_clean(conn: &mut SqliteConnection) -> Result<()> {
     let missing_start_utc: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM events WHERE start_at_utc IS NULL")
-            .fetch_one(&mut *conn)
+            .fetch_one(conn)
             .await
             .context("precheck: count NULL start_at_utc values")?;
 
     let missing_end_utc: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM events WHERE end_at IS NOT NULL AND end_at_utc IS NULL",
     )
-    .fetch_one(&mut *conn)
+    .fetch_one(conn)
     .await
     .context("precheck: count legacy end_at rows missing end_at_utc")?;
 
