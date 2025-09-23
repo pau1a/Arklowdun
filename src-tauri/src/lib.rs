@@ -1151,8 +1151,8 @@ async fn db_has_pet_columns(state: State<'_, AppState>) -> AppResult<bool> {
 }
 
 /// Surface the cached database health report over IPC using the
-/// `db.getHealthReport` command string consumed by the frontend.
-#[tauri::command(rename = "db.getHealthReport")]
+/// `db_get_health_report` command string consumed by the frontend.
+#[tauri::command]
 async fn db_get_health_report(state: State<'_, AppState>) -> AppResult<DbHealthReport> {
     let report = state
         .db_health
@@ -1163,8 +1163,8 @@ async fn db_get_health_report(state: State<'_, AppState>) -> AppResult<DbHealthR
 }
 
 /// Re-run the database health checks and return the fresh report via the
-/// `db.recheck` IPC command used by the UI.
-#[tauri::command(rename = "db.recheck")]
+/// `db_recheck` IPC command used by the UI.
+#[tauri::command]
 async fn db_recheck(state: State<'_, AppState>) -> AppResult<DbHealthReport> {
     let pool = state.pool.clone();
     let db_path = state.db_path.clone();
@@ -1175,7 +1175,7 @@ async fn db_recheck(state: State<'_, AppState>) -> AppResult<DbHealthReport> {
         async move {
             let report = crate::db::health::run_health_checks(&pool, &db_path)
                 .await
-                .map_err(|err| AppError::from(err).with_context("operation", "db.recheck"))?;
+                .map_err(|err| AppError::from(err).with_context("operation", "db_recheck"))?;
             if matches!(report.status, DbHealthStatus::Ok) {
                 tracing::info!(target: "arklowdun", "[DB_HEALTH_OK]");
             } else {
@@ -2135,22 +2135,22 @@ mod db_health_command_tests {
             .build()
             .expect("create window");
 
-        let response = get_ipc_response(&window, invoke_request("db.getHealthReport"))
-            .expect("db.getHealthReport returns");
+        let response = get_ipc_response(&window, invoke_request("db_get_health_report"))
+            .expect("db_get_health_report returns");
         let initial: DbHealthReport = response.deserialize().expect("deserialize initial report");
         assert_eq!(initial.status, cached_report.status);
         assert_eq!(initial.schema_hash, cached_report.schema_hash);
 
-        let response =
-            get_ipc_response(&window, invoke_request("db.recheck")).expect("db.recheck succeeds");
+        let response = get_ipc_response(&window, invoke_request("db_recheck"))
+            .expect("db_recheck succeeds");
         let refreshed: DbHealthReport = response
             .deserialize()
             .expect("deserialize refreshed report");
         assert_eq!(refreshed.status, DbHealthStatus::Ok);
         assert!(!refreshed.generated_at.is_empty());
 
-        let response = get_ipc_response(&window, invoke_request("db.getHealthReport"))
-            .expect("db.getHealthReport after recheck");
+        let response = get_ipc_response(&window, invoke_request("db_get_health_report"))
+            .expect("db_get_health_report after recheck");
         let cached_after: DbHealthReport =
             response.deserialize().expect("deserialize cached report");
         assert_eq!(cached_after.generated_at, refreshed.generated_at);

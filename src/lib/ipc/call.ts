@@ -55,7 +55,7 @@ export function normalizeError(error: unknown): AppError {
   return { code: FALLBACK_CODE, message: String(error), context: undefined };
 }
 
-const DB_HEALTH_COMMANDS = new Set(["db.getHealthReport", "db.recheck"]);
+const DB_HEALTH_COMMANDS = new Set(["db_get_health_report", "db_recheck"]);
 
 export async function call<T>(
   cmd: string,
