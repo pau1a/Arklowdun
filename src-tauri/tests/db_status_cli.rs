@@ -5,6 +5,7 @@ use arklowdun_lib::db::health::{DbHealthReport, DbHealthStatus};
 use assert_cmd::Command;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::Connection;
+use sqlx::ConnectOptions;
 use tempfile::tempdir;
 
 async fn prepare_fk_violation(db_path: &Path) -> Result<()> {
