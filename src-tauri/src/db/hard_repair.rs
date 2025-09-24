@@ -626,13 +626,18 @@ fn run_hard_repair_inner(db_path: PathBuf) -> AppResult<HardRepairOutcome> {
         dest_conn.pragma_update(None, "foreign_keys", 1).ok();
     }
 
+    #[cfg(test)]
     let (mut integrity_ok, mut integrity_error, fk_errors) = run_integrity_checks(&dest_conn);
+    #[cfg(not(test))]
+    let (integrity_ok, integrity_error, fk_errors) = run_integrity_checks(&dest_conn);
 
     #[cfg(test)]
-    if tests::should_force_integrity_fail() {
-        integrity_ok = false;
-        if integrity_error.is_none() {
-            integrity_error = Some("forced integrity failure for test".to_string());
+    {
+        if tests::should_force_integrity_fail() {
+            integrity_ok = false;
+            if integrity_error.is_none() {
+                integrity_error = Some("forced integrity failure for test".to_string());
+            }
         }
     }
 
@@ -797,7 +802,7 @@ mod tests {
         let src_path = tmp.path().join("source.sqlite3");
         let dest_path = tmp.path().join("dest.sqlite3");
 
-        let src_conn = Connection::open(&src_path).expect("open source");
+        let mut src_conn = Connection::open(&src_path).expect("open source");
         src_conn
             .execute_batch(
                 "PRAGMA foreign_keys = ON;
@@ -805,14 +810,17 @@ mod tests {
                  CREATE TABLE b(id INTEGER PRIMARY KEY, a_id INTEGER REFERENCES a(id));",
             )
             .expect("create schema");
-        src_conn
-            .execute("INSERT INTO a(id, b_id) VALUES (1, 1)", [])
-            .expect("insert a");
-        src_conn
-            .execute("INSERT INTO b(id, a_id) VALUES (1, 1)", [])
-            .expect("insert b");
+        src_conn.pragma_update(None, "defer_foreign_keys", 1).ok();
+        {
+            let tx = src_conn.transaction().expect("source tx");
+            tx.execute("INSERT INTO a(id, b_id) VALUES (1, 1)", [])
+                .expect("insert a");
+            tx.execute("INSERT INTO b(id, a_id) VALUES (1, 1)", [])
+                .expect("insert b");
+            tx.commit().expect("commit source tx");
+        }
 
-        let dest_conn = Connection::open(&dest_path).expect("open dest");
+        let mut dest_conn = Connection::open(&dest_path).expect("open dest");
         dest_conn
             .execute_batch(
                 "PRAGMA foreign_keys = ON;
