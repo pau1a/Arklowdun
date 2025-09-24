@@ -21,6 +21,12 @@ pub mod manifest;
 #[path = "db/backup.rs"]
 pub mod backup;
 
+#[path = "db/repair.rs"]
+pub mod repair;
+
+#[path = "db/swap.rs"]
+pub mod swap;
+
 #[allow(dead_code)]
 pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     let dir = path
@@ -112,23 +118,7 @@ where
 }
 
 // TXN: domain=OUT OF SCOPE tables=PRAGMA
-pub async fn open_sqlite_pool(app: &AppHandle) -> Result<(Pool<Sqlite>, PathBuf)> {
-    let app_dir = app
-        .path()
-        .app_data_dir()
-        .unwrap_or_else(|_| std::env::temp_dir());
-    std::fs::create_dir_all(&app_dir).map_err(|e| {
-        tracing::error!(
-            target: "arklowdun",
-            error = %e,
-            event = "app_data_dir_create_failed",
-            path = %app_dir.display()
-        );
-        e
-    })?;
-    let db_path = app_dir.join("arklowdun.sqlite3");
-    tracing::info!(target: "arklowdun", event = "db_path", path = %db_path.display());
-
+pub async fn connect_sqlite_pool(db_path: &Path) -> Result<Pool<Sqlite>> {
     let db_path_str = db_path.to_str().ok_or_else(|| {
         anyhow!(
             "Database path is not valid UTF-8: {}",
@@ -160,6 +150,28 @@ pub async fn open_sqlite_pool(app: &AppHandle) -> Result<(Pool<Sqlite>, PathBuf)
         .await?;
 
     log_effective_pragmas(&pool).await;
+
+    Ok(pool)
+}
+
+pub async fn open_sqlite_pool(app: &AppHandle) -> Result<(Pool<Sqlite>, PathBuf)> {
+    let app_dir = app
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| std::env::temp_dir());
+    std::fs::create_dir_all(&app_dir).map_err(|e| {
+        tracing::error!(
+            target: "arklowdun",
+            error = %e,
+            event = "app_data_dir_create_failed",
+            path = %app_dir.display()
+        );
+        e
+    })?;
+    let db_path = app_dir.join("arklowdun.sqlite3");
+    tracing::info!(target: "arklowdun", event = "db_path", path = %db_path.display());
+
+    let pool = connect_sqlite_pool(&db_path).await?;
 
     Ok((pool, db_path))
 }
