@@ -3,10 +3,10 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use super::manifest;
 use anyhow::{Context, Result};
 use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{pool::PoolConnection, Row, Sqlite, SqlitePool};
 use ts_rs::TS;
@@ -86,7 +86,9 @@ pub async fn run_health_checks(pool: &SqlitePool, db_path: &Path) -> Result<DbHe
     overall_ok &= storage_check.passed;
     checks.push(storage_check);
 
-    let schema_hash = compute_schema_hash(&mut conn).await.unwrap_or_default();
+    let schema_hash = manifest::schema_hash_from_conn(&mut conn)
+        .await
+        .unwrap_or_default();
 
     let status = if overall_ok {
         DbHealthStatus::Ok
@@ -484,33 +486,4 @@ fn wal_path(db_path: &Path) -> PathBuf {
     let mut os_string = db_path.as_os_str().to_os_string();
     os_string.push("-wal");
     PathBuf::from(os_string)
-}
-
-async fn compute_schema_hash(conn: &mut PoolConnection<Sqlite>) -> Result<String> {
-    let rows = sqlx::query(
-        "SELECT type, name, tbl_name, sql FROM sqlite_master\n         WHERE type IN ('table','index','trigger','view')\n         ORDER BY type, name",
-    )
-    .fetch_all(conn.as_mut())
-    .await?;
-
-    let mut hasher = Sha256::new();
-    for row in rows {
-        let ty: String = row.try_get("type")?;
-        let name: String = row.try_get("name")?;
-        let tbl: String = row.try_get("tbl_name")?;
-        let sql: Option<String> = row.try_get("sql").ok();
-
-        hasher.update(ty.as_bytes());
-        hasher.update([0]);
-        hasher.update(name.as_bytes());
-        hasher.update([0]);
-        hasher.update(tbl.as_bytes());
-        hasher.update([0]);
-        if let Some(sql) = sql {
-            hasher.update(sql.as_bytes());
-        }
-        hasher.update([0]);
-    }
-
-    Ok(format!("{:x}", hasher.finalize()))
 }

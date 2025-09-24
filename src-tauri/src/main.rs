@@ -6,11 +6,15 @@ use std::process;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use serde_json::json;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::ConnectOptions;
 use sqlx::SqlitePool;
 
-use arklowdun_lib::db::health::{DbHealthReport, DbHealthStatus};
+use arklowdun_lib::db::{
+    backup,
+    health::{DbHealthReport, DbHealthStatus},
+};
 use arklowdun_lib::ipc::guard::{DB_UNHEALTHY_CLI_HINT, DB_UNHEALTHY_CODE, DB_UNHEALTHY_EXIT_CODE};
 
 #[derive(Debug, Parser)]
@@ -37,6 +41,12 @@ enum DbCommand {
     },
     /// Run VACUUM to compact the database when it is healthy.
     Vacuum,
+    /// Create a consistent snapshot of the database with manifest metadata.
+    Backup {
+        /// Emit a machine-readable JSON object with the backup entry details.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn main() {
@@ -94,6 +104,7 @@ fn handle_db_command(command: DbCommand) -> Result<i32> {
             })
         }
         DbCommand::Vacuum => handle_db_vacuum(),
+        DbCommand::Backup { json } => handle_db_backup(json),
     }
 }
 
@@ -130,6 +141,43 @@ fn handle_db_vacuum() -> Result<i32> {
                 result.map(|_| ())
             })?;
             println!("Database vacuum completed.");
+            Ok(0)
+        }
+        Err(code) => Ok(code),
+    }
+}
+
+fn handle_db_backup(emit_json: bool) -> Result<i32> {
+    let db_path = default_db_path().context("determine database path")?;
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create database parent directory {}", parent.display()))?;
+    }
+
+    match guard_cli_db_mutation(&db_path)? {
+        Ok(pool) => {
+            let entry = tauri::async_runtime::block_on(async {
+                let result = backup::create_backup(&pool, &db_path)
+                    .await
+                    .context("create database backup");
+                pool.close().await;
+                result
+            })??;
+            if emit_json {
+                let path = entry.sqlite_path.clone();
+                let payload = json!({
+                    "entry": entry,
+                    "path": path,
+                });
+                let serialized = serde_json::to_string_pretty(&payload)
+                    .context("serialize backup entry payload")?;
+                println!("{serialized}");
+            } else {
+                let manifest_json = serde_json::to_string_pretty(&entry.manifest)
+                    .context("serialize backup manifest")?;
+                println!("{manifest_json}");
+                println!("Backup stored at {}", entry.sqlite_path);
+            }
             Ok(0)
         }
         Err(code) => Ok(code),

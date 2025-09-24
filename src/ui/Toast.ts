@@ -1,9 +1,15 @@
 export type ToastKind = 'info' | 'error' | 'success';
 
+export interface ToastAction {
+  label: string;
+  onSelect: () => void | Promise<void>;
+}
+
 export interface ToastOptions {
   kind: ToastKind;
   message: string;
   timeoutMs?: number;
+  actions?: ToastAction[];
 }
 
 export interface ToastEvent extends ToastOptions {
@@ -34,6 +40,26 @@ function renderToast(options: ToastEvent): HTMLDivElement {
   el.className = `toast toast--${options.kind}`;
   el.dataset.ui = 'toast';
   el.textContent = options.message;
+  if (options.actions && options.actions.length > 0) {
+    const actions = document.createElement('div');
+    actions.className = 'toast__actions';
+    for (const action of options.actions) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'toast__action';
+      button.textContent = action.label;
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        try {
+          void action.onSelect();
+        } catch {
+          // ignore action failures
+        }
+      });
+      actions.appendChild(button);
+    }
+    el.appendChild(actions);
+  }
   return el;
 }
 

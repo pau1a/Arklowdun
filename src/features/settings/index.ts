@@ -10,6 +10,16 @@ export { useSettings } from "./hooks/useSettings";
 export type { UseSettingsResult } from "./hooks/useSettings";
 
 export {
+  fetchBackupOverview,
+  createBackup,
+  revealBackup,
+  revealBackupFolder,
+} from "./api/backups";
+export type { BackupEntry } from "@bindings/BackupEntry";
+export type { BackupOverview } from "@bindings/BackupOverview";
+export type { BackupManifest } from "@bindings/BackupManifest";
+
+export {
   fetchAboutMetadata,
   fetchDiagnosticsSummary,
   openDiagnosticsDoc,

@@ -21,7 +21,10 @@ use tracing_subscriber::{
 use ts_rs::TS;
 
 use crate::{
-    db::health::{DbHealthReport, DbHealthStatus, STORAGE_SANITY_HEAL_NOTE},
+    db::{
+        backup,
+        health::{DbHealthReport, DbHealthStatus, STORAGE_SANITY_HEAL_NOTE},
+    },
     ipc::guard,
     state::AppState,
 };
@@ -1781,6 +1784,48 @@ async fn open_diagnostics_doc(app: tauri::AppHandle) -> AppResult<()> {
 }
 
 #[tauri::command]
+async fn db_backup_overview(state: State<'_, AppState>) -> AppResult<backup::BackupOverview> {
+    let pool = state.pool.clone();
+    let db_path = (*state.db_path).clone();
+    dispatch_async_app_result(move || {
+        let pool = pool.clone();
+        async move { backup::overview(&pool, &db_path).await }
+    })
+    .await
+}
+
+#[tauri::command]
+async fn db_backup_create(state: State<'_, AppState>) -> AppResult<backup::BackupEntry> {
+    let pool = state.pool.clone();
+    let db_path = (*state.db_path).clone();
+    dispatch_async_app_result(move || {
+        let pool = pool.clone();
+        async move { backup::create_backup(&pool, &db_path).await }
+    })
+    .await
+}
+
+#[tauri::command]
+async fn db_backup_reveal_root(state: State<'_, AppState>) -> AppResult<()> {
+    let db_path = (*state.db_path).clone();
+    dispatch_async_app_result(move || {
+        let db_path = db_path.clone();
+        async move { backup::reveal_backup_root(&db_path) }
+    })
+    .await
+}
+
+#[tauri::command]
+async fn db_backup_reveal(state: State<'_, AppState>, path: String) -> AppResult<()> {
+    let db_path = (*state.db_path).clone();
+    dispatch_async_app_result(move || {
+        let target = PathBuf::from(path);
+        async move { backup::reveal_backup(&db_path, &target) }
+    })
+    .await
+}
+
+#[tauri::command]
 #[allow(clippy::result_large_err)]
 async fn time_invariants_check(
     state: State<'_, AppState>,
@@ -1913,6 +1958,10 @@ macro_rules! app_commands {
             diagnostics_summary,
             diagnostics_doc_path,
             open_diagnostics_doc,
+            db_backup_overview,
+            db_backup_create,
+            db_backup_reveal_root,
+            db_backup_reveal,
             time_invariants_check,
             about_metadata,
             $($extra),*
