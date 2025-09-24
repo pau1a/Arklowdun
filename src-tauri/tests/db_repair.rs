@@ -84,6 +84,13 @@ async fn repair_recovers_from_wal_bloat() -> Result<()> {
         .connect()
         .await?;
 
+    let mut reader = SqliteConnectOptions::new()
+        .filename(&db_path)
+        .journal_mode(SqliteJournalMode::Wal)
+        .read_only(true)
+        .connect()
+        .await?;
+
     sqlx::query("PRAGMA wal_autocheckpoint = 0;")
         .execute(&mut conn)
         .await?;
@@ -105,6 +112,8 @@ async fn repair_recovers_from_wal_bloat() -> Result<()> {
         wal_file.exists(),
         "expected WAL file to exist before repair"
     );
+
+    reader.close().await?;
 
     let pool = open_pool(&db_path).await?;
     let options = repair_options(&pool, &db_path);
