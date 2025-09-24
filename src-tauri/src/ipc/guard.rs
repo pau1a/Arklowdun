@@ -14,7 +14,7 @@ use std::ops::Deref;
 use tracing::warn;
 
 use crate::{
-    db::health::{DbHealthReport, DbHealthStatus},
+    db::health::DbHealthStatus,
     state::AppState,
     AppError, AppResult,
 };
@@ -74,6 +74,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::health::DbHealthReport;
     use crate::events_tz_backfill::BackfillCoordinator;
     use sqlx::sqlite::SqlitePoolOptions;
     use std::{
