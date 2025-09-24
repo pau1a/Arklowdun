@@ -54,10 +54,9 @@ fn repair_options(pool: &sqlx::SqlitePool, db_path: &Path) -> DbRepairOptions {
                 })?;
                 let report = arklowdun_lib::db::health::run_health_checks(&pool, &db_path)
                     .await
-                    .map_err(anyhow::Error::new)
-                    .context("repair_post_swap_health")
-                    .map_err(AppError::from)
-                    .map_err(|err| err.with_context("operation", "repair_post_swap_health"))?;
+                    .map_err(|err| {
+                        AppError::from(err).with_context("operation", "repair_post_swap_health")
+                    })?;
                 pool.close().await;
                 Ok(Some(report))
             })
@@ -103,9 +102,7 @@ async fn repair_recovers_from_wal_bloat() -> Result<()> {
 
     let pool = open_pool(&db_path).await?;
     let options = repair_options(&pool, &db_path);
-    let summary = repair::run_guided_repair(&pool, &db_path, None, options)
-        .await
-        .map_err(anyhow::Error::new)?;
+    let summary = repair::run_guided_repair(&pool, &db_path, None, options).await?;
 
     pool.close().await;
 
@@ -172,9 +169,7 @@ async fn repair_fails_validation_and_restores_original() -> Result<()> {
 
     let pool = open_pool(&db_path).await?;
     let options = repair_options(&pool, &db_path);
-    let summary = repair::run_guided_repair(&pool, &db_path, None, options)
-        .await
-        .map_err(anyhow::Error::new)?;
+    let summary = repair::run_guided_repair(&pool, &db_path, None, options).await?;
     pool.close().await;
 
     assert!(!summary.success, "repair should fail validation");
