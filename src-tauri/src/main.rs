@@ -162,7 +162,7 @@ fn handle_db_backup(emit_json: bool) -> Result<i32> {
                     .context("create database backup");
                 pool.close().await;
                 result
-            })??;
+            })?;
             if emit_json {
                 let path = entry.sqlite_path.clone();
                 let payload = json!({
