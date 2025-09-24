@@ -25,11 +25,10 @@ use crate::{
     db::{
         backup,
         health::{DbHealthReport, DbHealthStatus, STORAGE_SANITY_HEAL_NOTE},
-        repair::{self, DbRepairEvent, DbRepairOptions, DbRepairSummary},
+        repair::{self, DbRepairEvent, DbRepairSummary},
     },
     ipc::guard,
     state::AppState,
-    AppError,
 };
 
 const FILES_INDEX_VERSION: i64 = 1;
@@ -1858,7 +1857,9 @@ async fn db_repair_run(
             let before_swap = {
                 let pool = pool.clone();
                 let flag = pool_closed.clone();
-                Arc::new(move || {
+                Arc::new(move || -> std::pin::Pin<
+                    Box<dyn std::future::Future<Output = AppResult<()>> + Send>,
+                > {
                     let pool = pool.clone();
                     let flag = flag.clone();
                     Box::pin(async move {
@@ -1873,19 +1874,24 @@ async fn db_repair_run(
                 let pool_handle = pool_handle.clone();
                 let cache = cache.clone();
                 let flag = pool_closed.clone();
-                Arc::new(move || {
+                Arc::new(move || -> std::pin::Pin<
+                    Box<
+                        dyn std::future::Future<
+                                Output = AppResult<Option<DbHealthReport>>
+                            > + Send,
+                    >,
+                > {
                     let db_path = db_path.clone();
                     let pool_handle = pool_handle.clone();
                     let cache = cache.clone();
                     let flag = flag.clone();
                     Box::pin(async move {
-                        let new_pool =
-                            crate::db::connect_sqlite_pool(&db_path)
-                                .await
-                                .map_err(|err| {
-                                    AppError::from(err)
-                                        .with_context("operation", "reopen_pool_after_swap")
-                                })?;
+                        let new_pool = crate::db::connect_sqlite_pool(&db_path)
+                            .await
+                            .map_err(|err| {
+                                AppError::from(err)
+                                    .with_context("operation", "reopen_pool_after_swap")
+                            })?;
                         {
                             let mut guard = pool_handle.write().expect("pool lock poisoned");
                             *guard = new_pool.clone();
@@ -1893,7 +1899,8 @@ async fn db_repair_run(
                         let report = crate::db::health::run_health_checks(&new_pool, &db_path)
                             .await
                             .map_err(|err| {
-                                err.with_context("operation", "repair_post_swap_health")
+                                AppError::from(err)
+                                    .with_context("operation", "repair_post_swap_health")
                             })?;
                         {
                             let mut guard = cache.lock().expect("db health cache poisoned");
