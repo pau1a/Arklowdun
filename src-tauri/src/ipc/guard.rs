@@ -121,14 +121,14 @@ mod tests {
         }
     }
 
-    #[test]
-    fn allows_mutations_when_health_ok() {
+    #[tokio::test]
+    async fn allows_mutations_when_health_ok() {
         let state = app_state_with_report(sample_report(DbHealthStatus::Ok));
         assert!(ensure_db_writable(&state).is_ok());
     }
 
-    #[test]
-    fn blocks_mutations_when_health_not_ok() {
+    #[tokio::test]
+    async fn blocks_mutations_when_health_not_ok() {
         let state = app_state_with_report(sample_report(DbHealthStatus::Error));
         let err = ensure_db_writable(&state).expect_err("expected guard to block writes");
         assert_eq!(err.code(), DB_UNHEALTHY_CODE);

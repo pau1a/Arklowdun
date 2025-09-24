@@ -910,6 +910,97 @@ footer a.footer__settings {
   margin-bottom: var(--space-4);
 }
 
+.settings__section--backups {
+  margin-bottom: var(--space-4);
+}
+
+.backups__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.backups__open-folder {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.backups__helper {
+  margin-top: var(--space-2);
+  color: var(--color-text-muted);
+}
+
+.backups__controls {
+  margin-top: var(--space-3);
+}
+
+.backups__space {
+  margin: var(--space-2) 0 0;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.backups__space--warning {
+  color: var(--color-danger);
+}
+
+.backups__status {
+  min-height: 1.5rem;
+  margin: var(--space-2) 0;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.backups__status--error {
+  color: var(--color-danger);
+}
+
+.backups__list {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.backups__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-base);
+  background: var(--color-surface-raised);
+}
+
+.backups__details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.backups__title {
+  font-weight: 600;
+}
+
+.backups__size {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.backups__item-actions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.backups__empty {
+  padding: var(--space-2);
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
 .timezone-maintenance__controls {
   display: flex;
   flex-wrap: wrap;
@@ -1867,6 +1958,27 @@ mark.search-hit {
   color: var(--color-text);
   box-shadow: var(--shadow-base);
   transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.toast__actions {
+  margin-top: var(--space-2);
+  display: flex;
+  gap: var(--space-2);
+}
+
+.toast__action {
+  pointer-events: auto;
+  background: transparent;
+  border: none;
+  color: var(--color-accent);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.toast__action:hover,
+.toast__action:focus-visible {
+  text-decoration: underline;
 }
 
 .toast--success { border-left-color: var(--color-success); }

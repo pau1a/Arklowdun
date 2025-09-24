@@ -4,7 +4,7 @@ import type { DbHealthReport } from "./DbHealthReport";
 /**
  * A structured application error that can be serialized and surfaced to the UI.
  */
-export type AppError = {
+export type AppError = { 
 /**
  * Machine readable error code.
  */
@@ -24,8 +24,8 @@ cause?: AppError,
 /**
  * Crash identifier associated with critical failures.
  */
-crash_id?: string | undefined,
+crash_id?: string | undefined, 
 /**
  * Optional database health report associated with the error.
  */
-health_report?: DbHealthReport | undefined, };
+health_report?: DbHealthReport, };

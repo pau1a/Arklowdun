@@ -15,6 +15,12 @@ use tauri::{AppHandle, Manager};
 #[path = "db/health.rs"]
 pub mod health;
 
+#[path = "db/manifest.rs"]
+pub mod manifest;
+
+#[path = "db/backup.rs"]
+pub mod backup;
+
 #[allow(dead_code)]
 pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     let dir = path

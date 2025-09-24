@@ -11,6 +11,7 @@ use std::panic::PanicHookInfo;
 use crate::{db::health::DbHealthReport, security::error_map::UiError};
 use anyhow::Error as AnyhowError;
 use once_cell::sync::OnceCell;
+use rusqlite::Error as RusqliteError;
 use serde::{Deserialize, Serialize};
 use serde_json::Error as SerdeJsonError;
 use sqlx::Error as SqlxError;
@@ -341,6 +342,9 @@ impl AppError {
         if let Some(sqlx) = err.downcast_ref::<SqlxError>() {
             return AppError::from_sqlx_ref(sqlx);
         }
+        if let Some(sqlite) = err.downcast_ref::<RusqliteError>() {
+            return AppError::from_rusqlite_ref(sqlite);
+        }
         if let Some(io) = err.downcast_ref::<IoError>() {
             return AppError::from_io_ref(io);
         }
@@ -353,6 +357,15 @@ impl AppError {
             root.cause = Some(Box::new(AppError::from_std_error(source)));
         }
         root
+    }
+
+    fn from_rusqlite_ref(error: &RusqliteError) -> Self {
+        let base = AppError::new("SQLITE/ERROR", error.to_string());
+        let base = match error.sqlite_error_code() {
+            Some(code) => base.with_context("sqlite_code", format!("{code:?}")),
+            None => base,
+        };
+        base.with_error_source(error.source())
     }
 
     /// Convert the error into a serializable DTO, cloning as needed.
@@ -425,6 +438,18 @@ impl From<SerdeJsonError> for AppError {
 impl From<&SerdeJsonError> for AppError {
     fn from(error: &SerdeJsonError) -> Self {
         AppError::from_serde_json_ref(error)
+    }
+}
+
+impl From<RusqliteError> for AppError {
+    fn from(error: RusqliteError) -> Self {
+        AppError::from_rusqlite_ref(&error)
+    }
+}
+
+impl From<&RusqliteError> for AppError {
+    fn from(error: &RusqliteError) -> Self {
+        AppError::from_rusqlite_ref(error)
     }
 }
 
