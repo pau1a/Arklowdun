@@ -2,14 +2,14 @@ use std::ffi::OsString;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use arklowdun_lib::db::health::DbHealthStatus;
 use arklowdun_lib::db::repair::{self, DbRepairOptions};
 use arklowdun_lib::AppError;
-use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{ConnectOptions, Connection, Row};
 use tempfile::tempdir;
@@ -54,6 +54,9 @@ fn repair_options(pool: &sqlx::SqlitePool, db_path: &Path) -> DbRepairOptions {
                 })?;
                 let report = arklowdun_lib::db::health::run_health_checks(&pool, &db_path)
                     .await
+                    .map_err(anyhow::Error::new)
+                    .context("repair_post_swap_health")
+                    .map_err(AppError::from)
                     .map_err(|err| err.with_context("operation", "repair_post_swap_health"))?;
                 pool.close().await;
                 Ok(Some(report))
@@ -240,13 +243,15 @@ fn repair_interrupted_during_rebuild_preserves_original() -> Result<()> {
         Result::<()>::Ok(())
     })?;
 
-    let mut cmd = Command::cargo_bin("arklowdun")?;
-    cmd.env("ARK_FAKE_APPDATA", db_root)
+    let bin = cargo_bin("arklowdun");
+    let mut child = Command::new(&bin)
+        .env("ARK_FAKE_APPDATA", db_root)
         .arg("db")
         .arg("repair")
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    let mut child = cmd.spawn().context("spawn repair process")?;
+        .stderr(Stdio::null())
+        .spawn()
+        .context("spawn repair process")?;
     let stdout = child.stdout.take().context("child stdout")?;
     let mut reader = BufReader::new(stdout);
     let mut line = String::new();
