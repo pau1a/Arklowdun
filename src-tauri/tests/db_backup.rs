@@ -195,20 +195,28 @@ async fn backup_succeeds_while_db_locked() -> Result<()> {
         .connect(&format!("sqlite://{}", db_path.display()))
         .await?;
 
-    let mut conn = pool.acquire().await?;
+    let mut locker = SqliteConnectOptions::new()
+        .filename(&db_path)
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Full)
+        .foreign_keys(true)
+        .connect()
+        .await?;
+
     sqlx::query("BEGIN IMMEDIATE;")
-        .execute(&mut conn)
+        .execute(&mut locker)
         .await?;
     sqlx::query("INSERT INTO sample(value) VALUES ('locked');")
-        .execute(&mut conn)
+        .execute(&mut locker)
         .await?;
 
     let entry = backup::create_backup(&pool, &db_path).await?;
     assert!(entry.total_size_bytes > 0);
 
-    sqlx::query("COMMIT;").execute(&mut conn).await?;
+    sqlx::query("COMMIT;").execute(&mut locker).await?;
 
-    drop(conn);
+    locker.close().await?;
     pool.close().await;
     Ok(())
 }
