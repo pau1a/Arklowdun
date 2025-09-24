@@ -236,7 +236,10 @@ fn handle_db_repair() -> Result<i32> {
                     })?;
                     let report = arklowdun_lib::db::health::run_health_checks(&pool, &db_path)
                         .await
-                        .map_err(|err| err.with_context("operation", "repair_post_swap_health"))?;
+                        .map_err(|err| {
+                            AppError::from(err)
+                                .with_context("operation", "repair_post_swap_health")
+                        })?;
                     pool.close().await;
                     Ok(Some(report))
                 })
