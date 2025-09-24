@@ -11,11 +11,7 @@ use sqlx::ConnectOptions;
 use sqlx::SqlitePool;
 
 use arklowdun_lib::db::health::{DbHealthReport, DbHealthStatus};
-use arklowdun_lib::ipc::guard::{
-    DB_UNHEALTHY_CLI_HINT,
-    DB_UNHEALTHY_CODE,
-    DB_UNHEALTHY_EXIT_CODE,
-};
+use arklowdun_lib::ipc::guard::{DB_UNHEALTHY_CLI_HINT, DB_UNHEALTHY_CODE, DB_UNHEALTHY_EXIT_CODE};
 
 #[derive(Debug, Parser)]
 #[command(name = "arklowdun", about = "Arklowdun desktop application", version)]
@@ -236,8 +232,8 @@ async fn open_health_pool(db_path: &Path) -> Result<SqlitePool> {
 mod tests {
     use super::*;
     use anyhow::Result;
-    use sqlx::Connection;
     use sqlx::ConnectOptions;
+    use sqlx::Connection;
     use tempfile::tempdir;
 
     fn ensure_database(db_path: &Path) -> Result<()> {
@@ -321,7 +317,10 @@ mod tests {
         prepare_fk_violation(&db_path)?;
 
         let guard = super::guard_cli_db_mutation(&db_path)?;
-        assert_eq!(guard, Err(DB_UNHEALTHY_EXIT_CODE));
+        match guard {
+            Err(code) => assert_eq!(code, DB_UNHEALTHY_EXIT_CODE),
+            Ok(_) => panic!("expected unhealthy database guard to block writes"),
+        }
         Ok(())
     }
 }

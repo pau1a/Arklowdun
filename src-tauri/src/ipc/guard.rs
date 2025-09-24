@@ -13,11 +13,7 @@ use std::ops::Deref;
 
 use tracing::warn;
 
-use crate::{
-    db::health::DbHealthStatus,
-    state::AppState,
-    AppError, AppResult,
-};
+use crate::{db::health::DbHealthStatus, state::AppState, AppError, AppResult};
 
 /// Stable error code returned when database health prevents write operations.
 pub const DB_UNHEALTHY_CODE: &str = "DB_UNHEALTHY_WRITE_BLOCKED";
@@ -45,11 +41,29 @@ impl DbWriteGuard {
 ///
 /// When the health report indicates any error, an [`AppError`] is returned with the
 /// [`DbHealthReport`] attached so callers can surface detailed diagnostics to the UI.
+pub trait AppStateRef {
+    fn as_app_state(&self) -> &AppState;
+}
+
+impl AppStateRef for AppState {
+    fn as_app_state(&self) -> &AppState {
+        self
+    }
+}
+
+impl<T> AppStateRef for T
+where
+    T: Deref<Target = AppState>,
+{
+    fn as_app_state(&self) -> &AppState {
+        self.deref()
+    }
+}
+
 #[allow(clippy::result_large_err)]
 #[must_use = "Database health must be checked before executing a mutation"]
-pub fn ensure_db_writable(
-    state: &(impl Deref<Target = AppState> + ?Sized),
-) -> AppResult<DbWriteGuard> {
+pub fn ensure_db_writable(state: &(impl AppStateRef + ?Sized)) -> AppResult<DbWriteGuard> {
+    let state = state.as_app_state();
     let report = state
         .db_health
         .lock()
