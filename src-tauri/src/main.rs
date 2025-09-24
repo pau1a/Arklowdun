@@ -231,13 +231,19 @@ fn handle_db_repair() -> Result<i32> {
             after_swap: Some(Arc::new(move || {
                 let db_path = db_path.clone();
                 Box::pin(async move {
-                    let pool = open_health_pool(&db_path).await.map_err(|err| {
-                        AppError::from(err).with_context("operation", "reopen_pool_after_swap")
-                    })?;
+                    let pool = open_health_pool(&db_path)
+                        .await
+                        .context("reopen_pool_after_swap")
+                        .map_err(AppError::from)
+                        .map_err(|err| {
+                            err.with_context("operation", "reopen_pool_after_swap")
+                        })?;
                     let report = arklowdun_lib::db::health::run_health_checks(&pool, &db_path)
                         .await
+                        .context("repair_post_swap_health")
+                        .map_err(AppError::from)
                         .map_err(|err| {
-                            AppError::from(err).with_context("operation", "repair_post_swap_health")
+                            err.with_context("operation", "repair_post_swap_health")
                         })?;
                     pool.close().await;
                     Ok(Some(report))
