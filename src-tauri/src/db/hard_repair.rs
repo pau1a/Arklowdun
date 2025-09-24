@@ -61,6 +61,7 @@ pub struct HardRepairRecoveryReport {
     pub app_version: String,
     pub tables: BTreeMap<String, HardRepairTableStats>,
     pub skipped_examples: Vec<HardRepairSkippedRow>,
+    #[ts(type = "string")]
     pub completed_at: DateTime<Utc>,
     #[serde(default)]
     pub integrity_ok: bool,
@@ -158,7 +159,8 @@ fn unique_timestamp_dir(
 }
 
 fn quote_ident(name: &str) -> String {
-    format!("\"{}\"", name.replace('"', "\"\""))
+    let escaped = name.replace('"', "\"\"");
+    format!("\"{}\"", escaped)
 }
 
 fn list_tables(conn: &Connection) -> AppResult<Vec<String>> {
@@ -300,7 +302,7 @@ fn topo_order(tables: Vec<String>, deps: &HashMap<String, BTreeSet<String>>) -> 
 }
 
 fn optional_column<T: FromSql>(row: &Row<'_>, name: &str) -> rusqlite::Result<Option<T>> {
-    match row.column_index(name) {
+    match row.as_ref().column_index(name) {
         Ok(idx) => row.get(idx).map(Some),
         Err(SqliteError::InvalidColumnName(_)) => Ok(None),
         Err(err) => Err(err),
@@ -567,7 +569,7 @@ fn run_hard_repair_inner(db_path: PathBuf) -> AppResult<HardRepairOutcome> {
             .with_context("operation", "open_source_db")
             .with_context("path", db_path.display().to_string())
     })?;
-    let dest_conn = Connection::open(&new_db_path).map_err(|err| {
+    let mut dest_conn = Connection::open(&new_db_path).map_err(|err| {
         AppError::from(err)
             .with_context("operation", "open_dest_db")
             .with_context("path", new_db_path.display().to_string())

@@ -1946,18 +1946,20 @@ async fn db_hard_repair_run(state: State<'_, AppState>) -> AppResult<HardRepairO
     let maintenance_guard = state.begin_maintenance()?;
     let pool = state.pool_clone();
     let pool_handle = state.pool.clone();
-    let db_path = (*state.db_path).clone();
+    let db_path_for_task = (*state.db_path).clone();
+    let db_path_for_reopen = (*state.db_path).clone();
     let cache = state.db_health.clone();
     let pool_closed = Arc::new(AtomicBool::new(false));
     let pool_closed_after = pool_closed.clone();
 
     let result = dispatch_async_app_result(move || {
         let pool = pool.clone();
-        let db_path = db_path.clone();
+        let db_path = db_path_for_task.clone();
         let pool_handle = pool_handle.clone();
         let cache = cache.clone();
         let pool_closed = pool_closed.clone();
         async move {
+            let db_path = db_path.clone();
             pool.close().await;
             pool_closed.store(true, Ordering::SeqCst);
             let outcome = hard_repair::run_hard_repair(&db_path).await?;
@@ -1988,7 +1990,7 @@ async fn db_hard_repair_run(state: State<'_, AppState>) -> AppResult<HardRepairO
     drop(maintenance_guard);
 
     if pool_closed_after.load(Ordering::SeqCst) {
-        let reopened = crate::db::connect_sqlite_pool(&db_path)
+        let reopened = crate::db::connect_sqlite_pool(&db_path_for_reopen)
             .await
             .map_err(|err| {
                 AppError::from(err)
