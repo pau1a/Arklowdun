@@ -196,15 +196,19 @@ async fn backup_succeeds_while_db_locked() -> Result<()> {
         .await?;
 
     let mut conn = pool.acquire().await?;
-    let mut tx = conn.begin().await?;
+    sqlx::query("BEGIN IMMEDIATE;")
+        .execute(&mut conn)
+        .await?;
     sqlx::query("INSERT INTO sample(value) VALUES ('locked');")
-        .execute(&mut tx)
+        .execute(&mut conn)
         .await?;
 
     let entry = backup::create_backup(&pool, &db_path).await?;
     assert!(entry.total_size_bytes > 0);
 
-    tx.commit().await?;
+    sqlx::query("COMMIT;").execute(&mut conn).await?;
+
+    drop(conn);
     pool.close().await;
     Ok(())
 }
