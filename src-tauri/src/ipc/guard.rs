@@ -30,6 +30,7 @@ pub const DB_UNHEALTHY_CLI_HINT: &str = "Run 'arklowdun db status' or repair.";
 pub const DB_UNHEALTHY_EXIT_CODE: i32 = 2;
 
 #[must_use = "Database health must be checked before executing a mutation"]
+#[derive(Debug)]
 pub struct DbWriteGuard {
     _private: (),
 }
@@ -46,10 +47,9 @@ impl DbWriteGuard {
 /// [`DbHealthReport`] attached so callers can surface detailed diagnostics to the UI.
 #[allow(clippy::result_large_err)]
 #[must_use = "Database health must be checked before executing a mutation"]
-pub fn ensure_db_writable<S>(state: &S) -> AppResult<DbWriteGuard>
-where
-    S: Deref<Target = AppState>,
-{
+pub fn ensure_db_writable(
+    state: &(impl Deref<Target = AppState> + ?Sized),
+) -> AppResult<DbWriteGuard> {
     let report = state
         .db_health
         .lock()
