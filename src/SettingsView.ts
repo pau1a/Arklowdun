@@ -9,6 +9,7 @@ import {
 import { createTimezoneMaintenanceSection } from "@features/settings/components/TimezoneMaintenanceSection";
 import { createBackupView } from "@features/settings/components/BackupView";
 import { createRepairView } from "@features/settings/components/RepairView";
+import { createHardRepairView } from "@features/settings/components/HardRepairView";
 import { createEmptyState } from "./ui/EmptyState";
 import { STR } from "./ui/strings";
 import createButton from "@ui/Button";
@@ -51,6 +52,7 @@ export function SettingsView(container: HTMLElement) {
   const timezoneMaintenance = createTimezoneMaintenanceSection();
   const backups = createBackupView();
   const repair = createRepairView();
+  const hardRepair = createHardRepairView();
   const general = createEmptySection("settings-general", "General");
   const storage = createEmptySection("settings-storage", "Storage and permissions");
   const notifications = createEmptySection("settings-notifications", "Notifications");
@@ -140,6 +142,7 @@ export function SettingsView(container: HTMLElement) {
     timezoneMaintenance.element,
     backups.element,
     repair.element,
+    hardRepair.element,
     general,
     storage,
     notifications,

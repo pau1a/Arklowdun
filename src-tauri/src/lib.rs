@@ -24,6 +24,7 @@ use ts_rs::TS;
 use crate::{
     db::{
         backup,
+        hard_repair::{self, HardRepairOutcome},
         health::{DbHealthReport, DbHealthStatus, STORAGE_SANITY_HEAL_NOTE},
         repair::{self, DbRepairEvent, DbRepairSummary},
     },
@@ -1941,6 +1942,68 @@ async fn db_repair_run(
 }
 
 #[tauri::command]
+async fn db_hard_repair_run(state: State<'_, AppState>) -> AppResult<HardRepairOutcome> {
+    let maintenance_guard = state.begin_maintenance()?;
+    let pool = state.pool_clone();
+    let pool_handle = state.pool.clone();
+    let db_path_for_task = (*state.db_path).clone();
+    let db_path_for_reopen = (*state.db_path).clone();
+    let cache = state.db_health.clone();
+    let pool_closed = Arc::new(AtomicBool::new(false));
+    let pool_closed_after = pool_closed.clone();
+
+    let result = dispatch_async_app_result(move || {
+        let pool = pool.clone();
+        let db_path = db_path_for_task.clone();
+        let pool_handle = pool_handle.clone();
+        let cache = cache.clone();
+        let pool_closed = pool_closed.clone();
+        async move {
+            let db_path = db_path.clone();
+            pool.close().await;
+            pool_closed.store(true, Ordering::SeqCst);
+            let outcome = hard_repair::run_hard_repair(&db_path).await?;
+            let new_pool = crate::db::connect_sqlite_pool(&db_path)
+                .await
+                .map_err(|err| {
+                    AppError::from(err).with_context("operation", "reopen_pool_after_hard_repair")
+                })?;
+            {
+                let mut guard = pool_handle.write().expect("pool lock poisoned");
+                *guard = new_pool.clone();
+            }
+            let health = crate::db::health::run_health_checks(&new_pool, &db_path)
+                .await
+                .map_err(|err| {
+                    AppError::from(err).with_context("operation", "hard_repair_post_health")
+                })?;
+            {
+                let mut guard = cache.lock().expect("db health cache poisoned");
+                *guard = health;
+            }
+            pool_closed.store(false, Ordering::SeqCst);
+            Ok(outcome)
+        }
+    })
+    .await;
+
+    drop(maintenance_guard);
+
+    if pool_closed_after.load(Ordering::SeqCst) {
+        let reopened = crate::db::connect_sqlite_pool(&db_path_for_reopen)
+            .await
+            .map_err(|err| {
+                AppError::from(err)
+                    .with_context("operation", "reopen_pool_after_hard_repair_failure")
+            })?;
+        state.replace_pool(reopened);
+        pool_closed_after.store(false, Ordering::SeqCst);
+    }
+
+    result
+}
+
+#[tauri::command]
 #[allow(clippy::result_large_err)]
 async fn time_invariants_check(
     state: State<'_, AppState>,
@@ -2078,6 +2141,7 @@ macro_rules! app_commands {
             db_backup_reveal_root,
             db_backup_reveal,
             db_repair_run,
+            db_hard_repair_run,
             time_invariants_check,
             about_metadata,
             $($extra),*

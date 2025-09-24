@@ -13,7 +13,7 @@ use sqlx::ConnectOptions;
 use sqlx::SqlitePool;
 
 use arklowdun_lib::db::{
-    backup,
+    backup, hard_repair,
     health::{DbHealthReport, DbHealthStatus},
     repair::{
         self, DbRepairEvent, DbRepairOptions, DbRepairStep, DbRepairStepState, DbRepairSummary,
@@ -54,6 +54,8 @@ enum DbCommand {
     },
     /// Attempt to repair a corrupted database by rebuilding and swapping files.
     Repair,
+    /// Attempt a last-resort hard repair that rebuilds the schema and imports tables.
+    HardRepair,
 }
 
 fn main() {
@@ -113,6 +115,7 @@ fn handle_db_command(command: DbCommand) -> Result<i32> {
         DbCommand::Vacuum => handle_db_vacuum(),
         DbCommand::Backup { json } => handle_db_backup(json),
         DbCommand::Repair => handle_db_repair(),
+        DbCommand::HardRepair => handle_db_hard_repair(),
     }
 }
 
@@ -235,16 +238,12 @@ fn handle_db_repair() -> Result<i32> {
                         .await
                         .context("reopen_pool_after_swap")
                         .map_err(AppError::from)
-                        .map_err(|err| {
-                            err.with_context("operation", "reopen_pool_after_swap")
-                        })?;
+                        .map_err(|err| err.with_context("operation", "reopen_pool_after_swap"))?;
                     let report = arklowdun_lib::db::health::run_health_checks(&pool, &db_path)
                         .await
                         .context("repair_post_swap_health")
                         .map_err(AppError::from)
-                        .map_err(|err| {
-                            err.with_context("operation", "repair_post_swap_health")
-                        })?;
+                        .map_err(|err| err.with_context("operation", "repair_post_swap_health"))?;
                     pool.close().await;
                     Ok(Some(report))
                 })
@@ -288,6 +287,68 @@ fn handle_db_repair() -> Result<i32> {
         }
         println!("Try running a hard repair or contact support if the issue persists.");
         Ok(1)
+    }
+}
+
+fn handle_db_hard_repair() -> Result<i32> {
+    let db_path = default_db_path().context("determine database path")?;
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create database parent directory {}", parent.display()))?;
+    }
+
+    let outcome = tauri::async_runtime::block_on(async {
+        hard_repair::run_hard_repair(&db_path)
+            .await
+            .context("run hard repair")
+    })?;
+
+    println!("Hard repair complete.");
+    println!("Pre-repair snapshot: {}", outcome.pre_backup_directory);
+    if let Some(archived) = &outcome.archived_db_path {
+        println!("Archived database: {}", archived);
+    } else {
+        println!("Original database left in place (integrity check failed).");
+    }
+    if let Some(rebuilt) = &outcome.rebuilt_db_path {
+        println!("Rebuilt copy preserved at: {}", rebuilt);
+    }
+    println!("Recovery report: {}", outcome.report_path);
+
+    for (table, stats) in &outcome.recovery.tables {
+        println!(
+            "{table:<24} attempted={:>6} succeeded={:>6} failed={:>6}",
+            stats.attempted, stats.succeeded, stats.failed
+        );
+    }
+
+    if !outcome.recovery.skipped_examples.is_empty() {
+        println!(
+            "{} row(s) were skipped. See the recovery report for details.",
+            outcome.recovery.skipped_examples.len()
+        );
+    }
+
+    if let Some(errors) = &outcome.recovery.foreign_key_errors {
+        if !errors.is_empty() {
+            println!("Foreign key issues detected: {}", errors.len());
+        }
+    }
+
+    if let Some(err) = &outcome.recovery.integrity_error {
+        if !outcome.recovery.integrity_ok {
+            println!("Integrity check reported: {err}");
+        }
+    }
+
+    if outcome.omitted {
+        println!(
+            "Hard repair completed with omissions. Review the recovery report for skipped rows."
+        );
+        Ok(1)
+    } else {
+        println!("All tables restored successfully.");
+        Ok(0)
     }
 }
 
