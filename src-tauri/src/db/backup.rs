@@ -1,9 +1,10 @@
+use std::borrow::Cow;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, Utc};
 use fs2::available_space;
@@ -109,12 +110,13 @@ impl BackupRecord {
 pub async fn overview(_pool: &SqlitePool, db_path: &Path) -> AppResult<BackupOverview> {
     let db_path = db_path.to_path_buf();
     let retention = RetentionConfig::load();
-    task::spawn_blocking(move || overview_sync(&db_path, &retention))
+    let overview = task::spawn_blocking(move || overview_sync(&db_path, &retention))
         .await
         .map_err(|err| {
             AppError::new("DB_BACKUP/TASK", "Backup overview task panicked")
                 .with_context("error", err.to_string())
-        })??
+        })??;
+    Ok(overview)
 }
 
 pub async fn create_backup(pool: &SqlitePool, db_path: &Path) -> AppResult<BackupEntry> {
@@ -124,12 +126,13 @@ pub async fn create_backup(pool: &SqlitePool, db_path: &Path) -> AppResult<Backu
     let db_path = db_path.to_path_buf();
     let retention = RetentionConfig::load();
     let schema = schema_hash.clone();
-    task::spawn_blocking(move || create_backup_sync(&db_path, &schema, &retention))
+    let record = task::spawn_blocking(move || create_backup_sync(&db_path, &schema, &retention))
         .await
         .map_err(|err| {
             AppError::new("DB_BACKUP/TASK", "Backup task panicked")
                 .with_context("error", err.to_string())
-        })??
+        })??;
+    Ok(record)
 }
 
 pub fn reveal_backup_root(db_path: &Path) -> AppResult<()> {
@@ -295,18 +298,15 @@ fn free_disk_space(path: &Path) -> AppResult<u64> {
         }
     }
 
-    let mut owned: Option<PathBuf> = None;
-    let target = if path.exists() {
-        path
+    let target: Cow<'_, Path> = if path.exists() {
+        Cow::Borrowed(path)
     } else if let Some(parent) = path.parent() {
-        owned = Some(parent.to_path_buf());
-        owned.as_ref().unwrap()
+        Cow::Owned(parent.to_path_buf())
     } else {
-        owned = Some(env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
-        owned.as_ref().unwrap()
+        Cow::Owned(env::current_dir().unwrap_or_else(|_| PathBuf::from("/")))
     };
 
-    available_space(target).map_err(|err| {
+    available_space(target.as_ref()).map_err(|err| {
         AppError::from(err)
             .with_context("operation", "available_space")
             .with_context("path", target.display().to_string())
@@ -353,20 +353,19 @@ fn run_sqlite_backup(src: &Path, dest: &Path) -> AppResult<()> {
             .with_context("operation", "open_source_db")
             .with_context("path", src.display().to_string())
     })?;
-    let dest_conn = Connection::open(dest).map_err(|err| {
+    let mut dest_conn = Connection::open(dest).map_err(|err| {
         AppError::from(err)
             .with_context("operation", "create_backup_db")
             .with_context("path", dest.display().to_string())
     })?;
 
-    let mut backup = Backup::new(&dest_conn, "main", &src_conn, "main")
-        .map_err(|err| AppError::from(err).with_context("operation", "backup_init"))?;
-    backup
-        .step(-1)
-        .map_err(|err| AppError::from(err).with_context("operation", "backup_step"))?;
-    backup
-        .finish()
-        .map_err(|err| AppError::from(err).with_context("operation", "backup_finish"))?;
+    {
+        let backup = Backup::new(&src_conn, &mut dest_conn)
+            .map_err(|err| AppError::from(err).with_context("operation", "backup_init"))?;
+        backup
+            .run_to_completion(128, Duration::from_millis(25), None)
+            .map_err(|err| AppError::from(err).with_context("operation", "backup_step"))?;
+    }
 
     dest_conn
         .execute_batch("PRAGMA wal_checkpoint(PASSIVE);")
