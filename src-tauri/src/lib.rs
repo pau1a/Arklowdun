@@ -1870,10 +1870,12 @@ async fn db_repair_run(
                 })
             };
 
+            let db_path_for_after_swap = db_path.clone();
             let after_swap = {
                 let pool_handle = pool_handle.clone();
                 let cache = cache.clone();
                 let flag = pool_closed.clone();
+                let db_path = db_path_for_after_swap;
                 Arc::new(move || -> std::pin::Pin<
                     Box<
                         dyn std::future::Future<
@@ -1912,12 +1914,13 @@ async fn db_repair_run(
                 })
             };
 
+            let db_path_for_repair = db_path.clone();
             let options = repair::DbRepairOptions {
                 before_swap: Some(before_swap),
                 after_swap: Some(after_swap),
             };
 
-            repair::run_guided_repair(&pool, &db_path, Some(handler), options).await
+            repair::run_guided_repair(&pool, &db_path_for_repair, Some(handler), options).await
         }
     })
     .await;
