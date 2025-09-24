@@ -131,7 +131,7 @@ export function createHardRepairView(): HardRepairViewInstance {
     const outcome = state.outcome;
     if (!outcome) return;
     try {
-      await copyText(outcome.report_path);
+      await copyText(outcome.reportPath);
       toast.success("Recovery report path copied.");
     } catch (error) {
       toast.error(`Failed to copy path: ${describeError(error)}`);
