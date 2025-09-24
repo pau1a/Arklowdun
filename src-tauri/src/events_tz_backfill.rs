@@ -1381,6 +1381,7 @@ pub async fn events_backfill_timezone(
         let default_tz = default_tz.clone();
         async move {
             let state: State<AppState> = app.state();
+            let _permit = crate::ipc::guard::ensure_db_writable(&state)?;
             let pool = state.pool.clone();
             let control = {
                 let mut guard = state.backfill.lock().unwrap();

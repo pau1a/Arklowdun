@@ -11,6 +11,11 @@ use sqlx::ConnectOptions;
 use sqlx::SqlitePool;
 
 use arklowdun_lib::db::health::{DbHealthReport, DbHealthStatus};
+use arklowdun_lib::ipc::guard::{
+    DB_UNHEALTHY_CLI_HINT,
+    DB_UNHEALTHY_CODE,
+    DB_UNHEALTHY_EXIT_CODE,
+};
 
 #[derive(Debug, Parser)]
 #[command(name = "arklowdun", about = "Arklowdun desktop application", version)]
@@ -34,6 +39,8 @@ enum DbCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Run VACUUM to compact the database when it is healthy.
+    Vacuum,
 }
 
 fn main() {
@@ -90,6 +97,46 @@ fn handle_db_command(command: DbCommand) -> Result<i32> {
                 DbHealthStatus::Error => 1,
             })
         }
+        DbCommand::Vacuum => handle_db_vacuum(),
+    }
+}
+
+fn guard_cli_db_mutation(db_path: &Path) -> Result<Result<SqlitePool, i32>> {
+    tauri::async_runtime::block_on(async {
+        let pool = open_health_pool(db_path).await?;
+        let report = arklowdun_lib::db::health::run_health_checks(&pool, db_path)
+            .await
+            .context("run database health checks")?;
+        if !matches!(report.status, DbHealthStatus::Ok) {
+            eprintln!("Error: {}. {}", DB_UNHEALTHY_CODE, DB_UNHEALTHY_CLI_HINT);
+            pool.close().await;
+            return Ok(Err(DB_UNHEALTHY_EXIT_CODE));
+        }
+        Ok(Ok(pool))
+    })
+}
+
+fn handle_db_vacuum() -> Result<i32> {
+    let db_path = default_db_path().context("determine database path")?;
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create database parent directory {}", parent.display()))?;
+    }
+
+    match guard_cli_db_mutation(&db_path)? {
+        Ok(pool) => {
+            tauri::async_runtime::block_on(async move {
+                let result = sqlx::query("VACUUM;")
+                    .execute(&pool)
+                    .await
+                    .context("vacuum database");
+                pool.close().await;
+                result.map(|_| ())
+            })?;
+            println!("Database vacuum completed.");
+            Ok(0)
+        }
+        Err(code) => Ok(code),
     }
 }
 
@@ -107,7 +154,10 @@ fn print_report_table(report: &DbHealthReport) {
     println!("Generated at : {}", report.generated_at);
 
     println!("\nChecks:");
-    println!("{:<20} {:<7} {:>13}  Details", "Check", "Passed", "Duration (ms)");
+    println!(
+        "{:<20} {:<7} {:>13}  Details",
+        "Check", "Passed", "Duration (ms)"
+    );
     for check in &report.checks {
         let passed = if check.passed { "yes" } else { "no" };
         let details = check
@@ -180,4 +230,98 @@ async fn open_health_pool(db_path: &Path) -> Result<SqlitePool> {
         .ok();
 
     Ok(pool)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Result;
+    use sqlx::Connection;
+    use sqlx::ConnectOptions;
+    use tempfile::tempdir;
+
+    fn ensure_database(db_path: &Path) -> Result<()> {
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        tauri::async_runtime::block_on(async {
+            let options = SqliteConnectOptions::new()
+                .filename(db_path)
+                .create_if_missing(true)
+                .journal_mode(SqliteJournalMode::Wal)
+                .synchronous(SqliteSynchronous::Full)
+                .foreign_keys(true);
+            let pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(options)
+                .await?;
+            pool.close().await;
+            Result::<()>::Ok(())
+        })
+    }
+
+    fn prepare_fk_violation(db_path: &Path) -> Result<()> {
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        tauri::async_runtime::block_on(async {
+            let mut conn = SqliteConnectOptions::new()
+                .filename(db_path)
+                .create_if_missing(true)
+                .journal_mode(SqliteJournalMode::Wal)
+                .synchronous(SqliteSynchronous::Full)
+                .foreign_keys(true)
+                .connect()
+                .await?;
+
+            sqlx::query("PRAGMA foreign_keys = OFF;")
+                .execute(&mut conn)
+                .await?;
+            sqlx::query("CREATE TABLE parent(id INTEGER PRIMARY KEY);")
+                .execute(&mut conn)
+                .await?;
+            sqlx::query(
+                "CREATE TABLE child(id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parent(id));",
+            )
+            .execute(&mut conn)
+            .await?;
+            sqlx::query("INSERT INTO child(id, parent_id) VALUES (1, 999);")
+                .execute(&mut conn)
+                .await?;
+            sqlx::query("PRAGMA foreign_keys = ON;")
+                .execute(&mut conn)
+                .await?;
+
+            conn.close().await?;
+            Result::<()>::Ok(())
+        })
+    }
+
+    #[test]
+    fn guard_cli_db_mutation_allows_healthy_db() -> Result<()> {
+        let tmp = tempdir()?;
+        let db_path = tmp.path().join("arklowdun.sqlite3");
+        ensure_database(&db_path)?;
+
+        let guard = super::guard_cli_db_mutation(&db_path)?;
+        let pool = guard.expect("expected healthy database guard to allow writes");
+        tauri::async_runtime::block_on(async move {
+            pool.close().await;
+        });
+
+        Ok(())
+    }
+
+    #[test]
+    fn guard_cli_db_mutation_blocks_unhealthy_db() -> Result<()> {
+        let tmp = tempdir()?;
+        let db_path = tmp.path().join("arklowdun.sqlite3");
+        prepare_fk_violation(&db_path)?;
+
+        let guard = super::guard_cli_db_mutation(&db_path)?;
+        assert_eq!(guard, Err(DB_UNHEALTHY_EXIT_CODE));
+        Ok(())
+    }
 }

@@ -22,6 +22,7 @@ use ts_rs::TS;
 
 use crate::{
     db::health::{DbHealthReport, DbHealthStatus, STORAGE_SANITY_HEAL_NOTE},
+    ipc::guard,
     state::AppState,
 };
 
@@ -104,6 +105,7 @@ pub mod exdate;
 mod household; // declare module; avoid `use` to prevent name collision
 mod id;
 mod importer;
+pub mod ipc;
 pub mod logging;
 pub mod migrate;
 pub mod migration_guard;
@@ -491,6 +493,7 @@ macro_rules! gen_domain_cmds {
                     state: State<'_, AppState>,
                     data: serde_json::Map<String, serde_json::Value>,
                 ) -> AppResult<serde_json::Value> {
+                    let _permit = guard::ensure_db_writable(&state)?;
                     let pool = state.pool.clone();
                     dispatch_async_app_result(move || {
                         let data = data;
@@ -513,6 +516,7 @@ macro_rules! gen_domain_cmds {
                     data: serde_json::Map<String, serde_json::Value>,
                     household_id: Option<String>,
                 ) -> AppResult<()> {
+                    let _permit = guard::ensure_db_writable(&state)?;
                     let pool = state.pool.clone();
                     dispatch_async_app_result(move || {
                         let household_id = household_id;
@@ -539,6 +543,7 @@ macro_rules! gen_domain_cmds {
                     household_id: String,
                     id: String,
                 ) -> AppResult<()> {
+                    let _permit = guard::ensure_db_writable(&state)?;
                     let pool = state.pool.clone();
                     dispatch_async_app_result(move || {
                         let household_id = household_id;
@@ -562,6 +567,7 @@ macro_rules! gen_domain_cmds {
                     household_id: String,
                     id: String,
                 ) -> AppResult<()> {
+                    let _permit = guard::ensure_db_writable(&state)?;
                     let pool = state.pool.clone();
                     dispatch_async_app_result(move || {
                         let household_id = household_id;
@@ -688,6 +694,7 @@ async fn vehicles_create(
     state: State<'_, AppState>,
     data: serde_json::Map<String, serde_json::Value>,
 ) -> AppResult<serde_json::Value> {
+    let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool.clone();
     dispatch_async_app_result(move || {
         let data = data;
@@ -703,6 +710,7 @@ async fn vehicles_update(
     data: serde_json::Map<String, serde_json::Value>,
     household_id: Option<String>,
 ) -> AppResult<()> {
+    let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool.clone();
     dispatch_async_app_result(move || {
         let id = id;
@@ -721,6 +729,7 @@ async fn vehicles_delete(
     household_id: String,
     id: String,
 ) -> AppResult<()> {
+    let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool.clone();
     dispatch_async_app_result(move || {
         let household_id = household_id;
@@ -736,6 +745,7 @@ async fn vehicles_restore(
     household_id: String,
     id: String,
 ) -> AppResult<()> {
+    let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool.clone();
     dispatch_async_app_result(move || {
         let household_id = household_id;
@@ -814,6 +824,7 @@ async fn event_create(
     state: State<'_, AppState>,
     data: serde_json::Map<String, serde_json::Value>,
 ) -> AppResult<serde_json::Value> {
+    let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool.clone();
     dispatch_async_app_result(move || {
         let data = data;
@@ -829,6 +840,7 @@ async fn event_update(
     data: serde_json::Map<String, serde_json::Value>,
     household_id: String,
 ) -> AppResult<()> {
+    let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool.clone();
     dispatch_async_app_result(move || {
         let id = id;
@@ -845,6 +857,7 @@ async fn event_delete(
     household_id: String,
     id: String,
 ) -> AppResult<()> {
+    let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool.clone();
     dispatch_async_app_result(move || {
         let household_id = household_id;
@@ -860,6 +873,7 @@ async fn event_restore(
     household_id: String,
     id: String,
 ) -> AppResult<()> {
+    let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool.clone();
     dispatch_async_app_result(move || {
         let household_id = household_id;
@@ -967,9 +981,10 @@ struct ImportArgs {
 #[tauri::command]
 async fn import_run_legacy(
     app: tauri::AppHandle,
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
     args: ImportArgs,
 ) -> AppResult<()> {
+    let _permit = guard::ensure_db_writable(&state)?;
     let app = app.clone();
     dispatch_async_app_result(move || async move {
         let household_id = args.household_id;
@@ -2167,5 +2182,133 @@ mod db_health_command_tests {
         let cached_after: DbHealthReport =
             response.deserialize().expect("deserialize cached report");
         assert_eq!(cached_after.generated_at, refreshed.generated_at);
+    }
+}
+
+#[cfg(test)]
+mod write_guard_tests {
+    use super::*;
+    use log::LevelFilter;
+    use sqlx::sqlite::{
+        SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
+    };
+    use sqlx::ConnectOptions;
+    use std::sync::{Arc, Mutex};
+    use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
+    use tauri::webview::InvokeRequest;
+    use tempfile::tempdir;
+    use tokio::runtime::Runtime;
+
+    fn invoke_request_with_payload(cmd: &str, payload: serde_json::Value) -> InvokeRequest {
+        InvokeRequest {
+            cmd: cmd.into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: "http://tauri.localhost".parse().expect("valid url"),
+            body: tauri::ipc::InvokeBody::from(payload),
+            headers: Default::default(),
+            invoke_key: INVOKE_KEY.to_string(),
+        }
+    }
+
+    #[test]
+    fn household_create_is_blocked_when_health_unhealthy() {
+        let dir = tempdir().expect("temp dir");
+        let db_path = dir.path().join("guard.sqlite3");
+
+        let runtime = Runtime::new().expect("create runtime");
+        let (pool, unhealthy_report) = runtime.block_on(async {
+            let options = SqliteConnectOptions::new()
+                .filename(&db_path)
+                .create_if_missing(true)
+                .journal_mode(SqliteJournalMode::Wal)
+                .synchronous(SqliteSynchronous::Full)
+                .foreign_keys(true)
+                .log_statements(LevelFilter::Off);
+            let pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(options)
+                .await
+                .expect("connect sqlite");
+            crate::db::apply_migrations(&pool)
+                .await
+                .expect("apply migrations");
+
+            let mut conn = pool.acquire().await.expect("acquire connection");
+            sqlx::query("PRAGMA foreign_keys = OFF;")
+                .execute(conn.as_mut())
+                .await
+                .expect("disable foreign keys");
+            sqlx::query("INSERT INTO notes (id, household_id, position, created_at, updated_at, z) VALUES ('n1','missing',0,0,0,0);")
+                .execute(conn.as_mut())
+                .await
+                .expect("insert corrupt note");
+            sqlx::query("PRAGMA foreign_keys = ON;")
+                .execute(conn.as_mut())
+                .await
+                .expect("enable foreign keys");
+            drop(conn);
+
+            let report = crate::db::health::run_health_checks(&pool, &db_path)
+                .await
+                .expect("health checks");
+            assert!(matches!(report.status, DbHealthStatus::Error));
+            (pool, report)
+        });
+        drop(runtime);
+
+        let app_state = crate::state::AppState {
+            pool: pool.clone(),
+            default_household_id: Arc::new(Mutex::new(String::from("test"))),
+            backfill: Arc::new(Mutex::new(
+                crate::events_tz_backfill::BackfillCoordinator::new(),
+            )),
+            db_health: Arc::new(Mutex::new(unhealthy_report.clone())),
+            db_path: Arc::new(db_path.clone()),
+        };
+
+        let app = mock_builder()
+            .manage(app_state)
+            .invoke_handler(tauri::generate_handler![super::household_create])
+            .build(mock_context(noop_assets()))
+            .expect("build tauri app");
+
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("create window");
+
+        let payload = serde_json::json!({
+            "data": { "name": "Blocked" }
+        });
+
+        let response = get_ipc_response(
+            &window,
+            invoke_request_with_payload("household_create", payload),
+        );
+        let err = response.expect_err("expected guard error");
+        let obj = err.as_object().expect("error payload is object");
+        assert_eq!(
+            obj.get("code").and_then(|v| v.as_str()),
+            Some(crate::ipc::guard::DB_UNHEALTHY_CODE)
+        );
+        assert_eq!(
+            obj.get("message").and_then(|v| v.as_str()),
+            Some(crate::ipc::guard::DB_UNHEALTHY_MESSAGE)
+        );
+        let health = obj
+            .get("health_report")
+            .and_then(|v| v.as_object())
+            .expect("health report attached");
+        assert_eq!(health.get("status").and_then(|v| v.as_str()), Some("error"));
+
+        let runtime = Runtime::new().expect("create runtime");
+        let count = runtime.block_on(async {
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM household")
+                .fetch_one(&pool)
+                .await
+                .expect("query household count")
+        });
+        drop(runtime);
+        assert_eq!(count, 0, "mutation should not have been applied");
     }
 }

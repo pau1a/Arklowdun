@@ -50,6 +50,21 @@ When converting SQL queries, driver-level issues (pool timeouts, decode
 failures, missing rows) use the `SQLX/*` prefix while raw SQLite engine
 responses keep the native code under `Sqlite/<number>`.
 
+- `DB_UNHEALTHY_WRITE_BLOCKED` → returned by the IPC/CLI guard whenever the
+  cached database health report is not `Ok`. The payload includes the full
+  report so the UI can show the banner and toast without issuing another
+  `db_get_health_report` call. Mutating CLI subcommands abort with exit code `2`
+  (see `DB_UNHEALTHY_EXIT_CODE`) so automation can detect the guard failure.
+
+  The attached `DbHealthReport` contains:
+
+  - `status` – overall enum (`Ok`, `Error`, or `Warning`).
+  - `checks` – individual check outcomes with human readable descriptions.
+  - `offenders` – redacted references to affected tables/rowids.
+  - `schema_hash` – hash of the schema used for compatibility checks.
+  - `app_version` – application version that produced the report.
+  - `generated_at` – ISO8601 timestamp when the report was captured.
+
 ## Conversions
 
 The module implements several `From` conversions so higher level code can reuse
@@ -112,7 +127,7 @@ The generated binding exposes the JSON shape for the UI:
 ```ts
 import { invoke } from "@tauri-apps/api/core";
 import type { AppError } from "../bindings/AppError";
-import { normalizeError } from "../api/call";
+import { normalizeError } from "@lib/ipc/call";
 
 export async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   try {

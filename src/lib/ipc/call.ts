@@ -4,6 +4,9 @@ import type { AppError } from "@bindings/AppError";
 import { actions } from "@store/index";
 
 const FALLBACK_CODE = "APP/UNKNOWN";
+export const DB_UNHEALTHY_WRITE_BLOCKED = "DB_UNHEALTHY_WRITE_BLOCKED";
+export const DB_UNHEALTHY_WRITE_BLOCKED_MESSAGE =
+  "Database integrity checks failed. Editing is disabled until repair completes.";
 
 type UnknownRecord = Record<string, unknown>;
 const isRecord = (v: unknown): v is UnknownRecord =>
@@ -44,6 +47,15 @@ export function normalizeError(error: unknown): AppError {
 
     const out: AppError = { code, message, context: ctx, crash_id: crashId };
 
+    if (code === DB_UNHEALTHY_WRITE_BLOCKED) {
+      out.message = DB_UNHEALTHY_WRITE_BLOCKED_MESSAGE;
+    }
+
+    const healthReport = record.health_report ?? record.healthReport;
+    if (healthReport && typeof healthReport === "object") {
+      out.health_report = healthReport as DbHealthReport;
+    }
+
     if (error.cause) out.cause = normalizeError(error.cause);
     else if (typeof error.stack === "string" && !out.context?.stack) {
       out.context = { ...(out.context ?? {}), stack: error.stack };
@@ -73,6 +85,9 @@ export async function call<T>(
     return result;
   } catch (err) {
     const normalized = normalizeError(err);
+    if (normalized.health_report) {
+      actions.db.health.receive(normalized.health_report);
+    }
     if (trackDbHealth) {
       actions.db.health.fail(normalized);
     }

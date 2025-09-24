@@ -17,14 +17,16 @@ const WAL_HEADER_MAGIC: &[u8; 4] = b"WAL\0";
 
 pub const STORAGE_SANITY_HEAL_NOTE: &str = "wal header healed after checkpoint";
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 #[serde(rename_all = "snake_case")]
 pub enum DbHealthStatus {
     Ok,
     Error,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 pub struct DbHealthCheck {
     pub name: String,
     pub passed: bool,
@@ -36,7 +38,8 @@ pub struct DbHealthCheck {
     pub details: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 pub struct DbHealthOffender {
     pub table: String,
     #[ts(type = "number")]
@@ -44,7 +47,7 @@ pub struct DbHealthOffender {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct DbHealthReport {
     pub status: DbHealthStatus,

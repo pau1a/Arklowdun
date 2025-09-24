@@ -1,5 +1,5 @@
 import type { AppError } from "@bindings/AppError";
-import { normalizeError } from "../api/call";
+import { normalizeError } from "@lib/ipc/call";
 
 export interface TimekeepingErrorDisplay {
   error: AppError;

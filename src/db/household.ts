@@ -1,4 +1,4 @@
-import { call } from "../api/call";
+import { call } from "@lib/ipc/call";
 import { log } from "../utils/logger";
 import { emit } from "../store/events";
 
