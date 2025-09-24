@@ -204,9 +204,7 @@ async fn backup_succeeds_while_db_locked() -> Result<()> {
         .connect()
         .await?;
 
-    sqlx::query("BEGIN IMMEDIATE;")
-        .execute(&mut locker)
-        .await?;
+    sqlx::query("BEGIN IMMEDIATE;").execute(&mut locker).await?;
     sqlx::query("INSERT INTO sample(value) VALUES ('locked');")
         .execute(&mut locker)
         .await?;

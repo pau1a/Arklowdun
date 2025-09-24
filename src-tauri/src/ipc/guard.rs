@@ -24,6 +24,11 @@ pub const DB_UNHEALTHY_MESSAGE: &str =
 pub const DB_UNHEALTHY_CLI_HINT: &str = "Run 'arklowdun db status' or repair.";
 /// Exit status used by CLI subcommands when writes are rejected.
 pub const DB_UNHEALTHY_EXIT_CODE: i32 = 2;
+/// Error code returned when maintenance blocks database writes.
+pub const DB_MAINTENANCE_CODE: &str = "DB_MAINTENANCE_IN_PROGRESS";
+/// Message shown to users when maintenance blocks database writes.
+pub const DB_MAINTENANCE_MESSAGE: &str =
+    "Database maintenance is running. Please try again after repair completes.";
 
 #[must_use = "Database health must be checked before executing a mutation"]
 #[derive(Debug)]
@@ -64,6 +69,10 @@ where
 #[must_use = "Database health must be checked before executing a mutation"]
 pub fn ensure_db_writable(state: &(impl AppStateRef + ?Sized)) -> AppResult<DbWriteGuard> {
     let state = state.as_app_state();
+    if state.maintenance_active() {
+        warn!(target: "arklowdun", event = "db_write_blocked", reason = "maintenance");
+        return Err(AppError::new(DB_MAINTENANCE_CODE, DB_MAINTENANCE_MESSAGE));
+    }
     let report = state
         .db_health
         .lock()
@@ -93,7 +102,8 @@ mod tests {
     use sqlx::sqlite::SqlitePoolOptions;
     use std::{
         path::PathBuf,
-        sync::{Arc, Mutex},
+        sync::atomic::AtomicBool,
+        sync::{Arc, Mutex, RwLock},
     };
 
     fn app_state_with_report(report: DbHealthReport) -> AppState {
@@ -102,11 +112,12 @@ mod tests {
             .connect_lazy("sqlite::memory:")
             .expect("create sqlite pool");
         AppState {
-            pool,
+            pool: Arc::new(RwLock::new(pool)),
             default_household_id: Arc::new(Mutex::new(String::new())),
             backfill: Arc::new(Mutex::new(BackfillCoordinator::new())),
             db_health: Arc::new(Mutex::new(report)),
             db_path: Arc::new(PathBuf::from("test.sqlite3")),
+            maintenance: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -135,5 +146,16 @@ mod tests {
         assert_eq!(err.message(), DB_UNHEALTHY_MESSAGE);
         let report = err.health_report().expect("health report attached");
         assert_eq!(report.status, DbHealthStatus::Error);
+    }
+
+    #[tokio::test]
+    async fn blocks_mutations_during_maintenance() {
+        let state = app_state_with_report(sample_report(DbHealthStatus::Ok));
+        let guard = state.begin_maintenance().expect("enter maintenance");
+        let err = ensure_db_writable(&state).expect_err("expected maintenance guard to block");
+        assert_eq!(err.code(), DB_MAINTENANCE_CODE);
+        assert_eq!(err.message(), DB_MAINTENANCE_MESSAGE);
+        drop(guard);
+        assert!(ensure_db_writable(&state).is_ok());
     }
 }

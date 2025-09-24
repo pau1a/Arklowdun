@@ -3,12 +3,13 @@ use once_cell::sync::OnceCell;
 use paste::paste;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     io::{self, Write},
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
 };
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 use thiserror::Error;
 use tracing_appender::non_blocking::NonBlockingBuilder;
 use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
@@ -24,9 +25,11 @@ use crate::{
     db::{
         backup,
         health::{DbHealthReport, DbHealthStatus, STORAGE_SANITY_HEAL_NOTE},
+        repair::{self, DbRepairEvent, DbRepairOptions, DbRepairSummary},
     },
     ipc::guard,
     state::AppState,
+    AppError,
 };
 
 const FILES_INDEX_VERSION: i64 = 1;
@@ -448,7 +451,7 @@ macro_rules! gen_domain_cmds {
                     limit: Option<i64>,
                     offset: Option<i64>,
                 ) -> AppResult<Vec<serde_json::Value>> {
-                    let pool = state.pool.clone();
+                    let pool = state.pool_clone();
                     dispatch_async_app_result(move || {
                         let order_by = order_by;
                         let household_id = household_id;
@@ -473,7 +476,7 @@ macro_rules! gen_domain_cmds {
                     household_id: Option<String>,
                     id: String,
                 ) -> AppResult<Option<serde_json::Value>> {
-                    let pool = state.pool.clone();
+                    let pool = state.pool_clone();
                     dispatch_async_app_result(move || {
                         let household_id = household_id;
                         let id = id;
@@ -497,7 +500,7 @@ macro_rules! gen_domain_cmds {
                     data: serde_json::Map<String, serde_json::Value>,
                 ) -> AppResult<serde_json::Value> {
                     let _permit = guard::ensure_db_writable(&state)?;
-                    let pool = state.pool.clone();
+                    let pool = state.pool_clone();
                     dispatch_async_app_result(move || {
                         let data = data;
                         async move {
@@ -520,7 +523,7 @@ macro_rules! gen_domain_cmds {
                     household_id: Option<String>,
                 ) -> AppResult<()> {
                     let _permit = guard::ensure_db_writable(&state)?;
-                    let pool = state.pool.clone();
+                    let pool = state.pool_clone();
                     dispatch_async_app_result(move || {
                         let household_id = household_id;
                         let id = id;
@@ -547,7 +550,7 @@ macro_rules! gen_domain_cmds {
                     id: String,
                 ) -> AppResult<()> {
                     let _permit = guard::ensure_db_writable(&state)?;
-                    let pool = state.pool.clone();
+                    let pool = state.pool_clone();
                     dispatch_async_app_result(move || {
                         let household_id = household_id;
                         let id = id;
@@ -571,7 +574,7 @@ macro_rules! gen_domain_cmds {
                     id: String,
                 ) -> AppResult<()> {
                     let _permit = guard::ensure_db_writable(&state)?;
-                    let pool = state.pool.clone();
+                    let pool = state.pool_clone();
                     dispatch_async_app_result(move || {
                         let household_id = household_id;
                         let id = id;
@@ -656,7 +659,7 @@ async fn vehicles_list(
     state: State<'_, AppState>,
     household_id: String,
 ) -> AppResult<Vec<Vehicle>> {
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     dispatch_async_app_result(move || {
         let household_id = household_id;
         async move {
@@ -683,7 +686,7 @@ async fn vehicles_get(
     household_id: Option<String>,
     id: String,
 ) -> AppResult<Option<serde_json::Value>> {
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     dispatch_async_app_result(move || {
         let household_id = household_id;
         let id = id;
@@ -698,7 +701,7 @@ async fn vehicles_create(
     data: serde_json::Map<String, serde_json::Value>,
 ) -> AppResult<serde_json::Value> {
     let _permit = guard::ensure_db_writable(&state)?;
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     dispatch_async_app_result(move || {
         let data = data;
         async move { commands::create_command(&pool, "vehicles", data).await }
@@ -714,7 +717,7 @@ async fn vehicles_update(
     household_id: Option<String>,
 ) -> AppResult<()> {
     let _permit = guard::ensure_db_writable(&state)?;
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     dispatch_async_app_result(move || {
         let id = id;
         let data = data;
@@ -733,7 +736,7 @@ async fn vehicles_delete(
     id: String,
 ) -> AppResult<()> {
     let _permit = guard::ensure_db_writable(&state)?;
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     dispatch_async_app_result(move || {
         let household_id = household_id;
         let id = id;
@@ -749,7 +752,7 @@ async fn vehicles_restore(
     id: String,
 ) -> AppResult<()> {
     let _permit = guard::ensure_db_writable(&state)?;
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     dispatch_async_app_result(move || {
         let household_id = household_id;
         let id = id;
@@ -814,7 +817,7 @@ async fn events_list_range(
     start: i64,
     end: i64,
 ) -> AppResult<EventsListRangeResponse> {
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     dispatch_async_app_result(move || {
         let household_id = household_id;
         async move { commands::events_list_range_command(&pool, &household_id, start, end).await }
@@ -828,7 +831,7 @@ async fn event_create(
     data: serde_json::Map<String, serde_json::Value>,
 ) -> AppResult<serde_json::Value> {
     let _permit = guard::ensure_db_writable(&state)?;
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     dispatch_async_app_result(move || {
         let data = data;
         async move { commands::create_command(&pool, "events", data).await }
@@ -844,7 +847,7 @@ async fn event_update(
     household_id: String,
 ) -> AppResult<()> {
     let _permit = guard::ensure_db_writable(&state)?;
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     dispatch_async_app_result(move || {
         let id = id;
         let data = data;
@@ -861,7 +864,7 @@ async fn event_delete(
     id: String,
 ) -> AppResult<()> {
     let _permit = guard::ensure_db_writable(&state)?;
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     dispatch_async_app_result(move || {
         let household_id = household_id;
         let id = id;
@@ -877,7 +880,7 @@ async fn event_restore(
     id: String,
 ) -> AppResult<()> {
     let _permit = guard::ensure_db_writable(&state)?;
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     dispatch_async_app_result(move || {
         let household_id = household_id;
         let id = id;
@@ -896,7 +899,7 @@ async fn bills_list_due_between(
     offset: Option<i64>,
 ) -> AppResult<Vec<serde_json::Value>> {
     use sqlx::query;
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     dispatch_async_app_result(move || {
         let household_id = household_id;
         async move {
@@ -1118,20 +1121,20 @@ async fn files_index_ready(pool: &sqlx::SqlitePool, household_id: &str) -> bool 
 
 #[tauri::command]
 async fn db_table_exists(state: State<'_, AppState>, name: String) -> AppResult<bool> {
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     dispatch_async_app_result(move || async move { Ok(table_exists(&pool, &name).await) }).await
 }
 
 #[tauri::command]
 async fn db_has_files_index(state: State<'_, AppState>) -> AppResult<bool> {
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     dispatch_async_app_result(move || async move { Ok(table_exists(&pool, "files_index").await) })
         .await
 }
 
 #[tauri::command]
 async fn db_files_index_ready(state: State<'_, AppState>, household_id: String) -> AppResult<bool> {
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     dispatch_async_app_result(
         move || async move { Ok(files_index_ready(&pool, &household_id).await) },
     )
@@ -1140,7 +1143,7 @@ async fn db_files_index_ready(state: State<'_, AppState>, household_id: String) 
 
 #[tauri::command]
 async fn db_has_vehicle_columns(state: State<'_, AppState>) -> AppResult<bool> {
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     dispatch_async_app_result(move || async move {
         if !table_exists(&pool, "vehicles").await {
             return Ok(false);
@@ -1157,7 +1160,7 @@ async fn db_has_vehicle_columns(state: State<'_, AppState>) -> AppResult<bool> {
 
 #[tauri::command]
 async fn db_has_pet_columns(state: State<'_, AppState>) -> AppResult<bool> {
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     dispatch_async_app_result(move || async move {
         if !table_exists(&pool, "pets").await {
             return Ok(false);
@@ -1184,7 +1187,7 @@ async fn db_get_health_report(state: State<'_, AppState>) -> AppResult<DbHealthR
 /// `db_recheck` IPC command used by the UI.
 #[tauri::command]
 async fn db_recheck(state: State<'_, AppState>) -> AppResult<DbHealthReport> {
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     let db_path = state.db_path.clone();
     let cache = state.db_health.clone();
     dispatch_async_app_result(move || {
@@ -1287,7 +1290,7 @@ async fn search_entities(
     offset: i64,
 ) -> AppResult<Vec<SearchResult>> {
     use sqlx::Row;
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     dispatch_async_app_result(move || {
         let household_id = household_id;
         let query = query;
@@ -1620,7 +1623,7 @@ async fn attachment_open(
     table: String,
     id: String,
 ) -> AppResult<()> {
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     let app = app.clone();
     dispatch_async_app_result(move || {
         let table = table;
@@ -1667,7 +1670,7 @@ async fn attachment_reveal(
     table: String,
     id: String,
 ) -> AppResult<()> {
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     let app = app.clone();
     dispatch_async_app_result(move || {
         let table = table;
@@ -1785,7 +1788,7 @@ async fn open_diagnostics_doc(app: tauri::AppHandle) -> AppResult<()> {
 
 #[tauri::command]
 async fn db_backup_overview(state: State<'_, AppState>) -> AppResult<backup::BackupOverview> {
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     let db_path = (*state.db_path).clone();
     dispatch_async_app_result(move || {
         let pool = pool.clone();
@@ -1796,7 +1799,7 @@ async fn db_backup_overview(state: State<'_, AppState>) -> AppResult<backup::Bac
 
 #[tauri::command]
 async fn db_backup_create(state: State<'_, AppState>) -> AppResult<backup::BackupEntry> {
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     let db_path = (*state.db_path).clone();
     dispatch_async_app_result(move || {
         let pool = pool.clone();
@@ -1826,12 +1829,114 @@ async fn db_backup_reveal(state: State<'_, AppState>, path: String) -> AppResult
 }
 
 #[tauri::command]
+async fn db_repair_run(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<DbRepairSummary> {
+    let maintenance_guard = state.begin_maintenance()?;
+    let pool = state.pool_clone();
+    let pool_handle = state.pool.clone();
+    let db_path = (*state.db_path).clone();
+    let db_path_for_reopen = db_path.clone();
+    let cache = state.db_health.clone();
+    let emitter = app.clone();
+    let pool_closed = Arc::new(AtomicBool::new(false));
+    let pool_closed_after = pool_closed.clone();
+
+    let result = dispatch_async_app_result(move || {
+        let pool = pool.clone();
+        let db_path = db_path.clone();
+        let cache = cache.clone();
+        let emitter = emitter.clone();
+        let pool_handle = pool_handle.clone();
+        let pool_closed = pool_closed.clone();
+        async move {
+            let handler = Arc::new(move |event: DbRepairEvent| {
+                let _ = emitter.emit("db_repair_progress", event.clone());
+            });
+
+            let before_swap = {
+                let pool = pool.clone();
+                let flag = pool_closed.clone();
+                Arc::new(move || {
+                    let pool = pool.clone();
+                    let flag = flag.clone();
+                    Box::pin(async move {
+                        pool.close().await;
+                        flag.store(true, Ordering::SeqCst);
+                        Ok(())
+                    })
+                })
+            };
+
+            let after_swap = {
+                let pool_handle = pool_handle.clone();
+                let cache = cache.clone();
+                let flag = pool_closed.clone();
+                Arc::new(move || {
+                    let db_path = db_path.clone();
+                    let pool_handle = pool_handle.clone();
+                    let cache = cache.clone();
+                    let flag = flag.clone();
+                    Box::pin(async move {
+                        let new_pool =
+                            crate::db::connect_sqlite_pool(&db_path)
+                                .await
+                                .map_err(|err| {
+                                    AppError::from(err)
+                                        .with_context("operation", "reopen_pool_after_swap")
+                                })?;
+                        {
+                            let mut guard = pool_handle.write().expect("pool lock poisoned");
+                            *guard = new_pool.clone();
+                        }
+                        let report = crate::db::health::run_health_checks(&new_pool, &db_path)
+                            .await
+                            .map_err(|err| {
+                                err.with_context("operation", "repair_post_swap_health")
+                            })?;
+                        {
+                            let mut guard = cache.lock().expect("db health cache poisoned");
+                            *guard = report.clone();
+                        }
+                        flag.store(false, Ordering::SeqCst);
+                        Ok(Some(report))
+                    })
+                })
+            };
+
+            let options = repair::DbRepairOptions {
+                before_swap: Some(before_swap),
+                after_swap: Some(after_swap),
+            };
+
+            repair::run_guided_repair(&pool, &db_path, Some(handler), options).await
+        }
+    })
+    .await;
+
+    drop(maintenance_guard);
+
+    if pool_closed_after.load(Ordering::SeqCst) {
+        let reopened = crate::db::connect_sqlite_pool(&db_path_for_reopen)
+            .await
+            .map_err(|err| {
+                AppError::from(err).with_context("operation", "reopen_pool_after_failure")
+            })?;
+        state.replace_pool(reopened);
+        pool_closed_after.store(false, Ordering::SeqCst);
+    }
+
+    result
+}
+
+#[tauri::command]
 #[allow(clippy::result_large_err)]
 async fn time_invariants_check(
     state: State<'_, AppState>,
     household_id: Option<String>,
 ) -> AppResult<time_invariants::DriftReport> {
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     dispatch_async_app_result(move || {
         let pool = pool.clone();
         let household_id = household_id.clone();
@@ -1962,6 +2067,7 @@ macro_rules! app_commands {
             db_backup_create,
             db_backup_reveal_root,
             db_backup_reveal,
+            db_repair_run,
             time_invariants_check,
             about_metadata,
             $($extra),*
@@ -2009,14 +2115,16 @@ pub fn run() {
             let hh = tauri::async_runtime::block_on(crate::household::default_household_id(&pool))?;
             let db_health = Arc::new(Mutex::new(health_report));
             let db_path = Arc::new(db_path);
+            let pool_handle = Arc::new(RwLock::new(pool.clone()));
             app.manage(crate::state::AppState {
-                pool: pool.clone(),
+                pool: pool_handle,
                 default_household_id: Arc::new(Mutex::new(hh)),
                 backfill: Arc::new(Mutex::new(
                     crate::events_tz_backfill::BackfillCoordinator::new(),
                 )),
                 db_health,
                 db_path,
+                maintenance: Arc::new(AtomicBool::new(false)),
             });
             Ok(())
         })
@@ -2190,13 +2298,14 @@ mod db_health_command_tests {
         drop(runtime);
 
         let app_state = crate::state::AppState {
-            pool: pool.clone(),
+            pool: Arc::new(RwLock::new(pool.clone())),
             default_household_id: Arc::new(Mutex::new(String::from("test-household"))),
             backfill: Arc::new(Mutex::new(
                 crate::events_tz_backfill::BackfillCoordinator::new(),
             )),
             db_health: Arc::new(Mutex::new(cached_report.clone())),
             db_path: Arc::new(db_path.clone()),
+            maintenance: Arc::new(AtomicBool::new(false)),
         };
 
         let app = mock_builder()
@@ -2307,13 +2416,14 @@ mod write_guard_tests {
         drop(runtime);
 
         let app_state = crate::state::AppState {
-            pool: pool.clone(),
+            pool: Arc::new(RwLock::new(pool.clone())),
             default_household_id: Arc::new(Mutex::new(String::from("test"))),
             backfill: Arc::new(Mutex::new(
                 crate::events_tz_backfill::BackfillCoordinator::new(),
             )),
             db_health: Arc::new(Mutex::new(unhealthy_report.clone())),
             db_path: Arc::new(db_path.clone()),
+            maintenance: Arc::new(AtomicBool::new(false)),
         };
 
         let app = mock_builder()

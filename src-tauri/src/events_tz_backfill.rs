@@ -1382,7 +1382,7 @@ pub async fn events_backfill_timezone(
         async move {
             let state: State<AppState> = app.state();
             let _permit = crate::ipc::guard::ensure_db_writable(&state)?;
-            let pool = state.pool.clone();
+            let pool = state.pool_clone();
             let control = {
                 let mut guard = state.backfill.lock().unwrap();
                 guard.try_start(&household_id)?
@@ -1477,7 +1477,7 @@ pub async fn events_backfill_timezone_status(
     household_id: String,
 ) -> AppResult<BackfillStatusReport> {
     let state: State<AppState> = app.state();
-    let pool = state.pool.clone();
+    let pool = state.pool_clone();
     let running = {
         let guard = state.backfill.lock().unwrap();
         guard.running_household()

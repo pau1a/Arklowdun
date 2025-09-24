@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -14,8 +15,12 @@ use sqlx::SqlitePool;
 use arklowdun_lib::db::{
     backup,
     health::{DbHealthReport, DbHealthStatus},
+    repair::{
+        self, DbRepairEvent, DbRepairOptions, DbRepairStep, DbRepairStepState, DbRepairSummary,
+    },
 };
 use arklowdun_lib::ipc::guard::{DB_UNHEALTHY_CLI_HINT, DB_UNHEALTHY_CODE, DB_UNHEALTHY_EXIT_CODE};
+use arklowdun_lib::AppError;
 
 #[derive(Debug, Parser)]
 #[command(name = "arklowdun", about = "Arklowdun desktop application", version)]
@@ -47,6 +52,8 @@ enum DbCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Attempt to repair a corrupted database by rebuilding and swapping files.
+    Repair,
 }
 
 fn main() {
@@ -105,6 +112,7 @@ fn handle_db_command(command: DbCommand) -> Result<i32> {
         }
         DbCommand::Vacuum => handle_db_vacuum(),
         DbCommand::Backup { json } => handle_db_backup(json),
+        DbCommand::Repair => handle_db_repair(),
     }
 }
 
@@ -181,6 +189,118 @@ fn handle_db_backup(emit_json: bool) -> Result<i32> {
             Ok(0)
         }
         Err(code) => Ok(code),
+    }
+}
+
+fn handle_db_repair() -> Result<i32> {
+    let db_path = default_db_path().context("determine database path")?;
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create database parent directory {}", parent.display()))?;
+    }
+
+    let pool = tauri::async_runtime::block_on(open_health_pool(&db_path))?;
+
+    let printer: Arc<dyn Fn(DbRepairEvent) + Send + Sync> = Arc::new(|event| match event {
+        DbRepairEvent::Step {
+            step,
+            status,
+            message,
+        } => {
+            let label = cli_step_label(&step);
+            let status_label = cli_status_label(&status);
+            if let Some(msg) = message {
+                println!("{label:<12} {status_label:<9} {msg}");
+            } else {
+                println!("{label:<12} {status_label:<9}");
+            }
+        }
+    });
+
+    let options = {
+        let pool = pool.clone();
+        let db_path = db_path.clone();
+        DbRepairOptions {
+            before_swap: Some(Arc::new(move || {
+                let pool = pool.clone();
+                Box::pin(async move {
+                    pool.close().await;
+                    Ok(())
+                })
+            })),
+            after_swap: Some(Arc::new(move || {
+                let db_path = db_path.clone();
+                Box::pin(async move {
+                    let pool = open_health_pool(&db_path).await.map_err(|err| {
+                        AppError::from(err).with_context("operation", "reopen_pool_after_swap")
+                    })?;
+                    let report = arklowdun_lib::db::health::run_health_checks(&pool, &db_path)
+                        .await
+                        .map_err(|err| err.with_context("operation", "repair_post_swap_health"))?;
+                    pool.close().await;
+                    Ok(Some(report))
+                })
+            })),
+        }
+    };
+
+    let summary: DbRepairSummary = tauri::async_runtime::block_on(async {
+        let result =
+            repair::run_guided_repair(&pool, &db_path, Some(printer.clone()), options).await;
+        pool.close().await;
+        result
+    })?;
+
+    println!();
+    if summary.success {
+        println!("Repair complete. Your data was verified and restored safely.");
+        if let Some(path) = &summary.backup_directory {
+            println!("Pre-repair backup: {path}");
+        }
+        if let Some(path) = &summary.archived_db_path {
+            println!("Original database archived as: {path}");
+        }
+        if summary.duration_ms > 0 {
+            println!(
+                "Elapsed: {:.2} seconds",
+                summary.duration_ms as f64 / 1000.0
+            );
+        }
+        Ok(0)
+    } else {
+        println!("Repair failed. Your database remains in read-only mode.");
+        if let Some(error) = &summary.error {
+            println!("Reason: {} ({})", error.message(), error.code());
+        }
+        if let Some(path) = &summary.backup_directory {
+            println!("Pre-repair backup: {path}");
+        }
+        if let Some(path) = &summary.archived_db_path {
+            println!("Original database preserved at: {path}");
+        }
+        println!("Try running a hard repair or contact support if the issue persists.");
+        Ok(1)
+    }
+}
+
+fn cli_step_label(step: &DbRepairStep) -> &'static str {
+    match step {
+        DbRepairStep::Backup => "Backup",
+        DbRepairStep::Checkpoint => "Checkpoint",
+        DbRepairStep::Rebuild => "Rebuild",
+        DbRepairStep::Validate => "Validate",
+        DbRepairStep::Swap => "Swap",
+    }
+}
+
+fn cli_status_label(state: &DbRepairStepState) -> &'static str {
+    match state {
+        DbRepairStepState::Pending => "pending",
+        DbRepairStepState::Running => "running",
+        DbRepairStepState::Success => "success",
+        DbRepairStepState::Warning => "warning",
+        DbRepairStepState::Skipped => "skipped",
+        DbRepairStepState::Failed => "failed",
     }
 }
 
