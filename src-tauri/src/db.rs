@@ -24,8 +24,14 @@ pub mod backup;
 #[path = "db/repair.rs"]
 pub mod repair;
 
+#[path = "db/hard_repair.rs"]
+pub mod hard_repair;
+
 #[path = "db/swap.rs"]
 pub mod swap;
+
+#[path = "db/schema_rebuild.rs"]
+pub mod schema_rebuild;
 
 #[allow(dead_code)]
 pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {

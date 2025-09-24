@@ -1,0 +1,75 @@
+use std::fs;
+use std::path::Path;
+
+use include_dir::{include_dir, Dir};
+use rusqlite::Connection;
+
+use crate::{AppError, AppResult};
+
+static MIGRATIONS_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../migrations");
+
+fn sorted_migrations() -> Vec<&'static include_dir::File<'static>> {
+    let mut files: Vec<_> = MIGRATIONS_DIR
+        .files()
+        .filter(|file| {
+            file.path()
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.ends_with(".up.sql") && !name.starts_with('_'))
+                .unwrap_or(false)
+        })
+        .collect();
+    files.sort_by_key(|file| file.path().to_path_buf());
+    files
+}
+
+pub fn rebuild_schema(dest: &Path) -> AppResult<()> {
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            AppError::from(err)
+                .with_context("operation", "create_schema_parent")
+                .with_context("path", parent.display().to_string())
+        })?;
+    }
+
+    if dest.exists() {
+        fs::remove_file(dest).map_err(|err| {
+            AppError::from(err)
+                .with_context("operation", "remove_existing_schema")
+                .with_context("path", dest.display().to_string())
+        })?;
+    }
+
+    let conn = Connection::open(dest).map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "create_new_schema")
+            .with_context("path", dest.display().to_string())
+    })?;
+
+    conn.pragma_update(None, "journal_mode", "WAL").ok();
+    conn.pragma_update(None, "foreign_keys", 1).ok();
+
+    for file in sorted_migrations() {
+        let sql = file.contents_utf8().ok_or_else(|| {
+            AppError::new(
+                "DB_SCHEMA_REBUILD/INVALID_UTF8",
+                "Migration file is not valid UTF-8",
+            )
+            .with_context("path", file.path().display().to_string())
+        })?;
+        conn.execute_batch(sql).map_err(|err| {
+            AppError::from(err)
+                .with_context("operation", "apply_migration")
+                .with_context("path", file.path().display().to_string())
+        })?;
+    }
+
+    conn.flush_prepared_statement_cache();
+    conn.close().map_err(|(_, err)| {
+        AppError::from(err)
+            .with_context("operation", "close_schema_conn")
+            .with_context("path", dest.display().to_string())
+    })?;
+
+    Ok(())
+}

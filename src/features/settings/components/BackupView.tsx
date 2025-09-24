@@ -1,4 +1,4 @@
-import { writeText } from "@lib/ipc/clipboard";
+import { copyText } from "../api/clipboard";
 import { toast } from "@ui/Toast";
 import createButton from "@ui/Button";
 import type { AppError } from "@bindings/AppError";
@@ -65,7 +65,7 @@ function describeError(error: unknown): string {
 
 async function copyPath(path: string): Promise<void> {
   try {
-    await writeText(path);
+    await copyText(path);
     toast.show({ kind: "info", message: "Backup path copied to clipboard." });
   } catch (error) {
     toast.show({

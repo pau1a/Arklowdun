@@ -20,10 +20,12 @@ export type { BackupOverview } from "@bindings/BackupOverview";
 export type { BackupManifest } from "@bindings/BackupManifest";
 
 export { runRepair, listenRepairEvents } from "./api/repair";
+export { runHardRepair } from "./api/hardRepair";
 export type { DbRepairSummary } from "@bindings/DbRepairSummary";
 export type { DbRepairEvent } from "@bindings/DbRepairEvent";
 export type { DbRepairStep } from "@bindings/DbRepairStep";
 export type { DbRepairStepState } from "@bindings/DbRepairStepState";
+export type { HardRepairOutcome } from "@bindings/HardRepairOutcome";
 
 export {
   fetchAboutMetadata,

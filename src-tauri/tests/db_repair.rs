@@ -53,16 +53,12 @@ fn repair_options(pool: &sqlx::SqlitePool, db_path: &Path) -> DbRepairOptions {
                     .await
                     .context("reopen_pool_for_tests")
                     .map_err(AppError::from)
-                    .map_err(|err| {
-                        err.with_context("operation", "reopen_pool_for_tests")
-                    })?;
+                    .map_err(|err| err.with_context("operation", "reopen_pool_for_tests"))?;
                 let report = arklowdun_lib::db::health::run_health_checks(&pool, &db_path)
                     .await
                     .context("repair_post_swap_health")
                     .map_err(AppError::from)
-                    .map_err(|err| {
-                        err.with_context("operation", "repair_post_swap_health")
-                    })?;
+                    .map_err(|err| err.with_context("operation", "repair_post_swap_health"))?;
                 pool.close().await;
                 Ok(Some(report))
             })
