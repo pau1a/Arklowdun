@@ -84,7 +84,7 @@ async fn repair_recovers_from_wal_bloat() -> Result<()> {
         .connect()
         .await?;
 
-    let mut reader = SqliteConnectOptions::new()
+    let reader = SqliteConnectOptions::new()
         .filename(&db_path)
         .journal_mode(SqliteJournalMode::Wal)
         .read_only(true)
