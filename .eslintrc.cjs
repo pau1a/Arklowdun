@@ -17,6 +17,22 @@ const tauriImportRestriction = {
       message:
         "IPC plugins must be wrapped inside src/lib/ipc/. Import the shared adapter instead of the plugin package directly.",
     },
+    {
+      group: [
+        "./api/call",
+        "./api/call/**",
+        "../api/call",
+        "../api/call/**",
+        "../../api/call",
+        "../../api/call/**",
+        "../../../api/call",
+        "../../../api/call/**",
+        "../../../../api/call",
+        "../../../../api/call/**",
+      ],
+      message:
+        "src/lib/ipc/call.ts is the canonical IPC adapter. Update imports instead of using the legacy src/api/call.ts path.",
+    },
   ],
 };
 

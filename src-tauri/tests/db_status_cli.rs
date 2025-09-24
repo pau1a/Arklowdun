@@ -2,10 +2,11 @@ use std::path::Path;
 
 use anyhow::Result;
 use arklowdun_lib::db::health::{DbHealthReport, DbHealthStatus};
+use arklowdun_lib::ipc::guard::DB_UNHEALTHY_EXIT_CODE;
 use assert_cmd::Command;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
-use sqlx::Connection;
 use sqlx::ConnectOptions;
+use sqlx::Connection;
 use tempfile::tempdir;
 
 async fn prepare_fk_violation(db_path: &Path) -> Result<()> {
@@ -129,5 +130,51 @@ async fn db_status_cli_reports_error_and_nonzero_exit() -> Result<()> {
     let report: DbHealthReport = serde_json::from_slice(&json_output.stdout)?;
     assert_eq!(report.status, DbHealthStatus::Error);
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn db_vacuum_succeeds_on_healthy_db() -> Result<()> {
+    let tmp = tempdir()?;
+    let appdata = tmp.path().join("appdata");
+    let db_path = appdata.join("arklowdun.sqlite3");
+
+    ensure_database(&db_path).await?;
+
+    let output = Command::cargo_bin("arklowdun")?
+        .env("ARK_FAKE_APPDATA", &appdata)
+        .args(["db", "vacuum"])
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "vacuum failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Database vacuum completed."));
+    Ok(())
+}
+
+#[tokio::test]
+async fn db_vacuum_blocks_when_unhealthy() -> Result<()> {
+    let tmp = tempdir()?;
+    let appdata = tmp.path().join("appdata");
+    let db_path = appdata.join("arklowdun.sqlite3");
+
+    prepare_fk_violation(&db_path).await?;
+
+    let output = Command::cargo_bin("arklowdun")?
+        .env("ARK_FAKE_APPDATA", &appdata)
+        .args(["db", "vacuum"])
+        .output()?;
+
+    assert!(!output.status.success(), "vacuum unexpectedly succeeded");
+    assert_eq!(output.status.code(), Some(DB_UNHEALTHY_EXIT_CODE));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("DB_UNHEALTHY_WRITE_BLOCKED"));
+    assert!(stderr.contains("Run 'arklowdun db status' or repair."));
     Ok(())
 }

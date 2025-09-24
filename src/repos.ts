@@ -1,5 +1,5 @@
 // src/repos.ts
-import { call } from "./api/call";
+import { call } from "@lib/ipc/call";
 import { clearSearchCache } from "./services/searchRepo";
 
 import type {

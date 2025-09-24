@@ -1,4 +1,4 @@
-import { call } from "../../../api/call";
+import { call } from "@lib/ipc/call";
 import { defaultHouseholdId } from "../../../db/household";
 import type { EventsListRangeResponse } from "@bindings/EventsListRangeResponse";
 import type { CalendarEvent, CalendarWindowRange } from "../model/CalendarEvent";

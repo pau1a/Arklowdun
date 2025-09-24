@@ -1,4 +1,4 @@
-import { call } from "../api/call";
+import { call } from "@lib/ipc/call";
 import { defaultHouseholdId } from "../db/household";
 import { showError } from "./errors";
 import { presentFsError } from "@lib/ipc";

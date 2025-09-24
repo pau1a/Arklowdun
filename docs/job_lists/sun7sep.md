@@ -29,8 +29,8 @@ Stabilise Arklowdun mid-stream and finish key features with minimal regression r
       Run: `bash scripts/ci/no-json-writes.sh` (local guard script; name retained, no external CI implied)
 - [ ] No domain JSON reads outside sanctioned file views  
       Run: `git grep -n '@tauri-apps/plugin-fs' -- src | grep -v 'FilesView'` → **no hits**
-- [ ] No direct `invoke(` outside the unified helper  
-      Run: `git grep -n 'invoke\\(' -- src | grep -v 'src/api/call.ts'` → **no hits**
+- [ ] No direct `invoke(` outside the unified helper
+      Run: `git grep -n 'invoke\\(' -- src | grep -v 'src/lib/ipc/call.ts'` → **no hits**
 - [ ] No `alert(` for error paths in production code  
       Run: `git grep -n 'alert\\(' -- src` → **0** (or dev-only utilities)
 - [ ] TypeScript strict passes (no errors)  
@@ -145,11 +145,11 @@ Stop hard-coding log levels; enable runtime overrides aligned with existing env 
 Centralise `invoke` calls for typing and error normalisation.
 
 **Frontend**
-- [ ] `src/api/call.ts` wrapper with normalised error mapping
+- [ ] `src/lib/ipc/call.ts` wrapper with normalised error mapping
 - [ ] Replace direct `invoke(` across codebase
 
 **Acceptance (local)**
-- [ ] `git grep -n 'invoke\\(' -- src | grep -v 'src/api/call.ts'` → **no hits**
+- [ ] `git grep -n 'invoke\\(' -- src | grep -v 'src/lib/ipc/call.ts'` → **no hits**
 
 ---
 

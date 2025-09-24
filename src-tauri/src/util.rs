@@ -73,8 +73,8 @@ mod tests {
 
     #[test]
     fn dispatch_with_fence_catches_str_panic() {
-        let err = dispatch_with_fence(|| panic!("boom"))
-            .expect_err("should convert panic into error");
+        let err =
+            dispatch_with_fence(|| panic!("boom")).expect_err("should convert panic into error");
         assert_eq!(err.code(), "RUNTIME/PANIC");
         assert_eq!(err.message(), "boom");
         assert!(err.crash_id().is_some());

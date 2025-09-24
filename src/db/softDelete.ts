@@ -1,4 +1,4 @@
-import { call } from "../api/call";
+import { call } from "@lib/ipc/call";
 
 export async function deleteHousehold(id: string): Promise<void> {
   await call("household_delete", { householdId: id, id });

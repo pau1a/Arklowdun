@@ -8,7 +8,7 @@ use std::error::Error as StdError;
 use std::fmt;
 use std::panic::PanicHookInfo;
 
-use crate::security::error_map::UiError;
+use crate::{db::health::DbHealthReport, security::error_map::UiError};
 use anyhow::Error as AnyhowError;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
@@ -90,6 +90,10 @@ pub struct AppError {
     #[ts(optional)]
     #[ts(type = "string | undefined")]
     pub crash_id: Option<CrashId>,
+    /// Optional database health report associated with the error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub health_report: Option<DbHealthReport>,
 }
 
 /// Serializable representation of [`AppError`] for clients.
@@ -108,6 +112,9 @@ pub struct ErrorDto {
     /// Crash identifier associated with critical failures.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crash_id: Option<CrashId>,
+    /// Optional database health report associated with the error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_report: Option<DbHealthReport>,
 }
 
 pub type AppResult<T> = std::result::Result<T, AppError>;
@@ -126,6 +133,7 @@ impl AppError {
             context: HashMap::new(),
             cause: None,
             crash_id: None,
+            health_report: None,
         }
     }
 
@@ -148,6 +156,17 @@ impl AppError {
     pub fn with_crash_id(mut self, crash_id: CrashId) -> Self {
         self.crash_id = Some(crash_id);
         self
+    }
+
+    /// Attach the database health report that triggered this error.
+    pub fn with_health_report(mut self, report: DbHealthReport) -> Self {
+        self.health_report = Some(report);
+        self
+    }
+
+    /// Returns the database health report associated with the error, if any.
+    pub fn health_report(&self) -> Option<&DbHealthReport> {
+        self.health_report.as_ref()
     }
 
     /// Ensure the error is marked as critical, allocating a new Crash ID if needed.
@@ -438,6 +457,7 @@ impl From<&AppError> for ErrorDto {
                 .as_ref()
                 .map(|cause| Box::new(ErrorDto::from(cause.as_ref()))),
             crash_id: error.crash_id.clone(),
+            health_report: error.health_report.clone(),
         }
     }
 }
@@ -452,6 +472,7 @@ impl From<AppError> for ErrorDto {
             context: error.context,
             cause: error.cause.map(|cause| Box::new(ErrorDto::from(*cause))),
             crash_id: error.crash_id,
+            health_report: error.health_report,
         }
     }
 }

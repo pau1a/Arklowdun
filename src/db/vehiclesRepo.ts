@@ -1,4 +1,4 @@
-import { call } from "../api/call";
+import { call } from "@lib/ipc/call";
 import type { Vehicle } from "../bindings/Vehicle";
 
 function normalize(v: Vehicle): Vehicle {

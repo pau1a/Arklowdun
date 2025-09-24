@@ -29,8 +29,8 @@ Advance v1+1 priorities: Quick Search MVP, About & Diagnostics, and extended loc
       Run: `bash scripts/ci/no-json-writes.sh` (local guard script; name retained, no external CI implied)
 - [ ] No domain JSON reads outside sanctioned file views  
       Run: `git grep -n '@tauri-apps/plugin-fs' -- src | grep -v 'FilesView'` → **no hits**
-- [ ] No direct `invoke(` outside the unified helper  
-      Run: `git grep -n 'invoke\\(' -- src | grep -v 'src/api/call.ts'` → **no hits**
+- [ ] No direct `invoke(` outside the unified helper
+      Run: `git grep -n 'invoke\\(' -- src | grep -v 'src/lib/ipc/call.ts'` → **no hits**
 - [ ] No `alert(` for error paths in production code  
       Run: `git grep -n 'alert\\(' -- src` → **0** (or dev-only utilities)
 - [ ] TypeScript strict passes (no errors)  
@@ -110,16 +110,16 @@ Harden local hygiene.
 
 **Guards**
 - Forbid `@tauri-apps/plugin-fs` outside `src/files/*` and allowlist.
-- Forbid `invoke(` outside `src/api/call.ts`.
+- Forbid `invoke(` outside `src/lib/ipc/call.ts`.
 
 **Implementation**
 - Add `scripts/guards/no-direct-invoke.sh`:
   ```bash
   #!/bin/bash
   set -e
-  hits=$(git grep -n 'invoke(' -- src | grep -v 'src/api/call.ts' || true)
+  hits=$(git grep -n 'invoke(' -- src | grep -v 'src/lib/ipc/call.ts' || true)
   if [ -n "$hits" ]; then
-    echo "Forbidden invoke() usage outside src/api/call.ts:"
+    echo "Forbidden invoke() usage outside src/lib/ipc/call.ts:"
     echo "$hits"
     exit 1
   fi
