@@ -133,6 +133,12 @@ pub async fn execute_plan(
         rebuild_database_schema(ctx).await?;
     }
 
+    let mut attachments_summary: Option<AttachmentExecutionSummary> = None;
+    if matches!(plan.mode, ImportMode::Merge) {
+        attachments_summary =
+            Some(execute_attachments_merge(bundle, &plan.attachments, ctx).await?);
+    }
+
     let mut tables = BTreeMap::new();
 
     for entry in bundle.data_files() {
@@ -147,7 +153,7 @@ pub async fn execute_plan(
 
     let attachments = match plan.mode {
         ImportMode::Replace => execute_attachments_replace(bundle, &plan.attachments, ctx)?,
-        ImportMode::Merge => execute_attachments_merge(bundle, &plan.attachments, ctx).await?,
+        ImportMode::Merge => attachments_summary.expect("merge attachments summary"),
     };
 
     Ok(ExecutionReport {
