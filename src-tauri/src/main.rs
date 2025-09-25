@@ -7,7 +7,6 @@ use std::process;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use chrono::Utc;
 use clap::{Parser, Subcommand, ValueEnum};
 use semver::Version;
 use serde_json::json;
@@ -506,7 +505,7 @@ enum ImportResult {
 }
 
 async fn run_cli_import(
-    mut pool: SqlitePool,
+    pool: SqlitePool,
     bundle_path: PathBuf,
     attachments_root: PathBuf,
     target_root: PathBuf,
