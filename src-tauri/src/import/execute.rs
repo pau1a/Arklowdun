@@ -4,6 +4,7 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use anyhow::Error as AnyError;
+use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::pool::PoolConnection;
@@ -109,6 +110,8 @@ pub enum ExecutionError {
     UnknownTable(String),
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
+    #[error("failed to apply migrations: {0}")]
+    Migration(#[source] AnyError),
     #[error("attachment path escapes base: {0}")]
     AttachmentPathTraversal(String),
     #[error("failed to copy attachment {path}: {source}")]
@@ -205,7 +208,7 @@ async fn rebuild_database_schema(ctx: &ExecutionContext<'_>) -> Result<(), Execu
 
     migrate::apply_migrations(ctx.pool)
         .await
-        .map_err(ExecutionError::Database)?;
+        .map_err(ExecutionError::Migration)?;
 
     Ok(())
 }
