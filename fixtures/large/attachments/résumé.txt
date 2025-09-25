@@ -1,0 +1,2 @@
+This sample résumé text fixture exercises Latin-1 characters while remaining a deterministic attachment payload.
+It is intentionally short so the seeder can copy it many times when mapping attachments by hash.

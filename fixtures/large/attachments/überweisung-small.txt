@@ -1,0 +1,8 @@
+Überweisungsliste
+=================
+
+1. Miete (Nr. 48392)
+2. Stromabschlag (Nr. 11200)
+3. Rücklage Export-Test (Nr. 77431)
+
+Alle Beträge sind absichtlich klein gehalten, damit der Round-Trip-Fixture schnell bleibt.

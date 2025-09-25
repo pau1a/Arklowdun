@@ -1,0 +1,9 @@
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer euismod, nisl sed fermentum aliquet, nunc neque efficitur neque, nec varius ipsum diam ac turpis.
+
+Phasellus faucibus tellus sit amet metus dictum, a tincidunt turpis eleifend. Nulla facilisi. Suspendisse potenti. Vivamus id mi at arcu tincidunt pharetra. Aliquam erat volutpat.
+
+Curabitur accumsan tortor sed arcu tincidunt, quis tempor lacus iaculis. Integer commodo odio non ante ultrices, id tristique ipsum cursus. Pellentesque finibus libero sed nibh pretium, in eleifend nisl iaculis.
+
+Sed at porttitor neque. Suspendisse pulvinar mauris massa, vitae eleifend ipsum aliquam in. Mauris blandit elementum interdum. Duis consectetur posuere venenatis.
+
+-- canonical-fixture --

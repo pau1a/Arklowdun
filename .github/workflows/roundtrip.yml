@@ -1,0 +1,19 @@
+name: roundtrip-fixture
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify-large-fixture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify large fixture determinism
+        run: npm run fixtures:verify

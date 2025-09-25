@@ -1,0 +1,12 @@
+Quarterly café refurbishment budget
+==================================
+
+Line Item           | Cost (USD)
+--------------------|-----------
+Espresso machine    | 4,500.00
+Grinder calibration |   320.00
+Counter resurfacing | 2,100.00
+
+Notes:
+- Prices locked using supplier quote RT-CAFÉ-042.
+- All numbers generated deterministically for CI fixture validation.

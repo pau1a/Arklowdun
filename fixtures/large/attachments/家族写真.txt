@@ -1,0 +1,5 @@
+Family photo placeholder
+========================
+
+This attachment maintains coverage for non-Latin filenames while containing plain English text.  It describes a hypothetical family photo entry without embedding a binary image file.  The seeder can copy this document to exercise filesystem code paths that expect unicode file names.
+
