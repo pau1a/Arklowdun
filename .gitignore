@@ -46,3 +46,6 @@ fixtures/**/*.sqlite3
 src-tauri/fixtures/**/*.sqlite3
 
 test-results/
+
+# Round-trip / test workspace
+.tmp/
