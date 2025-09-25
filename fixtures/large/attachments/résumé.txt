@@ -1,0 +1,1 @@
+Combining accent résumé variant to surface macOS NFD handling in attachment pipelines.

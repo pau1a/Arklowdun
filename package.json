@@ -13,6 +13,8 @@
     "bench:query:smoke": "node --loader ts-node/esm scripts/bench/generate_query_fixture.ts --rows 1000 && cd src-tauri && cargo run --locked --bin time -- query-bench --rows 1000 --iterations 10 --warmup 2 --window day --window week --window month",
     "bench:smoke": "cd src-tauri && cargo run --locked --bin time -- backfill-bench --rows 1000 --chunk-size 500 --progress-interval 0",
     "migrate:checksum": "node --loader ts-node/esm scripts/migrate-checksum.ts",
+    "fixtures:seed": "node --loader ts-node/esm fixtures/large/seed.ts",
+    "fixtures:verify": "node scripts/ci/verify-large-fixture.mjs",
     "migrate:batch1": "node --loader ts-node/esm src/tools/migrate-batch1.ts",
     "check:household": "bash scripts/check-household-scope.sh",
     "test": "node --import ./scripts/test-preload.mjs --test tests/*.ts tests/*.js",

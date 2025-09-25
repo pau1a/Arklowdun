@@ -1,0 +1,45 @@
+{
+  "database": "/tmp/roundtrip.sqlite3",
+  "households": 3,
+  "seed": 42,
+  "events": {
+    "total": 10000,
+    "timed": 2501,
+    "allDay": 2514,
+    "recurring": 2507,
+    "multiDay": 2478,
+    "withReminder": 4473,
+    "softDeleted": 725,
+    "restored": 300,
+    "recurrence": {
+      "daily": 823,
+      "weekly": 853,
+      "monthly": 831,
+      "until": 514,
+      "count": 1993,
+      "byDay": 1676,
+      "byMonthDay": 831,
+      "withExdates": 1532,
+      "withDuplicateExdates": 287,
+      "dstEdge": 1
+    }
+  },
+  "notes": {
+    "total": 5000,
+    "softDeleted": 407,
+    "restored": 200,
+    "withDeadline": 1714
+  },
+  "attachments": {
+    "total": 300,
+    "byRootKey": {
+      "attachments": 224,
+      "appData": 76
+    },
+    "bySourceKind": {
+      "small": 256,
+      "medium": 44
+    },
+    "reusedLogicalFiles": 8
+  }
+}
