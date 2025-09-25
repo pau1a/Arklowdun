@@ -6,7 +6,9 @@ use std::path::Path;
 use anyhow::Error as AnyError;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sqlx::pool::PoolConnection;
 use sqlx::Row;
+use sqlx::Sqlite;
 use sqlx::SqlitePool;
 use thiserror::Error;
 use ts_rs::TS;
@@ -188,6 +190,7 @@ async fn plan_table_merge(
 
         let id = extract_id(&entry.logical_name, &value)?;
         let bundle_updated = value.get("updated_at").and_then(|v| v.as_i64());
+        let id_display = id.to_string();
 
         let mut query = sqlx::query(&sql);
         match &id {
@@ -219,12 +222,13 @@ async fn plan_table_merge(
                         updates += 1;
                     } else if bundle_ts < live_ts {
                         skips += 1;
-                        conflicts.push(TableConflict {
-                            table: entry.logical_name.clone(),
-                            id: id.to_string(),
-                            bundle_updated_at: Some(bundle_ts),
-                            live_updated_at: Some(live_ts),
-                        });
+                        push_table_conflict(
+                            &mut conflicts,
+                            &entry.logical_name,
+                            &id_display,
+                            Some(bundle_ts),
+                            Some(live_ts),
+                        );
                     } else {
                         skips += 1;
                     }
@@ -234,12 +238,13 @@ async fn plan_table_merge(
                 }
                 (None, Some(live_ts)) => {
                     skips += 1;
-                    conflicts.push(TableConflict {
-                        table: entry.logical_name.clone(),
-                        id: id.to_string(),
-                        bundle_updated_at: None,
-                        live_updated_at: Some(live_ts),
-                    });
+                    push_table_conflict(
+                        &mut conflicts,
+                        &entry.logical_name,
+                        &id_display,
+                        None,
+                        Some(live_ts),
+                    );
                 }
                 (None, None) => {
                     updates += 1;
@@ -377,23 +382,17 @@ async fn load_live_attachment_updated_at(
     let mut max_ts: Option<i64> = None;
     let mut conn = pool.acquire().await.map_err(PlanError::Database)?;
     for table in ATTACHMENT_TABLES {
+        if !attachment_table_exists(&mut conn, table).await? {
+            continue;
+        }
         let sql = format!(
             "SELECT MAX(updated_at) FROM {table} WHERE root_key = 'attachments' AND relative_path = ?1 AND deleted_at IS NULL"
         );
-        let ts: Option<i64> = match sqlx::query_scalar(&sql)
+        let ts: Option<i64> = sqlx::query_scalar(&sql)
             .bind(rel)
-            .fetch_one(conn.as_mut())
+            .fetch_optional(conn.as_mut())
             .await
-        {
-            Ok(value) => value,
-            Err(sqlx::Error::Database(db_err))
-                if db_err.code().map_or(false, |code| code == "SQLITE_ERROR")
-                    && db_err.message().contains("no such table") =>
-            {
-                continue;
-            }
-            Err(err) => return Err(PlanError::Database(err)),
-        };
+            .map_err(PlanError::Database)?;
         if let Some(ts) = ts {
             if max_ts.map_or(true, |current| ts > current) {
                 max_ts = Some(ts);
@@ -401,6 +400,40 @@ async fn load_live_attachment_updated_at(
         }
     }
     Ok(max_ts)
+}
+
+fn push_table_conflict(
+    conflicts: &mut Vec<TableConflict>,
+    table: &str,
+    id: &str,
+    bundle_updated_at: Option<i64>,
+    live_updated_at: Option<i64>,
+) {
+    if conflicts
+        .iter()
+        .any(|existing| existing.table == table && existing.id == id)
+    {
+        return;
+    }
+    conflicts.push(TableConflict {
+        table: table.to_string(),
+        id: id.to_string(),
+        bundle_updated_at,
+        live_updated_at,
+    });
+}
+
+async fn attachment_table_exists(
+    conn: &mut PoolConnection<Sqlite>,
+    table: &str,
+) -> Result<bool, PlanError> {
+    let exists =
+        sqlx::query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1")
+            .bind(table)
+            .fetch_optional(conn)
+            .await
+            .map_err(PlanError::Database)?;
+    Ok(exists.is_some())
 }
 
 enum AttachmentAction {
