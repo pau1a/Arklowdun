@@ -301,7 +301,7 @@ rm -rf "$APPDATA_DIR"
 mkdir -p "$APPDATA_DIR"
 
 log_step "Bootstrapping schema (migrations) for a fresh appdata"
-DB="$DB_PATH" "$REPO_ROOT/scripts/migrate.sh" fresh 2>&1 | tee -a "$LOG_PATH"
+"$ARKLOWDUN_BIN" db migrate --fresh 2>&1 | tee -a "$LOG_PATH"
 
 log_step "Importing export bundle using mode=$IMPORT_MODE"
 IMPORT_OUTPUT="$(
