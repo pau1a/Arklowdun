@@ -1,12 +1,15 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+use anyhow::{Context, Result as AnyResult};
 use once_cell::sync::OnceCell;
 use paste::paste;
+use semver::Version;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::Row;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     io::{self, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, RwLock},
 };
 use tauri::{Emitter, Manager, State};
@@ -104,13 +107,14 @@ impl<'a> MakeWriter<'a> for RotatingFileWriter {
 mod attachments;
 pub mod commands;
 pub mod db;
-pub mod export;
 mod diagnostics;
 pub mod error;
 pub mod events_tz_backfill;
 pub mod exdate;
+pub mod export;
 mod household; // declare module; avoid `use` to prevent name collision
 mod id;
+pub mod import;
 mod importer;
 pub mod ipc;
 pub mod logging;
@@ -985,6 +989,21 @@ struct ImportArgs {
     dry_run: bool,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportPreviewArgs {
+    bundle_path: String,
+    mode: import::plan::ImportMode,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportExecuteArgs {
+    bundle_path: String,
+    mode: import::plan::ImportMode,
+    expected_plan_digest: String,
+}
+
 #[tauri::command]
 async fn import_run_legacy(
     app: tauri::AppHandle,
@@ -1006,6 +1025,191 @@ async fn import_run_legacy(
             })
     })
     .await
+}
+
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct ImportPreviewDto {
+    pub bundle_path: String,
+    pub mode: import::plan::ImportMode,
+    pub validation: import::validator::ValidationReport,
+    pub plan: import::plan::ImportPlan,
+    pub plan_digest: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct ImportExecuteDto {
+    pub bundle_path: String,
+    pub mode: import::plan::ImportMode,
+    pub validation: import::validator::ValidationReport,
+    pub plan: import::plan::ImportPlan,
+    pub plan_digest: String,
+    pub execution: import::execute::ExecutionReport,
+    pub report_path: String,
+}
+
+#[tauri::command]
+async fn db_import_preview(
+    state: State<'_, AppState>,
+    args: ImportPreviewArgs,
+) -> AppResult<ImportPreviewDto> {
+    let ImportPreviewArgs { bundle_path, mode } = args;
+    let pool = state.pool_clone();
+    let db_path = (*state.db_path).clone();
+    let (target_root, attachments_root, _) = resolve_import_paths(&db_path);
+    dispatch_async_app_result(move || {
+        let pool = pool.clone();
+        let target_root = target_root.clone();
+        let attachments_root = attachments_root.clone();
+        let bundle_path_buf = PathBuf::from(bundle_path.clone());
+        async move {
+            let result: AnyResult<ImportPreviewDto> = async {
+                let bundle = import::bundle::ImportBundle::load(&bundle_path_buf)
+                    .map_err(anyhow::Error::new)
+                    .context("load import bundle")?;
+                let minimum_version = Version::parse(import::MIN_SUPPORTED_APP_VERSION)
+                    .context("parse minimum supported app version")?;
+                let validation_ctx = import::validator::ValidationContext {
+                    pool: &pool,
+                    target_root: target_root.as_path(),
+                    minimum_app_version: &minimum_version,
+                    available_space_override: None,
+                };
+                let validation = import::validate_bundle(&bundle, &validation_ctx)
+                    .await
+                    .map_err(anyhow::Error::new)
+                    .context("validate import bundle")?;
+                let plan_ctx = import::plan::PlanContext {
+                    pool: &pool,
+                    attachments_root: attachments_root.as_path(),
+                };
+                let plan = import::build_plan(&bundle, &plan_ctx, mode)
+                    .await
+                    .map_err(anyhow::Error::new)
+                    .context("build import plan")?;
+                let plan_digest = compute_plan_digest(&plan)?;
+                Ok(ImportPreviewDto {
+                    bundle_path: bundle_path_buf.display().to_string(),
+                    mode,
+                    validation,
+                    plan,
+                    plan_digest,
+                })
+            }
+            .await;
+            result.map_err(AppError::from)
+        }
+    })
+    .await
+}
+
+#[tauri::command]
+async fn db_import_execute(
+    state: State<'_, AppState>,
+    args: ImportExecuteArgs,
+) -> AppResult<ImportExecuteDto> {
+    let _permit = guard::ensure_db_writable(&state)?;
+    let ImportExecuteArgs {
+        bundle_path,
+        mode,
+        expected_plan_digest,
+    } = args;
+    let pool = state.pool_clone();
+    let db_path = (*state.db_path).clone();
+    let (target_root, attachments_root, reports_dir) = resolve_import_paths(&db_path);
+    dispatch_async_app_result(move || {
+        let pool = pool.clone();
+        let target_root = target_root.clone();
+        let attachments_root = attachments_root.clone();
+        let reports_dir = reports_dir.clone();
+        let expected_digest = expected_plan_digest.clone();
+        let bundle_path_buf = PathBuf::from(bundle_path.clone());
+        async move {
+            let result: AnyResult<ImportExecuteDto> = async {
+                let bundle = import::bundle::ImportBundle::load(&bundle_path_buf)
+                    .map_err(anyhow::Error::new)
+                    .context("load import bundle")?;
+                let minimum_version = Version::parse(import::MIN_SUPPORTED_APP_VERSION)
+                    .context("parse minimum supported app version")?;
+                let validation_ctx = import::validator::ValidationContext {
+                    pool: &pool,
+                    target_root: target_root.as_path(),
+                    minimum_app_version: &minimum_version,
+                    available_space_override: None,
+                };
+                let validation = import::validate_bundle(&bundle, &validation_ctx)
+                    .await
+                    .map_err(anyhow::Error::new)
+                    .context("validate import bundle")?;
+                let plan_ctx = import::plan::PlanContext {
+                    pool: &pool,
+                    attachments_root: attachments_root.as_path(),
+                };
+                let plan = import::build_plan(&bundle, &plan_ctx, mode)
+                    .await
+                    .map_err(anyhow::Error::new)
+                    .context("build import plan")?;
+                let plan_digest = compute_plan_digest(&plan)?;
+                if plan_digest != expected_digest {
+                    anyhow::bail!(
+                        "Import plan changed after preview. Run a new dry-run before importing."
+                    );
+                }
+                std::fs::create_dir_all(&attachments_root).with_context(|| {
+                    format!(
+                        "create attachments directory {}",
+                        attachments_root.display()
+                    )
+                })?;
+                let exec_ctx =
+                    import::execute::ExecutionContext::new(&pool, attachments_root.as_path());
+                let execution = import::execute::execute_plan(&bundle, &plan, &exec_ctx)
+                    .await
+                    .map_err(anyhow::Error::new)
+                    .context("execute import plan")?;
+                let report_path = import::write_import_report(
+                    &reports_dir,
+                    &bundle_path_buf,
+                    &validation,
+                    &plan,
+                    &execution,
+                )
+                .context("write import report")?;
+                Ok(ImportExecuteDto {
+                    bundle_path: bundle_path_buf.display().to_string(),
+                    mode,
+                    validation,
+                    plan,
+                    plan_digest,
+                    execution,
+                    report_path: report_path.display().to_string(),
+                })
+            }
+            .await;
+            result.map_err(AppError::from)
+        }
+    })
+    .await
+}
+
+fn resolve_import_paths(db_path: &Path) -> (PathBuf, PathBuf, PathBuf) {
+    let target_root = db_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let attachments_root = target_root.join("attachments");
+    let reports_dir = target_root.join("reports");
+    (target_root, attachments_root, reports_dir)
+}
+
+fn compute_plan_digest(plan: &import::plan::ImportPlan) -> AnyResult<String> {
+    let json = serde_json::to_vec(plan).context("serialize import plan for digest")?;
+    let mut hasher = Sha256::new();
+    hasher.update(&json);
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 #[derive(Serialize, Deserialize, Clone, TS)]
@@ -1842,9 +2046,10 @@ async fn db_export_run(
         let pool = pool.clone();
         let app = app.clone();
         async move {
-            let entry = export::create_export(Some(&app), &pool, export::ExportOptions { out_parent: out })
-                .await
-                .map_err(|err| err.with_context("operation", "export_run"))?;
+            let entry =
+                export::create_export(Some(&app), &pool, export::ExportOptions { out_parent: out })
+                    .await
+                    .map_err(|err| err.with_context("operation", "export_run"))?;
             Ok::<_, crate::AppError>(export::ExportEntryDto::from(entry))
         }
     })
@@ -2165,6 +2370,8 @@ macro_rules! app_commands {
             db_backup_reveal_root,
             db_backup_reveal,
             db_export_run,
+            db_import_preview,
+            db_import_execute,
             db_repair_run,
             db_hard_repair_run,
             time_invariants_check,

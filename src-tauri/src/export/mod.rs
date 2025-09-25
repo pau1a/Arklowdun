@@ -74,7 +74,8 @@ pub async fn create_export<R: tauri::Runtime>(
         .map_err(|err| AppError::from(err).with_context("operation", "schema_version"))?;
 
     let (attachments_base, app_version) = (
-        resolve_attachments_base(app).map_err(|e| AppError::from(e).with_context("operation", "resolve_attachments_base"))?,
+        resolve_attachments_base(app)
+            .map_err(|e| AppError::from(e).with_context("operation", "resolve_attachments_base"))?,
         env!("CARGO_PKG_VERSION").to_string(),
     );
 
@@ -90,14 +91,20 @@ pub async fn create_export<R: tauri::Runtime>(
         move || estimate_export_size(&attachments_base)
     })
     .await
-    .map_err(|err| AppError::new("EXPORT/TASK", "Size estimate task panicked").with_context("error", err.to_string()))??;
+    .map_err(|err| {
+        AppError::new("EXPORT/TASK", "Size estimate task panicked")
+            .with_context("error", err.to_string())
+    })??;
 
     let avail = free_disk_space(&out_parent)
         .map_err(|err| AppError::from(err).with_context("operation", "available_space"))?;
     if avail < preflight.required_bytes {
         return Err(AppError::new(
             "EXPORT/LOW_DISK",
-            format!("Not enough disk space (need ~{}).", format_bytes(preflight.required_bytes)),
+            format!(
+                "Not enough disk space (need ~{}).",
+                format_bytes(preflight.required_bytes)
+            ),
         )
         .with_context("available_bytes", avail.to_string())
         .with_context("required_bytes", preflight.required_bytes.to_string()));
@@ -105,7 +112,8 @@ pub async fn create_export<R: tauri::Runtime>(
 
     // Allocate unique directory
     let timestamp = Utc::now();
-    let export_dir = unique_export_dir(&out_parent, &timestamp).map_err(|err| err.with_context("operation", "alloc_export_dir"))?;
+    let export_dir = unique_export_dir(&out_parent, &timestamp)
+        .map_err(|err| err.with_context("operation", "alloc_export_dir"))?;
     fs::create_dir_all(&export_dir).map_err(|err| {
         AppError::from(err)
             .with_context("operation", "create_export_dir")
@@ -129,23 +137,41 @@ pub async fn create_export<R: tauri::Runtime>(
         ("files_index", "files.jsonl"),
     ] {
         let path = data_dir.join(filename);
-        let (count, sha) = dump_table_jsonl(pool, table, &path)
-            .await
-            .map_err(|err| AppError::from(err).with_context("operation", "dump_table").with_context("table", table))?;
+        let (count, sha) = dump_table_jsonl(pool, table, &path).await.map_err(|err| {
+            AppError::from(err)
+                .with_context("operation", "dump_table")
+                .with_context("table", table)
+        })?;
         table_sha.insert(table, (count, sha));
     }
     // Fill manifest.tables with the exported subset
-    for (logical, table) in [("households", "household"), ("events", "events"), ("notes", "notes"), ("files", "files_index")] {
+    for (logical, table) in [
+        ("households", "household"),
+        ("events", "events"),
+        ("notes", "notes"),
+        ("files", "files_index"),
+    ] {
         if let Some((count, sha)) = table_sha.get(table) {
-            manifest.tables.insert(logical.to_string(), TableInfo { count: *count, sha256: sha.clone() });
+            manifest.tables.insert(
+                logical.to_string(),
+                TableInfo {
+                    count: *count,
+                    sha256: sha.clone(),
+                },
+            );
         }
     }
 
     // Copy attachments with deterministic order and build attachment manifests
     let (attachments_total_count, attachments_total_bytes, attachments_manifest_sha) =
-        copy_attachments_and_build_manifests(pool, &attachments_base, &attachments_dir, &export_dir)
-            .await
-            .map_err(|err| AppError::from(err).with_context("operation", "copy_attachments"))?;
+        copy_attachments_and_build_manifests(
+            pool,
+            &attachments_base,
+            &attachments_dir,
+            &export_dir,
+        )
+        .await
+        .map_err(|err| AppError::from(err).with_context("operation", "copy_attachments"))?;
 
     manifest.attachments.total_count = attachments_total_count as u64;
     manifest.attachments.total_bytes = attachments_total_bytes as u64;
@@ -168,7 +194,12 @@ pub async fn create_export<R: tauri::Runtime>(
         &manifest.attachments.sha256_manifest,
     )?;
 
-    Ok(ExportEntry { directory: export_dir, manifest_path, verify_sh_path, verify_ps1_path })
+    Ok(ExportEntry {
+        directory: export_dir,
+        manifest_path,
+        verify_sh_path,
+        verify_ps1_path,
+    })
 }
 
 struct SizeEstimate {
@@ -182,7 +213,9 @@ fn estimate_export_size(attachments_base: &Path) -> AppResult<SizeEstimate> {
     }
     // Add a rough buffer for data files
     total = total.saturating_add(5_000_000);
-    Ok(SizeEstimate { required_bytes: (total as f64 * 1.1).ceil() as u64 })
+    Ok(SizeEstimate {
+        required_bytes: (total as f64 * 1.1).ceil() as u64,
+    })
 }
 
 async fn current_schema_version(pool: &SqlitePool) -> Result<String> {
@@ -190,7 +223,8 @@ async fn current_schema_version(pool: &SqlitePool) -> Result<String> {
         "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1",
     )
     .fetch_optional(pool)
-    .await? {
+    .await?
+    {
         return Ok(v);
     }
     // Fallback: hash of schema
@@ -200,7 +234,22 @@ async fn current_schema_version(pool: &SqlitePool) -> Result<String> {
 async fn dump_table_jsonl(pool: &SqlitePool, table: &str, path: &Path) -> Result<(u64, String)> {
     // Dump SELECT * in stable order; only some tables have deleted_at
     let order = "id";
-    let has_deleted = matches!(table, "household" | "events" | "notes" | "bills" | "policies" | "property_documents" | "inventory_items" | "vehicle_maintenance" | "pets" | "family_members" | "budget_categories" | "expenses" | "shopping_items");
+    let has_deleted = matches!(
+        table,
+        "household"
+            | "events"
+            | "notes"
+            | "bills"
+            | "policies"
+            | "property_documents"
+            | "inventory_items"
+            | "vehicle_maintenance"
+            | "pets"
+            | "family_members"
+            | "budget_categories"
+            | "expenses"
+            | "shopping_items"
+    );
     let sql = if has_deleted {
         format!("SELECT * FROM {table} WHERE deleted_at IS NULL ORDER BY {order}")
     } else {
@@ -296,13 +345,17 @@ async fn load_attachment_rel_paths(pool: &SqlitePool) -> Result<Vec<String>> {
 }
 
 fn copy_and_hash(src: &Path, dest: &Path) -> Result<String> {
-    let mut in_f = fs::File::open(src).with_context(|| format!("open attachment: {}", src.display()))?;
-    let mut out_f = fs::File::create(dest).with_context(|| format!("create attachment: {}", dest.display()))?;
+    let mut in_f =
+        fs::File::open(src).with_context(|| format!("open attachment: {}", src.display()))?;
+    let mut out_f =
+        fs::File::create(dest).with_context(|| format!("create attachment: {}", dest.display()))?;
     let mut hasher = Sha256::new();
     let mut buf = [0_u8; 131072];
     loop {
         let n = in_f.read(&mut buf)?;
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         hasher.update(&buf[..n]);
         out_f.write_all(&buf[..n])?;
     }
@@ -353,7 +406,10 @@ fn unique_export_dir(root: &Path, timestamp: &DateTime<Utc>) -> AppResult<PathBu
             return Ok(candidate);
         }
     }
-    Err(AppError::new("EXPORT/NAME_COLLISION", "Unable to allocate export directory"))
+    Err(AppError::new(
+        "EXPORT/NAME_COLLISION",
+        "Unable to allocate export directory",
+    ))
 }
 
 fn format_bytes(bytes: u64) -> String {
@@ -361,7 +417,11 @@ fn format_bytes(bytes: u64) -> String {
         return "0 MB".to_string();
     }
     let mb = (bytes as f64) / 1_000_000.0;
-    if mb < 1.0 { "1 MB".to_string() } else { format!("{:.0} MB", mb.ceil()) }
+    if mb < 1.0 {
+        "1 MB".to_string()
+    } else {
+        format!("{:.0} MB", mb.ceil())
+    }
 }
 
 fn write_verify_scripts(
@@ -371,13 +431,19 @@ fn write_verify_scripts(
     attachments_manifest_sha: &str,
 ) -> Result<()> {
     // Extract expected table hashes if available
-    let expect = |key: &str| tables.get(key).map(|t| t.sha256.clone()).unwrap_or_default();
+    let expect = |key: &str| {
+        tables
+            .get(key)
+            .map(|t| t.sha256.clone())
+            .unwrap_or_default()
+    };
     let households_sha = expect("households");
     let events_sha = expect("events");
     let notes_sha = expect("notes");
     let files_sha = expect("files");
 
-    let sh = format!(r#"#!/usr/bin/env bash
+    let sh = format!(
+        r#"#!/usr/bin/env bash
 set -euo pipefail
 
 if command -v sha256sum >/dev/null 2>&1; then
@@ -433,7 +499,8 @@ echo 'OK'
         attachments_sha = attachments_manifest_sha,
     );
 
-    let ps1 = format!(r#"#requires -version 5
+    let ps1 = format!(
+        r#"#requires -version 5
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
@@ -495,7 +562,8 @@ fn resolve_attachments_base<R: tauri::Runtime>(
         return Ok(PathBuf::from(fake).join("attachments"));
     }
     if let Some(app) = app {
-        return fs_policy::base_for(RootKey::Attachments, app).map_err(|e| anyhow::anyhow!(e.to_string()));
+        return fs_policy::base_for(RootKey::Attachments, app)
+            .map_err(|e| anyhow::anyhow!(e.to_string()));
     }
     // Fallback for CLI when no app handle exists
     let base = dirs::data_dir()
