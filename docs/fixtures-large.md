@@ -1,4 +1,4 @@
-# Large Fixture Seeding Guide
+# Large Fixture Seeding Guide :)
 
 The large round-trip fixture is generated deterministically at runtime rather than being stored as a binary dump. This document explains how to reproduce the dataset, verify determinism, and understand the guarantees that the seeder enforces.
 
