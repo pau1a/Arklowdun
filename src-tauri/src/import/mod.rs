@@ -2,6 +2,7 @@ pub mod bundle;
 pub mod execute;
 pub mod plan;
 pub mod report;
+mod rows;
 pub mod validator;
 
 pub use bundle::{AttachmentEntry, DataFileEntry, ImportBundle, ImportBundleError};
