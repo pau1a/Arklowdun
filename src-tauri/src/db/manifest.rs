@@ -1,4 +1,4 @@
-use std::{fs::File, io::Read, path::Path};
+use std::{borrow::Cow, fs::File, io::Read, path::Path};
 
 use anyhow::{Context, Result};
 use chrono::{SecondsFormat, Utc};
@@ -90,6 +90,27 @@ pub fn file_sha256(path: &Path) -> Result<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+const UP_SUFFIX: &str = ".up.sql";
+const DOWN_SUFFIX: &str = ".down.sql";
+
+pub fn normalize_schema_version(version: &str) -> Cow<'_, str> {
+    let lower = version.to_ascii_lowercase();
+    if lower.ends_with(UP_SUFFIX) {
+        Cow::Owned(version[..version.len() - UP_SUFFIX.len()].to_string())
+    } else if lower.ends_with(DOWN_SUFFIX) {
+        Cow::Owned(version[..version.len() - DOWN_SUFFIX.len()].to_string())
+    } else {
+        Cow::Borrowed(version)
+    }
+}
+
+pub fn normalize_schema_version_owned(version: String) -> String {
+    match normalize_schema_version(&version) {
+        Cow::Borrowed(_) => version,
+        Cow::Owned(normalized) => normalized,
+    }
+}
+
 pub fn read_manifest(path: &Path) -> Result<BackupManifest> {
     let mut file =
         File::open(path).with_context(|| format!("open manifest file: {}", path.display()))?;
@@ -140,5 +161,17 @@ mod tests {
         assert_eq!(loaded.schema_hash, manifest.schema_hash);
         assert_eq!(loaded.db_size_bytes, manifest.db_size_bytes);
         assert_eq!(loaded.sha256, manifest.sha256);
+    }
+
+    #[test]
+    fn schema_version_normalization_strips_suffix() {
+        let canonical = normalize_schema_version("20230101_add_table.up.sql");
+        assert_eq!(canonical, "20230101_add_table");
+
+        let canonical_down = normalize_schema_version("20230101_add_table.DOWN.SQL");
+        assert_eq!(canonical_down, "20230101_add_table");
+
+        let unchanged = normalize_schema_version("20230101_add_table");
+        assert_eq!(unchanged, "20230101_add_table");
     }
 }

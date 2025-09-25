@@ -225,7 +225,7 @@ async fn current_schema_version(pool: &SqlitePool) -> Result<String> {
     .fetch_optional(pool)
     .await?
     {
-        return Ok(v);
+        return Ok(db_manifest::normalize_schema_version_owned(v));
     }
     // Fallback: hash of schema
     db_manifest::schema_hash(pool).await
@@ -553,6 +553,170 @@ Write-Host 'OK'
     }
     fs::write(ps1_path, ps1)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db;
+    use anyhow::Result;
+    use sqlx::SqlitePool;
+    use tempfile::TempDir;
+
+    async fn setup_pool(dir: &TempDir, version: &str) -> Result<SqlitePool> {
+        let db_path = dir.path().join("arklowdun.sqlite3");
+        let pool = db::connect_sqlite_pool(&db_path).await?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (
+                version TEXT PRIMARY KEY,
+                applied_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )",
+        )
+        .execute(&pool)
+        .await?;
+        sqlx::query("DELETE FROM schema_migrations")
+            .execute(&pool)
+            .await?;
+        sqlx::query("INSERT INTO schema_migrations (version) VALUES (?1)")
+            .bind(version)
+            .execute(&pool)
+            .await?;
+
+        for (table, schema) in [
+            (
+                "household",
+                "CREATE TABLE household (id TEXT PRIMARY KEY, deleted_at INTEGER)",
+            ),
+            (
+                "events",
+                "CREATE TABLE events (id TEXT PRIMARY KEY, deleted_at INTEGER)",
+            ),
+            (
+                "notes",
+                "CREATE TABLE notes (id TEXT PRIMARY KEY, deleted_at INTEGER)",
+            ),
+            (
+                "files_index",
+                "CREATE TABLE files_index (
+                    id TEXT PRIMARY KEY,
+                    root_key TEXT,
+                    relative_path TEXT,
+                    deleted_at INTEGER
+                )",
+            ),
+            (
+                "bills",
+                "CREATE TABLE bills (
+                    id TEXT PRIMARY KEY,
+                    relative_path TEXT,
+                    root_key TEXT,
+                    deleted_at INTEGER
+                )",
+            ),
+            (
+                "policies",
+                "CREATE TABLE policies (
+                    id TEXT PRIMARY KEY,
+                    relative_path TEXT,
+                    root_key TEXT,
+                    deleted_at INTEGER
+                )",
+            ),
+            (
+                "property_documents",
+                "CREATE TABLE property_documents (
+                    id TEXT PRIMARY KEY,
+                    relative_path TEXT,
+                    root_key TEXT,
+                    deleted_at INTEGER
+                )",
+            ),
+            (
+                "inventory_items",
+                "CREATE TABLE inventory_items (
+                    id TEXT PRIMARY KEY,
+                    relative_path TEXT,
+                    root_key TEXT,
+                    deleted_at INTEGER
+                )",
+            ),
+            (
+                "vehicle_maintenance",
+                "CREATE TABLE vehicle_maintenance (
+                    id TEXT PRIMARY KEY,
+                    relative_path TEXT,
+                    root_key TEXT,
+                    deleted_at INTEGER
+                )",
+            ),
+            (
+                "pet_medical",
+                "CREATE TABLE pet_medical (
+                    id TEXT PRIMARY KEY,
+                    relative_path TEXT,
+                    root_key TEXT,
+                    deleted_at INTEGER
+                )",
+            ),
+        ] {
+            sqlx::query(schema).execute(&pool).await?;
+            sqlx::query(&format!("DELETE FROM {table}"))
+                .execute(&pool)
+                .await?;
+        }
+
+        Ok(pool)
+    }
+
+    #[tokio::test]
+    async fn manifest_records_canonical_schema_version() {
+        let version = "0023_events_drop_legacy_time";
+        let db_dir = TempDir::new().expect("create db dir");
+        let pool = setup_pool(&db_dir, version)
+            .await
+            .expect("setup sqlite pool");
+        let export_dir = TempDir::new().expect("create export dir");
+        let fake_appdata = TempDir::new().expect("fake appdata");
+        let attachments_dir = fake_appdata.path().join("attachments");
+        std::fs::create_dir_all(&attachments_dir).expect("create attachments dir");
+
+        let prev = std::env::var_os("ARK_FAKE_APPDATA");
+        std::env::set_var("ARK_FAKE_APPDATA", fake_appdata.path());
+
+        let entry = create_export::<tauri::Wry>(
+            None,
+            &pool,
+            ExportOptions {
+                out_parent: export_dir.path().to_path_buf(),
+            },
+        )
+        .await
+        .expect("export succeeds");
+
+        let manifest_bytes = std::fs::read(&entry.manifest_path).expect("read manifest");
+        let manifest: ExportManifest =
+            serde_json::from_slice(&manifest_bytes).expect("parse manifest json");
+
+        let db_version: String = sqlx::query_scalar(
+            "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("fetch schema version");
+
+        assert_eq!(manifest.schema_version, db_version);
+        assert!(!manifest
+            .schema_version
+            .to_ascii_lowercase()
+            .ends_with(".up.sql"));
+
+        if let Some(prev) = prev {
+            std::env::set_var("ARK_FAKE_APPDATA", prev);
+        } else {
+            std::env::remove_var("ARK_FAKE_APPDATA");
+        }
+    }
 }
 
 fn resolve_attachments_base<R: tauri::Runtime>(

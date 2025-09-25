@@ -7,6 +7,7 @@ use thiserror::Error;
 use ts_rs::TS;
 
 use super::bundle::{ImportBundle, ImportBundleError};
+use crate::db::manifest as db_manifest;
 
 #[derive(Debug, Clone)]
 pub struct ValidationContext<'a> {
@@ -93,14 +94,17 @@ async fn validate_schema_version(
         .map_err(|err| ValidationError::Database(err.to_string()))?;
 
     let live_version = if let Some(v) = live {
-        v
+        db_manifest::normalize_schema_version_owned(v)
     } else {
-        crate::db::manifest::schema_hash(ctx.pool)
-            .await
-            .map_err(|err| ValidationError::Database(err.to_string()))?
+        db_manifest::normalize_schema_version_owned(
+            db_manifest::schema_hash(ctx.pool)
+                .await
+                .map_err(|err| ValidationError::Database(err.to_string()))?,
+        )
     };
 
-    let bundle_version = bundle.manifest().schema_version.clone();
+    let bundle_version =
+        db_manifest::normalize_schema_version_owned(bundle.manifest().schema_version.clone());
     if live_version != bundle_version {
         return Err(ValidationError::SchemaVersionMismatch {
             live: live_version,
@@ -304,6 +308,20 @@ mod tests {
         matches!(err, ValidationError::SchemaVersionMismatch { .. })
             .then_some(())
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn schema_version_suffix_is_ignored() {
+        let canonical = "20240101000000";
+        let pool = setup_pool(canonical).await;
+        let dir = TempDir::new().unwrap();
+        write_bundle(dir.path(), &format!("{canonical}.up.sql"), "1.0.0");
+        let bundle = ImportBundle::load(dir.path()).unwrap();
+        let min_version = Version::parse("0.1.0").unwrap();
+        let target_dir = TempDir::new().unwrap();
+        let ctx = ctx(&pool, target_dir.path(), &min_version);
+
+        validate_bundle(&bundle, &ctx).await.unwrap();
     }
 
     #[tokio::test]
