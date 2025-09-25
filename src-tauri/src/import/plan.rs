@@ -217,9 +217,13 @@ async fn plan_table_merge(
                     .await
                     .map_err(PlanError::Database)?;
 
-                let live = row.map(|row| LiveRow {
-                    deleted_at: row.try_get("deleted_at").ok(),
-                    updated_at: row.try_get("updated_at").ok(),
+                let live = row.map(|row| {
+                    let deleted_at = row.try_get::<Option<i64>, _>("deleted_at").unwrap_or(None);
+                    let updated_at = row.try_get::<Option<i64>, _>("updated_at").unwrap_or(None);
+                    LiveRow {
+                        deleted_at,
+                        updated_at,
+                    }
                 });
                 live_cache.insert(id.clone(), live.clone());
                 live
