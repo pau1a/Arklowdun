@@ -15,6 +15,7 @@ use ts_rs::TS;
 
 use super::bundle::{AttachmentEntry, DataFileEntry, ImportBundle};
 use super::plan::{AttachmentConflict, ImportMode, ImportPlan, TableConflict, TablePlan};
+use super::rows::canonicalize_row;
 use super::ATTACHMENT_TABLES;
 use crate::export::manifest::file_sha256;
 use crate::migrate;
@@ -104,6 +105,12 @@ pub enum ExecutionError {
         #[source]
         source: serde_json::Error,
     },
+    #[error("failed to normalize row for table {table}: {source}")]
+    RowNormalization {
+        table: String,
+        #[source]
+        source: AnyError,
+    },
     #[error("missing required field {field} in table {table}")]
     MissingField { table: String, field: String },
     #[error("unknown table in import bundle: {0}")]
@@ -129,8 +136,13 @@ pub async fn execute_plan(
     plan: &ImportPlan,
     ctx: &ExecutionContext<'_>,
 ) -> Result<ExecutionReport, ExecutionError> {
+    let table_entries = bundle.data_files();
+
     if matches!(plan.mode, ImportMode::Replace) {
         rebuild_database_schema(ctx).await?;
+        for entry in table_entries.iter().rev() {
+            clear_table(entry, ctx).await?;
+        }
     }
 
     let mut attachments_summary: Option<AttachmentExecutionSummary> = None;
@@ -141,7 +153,7 @@ pub async fn execute_plan(
 
     let mut tables = BTreeMap::new();
 
-    for entry in bundle.data_files() {
+    for entry in table_entries {
         if let Some(expected) = plan.tables.get(&entry.logical_name) {
             let summary = match plan.mode {
                 ImportMode::Replace => execute_table_replace(entry, expected, ctx).await?,
@@ -246,15 +258,6 @@ async fn execute_table_replace(
     ctx: &ExecutionContext<'_>,
 ) -> Result<TableExecutionSummary, ExecutionError> {
     let table = resolve_physical_table(&entry.logical_name)?;
-    {
-        let mut conn = ctx.pool.acquire().await.map_err(ExecutionError::Database)?;
-        let delete_sql = format!("DELETE FROM {}", quote_ident(table));
-        sqlx::query(&delete_sql)
-            .execute(conn.as_mut())
-            .await
-            .map_err(ExecutionError::Database)?;
-    }
-
     let summary = import_table_rows(
         entry,
         ctx.pool,
@@ -266,6 +269,20 @@ async fn execute_table_replace(
 
     verify_table_summary(&entry.logical_name, expected, &summary)?;
     Ok(summary)
+}
+
+async fn clear_table(
+    entry: &DataFileEntry,
+    ctx: &ExecutionContext<'_>,
+) -> Result<(), ExecutionError> {
+    let table = resolve_physical_table(&entry.logical_name)?;
+    let mut conn = ctx.pool.acquire().await.map_err(ExecutionError::Database)?;
+    let delete_sql = format!("DELETE FROM {}", quote_ident(table));
+    sqlx::query(&delete_sql)
+        .execute(conn.as_mut())
+        .await
+        .map_err(ExecutionError::Database)?;
+    Ok(())
 }
 
 async fn execute_table_merge(
@@ -315,11 +332,17 @@ async fn import_table_rows(
         if trimmed.is_empty() {
             continue;
         }
-        let value: Value =
+        let mut value: Value =
             serde_json::from_str(trimmed).map_err(|err| ExecutionError::DataFileParse {
                 path: entry.path.display().to_string(),
                 source: err,
             })?;
+        value = canonicalize_row(logical_table, value).map_err(|err| {
+            ExecutionError::RowNormalization {
+                table: logical_table.to_string(),
+                source: err,
+            }
+        })?;
         let object = value
             .as_object()
             .ok_or_else(|| ExecutionError::DataFileParse {
@@ -886,7 +909,7 @@ fn json_extract_for_column(column: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::import::plan::{build_plan, PlanContext};
+    use crate::import::plan::{build_plan, ImportMode, PlanContext};
     use serde_json::json;
     use sqlx::sqlite::{
         SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
@@ -922,19 +945,18 @@ mod tests {
         rows: &[Value],
         attachments: &[(String, Vec<u8>)],
     ) -> ImportBundle {
+        write_bundle_with_tables(root, &[(logical, rows.to_vec())], attachments)
+    }
+
+    fn write_bundle_with_tables(
+        root: &Path,
+        tables: &[(&str, Vec<Value>)],
+        attachments: &[(String, Vec<u8>)],
+    ) -> ImportBundle {
         use std::io::Write;
 
         std::fs::create_dir_all(root.join("data")).unwrap();
         std::fs::create_dir_all(root.join("attachments")).unwrap();
-        let data_path = root.join("data").join(format!("{}.jsonl", logical));
-        let mut file = std::fs::File::create(&data_path).unwrap();
-        for row in rows {
-            serde_json::to_writer(&mut file, row).unwrap();
-            file.write_all(b"\n").unwrap();
-        }
-        file.flush().unwrap();
-        drop(file);
-        let data_sha = file_sha256(&data_path).unwrap();
 
         let attachments_manifest_path = root.join("attachments_manifest.txt");
         let mut manifest_file = std::fs::File::create(&attachments_manifest_path).unwrap();
@@ -951,13 +973,28 @@ mod tests {
         drop(manifest_file);
         let attachments_manifest_sha = file_sha256(&attachments_manifest_path).unwrap();
 
+        let mut table_infos = serde_json::Map::new();
+        for (logical, rows) in tables {
+            let data_path = root.join("data").join(format!("{}.jsonl", logical));
+            let mut file = std::fs::File::create(&data_path).unwrap();
+            for row in rows {
+                serde_json::to_writer(&mut file, row).unwrap();
+                file.write_all(b"\n").unwrap();
+            }
+            file.flush().unwrap();
+            drop(file);
+            let data_sha = file_sha256(&data_path).unwrap();
+            table_infos.insert(
+                (*logical).to_string(),
+                json!({"count": rows.len() as u64, "sha256": data_sha}),
+            );
+        }
+
         let manifest = json!({
             "appVersion": "1.0.0",
             "schemaVersion": "20240101000000",
             "createdAt": "2024-01-01T00:00:00Z",
-            "tables": {
-                logical: {"count": rows.len() as u64, "sha256": data_sha},
-            },
+            "tables": table_infos,
             "attachments": {
                 "totalCount": attachments.len() as u64,
                 "totalBytes": attachments.iter().map(|(_, b)| b.len() as u64).sum::<u64>(),
@@ -1073,6 +1110,96 @@ mod tests {
         assert_eq!(keep.1, 200);
         let update = existing.iter().find(|(id, _)| id == "hh_update").unwrap();
         assert_eq!(update.1, 220);
+    }
+
+    #[tokio::test]
+    async fn camelcase_rows_round_trip_without_fk_errors() {
+        let (_db_dir, pool) = setup_pool().await;
+        let tmp = TempDir::new().unwrap();
+        let bundle = write_bundle_with_tables(
+            tmp.path(),
+            &[
+                (
+                    "household",
+                    vec![json!({
+                        "id": "hh1",
+                        "name": "Primary",
+                        "timeZone": "UTC",
+                        "createdAt": 1,
+                        "updatedAt": 2,
+                        "deletedAt": null
+                    })],
+                ),
+                (
+                    "events",
+                    vec![json!({
+                        "id": "evt1",
+                        "title": "Event",
+                        "householdId": "hh1",
+                        "startAtUtc": 3,
+                        "endAtUtc": 4,
+                        "createdAt": 5,
+                        "updatedAt": 6,
+                        "deletedAt": null,
+                        "timeZone": "UTC"
+                    })],
+                ),
+                (
+                    "notes",
+                    vec![json!({
+                        "id": "note1",
+                        "householdId": "hh1",
+                        "position": 1,
+                        "z": 0,
+                        "createdAt": 7,
+                        "updatedAt": 8,
+                        "deletedAt": null
+                    })],
+                ),
+            ],
+            &[],
+        );
+
+        let attachments_root = TempDir::new().unwrap();
+        let plan_ctx = PlanContext {
+            pool: &pool,
+            attachments_root: attachments_root.path(),
+        };
+        let plan = build_plan(&bundle, &plan_ctx, ImportMode::Replace)
+            .await
+            .unwrap();
+
+        let exec_ctx = ExecutionContext::new(&pool, attachments_root.path());
+        let report = execute_plan(&bundle, &plan, &exec_ctx).await.unwrap();
+
+        let fk_violations: Vec<(String, i64, String, i64)> =
+            sqlx::query_as("PRAGMA foreign_key_check")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert!(fk_violations.is_empty());
+
+        let event_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM events")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(event_count, 1);
+
+        let note_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM notes")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(note_count, 1);
+
+        let household_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM household")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(household_count, 1);
+
+        assert_eq!(report.tables.get("events").unwrap().adds, 1);
+        assert_eq!(report.tables.get("notes").unwrap().adds, 1);
+        assert_eq!(report.tables.get("household").unwrap().adds, 1);
     }
 
     #[tokio::test]
