@@ -401,13 +401,17 @@ async fn process_merge_row(
         .map_err(ExecutionError::Database)?;
 
     if let Some(existing_row) = existing {
-        let deleted: Option<i64> = existing_row.try_get("deleted_at").ok();
+        let deleted: Option<i64> = existing_row
+            .try_get::<Option<i64>, _>("deleted_at")
+            .unwrap_or(None);
         if deleted.is_some() {
             inserter.insert(tx, row).await?;
             summary.updates += 1;
             return Ok(());
         }
-        let live_updated: Option<i64> = existing_row.try_get("updated_at").ok();
+        let live_updated: Option<i64> = existing_row
+            .try_get::<Option<i64>, _>("updated_at")
+            .unwrap_or(None);
         match (bundle_updated, live_updated) {
             (Some(bundle_ts), Some(live_ts)) => {
                 if bundle_ts > live_ts {
