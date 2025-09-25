@@ -1,75 +1,138 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env sh
+set -eu
 
-DB="${DB:-dev.sqlite}"
-MIG_DIR="$(dirname "$0")/../migrations"
-export LC_ALL=C
-shopt -s nullglob
-
-reset_db() {
-  rm -f "$DB"
+command -v sqlite3 >/dev/null 2>&1 || {
+  echo "error: sqlite3 is required" >&2
+  exit 1
 }
 
-integrity_check(){ sqlite3 "$DB" 'PRAGMA integrity_check;' | grep -qx ok; }
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+MIG_DIR="$SCRIPT_DIR/../migrations"
 
-ensure_pairs() {
-  local missing=0
-  for f in "$MIG_DIR"/[0-9]*.up.sql; do
-    local base="$(basename "$f" .up.sql)"
-    if [[ ! -f "$MIG_DIR/${base}.down.sql" ]]; then
-      echo "missing down migration for $base" >&2
-      missing=1
-    fi
-  done
-  [[ $missing -eq 0 ]]
+if [ ! -d "$MIG_DIR" ]; then
+  echo "error: migrations directory not found at $MIG_DIR" >&2
+  exit 1
+fi
+
+DB_PATH="${DB:-}"
+if [ -z "$DB_PATH" ]; then
+  if [ -n "${ARK_FAKE_APPDATA:-}" ]; then
+    DB_PATH="$ARK_FAKE_APPDATA/arklowdun.sqlite3"
+  else
+    DB_PATH="$SCRIPT_DIR/../dev.sqlite"
+  fi
+fi
+
+DB_DIR=$(dirname "$DB_PATH")
+mkdir -p "$DB_DIR"
+
+escape_sql() {
+  printf %s "$1" | sed "s/'/''/g"
 }
 
-run_file() {
-  local file="$1"
-  echo "$file"
-  sqlite3 "$DB" <<SQL
-BEGIN IMMEDIATE;
+ensure_database() {
+  if [ ! -f "$DB_PATH" ]; then
+    : > "$DB_PATH"
+  fi
+
+  sqlite3 "$DB_PATH" <<'SQL' >/dev/null
+PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
-$(cat "$file")
-COMMIT;
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version TEXT PRIMARY KEY,
+  applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 SQL
 }
 
-migrate_up_all() {
-  ensure_pairs || return 1
-  mapfile -t ups < <(printf '%s\n' "$MIG_DIR"/[0-9]*.up.sql | sort)
-  for f in "${ups[@]}"; do
-    run_file "$f"
+remove_database() {
+  rm -f "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm"
+}
+
+list_migrations() {
+  find "$MIG_DIR" -type f -name '*_*.up.sql' -print | LC_ALL=C sort
+}
+
+has_migration_run() {
+  version="$1"
+  escaped=$(escape_sql "$version")
+  sqlite3 "$DB_PATH" "SELECT 1 FROM schema_migrations WHERE version = '$escaped' LIMIT 1;" | grep -q 1
+}
+
+apply_migration() {
+  file="$1"
+  [ -n "$file" ] || return 0
+  if [ ! -f "$file" ]; then
+    echo "error: migration file not found: $file" >&2
+    exit 1
+  fi
+
+  base=$(basename "$file")
+  version=${base%\.up.sql}
+
+  if has_migration_run "$version"; then
+    echo "Skipping migration $version (already applied)"
+    return 0
+  fi
+
+  escaped_version=$(escape_sql "$version")
+  if ! sqlite3 "$DB_PATH" <<SQL
+BEGIN IMMEDIATE;
+PRAGMA foreign_keys=ON;
+$(cat "$file")
+INSERT INTO schema_migrations(version) VALUES('$escaped_version');
+COMMIT;
+SQL
+  then
+    sqlite3 "$DB_PATH" 'ROLLBACK;' >/dev/null 2>&1 || true
+    echo "error: failed applying migration $version" >&2
+    exit 1
+  fi
+  echo "Applied migration $version"
+}
+
+run_migrations() {
+  list_migrations | while IFS= read -r migration; do
+    [ -n "$migration" ] || continue
+    apply_migration "$migration"
   done
-  integrity_check
+
+  if [ "$(sqlite3 "$DB_PATH" 'PRAGMA integrity_check;')" != "ok" ]; then
+    echo "error: integrity check failed" >&2
+    exit 1
+  fi
 }
 
-migrate_down_one() {
-  local version="$1"
-  version="${version%.up.sql}"
-  run_file "$MIG_DIR/${version}.down.sql"
+usage() {
+  cat <<'USAGE' >&2
+Usage: scripts/migrate.sh <command>
+
+Commands:
+  fresh   Remove the existing database and apply all migrations
+  up      Apply pending migrations to the existing database
+USAGE
 }
 
-migrate_down_all() {
-  mapfile -t downs < <(printf '%s\n' "$MIG_DIR"/[0-9]*.down.sql | sort -r)
-  for f in "${downs[@]}"; do
-    run_file "$f"
-  done
-  integrity_check
-}
+if [ $# -eq 0 ]; then
+  usage
+  exit 1
+fi
 
-roundtrip() {
-  migrate_up_all
-  migrate_down_all
-  migrate_up_all
-  integrity_check
-}
+command=$1
+shift
 
-case "${1:-}" in
-  fresh) reset_db; migrate_up_all ;;
-  up-all) migrate_up_all ;;
-  down-one) migrate_down_one "$2" ;;
-  down-all) migrate_down_all ;;
-  roundtrip) roundtrip ;;
-  *) echo "usage: $0 {fresh|up-all|down-one <version>|down-all|roundtrip}" ;;
+case "$command" in
+  fresh)
+    remove_database
+    ensure_database
+    run_migrations
+    ;;
+  up)
+    ensure_database
+    run_migrations
+    ;;
+  *)
+    usage
+    exit 1
+    ;;
 esac
