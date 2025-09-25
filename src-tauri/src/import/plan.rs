@@ -171,6 +171,7 @@ async fn plan_table_merge(
     let mut updates = 0_u64;
     let mut skips = 0_u64;
     let mut conflicts = Vec::new();
+    let mut conn = pool.acquire().await.map_err(PlanError::Database)?;
 
     for line in reader.lines() {
         let line = line.map_err(|err| PlanError::DataFileIo {
@@ -199,7 +200,7 @@ async fn plan_table_merge(
         }
 
         let row = query
-            .fetch_optional(pool)
+            .fetch_optional(conn.as_mut())
             .await
             .map_err(PlanError::Database)?;
 
@@ -374,15 +375,25 @@ async fn load_live_attachment_updated_at(
     rel: &str,
 ) -> Result<Option<i64>, PlanError> {
     let mut max_ts: Option<i64> = None;
+    let mut conn = pool.acquire().await.map_err(PlanError::Database)?;
     for table in ATTACHMENT_TABLES {
         let sql = format!(
             "SELECT MAX(updated_at) FROM {table} WHERE root_key = 'attachments' AND relative_path = ?1 AND deleted_at IS NULL"
         );
-        let ts: Option<i64> = sqlx::query_scalar(&sql)
+        let ts: Option<i64> = match sqlx::query_scalar(&sql)
             .bind(rel)
-            .fetch_one(pool)
+            .fetch_one(conn.as_mut())
             .await
-            .map_err(PlanError::Database)?;
+        {
+            Ok(value) => value,
+            Err(sqlx::Error::Database(db_err))
+                if db_err.code().map_or(false, |code| code == "SQLITE_ERROR")
+                    && db_err.message().contains("no such table") =>
+            {
+                continue;
+            }
+            Err(err) => return Err(PlanError::Database(err)),
+        };
         if let Some(ts) = ts {
             if max_ts.map_or(true, |current| ts > current) {
                 max_ts = Some(ts);
@@ -439,10 +450,10 @@ fn decide_attachment_action(
 
 fn resolve_physical_table(logical: &str) -> Result<&'static str, PlanError> {
     match logical {
-        "households" => Ok("household"),
+        "household" | "households" => Ok("household"),
         "events" => Ok("events"),
         "notes" => Ok("notes"),
-        "files" => Ok("files_index"),
+        "files" | "files_index" => Ok("files_index"),
         "bills" => Ok("bills"),
         "policies" => Ok("policies"),
         "property_documents" => Ok("property_documents"),
