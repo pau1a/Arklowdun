@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
+use anyhow::Error as AnyError;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::Row;
@@ -35,7 +36,7 @@ pub struct TablePlan {
     pub conflicts: Vec<TableConflict>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct TableConflict {
@@ -92,17 +93,29 @@ pub enum PlanError {
     #[error("invalid table in manifest: {0}")]
     InvalidTable(String),
     #[error("failed to read data file {path}: {source}")]
-    DataFileIo { path: String, source: String },
+    DataFileIo {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("failed to parse json in {path}: {source}")]
-    DataFileParse { path: String, source: String },
+    DataFileParse {
+        path: String,
+        #[source]
+        source: serde_json::Error,
+    },
     #[error("record in {table} missing required field {field}")]
     MissingField { table: String, field: String },
     #[error("database error: {0}")]
-    Database(String),
+    Database(#[from] sqlx::Error),
     #[error("attachment path escapes base: {0}")]
     AttachmentPathTraversal(String),
     #[error("failed to inspect attachment {path}: {source}")]
-    AttachmentIo { path: String, source: String },
+    AttachmentIo {
+        path: String,
+        #[source]
+        source: AnyError,
+    },
 }
 
 pub async fn build_plan(
@@ -150,7 +163,7 @@ async fn plan_table_merge(
 
     let file = File::open(&entry.path).map_err(|err| PlanError::DataFileIo {
         path: entry.path.display().to_string(),
-        source: err.to_string(),
+        source: err,
     })?;
     let reader = BufReader::new(file);
 
@@ -162,14 +175,14 @@ async fn plan_table_merge(
     for line in reader.lines() {
         let line = line.map_err(|err| PlanError::DataFileIo {
             path: entry.path.display().to_string(),
-            source: err.to_string(),
+            source: err,
         })?;
         if line.trim().is_empty() {
             continue;
         }
         let value: Value = serde_json::from_str(&line).map_err(|err| PlanError::DataFileParse {
             path: entry.path.display().to_string(),
-            source: err.to_string(),
+            source: err,
         })?;
 
         let id = extract_id(&entry.logical_name, &value)?;
@@ -188,7 +201,7 @@ async fn plan_table_merge(
         let row = query
             .fetch_optional(pool)
             .await
-            .map_err(|err| PlanError::Database(err.to_string()))?;
+            .map_err(PlanError::Database)?;
 
         if let Some(row) = row {
             let deleted: Option<i64> = row.try_get("deleted_at").ok();
@@ -218,13 +231,13 @@ async fn plan_table_merge(
                 (Some(_), None) => {
                     updates += 1;
                 }
-                (None, Some(_)) => {
+                (None, Some(live_ts)) => {
                     skips += 1;
                     conflicts.push(TableConflict {
                         table: entry.logical_name.clone(),
                         id: id.to_string(),
-                        bundle_updated_at,
-                        live_updated_at,
+                        bundle_updated_at: None,
+                        live_updated_at: Some(live_ts),
                     });
                 }
                 (None, None) => {
@@ -272,7 +285,7 @@ async fn plan_attachments_merge(
         }
         let existing_hash = file_sha256(&target).map_err(|err| PlanError::AttachmentIo {
             path: target.display().to_string(),
-            source: err.to_string(),
+            source: err,
         })?;
         if existing_hash == attachment.sha256 {
             plan.skips += 1;
@@ -318,13 +331,13 @@ fn collect_bundle_attachment_updates(
 
         let file = File::open(&entry.path).map_err(|err| PlanError::DataFileIo {
             path: entry.path.display().to_string(),
-            source: err.to_string(),
+            source: err,
         })?;
         let reader = BufReader::new(file);
         for line in reader.lines() {
             let line = line.map_err(|err| PlanError::DataFileIo {
                 path: entry.path.display().to_string(),
-                source: err.to_string(),
+                source: err,
             })?;
             if line.trim().is_empty() {
                 continue;
@@ -332,7 +345,7 @@ fn collect_bundle_attachment_updates(
             let value: Value =
                 serde_json::from_str(&line).map_err(|err| PlanError::DataFileParse {
                     path: entry.path.display().to_string(),
-                    source: err.to_string(),
+                    source: err,
                 })?;
             let root_key = value.get("root_key").and_then(|v| v.as_str());
             if !matches!(root_key, Some("attachments")) {
@@ -369,7 +382,7 @@ async fn load_live_attachment_updated_at(
             .bind(rel)
             .fetch_one(pool)
             .await
-            .map_err(|err| PlanError::Database(err.to_string()))?;
+            .map_err(PlanError::Database)?;
         if let Some(ts) = ts {
             if max_ts.map_or(true, |current| ts > current) {
                 max_ts = Some(ts);

@@ -3,6 +3,7 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
+use anyhow::Error as AnyError;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::pool::PoolConnection;
@@ -91,19 +92,31 @@ pub enum ExecutionError {
     #[error("attachment conflicts diverged from plan")]
     AttachmentConflictMismatch,
     #[error("failed to read data file {path}: {source}")]
-    DataFileIo { path: String, source: String },
+    DataFileIo {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("failed to parse json in {path}: {source}")]
-    DataFileParse { path: String, source: String },
+    DataFileParse {
+        path: String,
+        #[source]
+        source: serde_json::Error,
+    },
     #[error("missing required field {field} in table {table}")]
     MissingField { table: String, field: String },
     #[error("unknown table in import bundle: {0}")]
     UnknownTable(String),
     #[error("database error: {0}")]
-    Database(String),
+    Database(#[from] sqlx::Error),
     #[error("attachment path escapes base: {0}")]
     AttachmentPathTraversal(String),
     #[error("failed to copy attachment {path}: {source}")]
-    AttachmentIo { path: String, source: String },
+    AttachmentIo {
+        path: String,
+        #[source]
+        source: AnyError,
+    },
     #[error("hash mismatch after copying attachment {path}")]
     AttachmentHashMismatch { path: String },
 }
@@ -142,23 +155,19 @@ pub async fn execute_plan(
 }
 
 async fn rebuild_database_schema(ctx: &ExecutionContext<'_>) -> Result<(), ExecutionError> {
-    let mut conn = ctx
-        .pool
-        .acquire()
-        .await
-        .map_err(|err| ExecutionError::Database(err.to_string()))?;
+    let mut conn = ctx.pool.acquire().await.map_err(ExecutionError::Database)?;
 
     sqlx::query("PRAGMA foreign_keys=OFF")
-        .execute(&mut *conn)
+        .execute(conn.as_mut())
         .await
-        .map_err(|err| ExecutionError::Database(err.to_string()))?;
+        .map_err(ExecutionError::Database)?;
 
     let objects = sqlx::query_as::<_, (String, String)>(
         "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'",
     )
-    .fetch_all(&mut *conn)
+    .fetch_all(conn.as_mut())
     .await
-    .map_err(|err| ExecutionError::Database(err.to_string()))?;
+    .map_err(ExecutionError::Database)?;
 
     let mut drops: Vec<(u8, String, String)> = objects
         .into_iter()
@@ -184,19 +193,19 @@ async fn rebuild_database_schema(ctx: &ExecutionContext<'_>) -> Result<(), Execu
     }
 
     let _ = sqlx::query("DELETE FROM sqlite_sequence")
-        .execute(&mut *conn)
+        .execute(conn.as_mut())
         .await;
 
     sqlx::query("PRAGMA foreign_keys=ON")
-        .execute(&mut *conn)
+        .execute(conn.as_mut())
         .await
-        .map_err(|err| ExecutionError::Database(err.to_string()))?;
+        .map_err(ExecutionError::Database)?;
 
     drop(conn);
 
     migrate::apply_migrations(ctx.pool)
         .await
-        .map_err(|err| ExecutionError::Database(err.to_string()))?;
+        .map_err(ExecutionError::Database)?;
 
     Ok(())
 }
@@ -215,9 +224,9 @@ async fn drop_schema_object(
     };
 
     sqlx::query(&sql)
-        .execute(&mut *conn)
+        .execute(conn.as_mut())
         .await
-        .map_err(|err| ExecutionError::Database(err.to_string()))?;
+        .map_err(ExecutionError::Database)?;
 
     Ok(())
 }
@@ -229,16 +238,12 @@ async fn execute_table_replace(
 ) -> Result<TableExecutionSummary, ExecutionError> {
     let table = resolve_physical_table(&entry.logical_name)?;
     {
-        let mut conn = ctx
-            .pool
-            .acquire()
-            .await
-            .map_err(|err| ExecutionError::Database(err.to_string()))?;
+        let mut conn = ctx.pool.acquire().await.map_err(ExecutionError::Database)?;
         let delete_sql = format!("DELETE FROM {}", quote_ident(table));
         sqlx::query(&delete_sql)
-            .execute(&mut *conn)
+            .execute(conn.as_mut())
             .await
-            .map_err(|err| ExecutionError::Database(err.to_string()))?;
+            .map_err(ExecutionError::Database)?;
     }
 
     let summary = import_table_rows(
@@ -283,7 +288,7 @@ async fn import_table_rows(
 ) -> Result<TableExecutionSummary, ExecutionError> {
     let file = fs::File::open(&entry.path).map_err(|err| ExecutionError::DataFileIo {
         path: entry.path.display().to_string(),
-        source: err.to_string(),
+        source: err,
     })?;
     let reader = BufReader::new(file);
 
@@ -295,7 +300,7 @@ async fn import_table_rows(
     for line in reader.lines() {
         let line = line.map_err(|err| ExecutionError::DataFileIo {
             path: entry.path.display().to_string(),
-            source: err.to_string(),
+            source: err,
         })?;
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -304,24 +309,20 @@ async fn import_table_rows(
         let value: Value =
             serde_json::from_str(trimmed).map_err(|err| ExecutionError::DataFileParse {
                 path: entry.path.display().to_string(),
-                source: err.to_string(),
+                source: err,
             })?;
         let object = value
             .as_object()
             .ok_or_else(|| ExecutionError::DataFileParse {
                 path: entry.path.display().to_string(),
-                source: "expected object".to_string(),
+                source: serde_json::Error::custom("expected object"),
             })?;
         if inserter.is_none() {
             inserter = Some(TableInserter::prepare(physical_table, object)?);
         }
 
         if tx.is_none() {
-            tx = Some(
-                pool.begin()
-                    .await
-                    .map_err(|err| ExecutionError::Database(err.to_string()))?,
-            );
+            tx = Some(pool.begin().await.map_err(ExecutionError::Database)?);
             chunk_len = 0;
         }
 
@@ -348,20 +349,14 @@ async fn import_table_rows(
         chunk_len += 1;
 
         if chunk_len >= ROW_CHUNK_SIZE {
-            if let Some(mut active) = tx.take() {
-                active
-                    .commit()
-                    .await
-                    .map_err(|err| ExecutionError::Database(err.to_string()))?;
+            if let Some(active) = tx.take() {
+                active.commit().await.map_err(ExecutionError::Database)?;
             }
         }
     }
 
-    if let Some(mut active) = tx.take() {
-        active
-            .commit()
-            .await
-            .map_err(|err| ExecutionError::Database(err.to_string()))?;
+    if let Some(active) = tx.take() {
+        active.commit().await.map_err(ExecutionError::Database)?;
     }
 
     Ok(summary)
@@ -392,9 +387,9 @@ async fn process_merge_row(
     }
 
     let existing: Option<SqliteRow> = query
-        .fetch_optional(&mut *tx)
+        .fetch_optional(tx.as_mut())
         .await
-        .map_err(|err| ExecutionError::Database(err.to_string()))?;
+        .map_err(ExecutionError::Database)?;
 
     if let Some(existing_row) = existing {
         let deleted: Option<i64> = existing_row.try_get("deleted_at").ok();
@@ -430,7 +425,7 @@ async fn process_merge_row(
                 summary.conflicts.push(TableConflict {
                     table: logical_table.to_string(),
                     id: id.to_string(),
-                    bundle_updated_at,
+                    bundle_updated_at: bundle_updated,
                     live_updated_at: Some(live_ts),
                 });
             }
@@ -493,14 +488,14 @@ fn execute_attachments_replace(
             fs::remove_dir_all(ctx.attachments_root).map_err(|err| {
                 ExecutionError::AttachmentIo {
                     path: ctx.attachments_root.display().to_string(),
-                    source: err.to_string(),
+                    source: err.into(),
                 }
             })?;
         }
     }
     fs::create_dir_all(ctx.attachments_root).map_err(|err| ExecutionError::AttachmentIo {
         path: ctx.attachments_root.display().to_string(),
-        source: err.to_string(),
+        source: err.into(),
     })?;
 
     let mut summary = AttachmentExecutionSummary::default();
@@ -533,7 +528,7 @@ async fn execute_attachments_merge(
         }
         let existing_hash = file_sha256(&dest).map_err(|err| ExecutionError::AttachmentIo {
             path: dest.display().to_string(),
-            source: err.to_string(),
+            source: err,
         })?;
         if existing_hash == attachment.sha256 {
             summary.skips += 1;
@@ -609,16 +604,16 @@ fn copy_attachment(
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent).map_err(|err| ExecutionError::AttachmentIo {
             path: parent.display().to_string(),
-            source: err.to_string(),
+            source: err.into(),
         })?;
     }
     fs::copy(&source, &dest).map_err(|err| ExecutionError::AttachmentIo {
         path: dest.display().to_string(),
-        source: err.to_string(),
+        source: err.into(),
     })?;
     let copied_hash = file_sha256(&dest).map_err(|err| ExecutionError::AttachmentIo {
         path: dest.display().to_string(),
-        source: err.to_string(),
+        source: err,
     })?;
     if copied_hash != attachment.sha256 {
         return Err(ExecutionError::AttachmentHashMismatch {
@@ -642,13 +637,13 @@ fn collect_bundle_attachment_updates(
 
         let file = File::open(&entry.path).map_err(|err| ExecutionError::DataFileIo {
             path: entry.path.display().to_string(),
-            source: err.to_string(),
+            source: err,
         })?;
         let reader = BufReader::new(file);
         for line in reader.lines() {
             let line = line.map_err(|err| ExecutionError::DataFileIo {
                 path: entry.path.display().to_string(),
-                source: err.to_string(),
+                source: err,
             })?;
             if line.trim().is_empty() {
                 continue;
@@ -656,7 +651,7 @@ fn collect_bundle_attachment_updates(
             let value: Value =
                 serde_json::from_str(&line).map_err(|err| ExecutionError::DataFileParse {
                     path: entry.path.display().to_string(),
-                    source: err.to_string(),
+                    source: err,
                 })?;
             let root_key = value.get("root_key").and_then(|v| v.as_str());
             if !matches!(root_key, Some("attachments")) {
@@ -693,7 +688,7 @@ async fn load_live_attachment_updated_at(
             .bind(rel)
             .fetch_one(pool)
             .await
-            .map_err(|err| ExecutionError::Database(err.to_string()))?;
+            .map_err(ExecutionError::Database)?;
         if let Some(ts) = ts {
             if max_ts.map_or(true, |current| ts > current) {
                 max_ts = Some(ts);
@@ -783,13 +778,13 @@ impl TableInserter {
     ) -> Result<(), ExecutionError> {
         let payload = serde_json::to_string(row).map_err(|err| ExecutionError::DataFileParse {
             path: self.table.clone(),
-            source: err.to_string(),
+            source: err,
         })?;
         sqlx::query(&self.sql)
             .bind(payload)
-            .execute(&mut *tx)
+            .execute(tx.as_mut())
             .await
-            .map_err(|err| ExecutionError::Database(err.to_string()))?;
+            .map_err(ExecutionError::Database)?;
         Ok(())
     }
 }

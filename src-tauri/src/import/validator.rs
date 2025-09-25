@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use semver::Version;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use thiserror::Error;
 use ts_rs::TS;
@@ -56,7 +56,7 @@ pub enum ValidationError {
     InvalidAppVersion(String),
 }
 
-#[derive(Debug, Clone, Default, Serialize, TS)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct ValidationReport {
@@ -148,7 +148,7 @@ fn validate_hashes(bundle: &ImportBundle) -> Result<(), ValidationError> {
         .map_err(|err| match err {
             ImportBundleError::Hash { path, source } => ValidationError::AttachmentsManifestHash {
                 path,
-                reason: source,
+                reason: source.to_string(),
             },
             other => ValidationError::Bundle(other),
         })?;
@@ -159,7 +159,7 @@ fn validate_hashes(bundle: &ImportBundle) -> Result<(), ValidationError> {
             .map_err(|err| match err {
                 ImportBundleError::Hash { source, .. } => ValidationError::DataFileHashMismatch {
                     path: data.path.display().to_string(),
-                    reason: source,
+                    reason: source.to_string(),
                 },
                 other => ValidationError::Bundle(other),
             })?;
@@ -171,7 +171,7 @@ fn validate_hashes(bundle: &ImportBundle) -> Result<(), ValidationError> {
             .map_err(|err| match err {
                 ImportBundleError::Hash { source, .. } => ValidationError::AttachmentHashMismatch {
                     path: attachment.relative_path.clone(),
-                    reason: source,
+                    reason: source.to_string(),
                 },
                 ImportBundleError::AttachmentMissing(path) => {
                     ValidationError::AttachmentHashMismatch {

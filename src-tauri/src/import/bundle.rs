@@ -3,7 +3,7 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
-use anyhow::Context;
+use anyhow::{Context, Error as AnyError};
 use thiserror::Error;
 
 use crate::export::manifest::{file_sha256, ExportManifest};
@@ -29,9 +29,16 @@ pub enum ImportBundleError {
     #[error("bundle attachment missing: {0}")]
     AttachmentMissing(String),
     #[error("failed to hash file {path}: {source}")]
-    Hash { path: String, source: String },
-    #[error("failed to enumerate bundle: {0}")]
-    Walk(String),
+    Hash {
+        path: String,
+        #[source]
+        source: AnyError,
+    },
+    #[error("failed to enumerate bundle: {source}")]
+    Walk {
+        #[source]
+        source: AnyError,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -218,18 +225,18 @@ impl ImportBundle {
             Ok(total)
         }
 
-        walk(root).map_err(|err| ImportBundleError::Walk(err.to_string()))
+        walk(root).map_err(|err| ImportBundleError::Walk { source: err })
     }
 
     pub fn verify_data_file_hash(&self, entry: &DataFileEntry) -> Result<(), ImportBundleError> {
         let actual = file_sha256(&entry.path).map_err(|err| ImportBundleError::Hash {
             path: entry.path.display().to_string(),
-            source: err.to_string(),
+            source: err,
         })?;
         if actual != entry.sha256 {
             return Err(ImportBundleError::Hash {
                 path: entry.path.display().to_string(),
-                source: format!("expected {}, found {}", entry.sha256, actual),
+                source: AnyError::msg(format!("expected {}, found {}", entry.sha256, actual)),
             });
         }
         Ok(())
@@ -244,12 +251,12 @@ impl ImportBundle {
         }
         let actual = file_sha256(&path).map_err(|err| ImportBundleError::Hash {
             path: path.display().to_string(),
-            source: err.to_string(),
+            source: err,
         })?;
         if actual != entry.sha256 {
             return Err(ImportBundleError::Hash {
                 path: path.display().to_string(),
-                source: format!("expected {}, found {}", entry.sha256, actual),
+                source: AnyError::msg(format!("expected {}, found {}", entry.sha256, actual)),
             });
         }
         Ok(())
@@ -259,16 +266,16 @@ impl ImportBundle {
         let actual = file_sha256(&self.attachments_manifest_path).map_err(|err| {
             ImportBundleError::Hash {
                 path: self.attachments_manifest_path.display().to_string(),
-                source: err.to_string(),
+                source: err,
             }
         })?;
         if actual != self.manifest.attachments.sha256_manifest {
             return Err(ImportBundleError::Hash {
                 path: self.attachments_manifest_path.display().to_string(),
-                source: format!(
+                source: AnyError::msg(format!(
                     "expected {}, found {}",
                     self.manifest.attachments.sha256_manifest, actual
-                ),
+                )),
             });
         }
         Ok(())
