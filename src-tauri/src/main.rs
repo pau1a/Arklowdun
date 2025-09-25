@@ -1,12 +1,15 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use chrono::Utc;
+use clap::{Parser, Subcommand, ValueEnum};
+use semver::Version;
 use serde_json::json;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::ConnectOptions;
@@ -18,6 +21,11 @@ use arklowdun_lib::db::{
     repair::{
         self, DbRepairEvent, DbRepairOptions, DbRepairStep, DbRepairStepState, DbRepairSummary,
     },
+};
+use arklowdun_lib::import::{
+    build_plan, execute_plan, validate_bundle, write_import_report, ExecutionContext,
+    ExecutionReport, ImportBundle, ImportMode, ImportPlan, PlanContext, ValidationContext,
+    ValidationReport, MIN_SUPPORTED_APP_VERSION,
 };
 use arklowdun_lib::ipc::guard::{DB_UNHEALTHY_CLI_HINT, DB_UNHEALTHY_CODE, DB_UNHEALTHY_EXIT_CODE};
 use arklowdun_lib::AppError;
@@ -62,6 +70,39 @@ enum DbCommand {
     Repair,
     /// Attempt a last-resort hard repair that rebuilds the schema and imports tables.
     HardRepair,
+    /// Import data from an export bundle with validation and dry-run planning.
+    Import {
+        /// Path to the export bundle directory.
+        #[arg(long = "in", value_name = "PATH")]
+        input: PathBuf,
+        /// Import mode determining merge vs replace behavior.
+        #[arg(long, value_enum, default_value_t = ImportModeArg::Merge)]
+        mode: ImportModeArg,
+        /// Run validation and planning without executing the plan.
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ImportModeArg {
+    Merge,
+    Replace,
+}
+
+impl Default for ImportModeArg {
+    fn default() -> Self {
+        Self::Merge
+    }
+}
+
+impl From<ImportModeArg> for ImportMode {
+    fn from(value: ImportModeArg) -> Self {
+        match value {
+            ImportModeArg::Merge => ImportMode::Merge,
+            ImportModeArg::Replace => ImportMode::Replace,
+        }
+    }
 }
 
 fn main() {
@@ -123,6 +164,11 @@ fn handle_db_command(command: DbCommand) -> Result<i32> {
         DbCommand::Export { out } => handle_db_export(out),
         DbCommand::Repair => handle_db_repair(),
         DbCommand::HardRepair => handle_db_hard_repair(),
+        DbCommand::Import {
+            input,
+            mode,
+            dry_run,
+        } => handle_db_import(input, mode, dry_run),
     }
 }
 
@@ -387,6 +433,198 @@ fn handle_db_hard_repair() -> Result<i32> {
     }
 }
 
+fn handle_db_import(input: PathBuf, mode: ImportModeArg, dry_run: bool) -> Result<i32> {
+    let db_path = default_db_path().context("determine database path")?;
+    if let Some(parent) = db_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create database parent directory {}", parent.display()))?;
+    }
+
+    let attachments_root = default_attachments_path().context("resolve attachments directory")?;
+    fs::create_dir_all(&attachments_root).with_context(|| {
+        format!(
+            "create attachments directory {}",
+            attachments_root.display()
+        )
+    })?;
+
+    let reports_dir = db_path
+        .parent()
+        .map(|p| p.join("reports"))
+        .unwrap_or_else(|| PathBuf::from("reports"));
+
+    match guard_cli_db_mutation(&db_path)? {
+        Ok(pool) => {
+            let target_root = db_path
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("."));
+            match tauri::async_runtime::block_on(run_cli_import(
+                pool,
+                input,
+                attachments_root,
+                target_root,
+                reports_dir,
+                mode.into(),
+                dry_run,
+            )) {
+                Ok(outcome) => {
+                    print_import_outcome(&outcome)?;
+                    Ok(0)
+                }
+                Err(ImportCliError::Validation(err)) => {
+                    eprintln!("Validation error: {:#}", err);
+                    Ok(1)
+                }
+                Err(ImportCliError::Execution(err)) => {
+                    eprintln!("Execution error: {:#}", err);
+                    Ok(2)
+                }
+            }
+        }
+        Err(code) => Ok(code),
+    }
+}
+
+enum ImportCliError {
+    Validation(anyhow::Error),
+    Execution(anyhow::Error),
+}
+
+struct ImportOutcome {
+    validation: ValidationReport,
+    plan: ImportPlan,
+    result: ImportResult,
+}
+
+enum ImportResult {
+    DryRun,
+    Executed {
+        execution: ExecutionReport,
+        report_path: PathBuf,
+    },
+}
+
+async fn run_cli_import(
+    mut pool: SqlitePool,
+    bundle_path: PathBuf,
+    attachments_root: PathBuf,
+    target_root: PathBuf,
+    reports_dir: PathBuf,
+    mode: ImportMode,
+    dry_run: bool,
+) -> Result<ImportOutcome, ImportCliError> {
+    let result = async {
+        let bundle = ImportBundle::load(&bundle_path)
+            .map_err(anyhow::Error::new)
+            .context("load import bundle")
+            .map_err(ImportCliError::Validation)?;
+
+        let minimum_version = Version::parse(MIN_SUPPORTED_APP_VERSION)
+            .expect("MIN_SUPPORTED_APP_VERSION is valid semver");
+        let validation_ctx = ValidationContext {
+            pool: &pool,
+            target_root: target_root.as_path(),
+            minimum_app_version: &minimum_version,
+            available_space_override: None,
+        };
+        let validation = validate_bundle(&bundle, &validation_ctx)
+            .await
+            .map_err(anyhow::Error::new)
+            .context("validate import bundle")
+            .map_err(ImportCliError::Validation)?;
+
+        let plan_ctx = PlanContext {
+            pool: &pool,
+            attachments_root: attachments_root.as_path(),
+        };
+        let plan = build_plan(&bundle, &plan_ctx, mode)
+            .await
+            .map_err(anyhow::Error::new)
+            .context("build import plan")
+            .map_err(ImportCliError::Validation)?;
+
+        if dry_run {
+            return Ok(ImportOutcome {
+                validation,
+                plan,
+                result: ImportResult::DryRun,
+            });
+        }
+
+        let exec_ctx = ExecutionContext::new(&pool, attachments_root.as_path());
+        let execution = execute_plan(&bundle, &plan, &exec_ctx)
+            .await
+            .map_err(anyhow::Error::new)
+            .context("execute import plan")
+            .map_err(ImportCliError::Execution)?;
+
+        let report_path =
+            write_import_report(&reports_dir, &bundle_path, &validation, &plan, &execution)
+                .map_err(ImportCliError::Execution)?;
+
+        Ok(ImportOutcome {
+            validation,
+            plan,
+            result: ImportResult::Executed {
+                execution,
+                report_path,
+            },
+        })
+    }
+    .await;
+
+    pool.close().await;
+    result
+}
+
+fn print_import_outcome(outcome: &ImportOutcome) -> Result<()> {
+    match &outcome.result {
+        ImportResult::DryRun => {
+            println!(
+                "Validation OK: bundle size {} bytes ({} data files, {} attachments).",
+                outcome.validation.bundle_size_bytes,
+                outcome.validation.data_files_verified,
+                outcome.validation.attachments_verified
+            );
+            let plan_json =
+                serde_json::to_string_pretty(&outcome.plan).context("serialize dry-run plan")?;
+            println!("{plan_json}");
+        }
+        ImportResult::Executed {
+            execution,
+            report_path,
+        } => {
+            println!(
+                "Import complete in {} mode.",
+                match execution.mode {
+                    ImportMode::Merge => "merge",
+                    ImportMode::Replace => "replace",
+                }
+            );
+
+            let (mut adds, mut updates, mut skips) = (0_u64, 0_u64, 0_u64);
+            for summary in execution.tables.values() {
+                adds += summary.adds;
+                updates += summary.updates;
+                skips += summary.skips;
+            }
+            println!(
+                "Tables: {adds} adds, {updates} updates, {skips} skips across {} table(s).",
+                execution.tables.len()
+            );
+            println!(
+                "Attachments: {} adds, {} updates, {} skips.",
+                execution.attachments.adds,
+                execution.attachments.updates,
+                execution.attachments.skips
+            );
+            println!("Report saved to {}", report_path.display());
+        }
+    }
+    Ok(())
+}
+
 fn cli_step_label(step: &DbRepairStep) -> &'static str {
     match step {
         DbRepairStep::Backup => "Backup",
@@ -471,6 +709,17 @@ fn default_db_path() -> Result<PathBuf> {
         .or_else(|| std::env::current_dir().ok())
         .ok_or_else(|| anyhow::anyhow!("failed to resolve application data directory"))?;
     Ok(base.join("com.paula.arklowdun").join("arklowdun.sqlite3"))
+}
+
+fn default_attachments_path() -> Result<PathBuf> {
+    if let Ok(fake) = std::env::var("ARK_FAKE_APPDATA") {
+        return Ok(PathBuf::from(fake).join("attachments"));
+    }
+
+    let base = dirs::data_dir()
+        .or_else(|| std::env::current_dir().ok())
+        .ok_or_else(|| anyhow::anyhow!("failed to resolve application data directory"))?;
+    Ok(base.join("com.paula.arklowdun").join("attachments"))
 }
 
 async fn open_health_pool(db_path: &Path) -> Result<SqlitePool> {
