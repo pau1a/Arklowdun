@@ -430,7 +430,7 @@ async fn attachment_table_exists(
     let exists =
         sqlx::query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1")
             .bind(table)
-            .fetch_optional(conn)
+            .fetch_optional(conn.as_mut())
             .await
             .map_err(PlanError::Database)?;
     Ok(exists.is_some())
