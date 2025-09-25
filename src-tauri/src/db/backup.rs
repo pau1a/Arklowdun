@@ -404,6 +404,14 @@ fn collect_backups(root: &Path) -> AppResult<Vec<BackupRecord>> {
         if !path.is_dir() {
             continue;
         }
+        // Filter only directories that look like a timestamped backup (YYYYMMDD-HHMMSS[-NN]).
+        // This avoids noisy warnings for hard-repair or pre-repair directories that are
+        // intentionally placed under the backups root but do not contain a manifest.
+        if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
+            if !looks_like_backup_dir(name) {
+                continue;
+            }
+        }
         let manifest_path = path.join(manifest::MANIFEST_FILE_NAME);
         let manifest = match manifest::read_manifest(&manifest_path) {
             Ok(manifest) => manifest,
@@ -432,6 +440,27 @@ fn collect_backups(root: &Path) -> AppResult<Vec<BackupRecord>> {
     }
 
     Ok(out)
+}
+
+fn looks_like_backup_dir(name: &str) -> bool {
+    // Expected: YYYYMMDD-HHMMSS or YYYYMMDD-HHMMSS-NN
+    // Positions: 0..8 digits, 8 '-', 9..15 digits, optionally '-' and two digits
+    let bytes = name.as_bytes();
+    let base_ok = bytes.len() >= 15
+        && bytes.get(8) == Some(&b'-')
+        && bytes[0..8].iter().all(|b| b.is_ascii_digit())
+        && bytes[9..15].iter().all(|b| b.is_ascii_digit());
+    if !base_ok {
+        return false;
+    }
+    if bytes.len() == 15 {
+        return true;
+    }
+    if bytes.len() == 18 {
+        bytes.get(15) == Some(&b'-') && bytes[16..18].iter().all(|b| b.is_ascii_digit())
+    } else {
+        false
+    }
 }
 
 fn load_record(dir: &Path, manifest: BackupManifest) -> AppResult<BackupRecord> {

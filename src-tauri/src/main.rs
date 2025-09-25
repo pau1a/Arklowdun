@@ -52,6 +52,12 @@ enum DbCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Export data, attachments, and a manifest for verification.
+    Export {
+        /// Parent directory to create export-YYYYMMDD-HHMMSS under.
+        #[arg(long, value_name = "PATH")]
+        out: std::path::PathBuf,
+    },
     /// Attempt to repair a corrupted database by rebuilding and swapping files.
     Repair,
     /// Attempt a last-resort hard repair that rebuilds the schema and imports tables.
@@ -114,6 +120,7 @@ fn handle_db_command(command: DbCommand) -> Result<i32> {
         }
         DbCommand::Vacuum => handle_db_vacuum(),
         DbCommand::Backup { json } => handle_db_backup(json),
+        DbCommand::Export { out } => handle_db_export(out),
         DbCommand::Repair => handle_db_repair(),
         DbCommand::HardRepair => handle_db_hard_repair(),
     }
@@ -189,6 +196,34 @@ fn handle_db_backup(emit_json: bool) -> Result<i32> {
                 println!("{manifest_json}");
                 println!("Backup stored at {}", entry.sqlite_path);
             }
+            Ok(0)
+        }
+        Err(code) => Ok(code),
+    }
+}
+
+fn handle_db_export(out_parent: std::path::PathBuf) -> Result<i32> {
+    use arklowdun_lib::export::{create_export, ExportOptions};
+
+    let db_path = default_db_path().context("determine database path")?;
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create database parent directory {}", parent.display()))?;
+    }
+
+    match guard_cli_db_mutation(&db_path)? {
+        Ok(pool) => {
+            let entry = tauri::async_runtime::block_on(async move {
+                let res = create_export::<tauri::Wry>(None, &pool, ExportOptions { out_parent })
+                    .await
+                    .context("create export package");
+                pool.close().await;
+                res
+            })?;
+            println!("Export created at {}", entry.directory.display());
+            println!("Manifest: {}", entry.manifest_path.display());
+            println!("Verify (bash): {}", entry.verify_sh_path.display());
+            println!("Verify (PowerShell): {}", entry.verify_ps1_path.display());
             Ok(0)
         }
         Err(code) => Ok(code),

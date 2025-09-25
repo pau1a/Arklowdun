@@ -104,6 +104,7 @@ impl<'a> MakeWriter<'a> for RotatingFileWriter {
 mod attachments;
 pub mod commands;
 pub mod db;
+pub mod export;
 mod diagnostics;
 pub mod error;
 pub mod events_tz_backfill;
@@ -1829,6 +1830,29 @@ async fn db_backup_reveal(state: State<'_, AppState>, path: String) -> AppResult
 }
 
 #[tauri::command]
+async fn db_export_run(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    out_parent: String,
+) -> AppResult<export::ExportEntryDto> {
+    let pool = state.pool_clone();
+    let out = std::path::PathBuf::from(out_parent);
+    let app = app.clone();
+    let result = dispatch_async_app_result(move || {
+        let pool = pool.clone();
+        let app = app.clone();
+        async move {
+            let entry = export::create_export(Some(&app), &pool, export::ExportOptions { out_parent: out })
+                .await
+                .map_err(|err| err.with_context("operation", "export_run"))?;
+            Ok::<_, crate::AppError>(export::ExportEntryDto::from(entry))
+        }
+    })
+    .await?;
+    Ok(result)
+}
+
+#[tauri::command]
 async fn db_repair_run(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -2140,6 +2164,7 @@ macro_rules! app_commands {
             db_backup_create,
             db_backup_reveal_root,
             db_backup_reveal,
+            db_export_run,
             db_repair_run,
             db_hard_repair_run,
             time_invariants_check,
