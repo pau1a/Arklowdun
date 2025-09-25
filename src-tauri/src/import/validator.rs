@@ -214,7 +214,6 @@ mod tests {
     struct BundlePaths {
         data_file: PathBuf,
         attachment_file: PathBuf,
-        attachments_manifest: PathBuf,
     }
 
     fn write_bundle(root: &Path, schema_version: &str, app_version: &str) -> BundlePaths {
@@ -256,10 +255,11 @@ mod tests {
         )
         .unwrap();
 
+        let _ = attachments_manifest;
+
         BundlePaths {
             data_file: households_path,
             attachment_file: attachment_path,
-            attachments_manifest,
         }
     }
 
