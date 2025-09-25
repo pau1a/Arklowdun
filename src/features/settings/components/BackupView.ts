@@ -98,11 +98,11 @@ function renderEntries(list: HTMLElement, entries: BackupEntry[]): void {
 
     const title = document.createElement("span");
     title.className = "backups__title";
-    title.textContent = formatDate(entry.manifest.created_at);
+    title.textContent = formatDate(entry.manifest.createdAt);
 
     const size = document.createElement("span");
     size.className = "backups__size";
-    size.textContent = formatBytes(entry.manifest.db_size_bytes);
+    size.textContent = formatBytes(entry.manifest.dbSizeBytes);
 
     details.append(title, size);
 
@@ -117,7 +117,7 @@ function renderEntries(list: HTMLElement, entries: BackupEntry[]): void {
     });
     revealButton.addEventListener("click", (event) => {
       event.preventDefault();
-      void revealBackup(entry.sqlite_path).catch((error) => {
+      void revealBackup(entry.sqlitePath).catch((error) => {
         toast.show({ kind: "error", message: describeError(error) });
       });
     });
@@ -191,7 +191,7 @@ export function createBackupView(): BackupViewInstance {
   };
 
   function syncHelper(): void {
-    const retention = state.overview?.retention_max_count;
+    const retention = state.overview?.retentionMaxCount;
     if (typeof retention === "number" && retention > 0) {
       const suffix =
         retention === 1
@@ -218,8 +218,9 @@ export function createBackupView(): BackupViewInstance {
 
   function syncButton(): void {
     const overview = state.overview;
-    const available = overview?.available_bytes ?? 0;
-    const required = overview?.required_free_bytes ?? Number.POSITIVE_INFINITY;
+    const available = overview?.availableBytes ?? 0;
+    const required =
+      overview?.requiredFreeBytes ?? Number.POSITIVE_INFINITY;
     const enoughSpace = overview ? available >= required : false;
     const label = state.creating ? "Creating…" : "Create Backup";
     const disabled =
@@ -237,10 +238,10 @@ export function createBackupView(): BackupViewInstance {
       space.classList.remove("backups__space--warning");
       return;
     }
-    const availableText = formatBytes(overview.available_bytes);
-    const requiredText = formatBytes(overview.required_free_bytes);
-    const retention = overview.retention_max_count;
-    const notEnough = overview.available_bytes < overview.required_free_bytes;
+    const availableText = formatBytes(overview.availableBytes);
+    const requiredText = formatBytes(overview.requiredFreeBytes);
+    const retention = overview.retentionMaxCount;
+    const notEnough = overview.availableBytes < overview.requiredFreeBytes;
     const warning = notEnough ? " · Not enough free space for a backup." : "";
     space.textContent = `Available: ${availableText} · Estimated required: ${requiredText} · Retention: last ${retention} snapshots${warning}`;
     space.classList.toggle("backups__space--warning", notEnough);
@@ -276,20 +277,21 @@ export function createBackupView(): BackupViewInstance {
     syncButton();
     try {
       const entry = await createBackup();
-      const sizeLabel = formatBytes(entry.manifest.db_size_bytes);
+      const sizeLabel = formatBytes(entry.manifest.dbSizeBytes);
       toast.show({
         kind: "success",
         message: `Backup created (${sizeLabel})`,
         actions: [
           {
             label: "Reveal",
-            onSelect: () => revealBackup(entry.sqlite_path).catch((error) => {
-              toast.show({ kind: "error", message: describeError(error) });
-            }),
+            onSelect: () =>
+              revealBackup(entry.sqlitePath).catch((error) => {
+                toast.show({ kind: "error", message: describeError(error) });
+              }),
           },
           {
             label: "Copy path",
-            onSelect: () => copyPath(entry.sqlite_path),
+            onSelect: () => copyPath(entry.sqlitePath),
           },
         ],
       });

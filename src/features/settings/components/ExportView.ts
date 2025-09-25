@@ -60,7 +60,11 @@ export function createExportView(): ExportViewInstance {
           label: "Reveal",
           onSelect: async () => {
             if (typeof reveal === "function") {
-              try { await reveal(entry.manifest_path); } catch { /* ignore */ }
+              try {
+                await reveal(entry.manifestPath);
+              } catch {
+                /* ignore */
+              }
             } else {
               try { await navigator?.clipboard?.writeText?.(entry.directory); } catch {}
             }

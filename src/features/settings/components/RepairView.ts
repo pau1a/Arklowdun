@@ -1,9 +1,8 @@
 import type { DbRepairSummary } from "@bindings/DbRepairSummary";
-import type { DbRepairEvent } from "@bindings/DbRepairEvent";
 import type { DbRepairStep } from "@bindings/DbRepairStep";
 import type { DbRepairStepState } from "@bindings/DbRepairStepState";
 import createButton from "@ui/Button";
-import createModal, { type ModalInstance } from "@ui/Modal";
+import createModal from "@ui/Modal";
 import { actions, selectors, subscribe } from "@store/index";
 import { toast } from "@ui/Toast";
 
@@ -254,7 +253,7 @@ export function createRepairView(): RepairViewInstance {
   }
 
   function resetSteps(): void {
-    for (const [step, elements] of stepElements) {
+    for (const elements of stepElements.values()) {
       elements.item.dataset.status = "pending";
       elements.icon.className = STATUS_ICONS.pending;
       elements.note.textContent = "";

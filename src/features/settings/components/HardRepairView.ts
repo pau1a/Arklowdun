@@ -132,9 +132,12 @@ export function createHardRepairView(): HardRepairViewInstance {
     if (!outcome) return;
     try {
       await copyText(outcome.reportPath);
-      toast.success("Recovery report path copied.");
+      toast.show({ kind: "success", message: "Recovery report path copied." });
     } catch (error) {
-      toast.error(`Failed to copy path: ${describeError(error)}`);
+      toast.show({
+        kind: "error",
+        message: `Failed to copy path: ${describeError(error)}`,
+      });
     }
   }
 
@@ -152,7 +155,7 @@ export function createHardRepairView(): HardRepairViewInstance {
   }
 
   function formatOutcome(outcome: HardRepairOutcome): string {
-    const failedTotal = Array.from(outcome.recovery.tables.values()).reduce(
+    const failedTotal = Object.values(outcome.recovery.tables).reduce(
       (sum, entry) => sum + Number(entry.failed ?? 0),
       0,
     );
@@ -186,7 +189,7 @@ export function createHardRepairView(): HardRepairViewInstance {
       summary.textContent = `Hard Repair failed: ${message}`;
       status.textContent = `Hard Repair failed: ${message}`;
       reportButton.hidden = true;
-      toast.error(message);
+      toast.show({ kind: "error", message });
     } finally {
       state.running = false;
       syncButtons();

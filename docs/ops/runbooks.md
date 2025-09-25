@@ -1,5 +1,8 @@
 # Crash ID Triage
 
+See also: [Import Workflow Runbook](import-workflow.md) for guidance on
+validating bundles and running imports with progress logging.
+
 Use this runbook whenever support receives a screenshot or report that includes
 `Something went wrong. Crash ID: <ID>.`
 
