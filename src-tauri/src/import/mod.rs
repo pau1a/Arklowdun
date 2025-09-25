@@ -3,6 +3,7 @@ pub mod execute;
 pub mod plan;
 pub mod report;
 mod rows;
+mod table_order;
 pub mod validator;
 
 pub use bundle::{AttachmentEntry, DataFileEntry, ImportBundle, ImportBundleError};

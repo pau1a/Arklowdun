@@ -136,8 +136,13 @@ pub async fn execute_plan(
     plan: &ImportPlan,
     ctx: &ExecutionContext<'_>,
 ) -> Result<ExecutionReport, ExecutionError> {
+    let table_entries = bundle.data_files();
+
     if matches!(plan.mode, ImportMode::Replace) {
         rebuild_database_schema(ctx).await?;
+        for entry in table_entries.iter().rev() {
+            clear_table(entry, ctx).await?;
+        }
     }
 
     let mut attachments_summary: Option<AttachmentExecutionSummary> = None;
@@ -148,7 +153,7 @@ pub async fn execute_plan(
 
     let mut tables = BTreeMap::new();
 
-    for entry in bundle.data_files() {
+    for entry in table_entries {
         if let Some(expected) = plan.tables.get(&entry.logical_name) {
             let summary = match plan.mode {
                 ImportMode::Replace => execute_table_replace(entry, expected, ctx).await?,
@@ -253,15 +258,6 @@ async fn execute_table_replace(
     ctx: &ExecutionContext<'_>,
 ) -> Result<TableExecutionSummary, ExecutionError> {
     let table = resolve_physical_table(&entry.logical_name)?;
-    {
-        let mut conn = ctx.pool.acquire().await.map_err(ExecutionError::Database)?;
-        let delete_sql = format!("DELETE FROM {}", quote_ident(table));
-        sqlx::query(&delete_sql)
-            .execute(conn.as_mut())
-            .await
-            .map_err(ExecutionError::Database)?;
-    }
-
     let summary = import_table_rows(
         entry,
         ctx.pool,
@@ -273,6 +269,20 @@ async fn execute_table_replace(
 
     verify_table_summary(&entry.logical_name, expected, &summary)?;
     Ok(summary)
+}
+
+async fn clear_table(
+    entry: &DataFileEntry,
+    ctx: &ExecutionContext<'_>,
+) -> Result<(), ExecutionError> {
+    let table = resolve_physical_table(&entry.logical_name)?;
+    let mut conn = ctx.pool.acquire().await.map_err(ExecutionError::Database)?;
+    let delete_sql = format!("DELETE FROM {}", quote_ident(table));
+    sqlx::query(&delete_sql)
+        .execute(conn.as_mut())
+        .await
+        .map_err(ExecutionError::Database)?;
+    Ok(())
 }
 
 async fn execute_table_merge(

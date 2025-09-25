@@ -8,6 +8,8 @@ use thiserror::Error;
 
 use crate::export::manifest::{file_sha256, ExportManifest};
 
+use super::table_order::table_order_key;
+
 #[derive(Debug, Error)]
 pub enum ImportBundleError {
     #[error("manifest.json not found in bundle")]
@@ -165,6 +167,9 @@ impl ImportBundle {
                 count: table.count,
             });
         }
+        entries.sort_by(|a, b| {
+            table_order_key(&a.logical_name).cmp(&table_order_key(&b.logical_name))
+        });
         Ok(entries)
     }
 
