@@ -95,10 +95,11 @@ function parseErrorInfo(error: unknown): {
   };
 }
 
-function formatBytes(value: number): string {
-  if (value < 1024) return `${numberFormatter.format(value)} bytes`;
+function formatBytes(value: number | bigint): string {
+  const numeric = typeof value === "bigint" ? Number(value) : value;
+  if (numeric < 1024) return `${numberFormatter.format(numeric)} bytes`;
   const units = ["KB", "MB", "GB", "TB"] as const;
-  let size = value;
+  let size = numeric;
   let unitIndex = 0;
   while (size >= 1024 && unitIndex < units.length - 1) {
     size /= 1024;
@@ -116,28 +117,34 @@ function describeError(error: unknown): string {
   return JSON.stringify(error);
 }
 
-function summarizeTablePlan(plan: ImportPlan): { adds: number; updates: number; skips: number } {
-  return Object.values(plan.tables).reduce(
-    (acc, stats) => {
-      acc.adds += Number(stats.adds ?? 0);
-      acc.updates += Number(stats.updates ?? 0);
-      acc.skips += Number(stats.skips ?? 0);
-      return acc;
-    },
-    { adds: 0, updates: 0, skips: 0 },
-  );
+function summarizeTablePlan(plan: ImportPlan): {
+  adds: number;
+  updates: number;
+  skips: number;
+} {
+  const totals = { adds: 0, updates: 0, skips: 0 };
+  for (const stats of Object.values(plan.tables)) {
+    if (!stats) continue;
+    totals.adds += Number(stats.adds ?? 0);
+    totals.updates += Number(stats.updates ?? 0);
+    totals.skips += Number(stats.skips ?? 0);
+  }
+  return totals;
 }
 
-function summarizeExecution(report: ExecutionReport): { adds: number; updates: number; skips: number } {
-  return Object.values(report.tables).reduce(
-    (acc, stats) => {
-      acc.adds += Number(stats.adds ?? 0);
-      acc.updates += Number(stats.updates ?? 0);
-      acc.skips += Number(stats.skips ?? 0);
-      return acc;
-    },
-    { adds: 0, updates: 0, skips: 0 },
-  );
+function summarizeExecution(report: ExecutionReport): {
+  adds: number;
+  updates: number;
+  skips: number;
+} {
+  const totals = { adds: 0, updates: 0, skips: 0 };
+  for (const stats of Object.values(report.tables)) {
+    if (!stats) continue;
+    totals.adds += Number(stats.adds ?? 0);
+    totals.updates += Number(stats.updates ?? 0);
+    totals.skips += Number(stats.skips ?? 0);
+  }
+  return totals;
 }
 
 function renderAttachmentsSummary(
@@ -220,6 +227,7 @@ function renderPlanTables(
 
   const tbody = document.createElement("tbody");
   for (const [name, stats] of Object.entries(plan.tables)) {
+    if (!stats) continue;
     const row = document.createElement("tr");
 
     const nameCell = document.createElement("th");
