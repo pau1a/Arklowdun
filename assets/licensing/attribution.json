@@ -80,43 +80,6 @@
           "description": "Defines Inter variable font faces for typography."
         }
       ]
-    },
-    {
-      "id": "dashboard-background-202502",
-      "name": "Dashboard Background Illustration",
-      "category": "illustrations",
-      "summary": "Layered wave illustration used as the dashboard backdrop.",
-      "sources": [
-        {
-          "type": "manual",
-          "description": "Custom artwork provided for the Arklowdun dashboard."
-        }
-      ],
-      "licenses": [
-        {
-          "name": "Project-provided artwork",
-          "identifier": "Proprietary",
-          "url": "https://arklowdun.invalid/licenses/project-artwork"
-        }
-      ],
-      "attribution": {
-        "statements": [
-          "Dashboard background illustration supplied by the Arklowdun project team."
-        ]
-      },
-      "artifacts": [
-        {
-          "path": "src/assets/backgrounds/dashboard.svg",
-          "type": "image"
-        }
-      ],
-      "consumers": [
-        {
-          "file": "src/styles.scss",
-          "type": "css-background",
-          "description": "Applied to the dashboard layout container."
-        }
-      ]
     }
   ]
 }

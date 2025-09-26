@@ -1,0 +1,76 @@
+.ark-waves {
+  display: block;
+  position: relative;
+  width: 120%;
+  height: auto;
+  pointer-events: none;
+  transform: translateZ(0);
+  animation: ark-waves-drift-x 40s ease-in-out infinite alternate;
+}
+
+.ark-waves__layer {
+  will-change: transform;
+  transform-origin: center;
+  animation-name: ark-waves-bob;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+.ark-waves__layer:nth-of-type(1) {
+  --ark-wave-amp: 8px;
+  animation-duration: 12s;
+  animation-delay: -1s;
+}
+
+.ark-waves__layer:nth-of-type(2) {
+  --ark-wave-amp: 12px;
+  animation-duration: 14s;
+  animation-delay: -2s;
+}
+
+.ark-waves__layer:nth-of-type(3) {
+  --ark-wave-amp: 16px;
+  animation-duration: 18s;
+  animation-delay: -3s;
+}
+
+.ark-waves__layer:nth-of-type(4) {
+  --ark-wave-amp: 10px;
+  animation-duration: 13s;
+  animation-delay: -4s;
+}
+
+.ark-waves__layer:nth-of-type(5) {
+  --ark-wave-amp: 6px;
+  animation-duration: 11s;
+  animation-delay: -5s;
+}
+
+@keyframes ark-waves-bob {
+  0% {
+    transform: translate3d(0, var(--ark-wave-amp, 6px), 0);
+  }
+  50% {
+    transform: translate3d(0, calc(var(--ark-wave-amp, 6px) * -1), 0);
+  }
+  100% {
+    transform: translate3d(0, var(--ark-wave-amp, 6px), 0);
+  }
+}
+
+@keyframes ark-waves-drift-x {
+  0% {
+    transform: translateX(-10px);
+  }
+  100% {
+    transform: translateX(10px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ark-waves,
+  .ark-waves__layer {
+    animation: none !important;
+    transform: none !important;
+  }
+}

@@ -1,5 +1,7 @@
 // src/DashboardView.ts
+import createAnimatedWaves from "./components/visuals/AnimatedWaves";
 import { nowMs, toDate } from "./db/time";
+import { registerViewCleanup } from "./utils/viewLifecycle";
 import { defaultHouseholdId } from "./db/household";
 import { billsApi, policiesRepo, eventsApi } from "./repos";
 import { vehiclesRepo } from "./db/vehiclesRepo";
@@ -21,6 +23,7 @@ export async function DashboardView(container: HTMLElement) {
   const section = document.createElement("section");
   section.className = "dashboard";
   section.innerHTML = `
+      <div class="dashboard__background" aria-hidden="true"></div>
       <header class="dashboard__header">
         <div>
           <h2>Dashboard</h2>
@@ -40,6 +43,14 @@ export async function DashboardView(container: HTMLElement) {
         <p>Coming soon</p>
       </div>
     `;
+
+  const backgroundHost = section.querySelector<HTMLDivElement>(".dashboard__background");
+  if (backgroundHost) {
+    const waves = createAnimatedWaves({ variant: "dark" });
+    waves.update({ className: "dashboard__waves" });
+    backgroundHost.appendChild(waves);
+    registerViewCleanup(container, () => waves.destroy());
+  }
   container.innerHTML = "";
   container.appendChild(section);
 
