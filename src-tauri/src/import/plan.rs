@@ -90,6 +90,12 @@ pub struct PlanContext<'a> {
     pub attachments_root: &'a Path,
 }
 
+#[derive(Debug, Clone)]
+struct LiveRow {
+    deleted_at: Option<i64>,
+    updated_at: Option<i64>,
+}
+
 #[derive(Debug, Error)]
 pub enum PlanError {
     #[error("invalid table in manifest: {0}")]
@@ -174,6 +180,7 @@ async fn plan_table_merge(
     let mut skips = 0_u64;
     let mut conflicts = Vec::new();
     let mut conn = pool.acquire().await.map_err(PlanError::Database)?;
+    let mut live_cache: HashMap<IdValue, Option<LiveRow>> = HashMap::new();
 
     for line in reader.lines() {
         let line = line.map_err(|err| PlanError::DataFileIo {
@@ -192,31 +199,40 @@ async fn plan_table_merge(
         let bundle_updated = value.get("updated_at").and_then(|v| v.as_i64());
         let id_display = id.to_string();
 
-        let mut query = sqlx::query(&sql);
-        match &id {
-            IdValue::Int(v) => {
-                query = query.bind(*v);
+        let live_entry = match live_cache.get(&id) {
+            Some(entry) => entry.clone(),
+            None => {
+                let mut query = sqlx::query(&sql);
+                match &id {
+                    IdValue::Int(v) => {
+                        query = query.bind(*v);
+                    }
+                    IdValue::String(s) => {
+                        query = query.bind(s);
+                    }
+                }
+
+                let row = query
+                    .fetch_optional(conn.as_mut())
+                    .await
+                    .map_err(PlanError::Database)?;
+
+                let live = row.map(|row| LiveRow {
+                    deleted_at: row.try_get("deleted_at").ok(),
+                    updated_at: row.try_get("updated_at").ok(),
+                });
+                live_cache.insert(id.clone(), live.clone());
+                live
             }
-            IdValue::String(s) => {
-                query = query.bind(s);
-            }
-        }
+        };
 
-        let row = query
-            .fetch_optional(conn.as_mut())
-            .await
-            .map_err(PlanError::Database)?;
-
-        if let Some(row) = row {
-            let deleted: Option<i64> = row.try_get("deleted_at").ok();
-            let live_updated: Option<i64> = row.try_get("updated_at").ok();
-
-            if deleted.is_some() {
+        if let Some(live) = live_entry {
+            if live.deleted_at.is_some() {
                 updates += 1;
                 continue;
             }
 
-            match (bundle_updated, live_updated) {
+            match (bundle_updated, live.updated_at) {
                 (Some(bundle_ts), Some(live_ts)) => {
                     if bundle_ts > live_ts {
                         updates += 1;
@@ -509,7 +525,7 @@ fn ensure_safe_relative_path(rel: &str) -> Result<(), PlanError> {
     Ok(())
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum IdValue {
     Int(i64),
     String(String),
