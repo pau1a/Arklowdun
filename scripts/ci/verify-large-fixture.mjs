@@ -157,6 +157,7 @@ async function main() {
     }
 
     const expectedAttachments = JSON.parse(await fsPromises.readFile(expectedAttachmentsPath, 'utf8'));
+    expectedAttachments.sort(compareAttachmentRecords);
 
     const attachmentsActual = [
       ...(await collectAttachments(attachmentsDir, 'attachments')),
