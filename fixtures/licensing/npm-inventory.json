@@ -1,0 +1,82 @@
+{
+  "generatedAt": "2024-01-01T00:00:00.000Z",
+  "source": {
+    "packageManager": "npm",
+    "lockfile": "fixtures/licensing/package-lock.fixture.json"
+  },
+  "dependencies": [
+    {
+      "name": "alpha",
+      "version": "1.0.1",
+      "resolved": "https://registry.npmjs.org/alpha/-/alpha-1.0.1.tgz",
+      "checksum": "sha512-alpha",
+      "dependencyType": "direct",
+      "licenses": [
+        "MIT"
+      ],
+      "source": {
+        "type": "npm",
+        "location": "https://registry.npmjs.org/alpha/-/alpha-1.0.1.tgz"
+      }
+    },
+    {
+      "name": "bravo",
+      "version": "2.1.0",
+      "resolved": "https://registry.npmjs.org/bravo/-/bravo-2.1.0.tgz",
+      "checksum": "sha512-bravo",
+      "dependencyType": "direct",
+      "licenses": [
+        "Apache-2.0",
+        "BSD-3-Clause"
+      ],
+      "source": {
+        "type": "npm",
+        "location": "https://registry.npmjs.org/bravo/-/bravo-2.1.0.tgz"
+      },
+      "notes": "bravo@2.1.0 is deprecated: security fixes available in 2.2.0"
+    },
+    {
+      "name": "charlie",
+      "version": "3.0.0",
+      "resolved": "https://registry.npmjs.org/charlie/-/charlie-3.0.0.tgz",
+      "checksum": "sha512-charlie",
+      "dependencyType": "direct",
+      "licenses": [
+        "UNKNOWN"
+      ],
+      "source": {
+        "type": "npm",
+        "location": "https://registry.npmjs.org/charlie/-/charlie-3.0.0.tgz"
+      },
+      "notes": "license metadata unavailable in lockfile"
+    },
+    {
+      "name": "delta",
+      "version": "4.5.6",
+      "resolved": "https://registry.npmjs.org/delta/-/delta-4.5.6.tgz",
+      "checksum": "sha512-delta",
+      "dependencyType": "indirect",
+      "licenses": [
+        "ISC"
+      ],
+      "source": {
+        "type": "npm",
+        "location": "https://registry.npmjs.org/delta/-/delta-4.5.6.tgz"
+      }
+    },
+    {
+      "name": "echo",
+      "version": "7.8.9",
+      "resolved": "https://registry.npmjs.org/echo/-/echo-7.8.9.tgz",
+      "checksum": "sha512-echo",
+      "dependencyType": "indirect",
+      "licenses": [
+        "GPL-2.0-or-later WITH Autoconf-exception-3.0"
+      ],
+      "source": {
+        "type": "npm",
+        "location": "https://registry.npmjs.org/echo/-/echo-7.8.9.tgz"
+      }
+    }
+  ]
+}
