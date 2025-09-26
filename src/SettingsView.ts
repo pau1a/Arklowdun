@@ -15,6 +15,7 @@ import { createHardRepairView } from "@features/settings/components/HardRepairVi
 import { createEmptyState } from "./ui/EmptyState";
 import { STR } from "./ui/strings";
 import createButton from "@ui/Button";
+import { createAttributionSection } from "@features/settings/components/AttributionSection";
 
 export function SettingsView(container: HTMLElement) {
   const panel = SettingsPanel();
@@ -137,7 +138,14 @@ export function SettingsView(container: HTMLElement) {
   preview.hidden = true;
   preview.setAttribute("aria-label", "Latest copied diagnostics summary");
 
-  aboutBody.append(metaList, note, actions, status, preview);
+  const attribution = createAttributionSection();
+  const bodyChildren: HTMLElement[] = [metaList, note];
+  if (attribution) {
+    bodyChildren.push(attribution);
+  }
+  bodyChildren.push(actions, status, preview);
+
+  aboutBody.append(...bodyChildren);
   about.append(aboutHeading, aboutBody);
 
   section.append(

@@ -1,6 +1,6 @@
 import { resolve as tsResolve, load as tsLoad, getFormat as tsGetFormat, transformSource as tsTransformSource } from 'ts-node/esm';
 import { createRequire } from 'node:module';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -40,7 +40,23 @@ export async function resolve(specifier, context, defaultResolve) {
 
       const absolutePath = resolvePath(candidate);
       if (existsSync(absolutePath)) {
-        nextSpecifier = pathToFileURL(absolutePath).href;
+        try {
+          const stats = statSync(absolutePath);
+          if (stats.isDirectory()) {
+            const indexMatch = extensions
+              .map((ext) => resolvePath(absolutePath, `index${ext}`))
+              .find((file) => existsSync(file));
+            if (indexMatch) {
+              nextSpecifier = pathToFileURL(indexMatch).href;
+            } else {
+              nextSpecifier = pathToFileURL(absolutePath).href;
+            }
+          } else {
+            nextSpecifier = pathToFileURL(absolutePath).href;
+          }
+        } catch {
+          nextSpecifier = pathToFileURL(absolutePath).href;
+        }
       } else {
         nextSpecifier = candidate;
       }

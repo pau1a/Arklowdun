@@ -4,23 +4,23 @@
   "files": [
     {
       "path": "CREDITS.md",
-      "sha256": "17e754bf964e11699676656649ec3d474882d5c5df4681cbc4737a2432c0563a",
-      "bytes": 270542
+      "sha256": "8051318d806492235b9930a1fede33034747e99120f5e3e50349e5e823266f92",
+      "bytes": 271537
     },
     {
       "path": "NOTICE.md",
-      "sha256": "19a2aeb382371bdbca9ff6b84669061338fdda9f41cb60cbe9247ac8d8dbb130",
-      "bytes": 270560
+      "sha256": "4946fcc3169b65c09dc5d64346440656ea2a7e321389c9d6dc0df39259a6d721",
+      "bytes": 271555
     },
     {
       "path": "src-tauri/resources/licenses/CREDITS.txt",
-      "sha256": "bb4f5aac0e5162e2dfbb7bd6b9ccae2b47b1a3c0e2129d9663c0f006f7bff0df",
-      "bytes": 171111
+      "sha256": "9ecc833f6ebde39b3377be8482d64e8a62a2e9d8783a88cdf9725d76b58dd524",
+      "bytes": 172072
     },
     {
       "path": "src-tauri/resources/licenses/NOTICE.txt",
-      "sha256": "d1a1666e123394fd2ecb88d73c2a3794c4a0e5b8964ed03c9a087147a8419193",
-      "bytes": 171045
+      "sha256": "695e9641c546dc1ea1413962c44339046aaed266b9f136a0b45f7ed053b71bac",
+      "bytes": 172006
     }
   ]
 }
