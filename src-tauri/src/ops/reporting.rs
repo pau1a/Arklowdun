@@ -607,7 +607,7 @@ mod tests {
 
     #[test]
     fn serialization_truncates_arrays_and_emits_truncation_error() {
-        let started = Utc::with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let started = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let finished = started + Duration::seconds(1);
 
         let chunk = "x".repeat(1024);
@@ -775,7 +775,7 @@ mod tests {
 
     #[test]
     fn validate_timestamps_rejects_inversion() {
-        let started = Utc::with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let started = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let finished = started - Duration::seconds(1);
         let err = validate_timestamps(started, finished).unwrap_err();
         assert_eq!(err.code, "OPS_REPORTING/TIMESTAMPS");
@@ -783,7 +783,7 @@ mod tests {
 
     #[test]
     fn sample_report_matches_schema() {
-        let started = Utc::with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let started = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let finished = started + Duration::seconds(2);
         let payload = ReportPayload {
             report_version: REPORT_VERSION,
@@ -815,7 +815,13 @@ mod tests {
             .join("report-v1.schema.json");
         let schema: Value = serde_json::from_slice(&fs::read(&schema_path).unwrap()).unwrap();
         let compiled = JSONSchema::compile(&schema).expect("compile schema");
-        compiled.validate(&value).expect("report satisfies schema");
+        if let Err(errors) = compiled.validate(&value) {
+            let msgs = errors
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            panic!("report does not satisfy schema:\n{msgs}");
+        }
     }
 
     #[cfg(unix)]
@@ -850,7 +856,7 @@ mod tests {
             .expect("insert schema version");
 
         let temp = tempdir().unwrap();
-        let started = Utc::with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let started = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let finished = started + Duration::milliseconds(1500);
         let details = json!({
             "checks": [],
