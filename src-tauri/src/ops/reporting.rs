@@ -321,12 +321,16 @@ fn is_valid_report_filename(file_name: &str, operation_prefix: &str) -> bool {
 fn debug_validate_against_schema(bytes: &[u8]) {
     let value: Value =
         serde_json::from_slice(bytes).expect("persisted reports must serialize into valid JSON");
-    if let Err(errors) = REPORT_SCHEMA.validate(&value) {
-        let messages: Vec<String> = errors.map(|error| error.to_string()).collect();
-        panic!(
-            "persisted report failed schema validation:\n{}",
-            messages.join("\n")
-        );
+    {
+        // Drop this result (and its borrowed iterator) before `value` goes out of scope.
+        let res = REPORT_SCHEMA.validate(&value);
+        if let Err(errors) = res {
+            let messages: Vec<String> = errors.map(|e| e.to_string()).collect();
+            panic!(
+                "persisted report failed schema validation:\n{}",
+                messages.join("\n")
+            );
+        }
     }
 }
 
