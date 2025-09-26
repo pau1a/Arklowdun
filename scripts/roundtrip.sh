@@ -333,11 +333,13 @@ done
 VERIFY_EXIT_CODE=0
 ROUNDTRIP_VERIFY_STATUS="skipped (no verifier detected)"
 VERIFY_REPORT_COPY=""
+VERIFY_SCRIPT_RECORD=""
 
 if [[ -n "$ROUNDTRIP_VERIFY_SCRIPT" ]]; then
   VERIFY_REPORT_RAW="$TMP_DIR/roundtrip-diff.json"
   VERIFY_REPORT_COPY="$ARTIFACT_DIR/roundtrip-diff.json"
   ROUNDTRIP_VERIFY_STATUS="passed"
+  VERIFY_SCRIPT_RECORD="$ROUNDTRIP_VERIFY_SCRIPT"
   rm -f "$VERIFY_REPORT_RAW"
   log_step "Running verification script at $ROUNDTRIP_VERIFY_SCRIPT"
 
@@ -394,6 +396,7 @@ VERIFY_PS1_VALUE="$VERIFY_PS1_PATH" \
 IMPORT_REPORT_VALUE="$IMPORT_REPORT_PATH" \
 CLI_VERSION_VALUE="$CLI_VERSION" \
 VERIFY_REPORT_VALUE="$VERIFY_REPORT_COPY" \
+VERIFY_RUNNER_VALUE="$VERIFY_SCRIPT_RECORD" \
   node --input-type=module <<'JS' 2>&1 | tee -a "$LOG_PATH"
 import fs from 'node:fs';
 import path from 'node:path';
@@ -419,6 +422,7 @@ const data = {
   verifyScriptPowerShell: process.env.VERIFY_PS1_VALUE,
   importReport: process.env.IMPORT_REPORT_VALUE,
   verifyReport: process.env.VERIFY_REPORT_VALUE,
+  roundtripVerifier: process.env.VERIFY_RUNNER_VALUE,
   cliVersion: process.env.CLI_VERSION_VALUE,
 };
 
@@ -433,9 +437,10 @@ JS
 
 log_step "Round-trip orchestration complete"
 
-if [[ -n "$VERIFY_REPORT_COPY" ]]; then
+if [[ -n "$VERIFY_REPORT_COPY" || -n "$VERIFY_SCRIPT_RECORD" ]]; then
   SUMMARY_VERIFY_LINES=$(cat <<EOF
   Verification status: $ROUNDTRIP_VERIFY_STATUS
+  Verification script: ${VERIFY_SCRIPT_RECORD:-n/a}
   Verification diff report: $VERIFY_REPORT_COPY
 EOF
 )
