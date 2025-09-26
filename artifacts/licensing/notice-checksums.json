@@ -1,0 +1,26 @@
+{
+  "inventoryHash": "9ac1b0cf439bb4f30580d6ed19a62d48f0383a4a42b60a202c3c0e0dfaf683ee",
+  "sourceInventory": "artifacts/licensing/full-inventory.json",
+  "files": [
+    {
+      "path": "CREDITS.md",
+      "sha256": "17e754bf964e11699676656649ec3d474882d5c5df4681cbc4737a2432c0563a",
+      "bytes": 270542
+    },
+    {
+      "path": "NOTICE.md",
+      "sha256": "19a2aeb382371bdbca9ff6b84669061338fdda9f41cb60cbe9247ac8d8dbb130",
+      "bytes": 270560
+    },
+    {
+      "path": "src-tauri/resources/licenses/CREDITS.txt",
+      "sha256": "bb4f5aac0e5162e2dfbb7bd6b9ccae2b47b1a3c0e2129d9663c0f006f7bff0df",
+      "bytes": 171111
+    },
+    {
+      "path": "src-tauri/resources/licenses/NOTICE.txt",
+      "sha256": "d1a1666e123394fd2ecb88d73c2a3794c4a0e5b8964ed03c9a087147a8419193",
+      "bytes": 171045
+    }
+  ]
+}

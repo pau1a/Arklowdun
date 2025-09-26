@@ -258,7 +258,7 @@ export async function generateCargoInventory({
             "--manifest-path",
             manifestPath ?? lockfilePath.replace(/Cargo\\.lock$/, "Cargo.toml")
           ],
-          { encoding: "utf8" }
+          { encoding: "utf8", maxBuffer: 20 * 1024 * 1024 }
         )
       ).stdout;
   const metadata: Metadata = JSON.parse(metadataRaw);

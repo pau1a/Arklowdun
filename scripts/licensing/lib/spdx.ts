@@ -37,6 +37,14 @@ export function normaliseLicenses(
       const parsed = spdxParse(value);
       collectSpdx(parsed, licenses);
     } catch (error) {
+      const normalised = value.replace(/\s+/g, " ").trim();
+      if (normalised.includes("/")) {
+        const parts = normalised.split("/").map((part) => part.trim()).filter(Boolean);
+        if (parts.every((part) => /^[A-Za-z0-9.+-]+$/.test(part))) {
+          licenses.push(...parts);
+          continue;
+        }
+      }
       if (/^[A-Za-z0-9.+-]+$/.test(value)) {
         licenses.push(value);
       } else {

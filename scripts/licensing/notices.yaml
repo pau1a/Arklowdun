@@ -1,0 +1,43 @@
+outputs:
+  - id: notice_markdown
+    target: notice
+    format: markdown
+    template: notice.md.tmpl
+    output: NOTICE.md
+  - id: notice_text
+    target: notice
+    format: text
+    template: notice.txt.tmpl
+    output: src-tauri/resources/licenses/NOTICE.txt
+  - id: credits_markdown
+    target: credits
+    format: markdown
+    template: credits.md.tmpl
+    output: CREDITS.md
+  - id: credits_text
+    target: credits
+    format: text
+    template: credits.txt.tmpl
+    output: src-tauri/resources/licenses/CREDITS.txt
+checksumsOutput: artifacts/licensing/notice-checksums.json
+manualSections:
+  - id: fonts-and-icons
+    title: Fonts and Icons
+    includeIn: [notice, credits]
+    content:
+      markdown: |
+        Font Awesome Free icons are distributed with Arklowdun for in-application visuals. Font Awesome Free is licensed under the Creative Commons Attribution 4.0 International license for icons and the SIL Open Font License 1.1 for fonts. Attribution text:
+
+        "Font Awesome Free by @fontawesome - https://fontawesome.com", CC BY 4.0 / SIL OFL 1.1.
+      text: |
+        Font Awesome Free icons are distributed with Arklowdun for in-application visuals. Font Awesome Free is licensed under the Creative Commons Attribution 4.0 International license for icons and the SIL Open Font License 1.1 for fonts. Attribution text:
+
+        "Font Awesome Free by @fontawesome - https://fontawesome.com", CC BY 4.0 / SIL OFL 1.1.
+  - id: contact
+    title: Questions & Contact
+    includeIn: [notice, credits]
+    content:
+      markdown: |
+        For questions about licensing or attribution, please contact the Arklowdun team at [compliance@arklowdun.local](mailto:compliance@arklowdun.local).
+      text: |
+        For questions about licensing or attribution, contact the Arklowdun team at compliance@arklowdun.local.
