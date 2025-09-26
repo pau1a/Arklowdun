@@ -249,6 +249,7 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - run: npm run lint
+      - run: npm run guard:asset-attribution
 
   unit:
     runs-on: ubuntu-latest

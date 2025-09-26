@@ -1,4 +1,4 @@
-import recoveryData from "./en/recovery.json" with { type: "json" };
+import settingsData from "./en/settings.json" with { type: "json" };
 
 type DotNestedKeys<
   T,
@@ -14,17 +14,19 @@ type DotNestedKeys<
       }[Extract<keyof T, string>]
     : never;
 
-export type RecoveryStringKey = Exclude<DotNestedKeys<typeof recoveryData>, "">;
+export type SettingsStringKey = Exclude<DotNestedKeys<typeof settingsData>, "">;
 
-const cache = new Map<RecoveryStringKey, string>();
+type SettingsParams = Record<string, string | number>;
 
-function resolveKey(key: RecoveryStringKey): string {
+const cache = new Map<SettingsStringKey, string>();
+
+function resolveKey(key: SettingsStringKey): string {
   if (cache.has(key)) {
     return cache.get(key)!;
   }
 
   const parts = key.split(".");
-  let current: unknown = recoveryData;
+  let current: unknown = settingsData;
 
   for (const part of parts) {
     if (
@@ -33,21 +35,23 @@ function resolveKey(key: RecoveryStringKey): string {
       Array.isArray(current) ||
       !(part in current)
     ) {
-      throw new Error(`Missing recovery string for key "${key}"`);
+      throw new Error(`Missing settings string for key "${key}"`);
     }
     current = (current as Record<string, unknown>)[part];
   }
 
   if (typeof current !== "string") {
-    throw new Error(`Recovery string key "${key}" did not resolve to a string.`);
+    throw new Error(`Settings string key "${key}" did not resolve to a string.`);
   }
 
   cache.set(key, current);
   return current;
 }
 
-function format(template: string, params?: Record<string, string | number>): string {
-  if (!params) return template;
+function format(template: string, params?: SettingsParams): string {
+  if (!params) {
+    return template;
+  }
   return template.replace(/{{\s*([\w.]+)\s*}}/g, (_, name: string) => {
     if (Object.prototype.hasOwnProperty.call(params, name)) {
       return String(params[name as keyof typeof params] ?? "");
@@ -56,12 +60,12 @@ function format(template: string, params?: Record<string, string | number>): str
   });
 }
 
-export function recoveryText(
-  key: RecoveryStringKey,
-  params?: Record<string, string | number>,
+export function settingsText(
+  key: SettingsStringKey,
+  params?: SettingsParams,
 ): string {
   const template = resolveKey(key);
   return format(template, params);
 }
 
-export const RECOVERY_STRINGS = recoveryData;
+export const SETTINGS_STRINGS = settingsData;

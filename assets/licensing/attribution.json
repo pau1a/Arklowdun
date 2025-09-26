@@ -1,0 +1,85 @@
+{
+  "assets": [
+    {
+      "id": "fontawesome-free",
+      "name": "Font Awesome Free",
+      "category": "icons",
+      "summary": "Iconography used across navigation, status, and action controls.",
+      "sources": [
+        {
+          "type": "npm",
+          "package": "@fortawesome/fontawesome-free",
+          "version": "^6.7.2",
+          "url": "https://fontawesome.com"
+        }
+      ],
+      "licenses": [
+        {
+          "name": "Creative Commons Attribution 4.0 International",
+          "identifier": "CC-BY-4.0",
+          "url": "https://creativecommons.org/licenses/by/4.0/"
+        },
+        {
+          "name": "SIL Open Font License 1.1",
+          "identifier": "OFL-1.1",
+          "url": "https://scripts.sil.org/OFL"
+        }
+      ],
+      "attribution": {
+        "statements": [
+          "Font Awesome Free by @fontawesome - https://fontawesome.com",
+          "Font Awesome is a trademark of Fonticons, Inc."
+        ]
+      },
+      "consumers": [
+        {
+          "file": "src/main.ts",
+          "type": "import",
+          "specifier": "@fortawesome/fontawesome-free/css/all.min.css"
+        }
+      ]
+    },
+    {
+      "id": "inter-variable",
+      "name": "Inter Variable Fonts",
+      "category": "fonts",
+      "summary": "Primary sans-serif typography for interface copy.",
+      "sources": [
+        {
+          "type": "upstream-download",
+          "url": "https://rsms.me/inter/"
+        }
+      ],
+      "licenses": [
+        {
+          "name": "SIL Open Font License 1.1",
+          "identifier": "OFL-1.1",
+          "url": "https://scripts.sil.org/OFL"
+        }
+      ],
+      "attribution": {
+        "statements": [
+          "\"Inter\" Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter)",
+          "This Font Software is licensed under the SIL Open Font License, Version 1.1."
+        ]
+      },
+      "artifacts": [
+        {
+          "path": "src/assets/fonts/inter/Inter-VariableFont_slnt,wght.woff2",
+          "type": "font"
+        },
+        {
+          "path": "src/assets/fonts/inter/Inter-Italic-VariableFont_slnt,wght.woff2",
+          "type": "font"
+        }
+      ],
+      "consumers": [
+        {
+          "file": "src/theme.scss",
+          "type": "font-face",
+          "description": "Defines Inter variable font faces for typography."
+        }
+      ]
+    }
+  ]
+}

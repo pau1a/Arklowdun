@@ -29,6 +29,7 @@
     "guard:ui-colors": "bash scripts/guards/no-ui-color-literals.sh",
     "guard:db-writes": "node scripts/guards/require-db-write-guard.mjs",
     "guard:recovery-strings": "bash scripts/check_strings.sh",
+    "guard:asset-attribution": "tsx scripts/licensing/validate-asset-attribution.ts",
     "gate:ipc-in-components": "node scripts/guards/gate-ipc-in-components.mjs",
     "gate:no-deep-relatives": "node scripts/guards/gate-no-deep-relatives.mjs",
     "gate:cross-feature-report": "node scripts/guards/gate-cross-feature-report.mjs",
@@ -39,7 +40,7 @@
     "generate:notice": "node scripts/licensing/run-generate-notice.mjs",
     "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
     "lint:structure": "node scripts/guards/structure-lint.mjs",
-    "check": "npm run typecheck && echo TS OK && npm run lint && npm run guard:invoke && npm run guard:ui-colors && npm run guard:db-writes && npm run guard:recovery-strings && npm run lint:structure",
+    "check": "npm run typecheck && echo TS OK && npm run lint && npm run guard:invoke && npm run guard:ui-colors && npm run guard:db-writes && npm run guard:recovery-strings && npm run guard:asset-attribution && npm run lint:structure",
     "dev:seed": "VITE_ENV=development node --loader ts-node/esm scripts/dev/seed.ts",
     "dev:profile": "VITE_ENV=development node --loader ts-node/esm scripts/dev/seed.ts --profile",
     "test:coverage": "vitest run --coverage",
@@ -58,7 +59,7 @@
     "schema:update": "scripts/verify_schema.sh --db dev.sqlite --schema schema.sql --update --verbose",
     "schema:verify:strict": "scripts/verify_schema.sh --db dev.sqlite --schema schema.sql --strict --include-migrations --verbose",
     "schema:ci": "scripts/ci/verify-schema.sh",
-    "release": "npm run check:plugin-fs && DB=dev.sqlite bash scripts/check_pending_migrations.sh && npm run tauri -- build",
+    "release": "npm run check:plugin-fs && npm run schema:update && DB=dev.sqlite bash scripts/check_pending_migrations.sh && npm run tauri -- build",
     "test:node": "tsx --test"
   },
   "dependencies": {

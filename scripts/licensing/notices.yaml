@@ -19,20 +19,9 @@ outputs:
     format: text
     template: credits.txt.tmpl
     output: src-tauri/resources/licenses/CREDITS.txt
+assetManifest: assets/licensing/attribution.json
 checksumsOutput: artifacts/licensing/notice-checksums.json
 manualSections:
-  - id: fonts-and-icons
-    title: Fonts and Icons
-    includeIn: [notice, credits]
-    content:
-      markdown: |
-        Font Awesome Free icons are distributed with Arklowdun for in-application visuals. Font Awesome Free is licensed under the Creative Commons Attribution 4.0 International license for icons and the SIL Open Font License 1.1 for fonts. Attribution text:
-
-        "Font Awesome Free by @fontawesome - https://fontawesome.com", CC BY 4.0 / SIL OFL 1.1.
-      text: |
-        Font Awesome Free icons are distributed with Arklowdun for in-application visuals. Font Awesome Free is licensed under the Creative Commons Attribution 4.0 International license for icons and the SIL Open Font License 1.1 for fonts. Attribution text:
-
-        "Font Awesome Free by @fontawesome - https://fontawesome.com", CC BY 4.0 / SIL OFL 1.1.
   - id: contact
     title: Questions & Contact
     includeIn: [notice, credits]

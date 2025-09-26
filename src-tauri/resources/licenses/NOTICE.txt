@@ -1389,12 +1389,35 @@ Zlib
 ----
 - foldhash 0.1.5 [Indirect] — registry (https://github.com/rust-lang/crates.io-index): registry+https://github.com/rust-lang/crates.io-index
 
-Fonts and Icons
----------------
+Bundled Fonts & Icons
+---------------------
 
-Font Awesome Free icons are distributed with Arklowdun for in-application visuals. Font Awesome Free is licensed under the Creative Commons Attribution 4.0 International license for icons and the SIL Open Font License 1.1 for fonts. Attribution text:
+Font Awesome Free
+~~~~~~~~~~~~~~~~~
+Iconography used across navigation, status, and action controls.
+Category: Icons
+Source: npm package @fortawesome/fontawesome-free ^6.7.2 — https://fontawesome.com
+Licenses: CC-BY-4.0 — Creative Commons Attribution 4.0 International (https://creativecommons.org/licenses/by/4.0/); OFL-1.1 — SIL Open Font License 1.1 (https://scripts.sil.org/OFL)
+Included via:
+  - src/main.ts — imports @fortawesome/fontawesome-free/css/all.min.css
+Required attribution:
+  - Font Awesome Free by @fontawesome - https://fontawesome.com
+  - Font Awesome is a trademark of Fonticons, Inc.
 
-"Font Awesome Free by @fontawesome - https://fontawesome.com", CC BY 4.0 / SIL OFL 1.1.
+Inter Variable Fonts
+~~~~~~~~~~~~~~~~~~~~
+Primary sans-serif typography for interface copy.
+Category: Fonts
+Source: Upstream download — https://rsms.me/inter/
+Licenses: OFL-1.1 — SIL Open Font License 1.1 (https://scripts.sil.org/OFL)
+Bundled files:
+  - src/assets/fonts/inter/Inter-VariableFont_slnt,wght.woff2 (Font)
+  - src/assets/fonts/inter/Inter-Italic-VariableFont_slnt,wght.woff2 (Font)
+Included via:
+  - src/theme.scss — Defines Inter variable font faces for typography.
+Required attribution:
+  - "Inter" Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter)
+  - This Font Software is licensed under the SIL Open Font License, Version 1.1.
 
 Questions & Contact
 -------------------

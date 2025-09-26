@@ -1,0 +1,17 @@
+{
+  "attribution": {
+    "heading": "Font and icon attribution",
+    "intro": "Arklowdun bundles the following third-party visual assets:",
+    "labels": {
+      "category": "Category",
+      "sources": {
+        "singular": "Source",
+        "plural": "Sources"
+      },
+      "licenses": {
+        "singular": "License",
+        "plural": "Licenses"
+      }
+    }
+  }
+}
