@@ -80,6 +80,11 @@ Override the diagnostics size cap with `ARK_MAX_FILE_MB=10` (default 10).
 - The full diagnostics guide (UI summary, CLI collectors, redaction policy, and sample bundles) lives in
   [docs/diagnostics.md](docs/diagnostics.md).
 
+## Licensing
+
+Arklowdun is distributed under the [Arklowdun – Proprietary License](LICENSE.txt). Third-party components
+remain governed by the licenses listed in [NOTICE](NOTICE.md) and [CREDITS](CREDITS.md).
+
 ## Database integrity
 
 Schema constraint guidelines live in [docs/integrity-rules.md](docs/integrity-rules.md).

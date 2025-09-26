@@ -6,6 +6,8 @@ This document explains how the automated NOTICE and CREDITS artifacts are genera
 
 The licensing pipeline produces a consolidated dependency inventory that feeds the NOTICE/CREDITS generator. Templates under `scripts/licensing/templates` define the published format, and committed outputs live at:
 
+> **Copyleft compliance**: The full copyleft audit process, findings, and remediation tracking live in `docs/licensing.md`. Run `npm run guard:copyleft-audit` to ensure the recorded audit matches the current lockfiles before every release.
+
 - `NOTICE.md` (repository Markdown copy)
 - `CREDITS.md` (repository Markdown copy)
 - `src-tauri/resources/licenses/NOTICE.txt` (plaintext bundle resource)

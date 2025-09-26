@@ -30,6 +30,7 @@
     "guard:db-writes": "node scripts/guards/require-db-write-guard.mjs",
     "guard:recovery-strings": "bash scripts/check_strings.sh",
     "guard:asset-attribution": "tsx scripts/licensing/validate-asset-attribution.ts",
+    "guard:copyleft-audit": "node scripts/licensing/require-current-copyleft-audit.mjs",
     "gate:ipc-in-components": "node scripts/guards/gate-ipc-in-components.mjs",
     "gate:no-deep-relatives": "node scripts/guards/gate-no-deep-relatives.mjs",
     "gate:cross-feature-report": "node scripts/guards/gate-cross-feature-report.mjs",
@@ -59,7 +60,7 @@
     "schema:update": "scripts/verify_schema.sh --db dev.sqlite --schema schema.sql --update --verbose",
     "schema:verify:strict": "scripts/verify_schema.sh --db dev.sqlite --schema schema.sql --strict --include-migrations --verbose",
     "schema:ci": "scripts/ci/verify-schema.sh",
-    "release": "npm run check:plugin-fs && npm run schema:update && DB=dev.sqlite bash scripts/check_pending_migrations.sh && npm run tauri -- build",
+    "release": "npm run guard:copyleft-audit && npm run check:plugin-fs && npm run schema:update && DB=dev.sqlite bash scripts/check_pending_migrations.sh && npm run tauri -- build",
     "test:node": "tsx --test"
   },
   "dependencies": {
