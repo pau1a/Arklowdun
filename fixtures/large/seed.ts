@@ -770,10 +770,13 @@ function loadAttachmentCorpus(): AttachmentSource[] {
       const kind: AttachmentSource["kind"] = stat.size <= 100_000 ? "small" : "medium";
       return { diskName, displayName, absPath, size: stat.size, kind };
     })
+    // Use locale-independent, codepoint-based sorting for determinism across OS/ICU versions
     .sort((a, b) => {
-      const nameCompare = a.displayName.localeCompare(b.displayName, "en");
-      if (nameCompare !== 0) return nameCompare;
-      return a.diskName.localeCompare(b.diskName, "en");
+      if (a.displayName < b.displayName) return -1;
+      if (a.displayName > b.displayName) return 1;
+      if (a.diskName < b.diskName) return -1;
+      if (a.diskName > b.diskName) return 1;
+      return 0;
     });
 
   return sources;

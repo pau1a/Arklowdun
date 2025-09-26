@@ -15,6 +15,7 @@
     "migrate:checksum": "node --loader ts-node/esm scripts/migrate-checksum.ts",
     "fixtures:seed": "node --loader ts-node/esm fixtures/large/seed.ts",
     "fixtures:verify": "node scripts/ci/verify-large-fixture.mjs",
+    "fixtures:update": "node scripts/ci/update-large-fixture-snapshots.mjs",
     "migrate:batch1": "node --loader ts-node/esm src/tools/migrate-batch1.ts",
     "check:household": "bash scripts/check-household-scope.sh",
     "test": "node --import ./scripts/test-preload.mjs --test tests/*.ts tests/*.js",

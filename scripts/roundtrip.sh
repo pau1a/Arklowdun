@@ -323,7 +323,8 @@ fi
 snapshot_attachments "post-import" "$POST_ATTACHMENTS"
 
 ROUNDTRIP_VERIFY_SCRIPT=""
-for candidate in "$REPO_ROOT/scripts/roundtrip-verify.ts" "$REPO_ROOT/scripts/roundtrip-verify.mjs" "$REPO_ROOT/scripts/roundtrip-verify.js"; do
+# Prefer .mjs shim (register()) to avoid Node loader edge cases
+for candidate in "$REPO_ROOT/scripts/roundtrip-verify.mjs" "$REPO_ROOT/scripts/roundtrip-verify.ts" "$REPO_ROOT/scripts/roundtrip-verify.js"; do
   if [[ -f "$candidate" ]]; then
     ROUNDTRIP_VERIFY_SCRIPT="$candidate"
     break
@@ -346,6 +347,7 @@ if [[ -n "$ROUNDTRIP_VERIFY_SCRIPT" ]]; then
   declare -a VERIFY_CMD=(node)
   case "$ROUNDTRIP_VERIFY_SCRIPT" in
     *.ts) VERIFY_CMD+=(--loader ts-node/esm "$ROUNDTRIP_VERIFY_SCRIPT") ;;
+    *.mjs) VERIFY_CMD+=("$ROUNDTRIP_VERIFY_SCRIPT") ;;
     *) VERIFY_CMD+=("$ROUNDTRIP_VERIFY_SCRIPT") ;;
   esac
 

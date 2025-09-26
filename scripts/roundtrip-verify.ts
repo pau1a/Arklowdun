@@ -1186,11 +1186,43 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
-  const err = error as Error;
-  console.error(`[roundtrip-verify] error: ${err.message}`);
-  if (err.stack) {
-    console.error(err.stack);
+function resolveOutPathFromArgv(argv: string[]): string {
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === '--out') {
+      const value = argv[i + 1];
+      if (value && !value.startsWith('--')) return path.resolve(value);
+    }
+  }
+  return path.resolve('roundtrip-diff.json');
+}
+
+main().catch(async (error) => {
+  // Normalize any thrown value (including plain objects) and always try to write a report
+  const argv = process.argv.slice(2);
+  const outPath = resolveOutPathFromArgv(argv);
+
+  const payload = (() => {
+    if (error instanceof Error) {
+      return { error: { message: error.message, stack: error.stack } };
+    }
+    try {
+      return { error: { message: String(error) } };
+    } catch {
+      return { error: { message: 'Unknown error' } };
+    }
+  })();
+
+  try {
+    await fsPromises.mkdir(path.dirname(outPath), { recursive: true });
+    await fsPromises.writeFile(outPath, JSON.stringify(payload, null, 2) + '\n');
+  } catch {
+    // ignore secondary I/O failures
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[roundtrip-verify] error: ${message}`);
+  if (error instanceof Error && error.stack) {
+    console.error(error.stack);
   }
   process.exit(99);
 });
