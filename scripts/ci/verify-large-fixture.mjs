@@ -43,6 +43,13 @@ async function hashFile(filePath) {
   });
 }
 
+function compareAttachmentRecords(a, b) {
+  if (a.rootKey !== b.rootKey) {
+    return a.rootKey.localeCompare(b.rootKey);
+  }
+  return a.relativePath.localeCompare(b.relativePath);
+}
+
 async function collectAttachments(rootDir, rootKey, options = {}) {
   const { skip } = options;
   const items = [];
@@ -76,10 +83,7 @@ async function collectAttachments(rootDir, rootKey, options = {}) {
   }
 
   await walk(rootDir, '');
-  items.sort((a, b) => {
-    if (a.rootKey !== b.rootKey) return a.rootKey.localeCompare(b.rootKey);
-    return a.relativePath.localeCompare(b.relativePath);
-  });
+  items.sort(compareAttachmentRecords);
   return items;
 }
 
@@ -154,11 +158,6 @@ async function main() {
 
     const expectedAttachments = JSON.parse(await fsPromises.readFile(expectedAttachmentsPath, 'utf8'));
 
-    const sortByRootAndPath = (a, b) => {
-      if (a.rootKey !== b.rootKey) return a.rootKey.localeCompare(b.rootKey);
-      return a.relativePath.localeCompare(b.relativePath);
-    };
-
     const attachmentsActual = [
       ...(await collectAttachments(attachmentsDir, 'attachments')),
       ...(await collectAttachments(path.dirname(dbPath), 'appData', {
@@ -171,7 +170,7 @@ async function main() {
       })),
     ];
 
-    attachmentsActual.sort(sortByRootAndPath);
+    attachmentsActual.sort(compareAttachmentRecords);
 
     if (stableSerialize(attachmentsActual) !== stableSerialize(expectedAttachments)) {
       console.error('Attachment corpus output does not match golden snapshot.');
