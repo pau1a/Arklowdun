@@ -1,0 +1,75 @@
+{
+  "meta": {
+    "version": 1,
+    "generated_at": "2025-01-01T00:00:00Z",
+    "before": "/tmp/export-a",
+    "before_data_dir": "/tmp/export-a/data",
+    "before_attachments_dir": "/tmp/export-a/attachments",
+    "after": "/tmp/appdata-b",
+    "after_db": "/tmp/appdata-b/arklowdun.sqlite3",
+    "after_attachments_dir": "/tmp/appdata-b/attachments",
+    "options": {
+      "tables": ["households", "events", "notes", "files"],
+      "sample": 16,
+      "strict": true,
+      "fail_on": ["counts", "rows", "attachments", "health"],
+      "include_deleted": false,
+      "case_fold_paths": false
+    }
+  },
+  "health": {
+    "ok": true,
+    "checks": [
+      { "name": "quick_check", "ok": true },
+      { "name": "integrity_check", "ok": true },
+      { "name": "foreign_key_check", "ok": true },
+      { "name": "storage_sanity", "ok": true, "details": "journal_mode=wal; page_size=4096; wal=absent" }
+    ]
+  },
+  "tables": {
+    "households": {
+      "counts": { "before": 3, "after": 3, "ok": true },
+      "table_hash": {
+        "before": "0000000000000000000000000000000000000000000000000000000000000000",
+        "after": "0000000000000000000000000000000000000000000000000000000000000000",
+        "ok": true
+      },
+      "row_diffs": { "missing_ids": [], "extra_ids": [], "mismatched": [] }
+    },
+    "events": {
+      "counts": { "before": 10000, "after": 10000, "ok": true },
+      "table_hash": {
+        "before": "1111111111111111111111111111111111111111111111111111111111111111",
+        "after": "1111111111111111111111111111111111111111111111111111111111111111",
+        "ok": true
+      },
+      "row_diffs": { "missing_ids": [], "extra_ids": [], "mismatched": [] }
+    },
+    "notes": {
+      "counts": { "before": 5000, "after": 5000, "ok": true },
+      "table_hash": {
+        "before": "2222222222222222222222222222222222222222222222222222222222222222",
+        "after": "2222222222222222222222222222222222222222222222222222222222222222",
+        "ok": true
+      },
+      "row_diffs": { "missing_ids": [], "extra_ids": [], "mismatched": [] }
+    },
+    "files": {
+      "counts": { "before": 512, "after": 512, "ok": true },
+      "table_hash": {
+        "before": "3333333333333333333333333333333333333333333333333333333333333333",
+        "after": "3333333333333333333333333333333333333333333333333333333333333333",
+        "ok": true
+      },
+      "row_diffs": { "missing_ids": [], "extra_ids": [], "mismatched": [] }
+    }
+  },
+  "attachments": {
+    "counts": { "before": 300, "after": 300, "ok": true },
+    "bytes": { "before": 12873433, "after": 12873433, "ok": true },
+    "sha_mismatches": [],
+    "sample_verified": 16,
+    "sample_mismatches": []
+  },
+  "status": "PASS"
+}
