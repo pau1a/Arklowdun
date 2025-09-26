@@ -1,3 +1,6 @@
 # Generated licensing and compliance artifacts
 *
 !.gitignore
+!licensing/
+licensing/*
+!licensing/notice-checksums.json

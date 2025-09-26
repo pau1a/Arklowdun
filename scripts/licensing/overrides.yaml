@@ -2,3 +2,11 @@ buffer-builder@0.2.0:
   licenses:
     - MIT
   notes: "Upstream package declares \"MIT/X11\"; normalized to MIT for reporting."
+dlopen2@0.8.0:
+  licenses:
+    - MIT
+  notes: "License file bundled with crate (MIT License)."
+dlopen2_derive@0.4.1:
+  licenses:
+    - MIT
+  notes: "License file bundled with crate (MIT License)."

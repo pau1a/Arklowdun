@@ -45,7 +45,9 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "resources/docs/diagnostics.md"
+      "resources/docs/diagnostics.md",
+      "resources/licenses/NOTICE.txt",
+      "resources/licenses/CREDITS.txt"
     ]
   },
 
