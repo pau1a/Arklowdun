@@ -1,0 +1,54 @@
+{
+  "name": "sample-app",
+  "version": "0.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "sample-app",
+      "version": "0.0.0",
+      "dependencies": {
+        "alpha": "^1.0.0",
+        "bravo": "2.1.0"
+      },
+      "devDependencies": {
+        "charlie": "~3.0.0"
+      }
+    },
+    "node_modules/alpha": {
+      "name": "alpha",
+      "version": "1.0.1",
+      "resolved": "https://registry.npmjs.org/alpha/-/alpha-1.0.1.tgz",
+      "integrity": "sha512-alpha",
+      "license": "MIT"
+    },
+    "node_modules/bravo": {
+      "name": "bravo",
+      "version": "2.1.0",
+      "resolved": "https://registry.npmjs.org/bravo/-/bravo-2.1.0.tgz",
+      "integrity": "sha512-bravo",
+      "license": "(Apache-2.0 AND BSD-3-Clause)",
+      "deprecated": "bravo@2.1.0 is deprecated: security fixes available in 2.2.0"
+    },
+    "node_modules/charlie": {
+      "name": "charlie",
+      "version": "3.0.0",
+      "resolved": "https://registry.npmjs.org/charlie/-/charlie-3.0.0.tgz",
+      "integrity": "sha512-charlie"
+    },
+    "node_modules/bravo/node_modules/delta": {
+      "name": "delta",
+      "version": "4.5.6",
+      "resolved": "https://registry.npmjs.org/delta/-/delta-4.5.6.tgz",
+      "integrity": "sha512-delta",
+      "license": "ISC"
+    },
+    "node_modules/charlie/node_modules/echo": {
+      "name": "echo",
+      "version": "7.8.9",
+      "resolved": "https://registry.npmjs.org/echo/-/echo-7.8.9.tgz",
+      "integrity": "sha512-echo",
+      "license": "GPL-2.0-or-later WITH Autoconf-exception-3.0"
+    }
+  }
+}

@@ -1,0 +1,103 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LicensingInventory",
+  "type": "object",
+  "required": ["generatedAt", "source", "dependencies"],
+  "additionalProperties": false,
+  "properties": {
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "type": "object",
+      "required": ["packageManager", "lockfile"],
+      "additionalProperties": false,
+      "properties": {
+        "packageManager": {
+          "type": "string",
+          "enum": ["npm"]
+        },
+        "lockfile": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "version",
+          "resolved",
+          "checksum",
+          "dependencyType",
+          "licenses",
+          "source"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resolved": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uri"
+              },
+              {
+                "type": "string",
+                "enum": ["UNKNOWN"]
+              }
+            ]
+          },
+          "checksum": {
+            "type": "string",
+            "minLength": 1
+          },
+          "dependencyType": {
+            "type": "string",
+            "enum": ["direct", "indirect"]
+          },
+          "licenses": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^(UNKNOWN|SEE LICENSE|NOASSERTION|[A-Za-z0-9.+-]+(?:\\s+WITH\\s+[A-Za-z0-9.+-]+)?)$"
+            },
+            "uniqueItems": true
+          },
+          "source": {
+            "type": "object",
+            "required": ["type", "location"],
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["npm", "git", "manual"]
+              },
+              "location": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      },
+      "uniqueItems": true
+    }
+  }
+}
