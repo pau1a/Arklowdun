@@ -5,8 +5,9 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { generateInventory } from "../../scripts/licensing/npm-inventory.ts";
+import { Overrides, loadOverrides } from "../../scripts/licensing/lib/overrides.ts";
 
-const ROOT = dirname(fileURLToPath(new URL("../..", import.meta.url)));
+const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
 function normaliseForComparison<T extends { generatedAt: string }>(inventory: T) {
   return { ...inventory, generatedAt: "2024-01-01T00:00:00.000Z" };
@@ -18,6 +19,7 @@ test("parses fixture lockfile", async () => {
     lockfilePath: join(ROOT, "fixtures/licensing/package-lock.fixture.json"),
     schemaPath: join(ROOT, "schema/licensing-inventory.schema.json"),
     projectRoot: ROOT,
+    overrides: new Overrides(),
     warn: (message) => warnings.push(message)
   });
 
@@ -84,6 +86,7 @@ test("deduplicates repeated package entries", async () => {
     lockfilePath,
     schemaPath: join(ROOT, "schema/licensing-inventory.schema.json"),
     projectRoot: dir,
+    overrides: new Overrides(),
     warn: (message) => warnings.push(message)
   });
 
@@ -92,6 +95,7 @@ test("deduplicates repeated package entries", async () => {
   assert.equal(fooEntries.length, 1);
   assert.equal(fooEntries[0]?.dependencyType, "direct");
   assert.deepEqual(fooEntries[0]?.licenses, ["MIT"]);
+  assert.equal(fooEntries[0]?.provenance.length, 2);
 });
 
 test("applies manual overrides", async () => {
@@ -112,11 +116,12 @@ test("applies manual overrides", async () => {
   );
 
   const warnings: string[] = [];
+  const overrides = await loadOverrides(overridePath);
   const inventory = await generateInventory({
     lockfilePath: join(ROOT, "fixtures/licensing/package-lock.fixture.json"),
     schemaPath: join(ROOT, "schema/licensing-inventory.schema.json"),
     projectRoot: ROOT,
-    overridesPath: overridePath,
+    overrides,
     warn: (message) => warnings.push(message)
   });
 

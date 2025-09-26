@@ -273,11 +273,12 @@ jobs:
           node-version: 20
           cache: 'npm'
       - run: npm ci
-      - name: Generate npm license inventory
+      - name: Generate cross-ecosystem license inventory
         run: npm run licensing:inventory
-      - name: Upload inventory artifact
+      - name: Upload inventory artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: licensing-npm-inventory
-          path: artifacts/licensing/npm-inventory.json
+          name: licensing-inventory
+          path: artifacts/licensing
+          if-no-files-found: error
 

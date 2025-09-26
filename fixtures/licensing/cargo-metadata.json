@@ -1,0 +1,99 @@
+{
+  "packages": [
+    {
+      "id": "path+file:///workspace/Arklowdun/app#app@0.1.0",
+      "name": "app",
+      "version": "0.1.0",
+      "license": "MIT",
+      "license_file": null,
+      "source": null,
+      "manifest_path": "/workspace/Arklowdun/app/Cargo.toml",
+      "description": "Fixture workspace application",
+      "repository": null
+    },
+    {
+      "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.0",
+      "name": "serde",
+      "version": "1.0.0",
+      "license": "MIT OR Apache-2.0",
+      "license_file": null,
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_path": "/registry/serde/Cargo.toml",
+      "description": null,
+      "repository": "https://github.com/serde-rs/serde"
+    },
+    {
+      "id": "git+https://github.com/example/git-crate?rev=abcdef#git-crate@0.2.0",
+      "name": "git-crate",
+      "version": "0.2.0",
+      "license": "Apache-2.0",
+      "license_file": null,
+      "source": "git+https://github.com/example/git-crate?rev=abcdef#abcdef",
+      "manifest_path": "/tmp/git-crate/Cargo.toml",
+      "description": "Git dependency fixture",
+      "repository": "https://github.com/example/git-crate"
+    },
+    {
+      "id": "path+file:///workspace/Arklowdun/crates/local-dep#local-dep@0.3.0",
+      "name": "local-dep",
+      "version": "0.3.0",
+      "license": null,
+      "license_file": "/workspace/Arklowdun/crates/local-dep/LICENSE",
+      "source": "path+file:///workspace/Arklowdun/crates/local-dep",
+      "manifest_path": "/workspace/Arklowdun/crates/local-dep/Cargo.toml",
+      "description": null,
+      "repository": null
+    },
+    {
+      "id": "registry+https://github.com/rust-lang/crates.io-index#missing-license@0.4.0",
+      "name": "missing-license",
+      "version": "0.4.0",
+      "license": null,
+      "license_file": null,
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "manifest_path": "/registry/missing-license/Cargo.toml",
+      "description": "Deliberately missing license",
+      "repository": null
+    }
+  ],
+  "resolve": {
+    "nodes": [
+      {
+        "id": "path+file:///workspace/Arklowdun/app#app@0.1.0",
+        "deps": [
+          {
+            "name": "serde",
+            "pkg": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.0",
+            "dep_kinds": [
+              { "kind": null }
+            ]
+          },
+          {
+            "name": "git-crate",
+            "pkg": "git+https://github.com/example/git-crate?rev=abcdef#git-crate@0.2.0",
+            "dep_kinds": [
+              { "kind": "build" }
+            ]
+          },
+          {
+            "name": "local-dep",
+            "pkg": "path+file:///workspace/Arklowdun/crates/local-dep#local-dep@0.3.0",
+            "dep_kinds": [
+              { "kind": null }
+            ]
+          },
+          {
+            "name": "missing-license",
+            "pkg": "registry+https://github.com/rust-lang/crates.io-index#missing-license@0.4.0",
+            "dep_kinds": [
+              { "kind": null }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "workspace_members": [
+    "path+file:///workspace/Arklowdun/app#app@0.1.0"
+  ]
+}

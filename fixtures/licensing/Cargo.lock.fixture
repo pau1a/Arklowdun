@@ -1,0 +1,35 @@
+version = 3
+
+[[package]]
+name = "app"
+version = "0.1.0"
+dependencies = [
+  "serde 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "git-crate 0.2.0 (git+https://github.com/example/git-crate?rev=abcdef#abcdef)",
+  "local-dep 0.3.0",
+  "missing-license 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)"
+]
+
+[[package]]
+name = "serde"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "sha-serde"
+features = ["derive"]
+
+[[package]]
+name = "git-crate"
+version = "0.2.0"
+source = "git+https://github.com/example/git-crate?rev=abcdef#abcdef"
+
+[[package]]
+name = "local-dep"
+version = "0.3.0"
+source = "path+file:///workspace/Arklowdun/crates/local-dep"
+checksum = "sha-local"
+
+[[package]]
+name = "missing-license"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "sha-missing"
