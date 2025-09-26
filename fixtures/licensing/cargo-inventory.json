@@ -1,0 +1,114 @@
+{
+  "generatedAt": "2024-01-01T00:00:00.000Z",
+  "source": {
+    "type": "cargo",
+    "lockfile": "fixtures/licensing/Cargo.lock.fixture",
+    "metadata": "fixtures/licensing/cargo-metadata.json"
+  },
+  "dependencies": [
+    {
+      "name": "git-crate",
+      "version": "0.2.0",
+      "dependencyType": "direct",
+      "licenses": ["Apache-2.0"],
+      "resolved": "git+https://github.com/example/git-crate?rev=abcdef#abcdef",
+      "checksum": "UNKNOWN",
+      "source": {
+        "type": "git",
+        "location": "git+https://github.com/example/git-crate?rev=abcdef#abcdef"
+      },
+      "provenance": [
+        {
+          "ecosystem": "cargo",
+          "dependencyType": "direct",
+          "resolved": "git+https://github.com/example/git-crate?rev=abcdef#abcdef",
+          "checksum": "UNKNOWN",
+          "source": {
+            "type": "git",
+            "location": "git+https://github.com/example/git-crate?rev=abcdef#abcdef"
+          }
+        }
+      ]
+    },
+    {
+      "name": "local-dep",
+      "version": "0.3.0",
+      "dependencyType": "direct",
+      "licenses": ["UNKNOWN"],
+      "resolved": "path+file:///workspace/Arklowdun/crates/local-dep",
+      "checksum": "sha-local",
+      "source": {
+        "type": "path",
+        "location": "crates/local-dep/Cargo.toml"
+      },
+      "notes": "license metadata unavailable in cargo metadata; See license file at /workspace/Arklowdun/crates/local-dep/LICENSE",
+      "provenance": [
+        {
+          "ecosystem": "cargo",
+          "dependencyType": "direct",
+          "resolved": "path+file:///workspace/Arklowdun/crates/local-dep",
+          "checksum": "sha-local",
+          "source": {
+            "type": "path",
+            "location": "crates/local-dep/Cargo.toml"
+          }
+        }
+      ]
+    },
+    {
+      "name": "missing-license",
+      "version": "0.4.0",
+      "dependencyType": "direct",
+      "licenses": ["UNKNOWN"],
+      "resolved": "https://github.com/rust-lang/crates.io-index#missing-license@0.4.0",
+      "checksum": "sha-missing",
+      "source": {
+        "type": "registry",
+        "location": "registry+https://github.com/rust-lang/crates.io-index",
+        "registry": "https://github.com/rust-lang/crates.io-index"
+      },
+      "notes": "license metadata unavailable in cargo metadata",
+      "provenance": [
+        {
+          "ecosystem": "cargo",
+          "dependencyType": "direct",
+          "resolved": "https://github.com/rust-lang/crates.io-index#missing-license@0.4.0",
+          "checksum": "sha-missing",
+          "source": {
+            "type": "registry",
+            "location": "registry+https://github.com/rust-lang/crates.io-index",
+            "registry": "https://github.com/rust-lang/crates.io-index"
+          }
+        }
+      ]
+    },
+    {
+      "name": "serde",
+      "version": "1.0.0",
+      "dependencyType": "direct",
+      "licenses": ["MIT", "Apache-2.0"],
+      "resolved": "https://github.com/rust-lang/crates.io-index#serde@1.0.0",
+      "checksum": "sha-serde",
+      "source": {
+        "type": "registry",
+        "location": "registry+https://github.com/rust-lang/crates.io-index",
+        "registry": "https://github.com/rust-lang/crates.io-index"
+      },
+      "features": ["derive"],
+      "provenance": [
+        {
+          "ecosystem": "cargo",
+          "dependencyType": "direct",
+          "resolved": "https://github.com/rust-lang/crates.io-index#serde@1.0.0",
+          "checksum": "sha-serde",
+          "source": {
+            "type": "registry",
+            "location": "registry+https://github.com/rust-lang/crates.io-index",
+            "registry": "https://github.com/rust-lang/crates.io-index"
+          },
+          "features": ["derive"]
+        }
+      ]
+    }
+  ]
+}

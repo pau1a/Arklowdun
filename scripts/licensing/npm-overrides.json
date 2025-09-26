@@ -1,6 +1,0 @@
-{
-  "buffer-builder@0.2.0": {
-    "licenses": ["MIT"],
-    "notes": "Upstream package declares \"MIT/X11\"; normalized to MIT for reporting."
-  }
-}

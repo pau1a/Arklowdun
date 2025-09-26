@@ -5,32 +5,16 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
-import spdxParse from "spdx-expression-parse";
-
-type DependencyType = "direct" | "indirect";
-
-type InventoryDependency = {
-  name: string;
-  version: string;
-  resolved: string;
-  checksum: string;
-  dependencyType: DependencyType;
-  licenses: string[];
-  source: {
-    type: "npm" | "git" | "manual";
-    location: string;
-  };
-  notes?: string;
-};
-
-type Inventory = {
-  generatedAt: string;
-  source: {
-    packageManager: "npm";
-    lockfile: string;
-  };
-  dependencies: InventoryDependency[];
-};
+import {
+  DependencyType,
+  Inventory,
+  InventoryDependency,
+  InventorySource,
+  dedupeStrings,
+  sortDependencies
+} from "./lib/utils.ts";
+import { normaliseLicenses } from "./lib/spdx.ts";
+import { loadOverrides, Overrides } from "./lib/overrides.ts";
 
 type LockfilePackage = {
   name?: string;
@@ -50,11 +34,9 @@ type GenerateInventoryOptions = {
   lockfilePath: string;
   schemaPath: string;
   projectRoot: string;
-  overridesPath?: string;
+  overrides: Overrides;
   warn: (message: string) => void;
 };
-
-type OverrideRecord = Record<string, { licenses?: string[]; notes?: string }>;
 
 function normaliseName(key: string, pkg: LockfilePackage): string {
   if (pkg.name && pkg.name.trim().length > 0) {
@@ -65,113 +47,17 @@ function normaliseName(key: string, pkg: LockfilePackage): string {
   return last ?? key;
 }
 
-function normaliseLicenses(
-  pkg: LockfilePackage,
-  override?: { licenses?: string[] }
-): { licenses: string[]; missing: boolean; unparsable: string[] } {
-  if (override?.licenses && override.licenses.length > 0) {
-    return { licenses: dedupeStrings(override.licenses), missing: false, unparsable: [] };
-  }
-
-  const raw = pkg.licenses ?? pkg.license;
-  if (!raw) {
-    return { licenses: ["UNKNOWN"], missing: true, unparsable: [] };
-  }
-
-  const candidates = Array.isArray(raw) ? raw : [raw];
-  const licenses: string[] = [];
-  const unparsable: string[] = [];
-
-  for (const candidate of candidates) {
-    const value = typeof candidate === "string" ? candidate.trim() : candidate.type?.trim();
-    if (!value) {
-      continue;
-    }
-
-    try {
-      const parsed = spdxParse(value);
-      collectSpdx(parsed, licenses);
-    } catch (error) {
-      // Either a simple SPDX identifier or unparsable expression.
-      if (/^[A-Za-z0-9.+-]+$/.test(value)) {
-        licenses.push(value);
-      } else {
-        unparsable.push(value);
-      }
-    }
-  }
-
-  if (licenses.length === 0) {
-    return { licenses: ["UNKNOWN"], missing: true, unparsable };
-  }
-
-  return { licenses: dedupeStrings(licenses), missing: false, unparsable };
-}
-
-function collectSpdx(node: any, accumulator: string[]) {
-  if (!node) return;
-  if (node.license) {
-    const license = String(node.license);
-    if (node.exception) {
-      accumulator.push(`${license} WITH ${node.exception}`);
-    } else {
-      accumulator.push(license);
-    }
-    return;
-  }
-
-  if (node.left && node.right) {
-    collectSpdx(node.left, accumulator);
-    collectSpdx(node.right, accumulator);
-  }
-}
-
-function dedupeStrings(values: string[]): string[] {
-  const seen = new Set<string>();
-  const output: string[] = [];
-  for (const value of values) {
-    const trimmed = value.trim();
-    if (!trimmed) continue;
-    if (!seen.has(trimmed)) {
-      seen.add(trimmed);
-      output.push(trimmed);
-    }
-  }
-  return output;
-}
-
-async function loadOverrides(path: string | undefined): Promise<OverrideRecord> {
-  if (!path) {
-    return {};
-  }
-
-  try {
-    await access(path, fsConstants.F_OK);
-    const raw = await readFile(path, "utf8");
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object") {
-      return parsed as OverrideRecord;
-    }
-    throw new Error("Overrides file must contain a JSON object");
-  } catch (error: any) {
-    if (error?.code === "ENOENT") {
-      throw new Error(`Overrides file not found: ${path}`);
-    }
-    throw error;
-  }
-}
 
 export async function generateInventory({
   lockfilePath,
   schemaPath,
   projectRoot,
-  overridesPath,
+  overrides,
   warn
 }: GenerateInventoryOptions): Promise<Inventory> {
   const raw = await readFile(lockfilePath, "utf8");
   const lockfile: Lockfile = JSON.parse(raw);
   const packages = lockfile.packages ?? {};
-  const overrides = await loadOverrides(overridesPath);
 
   const rootPackage = packages[""] ?? {};
   const directDependencies = new Set<string>();
@@ -194,9 +80,9 @@ export async function generateInventory({
     const version = pkg.version ?? "0.0.0";
     const mapKey = `${name}@${version}`;
 
-    const override = overrides[mapKey] ?? overrides[name];
+    const override = overrides.get(name, version, "npm");
 
-    const { licenses, missing, unparsable } = normaliseLicenses(pkg, override);
+    const { licenses, missing, unparsable } = normaliseLicenses(pkg.licenses ?? pkg.license, override);
     if (missing) {
       warn(`License metadata missing for ${mapKey}`);
     }
@@ -219,6 +105,11 @@ export async function generateInventory({
       notes.push(pkg.deprecated.trim());
     }
 
+    const source: InventorySource = {
+      type: "npm",
+      location: resolved !== "UNKNOWN" ? resolved : name
+    };
+
     const entry: InventoryDependency = {
       name,
       version,
@@ -226,10 +117,16 @@ export async function generateInventory({
       checksum,
       dependencyType,
       licenses,
-      source: {
-        type: "npm",
-        location: resolved !== "UNKNOWN" ? resolved : name
-      }
+      source,
+      provenance: [
+        {
+          ecosystem: "npm",
+          dependencyType,
+          resolved,
+          checksum,
+          source
+        }
+      ]
     };
 
     if (notes.length > 0) {
@@ -239,10 +136,13 @@ export async function generateInventory({
     if (inventoryMap.has(mapKey)) {
       const existing = inventoryMap.get(mapKey)!;
       existing.licenses = dedupeStrings([...existing.licenses, ...entry.licenses]);
+      if (entry.dependencyType === "direct") {
+        existing.dependencyType = "direct";
+      }
+      existing.provenance.push(...entry.provenance);
       if (entry.notes) {
-        existing.notes = existing.notes
-          ? dedupeStrings([...existing.notes.split("; ").filter(Boolean), entry.notes]).join("; ")
-          : entry.notes;
+        const existingNotes = existing.notes ? existing.notes.split("; ").filter(Boolean) : [];
+        existing.notes = sortNotes([...existingNotes, entry.notes]);
       }
       continue;
     }
@@ -250,14 +150,12 @@ export async function generateInventory({
     inventoryMap.set(mapKey, entry);
   }
 
-  const dependencies = Array.from(inventoryMap.values()).sort((a, b) => {
-    return a.name.localeCompare(b.name) || a.version.localeCompare(b.version);
-  });
+  const dependencies = sortDependencies(Array.from(inventoryMap.values()));
 
   const inventory: Inventory = {
     generatedAt: new Date().toISOString(),
     source: {
-      packageManager: "npm",
+      type: "npm",
       lockfile: relative(projectRoot, lockfilePath)
     },
     dependencies
@@ -286,6 +184,10 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
+function sortNotes(notes: string[]): string {
+  return Array.from(new Set(notes.map((note) => note.trim()).filter(Boolean))).join("; ");
+}
+
 async function main() {
   const { values } = parseArgs({
     options: {
@@ -306,19 +208,20 @@ async function main() {
   const outputPath = values.output
     ? resolve(values.output)
     : join(projectRoot, "artifacts", "licensing", "npm-inventory.json");
-  const defaultOverridesPath = join(projectRoot, "scripts", "licensing", "npm-overrides.json");
+  const defaultOverridesPath = join(projectRoot, "scripts", "licensing", "overrides.yaml");
   const overridesPath = values.overrides
     ? resolve(values.overrides)
     : (await fileExists(defaultOverridesPath))
         ? defaultOverridesPath
         : undefined;
+  const overrides = await loadOverrides(overridesPath);
 
   const warnings: string[] = [];
   const inventory = await generateInventory({
     lockfilePath,
     schemaPath,
     projectRoot,
-    overridesPath,
+    overrides,
     warn: (message) => {
       warnings.push(message);
       console.warn(message);

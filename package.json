@@ -35,7 +35,7 @@
     "gate:query-perf-smoke": "node scripts/ci/query-perf-smoke.mjs",
     "perf:query:local": "node scripts/ci/query-perf-local.mjs",
     "gate:scan": "npm run gate:ipc-in-components && npm run gate:no-deep-relatives && npm run gate:cross-feature-report",
-    "licensing:inventory": "tsx scripts/licensing/npm-inventory.ts",
+    "licensing:inventory": "tsx scripts/licensing/pipeline.ts",
     "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
     "lint:structure": "node scripts/guards/structure-lint.mjs",
     "check": "npm run typecheck && echo TS OK && npm run lint && npm run guard:invoke && npm run guard:ui-colors && npm run guard:db-writes && npm run guard:recovery-strings && npm run lint:structure",
@@ -73,6 +73,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.0",
+    "@iarna/toml": "^2.2.5",
     "@playwright/test": "^1.49.0",
     "@tauri-apps/cli": "^2.8.3",
     "@types/better-sqlite3": "^7.6.13",
@@ -95,6 +96,7 @@
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "vite": "^6.0.3",
-    "vitest": "^1.6.0"
+    "vitest": "^1.6.0",
+    "yaml": "^2.8.1"
   }
 }
