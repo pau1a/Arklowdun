@@ -863,7 +863,7 @@ mod tests {
         let db_path = dir.path().join("validate.sqlite3");
         let conn = Connection::open(&db_path).unwrap();
         conn.execute_batch(
-            "PRAGMA foreign_keys = ON;
+            "PRAGMA foreign_keys = OFF;
             CREATE TABLE parent(id INTEGER PRIMARY KEY);
             CREATE TABLE child(id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parent(id));
             INSERT INTO child(id, parent_id) VALUES (1, 2);",

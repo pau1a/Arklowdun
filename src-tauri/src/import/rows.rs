@@ -101,7 +101,7 @@ pub struct BillRow {
     pub updated_at: i64,
     #[serde(alias = "deletedAt")]
     pub deleted_at: Option<i64>,
-    pub position: i64,
+    pub position: Option<i64>,
     #[serde(alias = "rootKey")]
     pub root_key: Option<String>,
     #[serde(alias = "relativePath")]
@@ -127,7 +127,7 @@ pub struct PolicyRow {
     pub updated_at: i64,
     #[serde(alias = "deletedAt")]
     pub deleted_at: Option<i64>,
-    pub position: i64,
+    pub position: Option<i64>,
     #[serde(alias = "rootKey")]
     pub root_key: Option<String>,
     #[serde(alias = "relativePath")]
