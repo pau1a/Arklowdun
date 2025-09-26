@@ -341,12 +341,20 @@ if [[ -n "$ROUNDTRIP_VERIFY_SCRIPT" ]]; then
   rm -f "$VERIFY_REPORT_RAW"
   log_step "Running verification script at $ROUNDTRIP_VERIFY_SCRIPT"
 
+  declare -a VERIFY_CMD=(node)
+  case "$ROUNDTRIP_VERIFY_SCRIPT" in
+    *.ts) VERIFY_CMD+=(--loader ts-node/esm "$ROUNDTRIP_VERIFY_SCRIPT") ;;
+    *) VERIFY_CMD+=("$ROUNDTRIP_VERIFY_SCRIPT") ;;
+  esac
+
+  declare -a VERIFY_ARGS=(
+    --before "$EXPORT_DIR"
+    --after "$APPDATA_DIR"
+    --out "$VERIFY_REPORT_RAW"
+  )
+
   set +e
-  node --loader ts-node/esm "$ROUNDTRIP_VERIFY_SCRIPT" \
-    --before "$EXPORT_DIR" \
-    --after "$APPDATA_DIR" \
-    --out "$VERIFY_REPORT_RAW" \
-    2>&1 | tee -a "$LOG_PATH"
+  "${VERIFY_CMD[@]}" "${VERIFY_ARGS[@]}" 2>&1 | tee -a "$LOG_PATH"
   VERIFY_EXIT_CODE=${PIPESTATUS[0]}
   set -e
 
