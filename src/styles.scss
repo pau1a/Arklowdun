@@ -77,7 +77,30 @@ main {
 
 #view {
   position: relative;
+  background-color: var(--color-panel);
+}
+
+#view.view--ambient {
   background-color: #001220;
+}
+
+.view__ambient {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.view__ambient-waves {
+  width: clamp(110%, 120%, 140%);
+  max-width: 1600px;
+  min-width: 960px;
+  margin-top: -12vh;
+  opacity: 0.9;
 }
 
 .container__banner,
@@ -463,7 +486,7 @@ textarea:focus-visible {
 
 .dashboard {
   position: relative;
-  z-index: 0;
+  z-index: 1;
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: var(--space-4);
@@ -474,29 +497,7 @@ textarea:focus-visible {
   align-items: start;
 }
 
-.dashboard__background {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.dashboard__background .ark-waves {
-  width: clamp(110%, 120%, 140%);
-  max-width: 1600px;
-  min-width: 960px;
-  margin-top: -12vh;
-}
-
-.dashboard__waves {
-  opacity: 0.9;
-}
-
-.dashboard > *:not(.dashboard__background) {
+.dashboard > * {
   position: relative;
   z-index: 1;
 }

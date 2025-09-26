@@ -23,7 +23,6 @@ export async function DashboardView(container: HTMLElement) {
   const section = document.createElement("section");
   section.className = "dashboard";
   section.innerHTML = `
-      <div class="dashboard__background" aria-hidden="true"></div>
       <header class="dashboard__header">
         <div>
           <h2>Dashboard</h2>
@@ -44,15 +43,23 @@ export async function DashboardView(container: HTMLElement) {
       </div>
     `;
 
-  const backgroundHost = section.querySelector<HTMLDivElement>(".dashboard__background");
-  if (backgroundHost) {
-    const waves = createAnimatedWaves({ variant: "dark" });
-    waves.update({ className: "dashboard__waves" });
-    backgroundHost.appendChild(waves);
-    registerViewCleanup(container, () => waves.destroy());
-  }
+  const ambientHost = document.createElement("div");
+  ambientHost.className = "view__ambient";
+  ambientHost.setAttribute("aria-hidden", "true");
+
+  const waves = createAnimatedWaves({ variant: "dark" });
+  waves.update({ className: "view__ambient-waves" });
+  ambientHost.appendChild(waves);
+
   container.innerHTML = "";
-  container.appendChild(section);
+  container.classList.add("view--ambient");
+  container.append(ambientHost, section);
+
+  registerViewCleanup(container, () => {
+    waves.destroy();
+    ambientHost.remove();
+    container.classList.remove("view--ambient");
+  });
 
   const listEl = section.querySelector<HTMLDivElement>("#dash-list");
   const items: { date: number; text: string }[] = [];
