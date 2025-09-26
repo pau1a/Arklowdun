@@ -75,6 +75,14 @@ main {
   background-color: var(--color-panel);
 }
 
+#view {
+  background-color: #001220;
+  background-image: url("/src/assets/backgrounds/dashboard.svg");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
 .container__banner,
 .container__view {
   display: contents;
@@ -465,13 +473,6 @@ textarea:focus-visible {
   padding-inline: var(--space-4);
   padding-block: clamp(var(--space-4), 6vw, var(--space-5));
   align-items: start;
-  background-color: #001220;
-  background-image: url("/src/assets/backgrounds/dashboard.svg");
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
 }
 
 /* Let all grid children shrink when needed */
