@@ -1,10 +1,18 @@
-name: roundtrip-fixture
+name: roundtrip
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: roundtrip-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  verify-large-fixture:
+  verify_large_fixture:
+    name: verify/large-fixture
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -17,3 +25,81 @@ jobs:
         run: npm ci
       - name: Verify large fixture determinism
         run: npm run fixtures:verify
+
+  roundtrip:
+    name: roundtrip/full-cycle
+    runs-on: ubuntu-latest
+    needs: verify_large_fixture
+    timeout-minutes: 30
+    env:
+      ROUNDTRIP_WARN_MINUTES: '20'
+      ROUNDTRIP_HARD_MINUTES: '30'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            sqlite3
+      - name: Install npm dependencies
+        run: npm ci
+      - name: Run round-trip workflow
+        id: roundtrip
+        run: |
+          set -euo pipefail
+          START=$(date +%s)
+          if bash scripts/roundtrip.sh --seed 42; then
+            STATUS=success
+          else
+            STATUS=failure
+          fi
+          END=$(date +%s)
+          DURATION=$((END - START))
+          echo "duration_seconds=$DURATION" >> "$GITHUB_OUTPUT"
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          if [ "$STATUS" != "success" ]; then
+            exit 1
+          fi
+      - name: Enforce runtime budget
+        if: always()
+        env:
+          WARN_MINUTES: ${{ env.ROUNDTRIP_WARN_MINUTES }}
+          HARD_MINUTES: ${{ env.ROUNDTRIP_HARD_MINUTES }}
+          DURATION_SECONDS: ${{ steps.roundtrip.outputs.duration_seconds }}
+        run: |
+          duration_raw=${DURATION_SECONDS:-}
+          if [ -z "$duration_raw" ]; then
+            echo "Round-trip duration unavailable (roundtrip step did not record metrics)."
+            exit 0
+          fi
+          warn_seconds=$((WARN_MINUTES * 60))
+          duration=$duration_raw
+          mins=$((duration / 60))
+          secs=$((duration % 60))
+          echo "Round-trip completed in ${mins}m${secs}s (soft budget ${WARN_MINUTES}m, hard budget ${HARD_MINUTES}m)"
+          if [ "$duration" -gt "$warn_seconds" ]; then
+            echo "::warning ::round-trip workflow exceeded soft runtime budget (${mins}m${secs}s > ${WARN_MINUTES}m)"
+          fi
+      - name: Upload round-trip artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roundtrip-artifacts-${{ runner.os }}
+          path: |
+            .tmp/roundtrip/**
+          if-no-files-found: ignore
+          retention-days: 7
