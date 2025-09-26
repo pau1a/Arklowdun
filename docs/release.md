@@ -32,13 +32,18 @@ OK: No pending migrations
 
 ## Building a release
 
-Use the `release` npm script to build the application bundle. It runs the pending migrations check before invoking the Tauri build and checks `dev.sqlite` by default:
+Use the `release` npm script to build the application bundle. It now ensures the copyleft audit record is in sync before running other guards and runs the pending migrations check before invoking the Tauri build. The script checks `dev.sqlite` by default:
 
 ```sh
 npm run release
 ```
 
-The build aborts if any migrations are missing from the target database.
+The build aborts if:
+
+- The copyleft audit hashes in `docs/licensing/copyleft-audit-record.yaml` do not match the current lockfiles or remediation items remain open.
+- Any migrations are missing from the target database.
+
+See `docs/licensing.md` for the audit methodology, evidence locations, and remediation tracking expectations. Confirm there are no outstanding `open` or `blocked` remediation entries before shipping.
 
 ## File system allowlist
 

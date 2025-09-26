@@ -1,0 +1,142 @@
+metadata:
+  audit_date: 2025-09-26
+  inventory_source_commit: d86db9ae2d1e7d6db0737cfd871af29b7c337aba
+  lockfiles:
+    - path: package-lock.json
+      sha256: 80143f4b0d446151282c9be215a162bb48d9ad69e9b81ed0039b7774718326fd
+    - path: src-tauri/Cargo.lock
+      sha256: 341d96a02db935e1161d68ff6801c8f0290a24db92046391bef110b04ae35423
+  prepared_by:
+    - name: Release Engineering
+      role: release manager
+  reviewers:
+    - name: Legal Liaison
+      role: legal/compliance
+  evidence:
+    public: docs/licensing/evidence/
+    restricted: Copyleft Evidence/2025-09
+findings:
+  - package: "@axe-core/playwright"
+    version: 4.10.2
+    ecosystem: npm
+    license: MPL-2.0
+    classification: weak
+    distribution: tooling
+    obligations:
+      - Keep package scoped to development workflows; confirm it is excluded from production bundles.
+      - Retain MPL-2.0 license text in NOTICE archives even though the package does not ship.
+    remediation:
+      status: complete
+      owner: QA Engineering
+      due: 2025-09-26
+      notes: |
+        Verified via dependency analyzer that the package is only referenced in Playwright accessibility tests.
+        No runtime bundles include it; no further action required beyond periodic verification.
+  - package: axe-core
+    version: 4.10.3
+    ecosystem: npm
+    license: MPL-2.0
+    classification: weak
+    distribution: tooling
+    obligations:
+      - Follow parent package handling for `@axe-core/playwright`.
+      - Ensure attribution remains in NOTICE for completeness.
+    remediation:
+      status: complete
+      owner: QA Engineering
+      due: 2025-09-26
+      notes: |
+        Transitive dependency of `@axe-core/playwright`; inherits the same non-distribution posture.
+  - package: cssparser
+    version: 0.29.6
+    ecosystem: cargo
+    license: MPL-2.0
+    classification: weak
+    distribution: release
+    obligations:
+      - Provide MPL-2.0 license text alongside distributed binaries.
+      - Publish or supply any local modifications to MPL-covered files (none applied).
+    remediation:
+      status: complete
+      owner: Release Engineering
+      due: 2025-09-26
+      notes: |
+        NOTICE bundle already embeds MPL-2.0 text via the consolidated inventory.
+        No local patches exist; audit linked upstream source at https://crates.io/crates/cssparser/0.29.6.
+  - package: cssparser-macros
+    version: 0.6.1
+    ecosystem: cargo
+    license: MPL-2.0
+    classification: weak
+    distribution: release
+    obligations:
+      - Mirror remediation posture for `cssparser`.
+    remediation:
+      status: complete
+      owner: Release Engineering
+      due: 2025-09-26
+      notes: |
+        Shares upstream provenance with `cssparser`; no additional obligations beyond maintaining NOTICE coverage.
+  - package: dtoa-short
+    version: 0.3.5
+    ecosystem: cargo
+    license: MPL-2.0
+    classification: weak
+    distribution: release
+    obligations:
+      - Include MPL-2.0 license text with shipped binaries.
+      - Retain ability to provide patched source if modifications occur.
+    remediation:
+      status: complete
+      owner: Runtime Team
+      due: 2025-09-26
+      notes: |
+        No modifications applied; upstream crate source recorded in the evidence README for future updates.
+  - package: option-ext
+    version: 0.2.0
+    ecosystem: cargo
+    license: MPL-2.0
+    classification: weak
+    distribution: release
+    obligations:
+      - Track MPL-2.0 notice distribution.
+      - Re-evaluate if static linking changes obligations (currently file-level only).
+    remediation:
+      status: complete
+      owner: Runtime Team
+      due: 2025-09-26
+      notes: |
+        Verified no local forks or patches; referencing upstream crate metadata is sufficient.
+  - package: selectors
+    version: 0.24.0
+    ecosystem: cargo
+    license: MPL-2.0
+    classification: weak
+    distribution: release
+    obligations:
+      - Continue shipping MPL notice text.
+      - Monitor for any direct source modifications.
+    remediation:
+      status: complete
+      owner: Runtime Team
+      due: 2025-09-26
+      notes: |
+        Dependency bundled via Servo stack; covered by existing NOTICE output.
+  - package: r-efi
+    version: 5.3.0
+    ecosystem: cargo
+    license: "MIT OR Apache-2.0 OR LGPL-2.1-or-later"
+    classification: dual-permissive
+    distribution: release
+    obligations:
+      - Elect the MIT/Apache-2.0 option and document the decision.
+      - Provide NOTICE attribution consistent with the selected permissive license.
+      - Retain ability to furnish source if LGPL option is ever exercised (not chosen).
+    remediation:
+      status: complete
+      owner: Release Engineering
+      due: 2025-09-26
+      notes: |
+        AUTHORS file confirms triple-licensing; election recorded here to avoid LGPL obligations.
+        NOTICE already lists r-efi under the MIT/Apache bucket.
+unknown_or_custom_licenses: []

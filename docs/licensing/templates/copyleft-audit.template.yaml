@@ -1,0 +1,36 @@
+metadata:
+  audit_date: YYYY-MM-DD
+  inventory_source_commit: <git commit hash>
+  lockfiles:
+    - path: package-lock.json
+      sha256: <sha256>
+    - path: src-tauri/Cargo.lock
+      sha256: <sha256>
+  prepared_by:
+    - name: <engineer>
+      role: release manager
+  reviewers:
+    - name: <legal contact>
+      role: legal
+  evidence:
+    public: docs/licensing/evidence/
+    restricted: Copyleft Evidence/YYYY-MM
+findings:
+  - package: <name>
+    version: <version>
+    ecosystem: npm|cargo|asset
+    license: <SPDX expression>
+    classification: strong|weak|dual-permissive|unknown
+    distribution: release|tooling|asset-only
+    obligations:
+      - <obligation summary>
+    remediation:
+      status: open|in-progress|complete
+      owner: <person or team>
+      due: YYYY-MM-DD
+      notes: |
+        Detailed context and links to evidence.
+  - package: ...
+unknown_or_custom_licenses:
+  - package: <name>
+    action: escalate-to-legal
