@@ -686,7 +686,7 @@ mod tests {
                 .join(format!("{month:02}"));
             fs::create_dir_all(&dir).unwrap();
             let filename = format!(
-                "backup-2023{:02}{:02}-{:02}{:02}{:02}-{:04}.json",
+                "backup-2023{:02}{:02}-{:02}{:02}{:02}-{:08x}.json",
                 month,
                 (i % 28) + 1,
                 (i % 24),

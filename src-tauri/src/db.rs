@@ -252,6 +252,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn write_atomic_preserves_existing_permissions() {
+        super::WRITE_ATOMIC_CRASH_BEFORE_RENAME.store(false, Ordering::SeqCst);
         use std::os::unix::fs::PermissionsExt;
 
         let temp = tempdir().unwrap();
@@ -269,6 +270,7 @@ mod tests {
 
     #[test]
     fn write_atomic_failure_does_not_corrupt_existing_file() {
+        super::WRITE_ATOMIC_CRASH_BEFORE_RENAME.store(false, Ordering::SeqCst);
         let temp = tempdir().unwrap();
         let path = temp.path().join("artifact.txt");
         fs::write(&path, b"stable").unwrap();
