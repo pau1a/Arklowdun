@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
+  <rect width="960" height="540" fill="#f8fafc"/>
+  <rect x="80" y="60" width="360" height="420" rx="24" fill="#ffffff" stroke="#cbd5f5" stroke-width="3"/>
+  <text x="120" y="110" font-family="Arial, sans-serif" font-size="24" fill="#1e293b">
+    Health Check
+  </text>
+  <rect x="100" y="140" width="320" height="54" rx="12" fill="#1d4ed8" opacity="0.1"/>
+  <text x="120" y="175" font-family="Arial, sans-serif" font-size="18" fill="#1d4ed8">
+    Run health check
+  </text>
+  <rect x="440" y="60" width="440" height="420" rx="24" fill="#ffffff" stroke="#cbd5f5" stroke-width="3"/>
+  <text x="480" y="110" font-family="Arial, sans-serif" font-size="24" fill="#1e293b">
+    Recovery operations
+  </text>
+  <text x="480" y="150" font-family="Arial, sans-serif" font-size="16" fill="#475569">
+    Backup · Repair · Hard Repair · Export · Import
+  </text>
+  <rect x="460" y="180" width="400" height="48" rx="12" fill="#0f172a" opacity="0.9"/>
+  <text x="660" y="212" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#ffffff">
+    Create Backup
+  </text>
+  <rect x="460" y="240" width="400" height="48" rx="12" fill="#1d4ed8" opacity="0.85"/>
+  <text x="660" y="272" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#ffffff">
+    Repair database
+  </text>
+  <rect x="460" y="300" width="400" height="48" rx="12" fill="#f1f5f9"/>
+  <text x="660" y="332" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#1e293b">
+    Run hard repair
+  </text>
+  <text x="480" y="380" font-family="Arial, sans-serif" font-size="16" fill="#64748b">
+    Placeholder settings overview
+  </text>
+</svg>

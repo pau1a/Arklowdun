@@ -18,7 +18,8 @@
       "@lib/*": ["lib/*"],
       "@bindings/*": ["bindings/*"],
       "@store/*": ["store/*"],
-      "@utils/*": ["utils/*"]
+      "@utils/*": ["utils/*"],
+      "@strings/*": ["strings/*"]
     },
     "isolatedModules": true,
     "noEmit": true,

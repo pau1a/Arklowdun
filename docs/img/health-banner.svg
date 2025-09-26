@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
+  <rect width="960" height="540" fill="#f2f6ff"/>
+  <rect x="80" y="120" width="800" height="120" rx="24" fill="#1f4ed8" opacity="0.85"/>
+  <text x="480" y="185" text-anchor="middle" font-family="Arial, sans-serif" font-size="36" fill="#ffffff">
+    Database issue detected.
+  </text>
+  <text x="480" y="225" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" fill="#e0e9ff">
+    Editing is disabled until repair completes.
+  </text>
+  <rect x="80" y="280" width="800" height="120" rx="24" fill="#f8fbff" stroke="#1f4ed8" stroke-width="4" opacity="0.9"/>
+  <text x="480" y="340" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" fill="#1f4ed8">
+    View details →
+  </text>
+  <text x="480" y="400" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#5b6b99">
+    Placeholder banner illustration
+  </text>
+</svg>

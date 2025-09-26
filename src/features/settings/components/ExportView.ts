@@ -1,7 +1,8 @@
 import createButton from "@ui/Button";
 import { toast } from "@ui/Toast";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { runExport } from "../api/export";
+import { openDirectoryDialog } from "../api/dialog";
+import { recoveryText } from "@strings/recovery";
 
 export interface ExportViewInstance {
   element: HTMLElement;
@@ -14,17 +15,23 @@ export function createExportView(): ExportViewInstance {
 
   const heading = document.createElement("h3");
   heading.id = "settings-export";
-  heading.textContent = "Export data";
+  heading.textContent = recoveryText("db.export.section.title");
 
   const helper = document.createElement("p");
   helper.className = "settings__helper export__helper";
-  helper.textContent = "Create a portable export with data, attachments, and a verification script.";
+  helper.textContent = recoveryText("db.export.section.helper");
 
   const controls = document.createElement("div");
   controls.className = "export__controls";
 
-  const pickButton = createButton({ label: "Choose folder…", variant: "ghost" });
-  const exportButton = createButton({ label: "Export", variant: "primary" });
+  const pickButton = createButton({
+    label: recoveryText("db.export.button.choose"),
+    variant: "ghost",
+  });
+  const exportButton = createButton({
+    label: recoveryText("db.export.button.run"),
+    variant: "primary",
+  });
   exportButton.disabled = true;
 
   const status = document.createElement("p");
@@ -34,11 +41,13 @@ export function createExportView(): ExportViewInstance {
 
   pickButton.onclick = async () => {
     try {
-      const selected = await openDialog({ directory: true, multiple: false });
+      const selected = await openDirectoryDialog();
       if (typeof selected === "string" && selected.length > 0) {
         outDir = selected;
         exportButton.disabled = false;
-        status.textContent = `Destination: ${selected}`;
+        status.textContent = recoveryText("db.export.status.destination", {
+          path: selected,
+        });
       }
     } catch (e) {
       // ignore cancel
@@ -49,15 +58,17 @@ export function createExportView(): ExportViewInstance {
     if (!outDir) return;
     exportButton.disabled = true;
     pickButton.disabled = true;
-    status.textContent = "Export in progress…";
+    status.textContent = recoveryText("db.export.status.running");
     try {
       const entry = await runExport(outDir);
-      status.textContent = `Export complete. Folder: ${entry.directory}`;
+      status.textContent = recoveryText("db.export.status.complete", {
+        path: entry.directory,
+      });
       try {
         const mod = await import("@tauri-apps/plugin-opener");
         const reveal = (mod as any)?.open as undefined | ((p: string) => Promise<void>);
         const action = {
-          label: "Reveal",
+          label: recoveryText("db.common.reveal"),
           onSelect: async () => {
             if (typeof reveal === "function") {
               try {
@@ -70,10 +81,21 @@ export function createExportView(): ExportViewInstance {
             }
           },
         };
-        toast.show({ kind: "success", message: `Export complete: ${entry.directory}`, actions: [action] });
+        toast.show({
+          kind: "success",
+          message: recoveryText("db.export.toast.success_path", {
+            path: entry.directory,
+          }),
+          actions: [action],
+        });
       } catch {
         // Fallback toast without action
-        toast.show({ kind: "success", message: `Export complete: ${entry.directory}` });
+        toast.show({
+          kind: "success",
+          message: recoveryText("db.export.toast.success_path", {
+            path: entry.directory,
+          }),
+        });
       }
     } catch (e: any) {
       const msg = typeof e?.message === "string" ? e.message : String(e);

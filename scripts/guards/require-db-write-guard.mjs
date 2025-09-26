@@ -19,6 +19,12 @@ const allowlist = new Set([
   'db_has_pet_columns',
   'db_get_health_report',
   'db_recheck',
+  'db_import_preview',
+  'db_backup_overview',
+  'db_backup_create',
+  'db_backup_reveal_root',
+  'db_backup_reveal',
+  'db_export_run',
   'search_entities',
   'attachment_open',
   'attachment_reveal',
@@ -110,7 +116,10 @@ for (const file of files) {
     if (/[\[<]/.test(command.name)) {
       continue;
     }
-    if (command.body.includes('ensure_db_writable')) {
+    if (
+      command.body.includes('ensure_db_writable') ||
+      command.body.includes('begin_maintenance')
+    ) {
       continue;
     }
     if (allowlist.has(command.name)) {

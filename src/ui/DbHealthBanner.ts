@@ -1,4 +1,5 @@
 import createButton from '@ui/Button';
+import { recoveryText } from '@strings/recovery';
 
 export type DbHealthBannerState = 'running' | 'healthy' | 'unhealthy';
 
@@ -17,9 +18,9 @@ export type DbHealthBannerElement = HTMLDivElement & {
 };
 
 const defaultMessages: Record<DbHealthBannerState, string> = {
-  running: 'Checking database health…',
-  healthy: 'Database is healthy',
-  unhealthy: 'Database needs attention',
+  running: recoveryText('db.health.banner.running'),
+  healthy: recoveryText('db.health.banner.healthy'),
+  unhealthy: recoveryText('db.health.banner.unhealthy'),
 };
 
 function applyStateClass(el: HTMLElement, state: DbHealthBannerState): void {
@@ -57,7 +58,7 @@ export function createDbHealthBanner(
   actions.className = 'db-health-banner__actions';
 
   const viewButton = createButton({
-    label: 'View details',
+    label: recoveryText('db.common.view_details'),
     variant: 'ghost',
     size: 'sm',
     className: 'db-health-banner__details',

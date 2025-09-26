@@ -2,6 +2,7 @@ import createButton from '@ui/Button';
 import createModal, { type ModalInstance } from '@ui/Modal';
 import type { DbHealthReport } from '@bindings/DbHealthReport';
 import type { AppError } from '@store/index';
+import { recoveryText } from '@strings/recovery';
 
 export type DbHealthPhase = 'idle' | 'pending' | 'error';
 
@@ -40,7 +41,7 @@ function formatDate(value: string | number | null | undefined): string | null {
 }
 
 function formatCheckName(name: string): string {
-  if (!name) return 'Check';
+  if (!name) return recoveryText('db.health.drawer.check_default');
   return name
     .split(/[_\s]+/)
     .filter(Boolean)
@@ -49,9 +50,15 @@ function formatCheckName(name: string): string {
 }
 
 function formatDuration(ms: number): string {
-  if (!Number.isFinite(ms)) return '0 ms';
+  if (!Number.isFinite(ms)) {
+    return recoveryText('db.health.drawer.duration', {
+      value: numberFormatter.format(0),
+    });
+  }
   const safe = Math.max(0, Math.round(ms));
-  return `${numberFormatter.format(safe)} ms`;
+  return recoveryText('db.health.drawer.duration', {
+    value: numberFormatter.format(safe),
+  });
 }
 
 export function createDbHealthDrawer(
@@ -103,7 +110,7 @@ export function createDbHealthDrawer(
   const title = document.createElement('h2');
   title.id = titleId;
   title.className = 'db-health-drawer__title';
-  title.textContent = 'Database health';
+  title.textContent = recoveryText('db.health.drawer.title');
 
   const statusLine = document.createElement('div');
   statusLine.className = 'db-health-drawer__status';
@@ -123,14 +130,14 @@ export function createDbHealthDrawer(
   controls.className = 'db-health-drawer__controls';
 
   const recheckButton = createButton({
-    label: 'Run health check',
+    label: recoveryText('db.health.drawer.recheck'),
     variant: 'primary',
     size: 'sm',
     className: 'db-health-drawer__recheck',
   });
 
   const closeButton = createButton({
-    label: 'Close',
+    label: recoveryText('db.common.close'),
     variant: 'ghost',
     size: 'sm',
     className: 'db-health-drawer__close',
@@ -149,13 +156,20 @@ export function createDbHealthDrawer(
     const hasHandler = typeof currentOnRecheck === 'function';
     if (!hasHandler) {
       recheckButton.hidden = true;
-      recheckButton.update({ disabled: true, label: 'Run health check' });
+      recheckButton.update({
+        disabled: true,
+        label: recoveryText('db.health.drawer.recheck'),
+      });
       return;
     }
 
     recheckButton.hidden = false;
-    const baseLabel = currentReport ? 'Re-run health check' : 'Run health check';
-    const pendingLabel = currentReport ? 'Re-checking…' : 'Checking…';
+    const baseLabel = currentReport
+      ? recoveryText('db.health.drawer.recheck_again')
+      : recoveryText('db.health.drawer.recheck');
+    const pendingLabel = currentReport
+      ? recoveryText('db.health.drawer.rechecking')
+      : recoveryText('db.health.drawer.checking');
     const disable = recheckInFlight || currentPhase === 'pending';
     recheckButton.update({
       label: disable ? pendingLabel : baseLabel,
@@ -195,7 +209,7 @@ export function createDbHealthDrawer(
   checksSection.className = 'db-health-drawer__section';
 
   const checksTitle = document.createElement('h3');
-  checksTitle.textContent = 'Checks';
+  checksTitle.textContent = recoveryText('db.health.drawer.checks');
 
   const checkList = document.createElement('ul');
   checkList.className = 'db-health-drawer__checks';
@@ -206,11 +220,11 @@ export function createDbHealthDrawer(
   offendersSection.className = 'db-health-drawer__section';
 
   const offendersTitle = document.createElement('h3');
-  offendersTitle.textContent = 'Violations';
+  offendersTitle.textContent = recoveryText('db.health.drawer.violations');
 
   const offendersEmpty = document.createElement('p');
   offendersEmpty.className = 'db-health-drawer__offenders-empty';
-  offendersEmpty.textContent = 'No violations detected.';
+  offendersEmpty.textContent = recoveryText('db.health.drawer.no_violations');
 
   const offendersList = document.createElement('ul');
   offendersList.className = 'db-health-drawer__offenders';
@@ -221,7 +235,7 @@ export function createDbHealthDrawer(
   metadataSection.className = 'db-health-drawer__section';
 
   const metadataTitle = document.createElement('h3');
-  metadataTitle.textContent = 'Metadata';
+  metadataTitle.textContent = recoveryText('db.health.drawer.metadata');
 
   const metadataList = document.createElement('dl');
   metadataList.className = 'db-health-drawer__metadata';
@@ -258,7 +272,9 @@ export function createDbHealthDrawer(
 
       const status = document.createElement('span');
       status.className = 'db-health-drawer__check-status';
-      status.textContent = check.passed ? 'Passed' : 'Failed';
+      status.textContent = check.passed
+        ? recoveryText('db.health.drawer.check_passed')
+        : recoveryText('db.health.drawer.check_failed');
       status.classList.add(
         check.passed
           ? 'db-health-drawer__check-status--ok'
@@ -313,7 +329,9 @@ export function createDbHealthDrawer(
 
       const rowId = document.createElement('span');
       rowId.className = 'db-health-drawer__offender-rowid';
-      rowId.textContent = `row ${numberFormatter.format(offender.rowid)}`;
+      rowId.textContent = recoveryText('db.health.drawer.row', {
+        id: numberFormatter.format(offender.rowid),
+      });
 
       headerRow.append(table, rowId);
 
@@ -334,10 +352,16 @@ export function createDbHealthDrawer(
     }
 
     const rows: Array<[string, string | null]> = [
-      ['Schema hash', currentReport.schema_hash || null],
-      ['App version', currentReport.app_version || null],
       [
-        'Generated at',
+        recoveryText('db.health.drawer.metadata_schema_hash'),
+        currentReport.schema_hash || null,
+      ],
+      [
+        recoveryText('db.health.drawer.metadata_app_version'),
+        currentReport.app_version || null,
+      ],
+      [
+        recoveryText('db.health.drawer.metadata_generated_at'),
         formatDate(currentReport.generated_at) ?? currentReport.generated_at,
       ],
     ];
@@ -359,29 +383,41 @@ export function createDbHealthDrawer(
     if (currentPhase === 'pending') {
       parts.push(
         currentReport
-          ? 'Health check is running. Showing the most recent report.'
-          : 'Initial health check is running.',
+          ? recoveryText('db.health.drawer.summary_running_existing')
+          : recoveryText('db.health.drawer.summary_running_initial'),
       );
     }
 
     if (currentReport?.generated_at) {
       const generated = formatDate(currentReport.generated_at);
-      if (generated) parts.push(`Generated ${generated}`);
+      if (generated)
+        parts.push(
+          recoveryText('db.health.description.generated', {
+            timestamp: generated,
+          }),
+        );
     }
 
     if (currentLastUpdated) {
       const updated = formatDate(currentLastUpdated);
-      if (updated) parts.push(`Last updated ${updated}`);
+      if (updated)
+        parts.push(
+          recoveryText('db.health.description.updated', {
+            timestamp: updated,
+          }),
+        );
     }
 
     if (currentReport?.offenders?.length) {
       parts.push(
-        `${numberFormatter.format(currentReport.offenders.length)} violation(s) detected`,
+        recoveryText('db.health.description.violations', {
+          count: numberFormatter.format(currentReport.offenders.length),
+        }),
       );
     }
 
     if (parts.length === 0 && currentPhase === 'error') {
-      parts.push('Unable to retrieve the latest health report.');
+      parts.push(recoveryText('db.health.drawer.summary_unavailable'));
     }
 
     summary.textContent = parts.join(' • ');
@@ -390,20 +426,22 @@ export function createDbHealthDrawer(
 
   const syncStatus = () => {
     let tone: (typeof BADGE_TONES)[number] = 'db-health-drawer__badge--ok';
-    let label = 'Healthy';
+    let label = recoveryText('db.health.drawer.status_healthy');
     let accent = 'var(--color-accent)';
 
     if (currentPhase === 'pending') {
       tone = 'db-health-drawer__badge--running';
-      label = currentReport ? 'Re-checking…' : 'Checking…';
+      label = currentReport
+        ? recoveryText('db.health.drawer.rechecking')
+        : recoveryText('db.health.drawer.checking');
       accent = 'var(--color-accent)';
     } else if (currentPhase === 'error') {
       tone = 'db-health-drawer__badge--error';
-      label = 'Unavailable';
+      label = recoveryText('db.health.drawer.status_unavailable');
       accent = 'var(--color-danger)';
     } else if (currentReport?.status === 'error') {
       tone = 'db-health-drawer__badge--warn';
-      label = 'Needs attention';
+      label = recoveryText('db.health.drawer.status_attention');
       accent = 'var(--color-danger)';
     } else if (tone === 'db-health-drawer__badge--ok') {
       accent = 'var(--color-success)';
@@ -423,7 +461,8 @@ export function createDbHealthDrawer(
     }
 
     const code = currentError?.code ? ` (${currentError.code})` : '';
-    const message = currentError?.message ?? 'Database health report unavailable.';
+    const message =
+      currentError?.message ?? recoveryText('db.health.status.unavailable');
     errorAlert.textContent = `${message}${code}`;
     errorAlert.hidden = false;
   };

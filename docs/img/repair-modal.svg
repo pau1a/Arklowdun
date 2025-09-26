@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
+  <rect width="960" height="540" fill="#101828" opacity="0.6"/>
+  <rect x="180" y="60" width="600" height="420" rx="32" fill="#ffffff"/>
+  <text x="480" y="130" text-anchor="middle" font-family="Arial, sans-serif" font-size="34" fill="#0f172a">
+    Repair database
+  </text>
+  <text x="480" y="170" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" fill="#475569">
+    Creating a pre-repair backup before making changes.
+  </text>
+  <rect x="240" y="210" width="480" height="40" rx="12" fill="#f1f5f9"/>
+  <text x="260" y="238" font-family="Arial, sans-serif" font-size="18" fill="#0f172a">
+    • Backup
+  </text>
+  <rect x="240" y="265" width="480" height="40" rx="12" fill="#f1f5f9" opacity="0.75"/>
+  <text x="260" y="293" font-family="Arial, sans-serif" font-size="18" fill="#0f172a">
+    • Validate
+  </text>
+  <rect x="240" y="320" width="480" height="40" rx="12" fill="#f1f5f9" opacity="0.55"/>
+  <text x="260" y="348" font-family="Arial, sans-serif" font-size="18" fill="#0f172a">
+    • Swap
+  </text>
+  <text x="480" y="380" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#64748b">
+    Placeholder modal walkthrough
+  </text>
+  <rect x="300" y="400" width="140" height="48" rx="12" fill="#1d4ed8"/>
+  <text x="370" y="432" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#ffffff">
+    Reveal backup
+  </text>
+  <rect x="460" y="400" width="140" height="48" rx="12" fill="#e2e8f0"/>
+  <text x="530" y="432" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#0f172a">
+    Close
+  </text>
+</svg>

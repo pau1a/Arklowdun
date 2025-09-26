@@ -1,98 +1,176 @@
-# Database Health Operations
+# Admin Runbook: Database Operations
 
-Operators can run the bundled CLI to check SQLite integrity before taking any
-remediation steps. The `arklowdun db status` command executes the same checks
-the desktop app runs on launch and produces the report that powers the in-app
-health banner and “View details” drawer. See the [DB health UI
-spec](../v1-beta-gate/03-data-safety/PR01.md#ui-surface) for the banner/drawer
-copy and [phase overview](../v1-beta-gate/03-data-safety/README.md#a-detect-db-health)
-for the wider workflow.
+This runbook documents the command-line interfaces that mirror the UI recovery actions. All commands are executed from the project root unless noted. Example outputs are truncated for clarity.
 
-## Running the status command
+## Health Status
 
 ```bash
-arklowdun db status
+$ tauri-cli db status
 ```
 
-The CLI opens the live application database (creating it if missing) and runs
-`PRAGMA quick_check`, `PRAGMA integrity_check`, `PRAGMA foreign_key_check`, and
-storage sanity checks (journal mode, page size, WAL inspection/self-heal). The
-result is printed as a table that mirrors the drawer in the app.
-
-### Example: healthy database
-
-```
-Database health report
-Status       : ok
-Schema hash  : 6f9f87c72c2f4b5aacdb1a3ce3e5b5f7b6789f3c2648c1f513fa09eace0a8ef9
-App version  : 0.1.0
-Generated at : 2024-03-15T18:21:09.114Z
-
-Checks:
-Check                Passed     Duration (ms)  Details
-quick_check          yes                   3  -
-integrity_check      yes                   6  -
-foreign_key_check    yes                   4  -
-storage_sanity       yes                  12  journal_mode=wal; page_size=4096; wal header healed after checkpoint
-
-Offenders: none
-```
-
-### Machine-readable output
-
-Use `--json` when scripting or collecting machine-readable evidence:
-
-```bash
-arklowdun db status --json
-```
-
-Sample payload (truncated for brevity):
+Expected output:
 
 ```json
 {
   "status": "ok",
+  "generated_at": "2025-02-10T19:47:21Z",
   "checks": [
-    {
-      "name": "quick_check",
-      "passed": true,
-      "duration_ms": 3
-    },
-    {
-      "name": "integrity_check",
-      "passed": true,
-      "duration_ms": 6
-    },
-    {
-      "name": "foreign_key_check",
-      "passed": true,
-      "duration_ms": 4
-    },
-    {
-      "name": "storage_sanity",
-      "passed": true,
-      "duration_ms": 12,
-      "details": "journal_mode=wal; page_size=4096; wal header healed after checkpoint"
-    }
-  ],
-  "offenders": [],
-  "schema_hash": "6f9f87c72c2f4b5aacdb1a3ce3e5b5f7b6789f3c2648c1f513fa09eace0a8ef9",
-  "app_version": "0.1.0",
-  "generated_at": "2024-03-15T18:21:09.114Z"
+    { "name": "integrity_check", "passed": true, "duration_ms": 142 }
+  ]
 }
 ```
 
-Consumers can diff successive reports to confirm when a repair job fixes a
-previously failing check or to archive `schema_hash`/`app_version` for audit.
+Exit codes:
 
-## Exit codes and unhealthy handling
+* `0` – Health report retrieved.
+* `64` – Report unavailable. Investigate filesystem access and retry.
 
-`arklowdun db status` exits with status `0` when every check passes and `1` when
-any check fails. Even on failure the report prints in full so operators can see
-which checks tripped and which tables appear under **Offenders**. When the exit
-code is non-zero the desktop app simultaneously shows the persistent health
-banner, blocks write operations, and offers a “View details” drawer with the
-same structured payload; use the UI flow for user-facing remediation guidance
-and the CLI for automation, logging, or remote triage.
+## Backups
 
-Re-run the command after repairs (guided or manual) to confirm the banner clears
-and the CLI returns to exit code `0`.
+Create a snapshot:
+
+```bash
+$ tauri-cli db backup
+```
+
+Example output:
+
+```json
+{
+  "sqlite_path": "/backups/db-2025-02-10.sqlite3",
+  "db_size_bytes": 143285248,
+  "retention": 5
+}
+```
+
+List existing backups:
+
+```bash
+$ tauri-cli db backup --list
+```
+
+Reveal the latest backup on disk:
+
+```bash
+$ tauri-cli db backup --reveal latest
+```
+
+Exit codes:
+
+* `0` – Snapshot created.
+* `65` – Insufficient disk. Free space or update retention.
+* `66` – Permission denied. Run with elevated privileges or adjust folder ACLs.
+
+## Repair
+
+Run a standard repair:
+
+```bash
+$ tauri-cli db repair
+```
+
+The command streams JSON progress events. Final summary:
+
+```json
+{
+  "success": true,
+  "duration_ms": 8432,
+  "steps": [
+    { "step": "backup", "status": "success" },
+    { "step": "swap", "status": "success" }
+  ],
+  "backup_sqlite_path": "/backups/db-2025-02-10.sqlite3"
+}
+```
+
+Exit codes:
+
+* `0` – Repair completed.
+* `70` – Repair failed (review `error` block in JSON output).
+
+## Hard Repair
+
+Use hard repair to rebuild tables one by one:
+
+```bash
+$ tauri-cli db hard-repair
+```
+
+Expected summary:
+
+```json
+{
+  "outcome": "partial",
+  "recovery": {
+    "tables": {
+      "events": { "adds": 1240, "failed": 2 }
+    }
+  },
+  "report_path": "/reports/hard-repair-2025-02-10.json"
+}
+```
+
+Exit codes:
+
+* `0` – Hard repair finished (even with warnings).
+* `70` – Hard repair aborted. Check the report and console output.
+
+## Export
+
+Create a portable bundle:
+
+```bash
+$ tauri-cli db export --out ./exports
+```
+
+Output:
+
+```json
+{
+  "directory": "./exports/arklowdun-2025-02-10",
+  "manifestPath": "./exports/arklowdun-2025-02-10/manifest.json",
+  "verifyShPath": "./exports/arklowdun-2025-02-10/verify.sh"
+}
+```
+
+## Import
+
+Preview an import:
+
+```bash
+$ tauri-cli db import --bundle ./exports/arklowdun-2025-02-10 --mode merge --dry-run
+```
+
+Apply the plan:
+
+```bash
+$ tauri-cli db import --bundle ./exports/arklowdun-2025-02-10 --mode merge --apply
+```
+
+Import exit codes:
+
+* `0` – Import applied successfully.
+* `68` – Bundle schema mismatch.
+* `69` – Validation failed. Inspect the generated report path.
+
+## Reports
+
+List available reports:
+
+```bash
+$ tauri-cli reports list
+```
+
+Show details for a specific report:
+
+```bash
+$ tauri-cli reports show hard-repair-2025-02-10.json
+```
+
+## Troubleshooting
+
+* **Insufficient disk** – Backups and repairs require free space equal to the database size plus 20%. Clear temp files or mount additional storage. Commands exit with `65` (backup) or `70` (repair) when space is inadequate.
+* **Permission denied** – Ensure the CLI runs with rights to the application directory and backup location. On Linux/macOS use `sudo`; on Windows launch an elevated shell.
+* **Schema mismatch** – Import and hard repair may fail if the bundle was produced by an older schema. Regenerate the export after upgrading the app, or run database migrations before importing.
+
+Always capture the JSON output and report files when escalating issues. The `context` block in error payloads contains stack traces and file paths required by engineering.

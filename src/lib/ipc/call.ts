@@ -2,11 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import type { DbHealthReport } from "@bindings/DbHealthReport";
 import type { AppError } from "@bindings/AppError";
 import { actions } from "@store/index";
+import { recoveryText } from "@strings/recovery";
 
 const FALLBACK_CODE = "APP/UNKNOWN";
 export const DB_UNHEALTHY_WRITE_BLOCKED = "DB_UNHEALTHY_WRITE_BLOCKED";
-export const DB_UNHEALTHY_WRITE_BLOCKED_MESSAGE =
-  "Database integrity checks failed. Editing is disabled until repair completes.";
+export const DB_UNHEALTHY_WRITE_BLOCKED_MESSAGE = recoveryText(
+  "db.unhealthy_banner.subtitle",
+);
 
 type UnknownRecord = Record<string, unknown>;
 const isRecord = (v: unknown): v is UnknownRecord =>

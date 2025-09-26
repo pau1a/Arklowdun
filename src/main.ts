@@ -36,6 +36,7 @@ import { runViewCleanups } from "./utils/viewLifecycle";
 import { initTheme } from "@ui/ThemeToggle";
 import { getStartupWindow } from "@lib/ipc/startup";
 import { ensureDbHealthReport, recheckDbHealth } from "./services/dbHealth";
+import { recoveryText } from "@strings/recovery";
 
 const appWindow = getStartupWindow();
 
@@ -126,28 +127,39 @@ function syncDbHealthUi(
   let message: string | null = null;
   if (isPending) {
     message = hasReport
-      ? "Re-checking database health…"
-      : "Checking database health…";
+      ? recoveryText("db.health.status.rechecking")
+      : recoveryText("db.health.status.checking");
   } else if (hasError) {
-    message = error?.message ?? "Database health report unavailable.";
+    message =
+      error?.message ?? recoveryText("db.health.status.unavailable");
   } else if (isUnhealthy) {
-    message = "Database health issues detected.";
+    message = recoveryText("db.health.status.issues");
   } else {
-    message = "Database is healthy";
+    message = recoveryText("db.health.status.healthy");
   }
 
   const descriptionParts: string[] = [];
   const generatedLabel = formatDbHealthTimestamp(report?.generated_at ?? null);
   if (generatedLabel) {
-    descriptionParts.push(`Generated ${generatedLabel}`);
+    descriptionParts.push(
+      recoveryText("db.health.description.generated", {
+        timestamp: generatedLabel,
+      }),
+    );
   }
   const updatedLabel = formatDbHealthTimestamp(lastUpdated ?? null);
   if (updatedLabel) {
-    descriptionParts.push(`Last updated ${updatedLabel}`);
+    descriptionParts.push(
+      recoveryText("db.health.description.updated", {
+        timestamp: updatedLabel,
+      }),
+    );
   }
   if (isUnhealthy && report?.offenders?.length) {
     descriptionParts.push(
-      `${numberFormatter.format(report.offenders.length)} violation(s) detected`,
+      recoveryText("db.health.description.violations", {
+        count: numberFormatter.format(report.offenders.length),
+      }),
     );
   }
   if (hasError && error?.code) {

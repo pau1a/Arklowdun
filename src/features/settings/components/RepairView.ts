@@ -5,16 +5,17 @@ import createButton from "@ui/Button";
 import createModal from "@ui/Modal";
 import { actions, selectors, subscribe } from "@store/index";
 import { toast } from "@ui/Toast";
+import { recoveryText } from "@strings/recovery";
 
 import { runRepair, listenRepairEvents } from "../api/repair";
 import { revealBackup } from "../api/backups";
 
 const STEP_LABELS: Record<DbRepairStep, string> = {
-  backup: "Backup",
-  checkpoint: "Checkpoint",
-  rebuild: "Rebuild",
-  validate: "Validate",
-  swap: "Swap",
+  backup: recoveryText("db.repair.steps.backup"),
+  checkpoint: recoveryText("db.repair.steps.checkpoint"),
+  rebuild: recoveryText("db.repair.steps.rebuild"),
+  validate: recoveryText("db.repair.steps.validate"),
+  swap: recoveryText("db.repair.steps.swap"),
 };
 
 const STATUS_ICONS: Record<DbRepairStepState, string> = {
@@ -34,15 +35,20 @@ const STEP_ORDER: DbRepairStep[] = [
   "swap",
 ];
 
+const numberFormatter = new Intl.NumberFormat();
+
 function formatLowDiskMessage(required?: string, available?: string): string {
   const requiredBytes = Number(required);
   const availableBytes = Number(available);
   if (Number.isFinite(requiredBytes) && Number.isFinite(availableBytes)) {
     const requiredMb = Math.ceil(requiredBytes / 1_000_000);
     const availableMb = Math.floor(availableBytes / 1_000_000);
-    return `Not enough free disk space to rebuild the database. Need roughly ${requiredMb.toLocaleString()} MB, but only ${availableMb.toLocaleString()} MB is available.`;
+    return recoveryText("db.repair.error.disk_precise", {
+      required: numberFormatter.format(requiredMb),
+      available: numberFormatter.format(availableMb),
+    });
   }
-  return "Not enough free disk space to rebuild the database.";
+  return recoveryText("db.repair.error.disk");
 }
 
 interface StepElements {
@@ -66,7 +72,7 @@ export interface RepairViewInstance {
 }
 
 function describeError(error: unknown): string {
-  if (!error) return "Unknown error";
+  if (!error) return recoveryText("db.common.unknown_error");
   if (typeof error === "string") return error;
   if (typeof error === "object") {
     const record = error as {
@@ -95,18 +101,17 @@ export function createRepairView(): RepairViewInstance {
 
   const heading = document.createElement("h3");
   heading.id = "settings-repair";
-  heading.textContent = "Repair";
+  heading.textContent = recoveryText("db.repair.section.title");
 
   const helper = document.createElement("p");
   helper.className = "settings__helper repair__helper";
-  helper.textContent =
-    "Run a guided repair when the database fails health checks. The process creates a backup, rebuilds the data file, verifies integrity, and swaps it into place.";
+  helper.textContent = recoveryText("db.repair.section.helper");
 
   const controls = document.createElement("div");
   controls.className = "repair__controls";
 
   const repairButton = createButton({
-    label: "Repair database",
+    label: recoveryText("db.repair.button.run"),
     variant: "primary",
     className: "repair__action",
   });
@@ -160,7 +165,7 @@ export function createRepairView(): RepairViewInstance {
   const modalTitle = document.createElement("h2");
   modalTitle.id = titleId;
   modalTitle.className = "repair-modal__title";
-  modalTitle.textContent = "Repair database";
+  modalTitle.textContent = recoveryText("db.repair.modal.title");
 
   modalHeader.appendChild(modalTitle);
 
@@ -170,7 +175,7 @@ export function createRepairView(): RepairViewInstance {
   const modalSummary = document.createElement("p");
   modalSummary.id = summaryId;
   modalSummary.className = "repair__outcome";
-  modalSummary.textContent = "Creating a pre-repair backup before making changes.";
+  modalSummary.textContent = recoveryText("db.repair.modal.intro");
 
   const modalDetails = document.createElement("div");
   modalDetails.className = "repair__details";
@@ -215,7 +220,7 @@ export function createRepairView(): RepairViewInstance {
   modalFooter.className = "repair-modal__footer";
 
   const revealButton = createButton({
-    label: "Reveal backup",
+    label: recoveryText("db.repair.modal.reveal"),
     variant: "ghost",
     className: "repair__reveal",
     disabled: true,
@@ -223,7 +228,7 @@ export function createRepairView(): RepairViewInstance {
   revealButton.hidden = true;
 
   const closeButton = createButton({
-    label: "Close",
+    label: recoveryText("db.repair.modal.close"),
     variant: "ghost",
     className: "repair__close",
     onClick: (event) => {
@@ -282,13 +287,13 @@ export function createRepairView(): RepairViewInstance {
 
   function formatSummaryError(summary: DbRepairSummary): string {
     const error = summary.error;
-    if (!error) return "Repair failed.";
+    if (!error) return recoveryText("db.repair.error.generic");
     if (error.code === "DB_REPAIR/LOW_DISK") {
       const context = error.context ?? {};
       return formatLowDiskMessage(context.required_bytes, context.available_bytes);
     }
     if (error.message) return error.message;
-    return "Repair failed.";
+    return recoveryText("db.repair.error.generic");
   }
 
   function applySummary(summary: DbRepairSummary): void {
@@ -302,18 +307,19 @@ export function createRepairView(): RepairViewInstance {
 
     if (summary.success) {
       modalSummary.className = "repair__outcome repair__outcome--success";
-      modalSummary.textContent =
-        "Repair complete. Your data was verified and restored safely.";
+      modalSummary.textContent = recoveryText("db.repair.success");
       if (summary.duration_ms) {
         const seconds = (summary.duration_ms / 1000).toFixed(1);
-        modalSummary.textContent += ` (Elapsed ${seconds}s)`;
+        modalSummary.textContent += recoveryText("db.repair.modal.elapsed", {
+          seconds,
+        });
       }
       revealButton.hidden = !state.backupPath;
       revealButton.update({ disabled: !state.backupPath });
     } else {
       modalSummary.className = "repair__outcome repair__outcome--error";
       const reason = formatSummaryError(summary);
-      modalSummary.textContent = `${reason} Your database remains read-only.`;
+      modalSummary.textContent = `${reason} ${recoveryText("db.repair.modal.read_only")}`;
       revealButton.hidden = !state.backupPath;
       revealButton.update({ disabled: !state.backupPath });
     }
@@ -322,7 +328,7 @@ export function createRepairView(): RepairViewInstance {
 
   function syncStatus(): void {
     if (state.running) {
-      status.textContent = "Repair is in progress…";
+      status.textContent = recoveryText("db.repair.status.running");
       return;
     }
     if (state.errorMessage) {
@@ -331,18 +337,18 @@ export function createRepairView(): RepairViewInstance {
     }
     const health = state.health;
     const unhealthy = health?.report?.status === "error";
-    if (!unhealthy) {
-      status.textContent = "Repair is available after a failed health check.";
-    } else {
-      status.textContent = "";
-    }
+    status.textContent = !unhealthy
+      ? recoveryText("db.repair.status.ready")
+      : "";
   }
 
   function syncRepairButton(): void {
     const health = state.health;
     const unhealthy = health?.report?.status === "error";
     const disabled = state.running || !unhealthy;
-    const label = state.running ? "Repairing…" : "Repair database";
+    const label = state.running
+      ? recoveryText("db.repair.button.running")
+      : recoveryText("db.repair.button.run");
     repairButton.update({ label, disabled });
   }
 
@@ -362,7 +368,7 @@ export function createRepairView(): RepairViewInstance {
     revealButton.update({ disabled: true });
     closeButton.update({ disabled: true });
     modalSummary.className = "repair__outcome";
-    modalSummary.textContent = "Preparing repair operation…";
+    modalSummary.textContent = recoveryText("db.repair.modal.preparing");
 
     modal.setOpen(true);
     currentOpen = true;
@@ -389,7 +395,7 @@ export function createRepairView(): RepairViewInstance {
     } catch (error) {
       state.errorMessage = describeError(error);
       modalSummary.className = "repair__outcome repair__outcome--error";
-      modalSummary.textContent = `${state.errorMessage}. Your database remains read-only.`;
+      modalSummary.textContent = `${state.errorMessage ?? recoveryText("db.repair.error.generic")}. ${recoveryText("db.repair.modal.read_only")}`;
       closeButton.update({ disabled: false });
       toast.show({ kind: "error", message: state.errorMessage });
     } finally {
@@ -408,7 +414,10 @@ export function createRepairView(): RepairViewInstance {
   revealButton.addEventListener("click", (event) => {
     event.preventDefault();
     if (!state.backupPath) {
-      toast.show({ kind: "error", message: "Backup path unavailable." });
+      toast.show({
+        kind: "error",
+        message: recoveryText("db.repair.modal.backup_unavailable"),
+      });
       return;
     }
     void revealBackup(state.backupPath).catch((error) => {

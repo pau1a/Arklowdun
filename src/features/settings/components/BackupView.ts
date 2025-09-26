@@ -2,6 +2,7 @@ import { copyText } from "../api/clipboard";
 import { toast } from "@ui/Toast";
 import createButton from "@ui/Button";
 import type { AppError } from "@bindings/AppError";
+import { recoveryText } from "@strings/recovery";
 import {
   createBackup,
   fetchBackupOverview,
@@ -23,22 +24,45 @@ interface ViewState {
   errorMessage: string | null;
 }
 
-const DEFAULT_HELPER_TEXT =
-  "Create a verified snapshot of the database. The five most recent backups are kept automatically.";
-
+const DEFAULT_HELPER_TEXT = recoveryText("db.backup.section.helper");
+const numberFormatter = new Intl.NumberFormat();
 function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes)) return "0 MB";
-  if (bytes <= 0) return "0 MB";
-  const units = ["bytes", "KB", "MB", "GB", "TB"] as const;
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return recoveryText("db.backup.format.value_unit", {
+      value: numberFormatter.format(0),
+      unit: recoveryText("db.backup.units.mb"),
+    });
+  }
   let value = bytes;
   let unitIndex = 0;
-  while (value >= 1000 && unitIndex < units.length - 1) {
+  while (value >= 1000 && unitIndex < 4) {
     value /= 1000;
     unitIndex += 1;
   }
-  if (unitIndex === 0) return `${Math.round(value)} bytes`;
-  if (value < 10) return `${value.toFixed(1)} ${units[unitIndex]}`;
-  return `${Math.round(value)} ${units[unitIndex]}`;
+  const unitLabel = (() => {
+    switch (unitIndex) {
+      case 0:
+        return recoveryText("db.backup.units.bytes");
+      case 1:
+        return recoveryText("db.backup.units.kb");
+      case 2:
+        return recoveryText("db.backup.units.mb");
+      case 3:
+        return recoveryText("db.backup.units.gb");
+      default:
+        return recoveryText("db.backup.units.tb");
+    }
+  })();
+  const formattedValue =
+    unitIndex === 0
+      ? numberFormatter.format(Math.round(value))
+      : value < 10
+        ? value.toFixed(1)
+        : numberFormatter.format(Math.round(value));
+  return recoveryText("db.backup.format.value_unit", {
+    value: formattedValue,
+    unit: unitLabel,
+  });
 }
 
 function formatDate(value: string): string {
@@ -48,29 +72,46 @@ function formatDate(value: string): string {
 }
 
 function describeError(error: unknown): string {
-  if (!error) return "Unknown error";
+  if (!error) return recoveryText("db.common.unknown_error");
   if (typeof error === "string") return error;
   if (typeof error === "object") {
     const record = error as Partial<AppError>;
-    if (record.code === "DB_BACKUP/LOW_DISK" && record.message) {
-      return record.message;
+    if (record.code === "DB_BACKUP/LOW_DISK") {
+      if (record.message) return record.message;
+      const context = record.context as Record<string, unknown> | undefined;
+      const required = context?.required_bytes ?? context?.required;
+      const size =
+        typeof required === "number"
+          ? formatBytes(Number(required))
+          : String(required ?? "");
+      if (size && size.trim().length > 0) {
+        return recoveryText("db.backup.error.disk", { size });
+      }
+      return recoveryText("db.backup.error.disk", { size: "?" });
     }
     if (record.code === "IO/EACCES" || record.code === "IO/ACCESS") {
-      return "Permission denied writing to backups folder.";
+      return recoveryText("db.backup.error.permission");
     }
     if (record.message) return record.message;
   }
-  return JSON.stringify(error);
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
 }
 
 async function copyPath(path: string): Promise<void> {
   try {
     await copyText(path);
-    toast.show({ kind: "info", message: "Backup path copied to clipboard." });
+    toast.show({
+      kind: "info",
+      message: recoveryText("db.backup.copy.success"),
+    });
   } catch (error) {
     toast.show({
       kind: "error",
-      message: describeError(error) || "Failed to copy path",
+      message: describeError(error) || recoveryText("db.backup.copy.failure"),
     });
   }
 }
@@ -79,7 +120,7 @@ function renderEmpty(list: HTMLElement): void {
   list.textContent = "";
   const empty = document.createElement("li");
   empty.className = "backups__empty";
-  empty.textContent = "No backups yet.";
+  empty.textContent = recoveryText("db.backup.list.empty");
   list.appendChild(empty);
 }
 
@@ -110,7 +151,7 @@ function renderEntries(list: HTMLElement, entries: BackupEntry[]): void {
     actions.className = "backups__item-actions";
 
     const revealButton = createButton({
-      label: "Reveal",
+      label: recoveryText("db.common.reveal"),
       variant: "ghost",
       size: "sm",
       className: "backups__reveal",
@@ -135,10 +176,10 @@ export function createBackupView(): BackupViewInstance {
 
   const heading = document.createElement("h3");
   heading.id = "settings-backups";
-  heading.textContent = "Backups";
+  heading.textContent = recoveryText("db.backup.section.title");
 
   const openFolderBtn = createButton({
-    label: "Open backups folder",
+    label: recoveryText("db.backup.button.open_folder"),
     variant: "ghost",
     size: "sm",
     className: "backups__open-folder",
@@ -162,7 +203,7 @@ export function createBackupView(): BackupViewInstance {
   controls.className = "backups__controls";
 
   const createBtn = createButton({
-    label: "Create Backup",
+    label: recoveryText("db.backup.button.create"),
     variant: "primary",
     className: "backups__create",
   });
@@ -195,9 +236,11 @@ export function createBackupView(): BackupViewInstance {
     if (typeof retention === "number" && retention > 0) {
       const suffix =
         retention === 1
-          ? "The last snapshot is kept automatically."
-          : `The last ${retention} snapshots are kept automatically.`;
-      helper.textContent = `Create a verified snapshot of the database. ${suffix}`;
+          ? recoveryText("db.backup.section.helper_single")
+          : recoveryText("db.backup.section.helper_retained", {
+              count: String(retention),
+            });
+      helper.textContent = `${DEFAULT_HELPER_TEXT} ${suffix}`.trim();
     } else {
       helper.textContent = DEFAULT_HELPER_TEXT;
     }
@@ -208,7 +251,7 @@ export function createBackupView(): BackupViewInstance {
       status.textContent = state.errorMessage;
       status.classList.add("backups__status--error");
     } else if (state.creating) {
-      status.textContent = "Creating backup…";
+      status.textContent = recoveryText("db.backup.status.creating");
       status.classList.remove("backups__status--error");
     } else {
       status.textContent = "";
@@ -222,7 +265,9 @@ export function createBackupView(): BackupViewInstance {
     const required =
       overview?.requiredFreeBytes ?? Number.POSITIVE_INFINITY;
     const enoughSpace = overview ? available >= required : false;
-    const label = state.creating ? "Creating…" : "Create Backup";
+    const label = state.creating
+      ? recoveryText("db.backup.button.creating")
+      : recoveryText("db.backup.button.create");
     const disabled =
       state.loading ||
       state.creating ||
@@ -242,8 +287,15 @@ export function createBackupView(): BackupViewInstance {
     const requiredText = formatBytes(overview.requiredFreeBytes);
     const retention = overview.retentionMaxCount;
     const notEnough = overview.availableBytes < overview.requiredFreeBytes;
-    const warning = notEnough ? " · Not enough free space for a backup." : "";
-    space.textContent = `Available: ${availableText} · Estimated required: ${requiredText} · Retention: last ${retention} snapshots${warning}`;
+    const warning = notEnough
+      ? recoveryText("db.backup.list.warning_suffix")
+      : "";
+    space.textContent = recoveryText("db.backup.list.available", {
+      available: availableText,
+      required: requiredText,
+      count: String(retention ?? 0),
+      warning,
+    });
     space.classList.toggle("backups__space--warning", notEnough);
   }
 
@@ -280,17 +332,17 @@ export function createBackupView(): BackupViewInstance {
       const sizeLabel = formatBytes(entry.manifest.dbSizeBytes);
       toast.show({
         kind: "success",
-        message: `Backup created (${sizeLabel})`,
+        message: recoveryText("db.backup.toast.success", { size: sizeLabel }),
         actions: [
           {
-            label: "Reveal",
+            label: recoveryText("db.backup.toast_actions.reveal"),
             onSelect: () =>
               revealBackup(entry.sqlitePath).catch((error) => {
                 toast.show({ kind: "error", message: describeError(error) });
               }),
           },
           {
-            label: "Copy path",
+            label: recoveryText("db.backup.toast_actions.copy_path"),
             onSelect: () => copyPath(entry.sqlitePath),
           },
         ],

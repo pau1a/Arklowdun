@@ -1,0 +1,266 @@
+{
+  "db": {
+    "unhealthy_banner": {
+      "title": "Database issue detected.",
+      "subtitle": "Editing is disabled until repair completes."
+    },
+    "common": {
+      "unknown_error": "Unknown error",
+      "close": "Close",
+      "view_details": "View details",
+      "reveal": "Reveal",
+      "copy_path": "Copy path",
+      "report_saved": "Report saved to {{path}}",
+      "report_saved_failure": "Failure report saved to {{path}}",
+      "report_path_copied": "Report path copied to clipboard.",
+      "loading": "Loading…"
+    },
+    "health": {
+      "banner": {
+        "running": "Checking database health…",
+        "healthy": "Database is healthy",
+        "unhealthy": "Database needs attention"
+      },
+      "status": {
+        "checking": "Checking database health…",
+        "rechecking": "Re-checking database health…",
+        "issues": "Database health issues detected.",
+        "healthy": "Database is healthy",
+        "unavailable": "Database health report unavailable."
+      },
+      "description": {
+        "generated": "Generated {{timestamp}}",
+        "updated": "Last updated {{timestamp}}",
+        "violations": "{{count}} violation(s) detected"
+      },
+      "drawer": {
+        "title": "Database health",
+        "recheck": "Run health check",
+        "recheck_again": "Re-run health check",
+        "rechecking": "Re-checking…",
+        "checking": "Checking…",
+        "close": "Close",
+        "checks": "Checks",
+        "violations": "Violations",
+        "no_violations": "No violations detected.",
+        "metadata": "Metadata",
+        "metadata_schema_hash": "Schema hash",
+        "metadata_app_version": "App version",
+        "metadata_generated_at": "Generated at",
+        "check_default": "Check",
+        "check_passed": "Passed",
+        "check_failed": "Failed",
+        "row": "row {{id}}",
+        "duration": "{{value}} ms",
+        "summary_running_existing": "Health check is running. Showing the most recent report.",
+        "summary_running_initial": "Initial health check is running.",
+        "summary_unavailable": "Unable to retrieve the latest health report.",
+        "status_healthy": "Healthy",
+        "status_unavailable": "Unavailable",
+        "status_attention": "Needs attention"
+      }
+    },
+    "backup": {
+      "section": {
+        "title": "Backups",
+        "helper": "Create a verified snapshot of the database. The five most recent backups are kept automatically.",
+        "helper_single": "The last snapshot is kept automatically.",
+        "helper_retained": "The last {{count}} snapshots are kept automatically."
+      },
+      "list": {
+        "empty": "No backups yet.",
+        "available": "Available: {{available}} · Estimated required: {{required}} · Retention: last {{count}} snapshots{{warning}}",
+        "warning_suffix": " · Not enough free space for a backup.",
+        "title": "Backups"
+      },
+      "button": {
+        "create": "Create Backup",
+        "creating": "Creating…",
+        "open_folder": "Open backups folder"
+      },
+      "status": {
+        "creating": "Creating backup…"
+      },
+      "format": {
+        "value_unit": "{{value}} {{unit}}"
+      },
+      "units": {
+        "bytes": "bytes",
+        "kb": "KB",
+        "mb": "MB",
+        "gb": "GB",
+        "tb": "TB"
+      },
+      "toast": {
+        "success": "Backup created ({{size}})."
+      },
+      "toast_actions": {
+        "reveal": "Reveal",
+        "copy_path": "Copy path"
+      },
+      "copy": {
+        "success": "Backup path copied to clipboard.",
+        "failure": "Failed to copy path"
+      },
+      "error": {
+        "disk": "Not enough disk space (need ~{{size}}).",
+        "permission": "Permission denied writing to backups folder."
+      }
+    },
+    "repair": {
+      "section": {
+        "title": "Repair",
+        "helper": "Run a guided repair when the database fails health checks. The process creates a backup, rebuilds the data file, verifies integrity, and swaps it into place."
+      },
+      "button": {
+        "run": "Repair database",
+        "running": "Repairing…"
+      },
+      "status": {
+        "running": "Repair is in progress…",
+        "ready": "Repair is available after a failed health check."
+      },
+      "modal": {
+        "title": "Repair database",
+        "intro": "Creating a pre-repair backup before making changes.",
+        "preparing": "Preparing repair operation…",
+        "read_only": "Your database remains read-only.",
+        "reveal": "Reveal backup",
+        "close": "Close",
+        "backup_unavailable": "Backup path unavailable.",
+        "elapsed": " (Elapsed {{seconds}}s)"
+      },
+      "steps": {
+        "backup": "Backup",
+        "checkpoint": "Checkpoint",
+        "rebuild": "Rebuild",
+        "validate": "Validate",
+        "swap": "Swap"
+      },
+      "success": "Repair complete. Your data was verified and restored safely.",
+      "partial": "Repair partially succeeded. {{count}} records could not be restored — download report.",
+      "error": {
+        "generic": "Repair failed.",
+        "disk_precise": "Not enough free disk space to rebuild the database. Need roughly {{required}} MB, but only {{available}} MB is available.",
+        "disk": "Not enough free disk space to rebuild the database."
+      }
+    },
+    "hard_repair": {
+      "section": {
+        "title": "Hard repair",
+        "helper": "Hard Repair rebuilds the database schema from scratch and copies tables one by one. It may skip corrupted rows but always produces a recovery report."
+      },
+      "button": {
+        "run": "Run hard repair",
+        "report": "Copy recovery report path",
+        "start": "Start hard repair",
+        "cancel": "Cancel"
+      },
+      "modal": {
+        "title": "Run hard repair",
+        "warning": "Hard Repair may recover most data but some records may be lost.",
+        "note": "During Hard Repair the application will be unavailable. The original database is preserved as a backup."
+      },
+      "status": {
+        "running": "Running Hard Repair. This may take several minutes.",
+        "complete": "Hard Repair complete. All tables were restored successfully.",
+        "complete_warnings": "Hard Repair complete with warnings — check the recovery report for details.",
+        "partial": "Hard Repair complete. {{count}} record{{suffix}} could not be restored — view report.",
+        "failure": "Hard Repair failed: {{message}}"
+      },
+      "toast": {
+        "copy_success": "Recovery report path copied.",
+        "copy_failure": "Failed to copy path: {{message}}"
+      }
+    },
+    "export": {
+      "section": {
+        "title": "Export data",
+        "helper": "Create a portable export with data, attachments, and a verification script."
+      },
+      "button": {
+        "choose": "Choose folder…",
+        "run": "Export"
+      },
+      "status": {
+        "destination": "Destination: {{path}}",
+        "running": "Export in progress…",
+        "complete": "Export complete. Folder: {{path}}"
+      },
+      "success": "Export complete ({{size}}).",
+      "toast": {
+        "success_path": "Export complete: {{path}}"
+      }
+    },
+    "import": {
+      "section": {
+        "title": "Import data",
+        "helper": "Validate bundles, review the dry-run plan, and apply imports with merge or replace modes."
+      },
+      "mode": {
+        "merge": "Merge (newer wins)",
+        "replace": "Replace (wipe & load)"
+      },
+      "button": {
+        "choose": "Choose bundle…",
+        "preview": "Run dry-run",
+        "import": "Import"
+      },
+      "status": {
+        "none": "No bundle selected.",
+        "selected": "Selected bundle: {{path}}",
+        "planning": "Running validation and planning…",
+        "ready": "Dry-run complete. Review the plan below.",
+        "executing": "Executing import…",
+        "success": "Import completed successfully."
+      },
+      "summary": {
+        "attachments": "Attachments",
+        "attachments_line": "Adds {{adds}} · Updates {{updates}} · Skips {{skips}}",
+        "attachments_applied": "Applied: Adds {{adds}} · Updates {{updates}} · Skips {{skips}}",
+        "attachments_conflicts": "Conflicts ({{count}}):",
+        "attachments_conflict_detail": "{{path}} – {{reason}}",
+        "attachments_conflict_bundle": "bundle {{timestamp}}",
+        "attachments_conflict_live": "live {{timestamp}}",
+        "attachments_conflict_timestamps": "timestamps: {{details}}",
+        "tables": "Tables",
+        "tables_headers": {
+          "table": "Table",
+          "adds": "Adds",
+          "updates": "Updates",
+          "skips": "Skips",
+          "conflicts": "Conflicts"
+        },
+        "tables_planned": "Planned: Adds {{adds}} · Updates {{updates}} · Skips {{skips}}",
+        "tables_applied": "Applied: Adds {{adds}} · Updates {{updates}} · Skips {{skips}}",
+        "validation": "Validation",
+        "validation_bundle_size": "Bundle size: {{size}}",
+        "validation_data_files": "Data files verified: {{count}}",
+        "validation_attachments": "Attachments verified: {{count}}",
+        "tables_conflict_detail": "{{id}} – bundle {{bundle}}, live {{live}}",
+        "conflict_unknown": "unknown"
+      },
+      "error": {
+        "banner": "Import failed.",
+        "dry_run": "Dry-run completed successfully.",
+        "version": "Export bundle version is not compatible with this app.",
+        "detail_code": "Code: {{code}}",
+        "detail_context": "Context:\n{{context}}",
+        "detail_stack": "Stack:\n{{stack}}",
+        "detail_cause": "Cause: {{message}}"
+      },
+      "report": {
+        "success": "Report saved to {{path}}",
+        "failure": "Failure report saved to {{path}}",
+        "reveal": "Reveal report"
+      },
+      "success": "Import complete. {{counts}} records imported.",
+      "dry_run": "Dry-run complete. No changes applied.",
+      "toast": {
+        "dry_run": "Dry-run completed successfully.",
+        "success": "Import completed successfully.",
+        "report_copied": "Report path copied to clipboard."
+      }
+    }
+  }
+}

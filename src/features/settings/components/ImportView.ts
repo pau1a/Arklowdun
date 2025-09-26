@@ -1,7 +1,7 @@
 import createButton from "@ui/Button";
 import createErrorBanner from "@ui/ErrorBanner";
 import { toast } from "@ui/Toast";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { recoveryText } from "@strings/recovery";
 
 import type { ImportMode } from "@bindings/ImportMode";
 import type { ImportPlan } from "@bindings/ImportPlan";
@@ -11,13 +11,13 @@ import type { ImportPreviewDto } from "@bindings/ImportPreviewDto";
 import type { AttachmentsPlan } from "@bindings/AttachmentsPlan";
 import type { AttachmentExecutionSummary } from "@bindings/AttachmentExecutionSummary";
 import { previewImport, executeImport } from "../api/import";
+import { openDirectoryDialog } from "../api/dialog";
 
 export interface ImportViewInstance {
   element: HTMLElement;
 }
 
 const numberFormatter = new Intl.NumberFormat();
-
 type UnknownRecord = Record<string, unknown>;
 
 function isRecord(value: unknown): value is UnknownRecord {
@@ -53,7 +53,9 @@ function extractErrorDetail(error: unknown): string | undefined {
 
   const details: string[] = [];
   if (typeof error.code === "string" && error.code.trim().length > 0) {
-    details.push(`Code: ${error.code}`);
+    details.push(
+      recoveryText("db.import.error.detail_code", { code: error.code }),
+    );
   }
 
   if ("context" in error && isRecord(error.context)) {
@@ -64,18 +66,27 @@ function extractErrorDetail(error: unknown): string | undefined {
       const formatted = contextEntries
         .map(([key, value]) => `${key}: ${String(value)}`)
         .join("\n");
-      details.push(`Context:\n${formatted}`);
+      details.push(
+        recoveryText("db.import.error.detail_context", { context: formatted }),
+      );
     }
     const stackValue = error.context.stack;
     if (typeof stackValue === "string" && stackValue.trim().length > 0) {
-      details.push(`Stack:\n${stackValue.trim()}`);
+      details.push(
+        recoveryText("db.import.error.detail_stack", {
+          stack: stackValue.trim(),
+        }),
+      );
     }
   }
 
   if ("cause" in error && error.cause !== undefined) {
     const causeMessage = describeError(error.cause);
-    if (causeMessage.trim().length > 0 && causeMessage !== "Unknown error") {
-      details.push(`Cause: ${causeMessage}`);
+    const unknown = recoveryText("db.common.unknown_error");
+    if (causeMessage.trim().length > 0 && causeMessage !== unknown) {
+      details.push(
+        recoveryText("db.import.error.detail_cause", { message: causeMessage }),
+      );
     }
   }
 
@@ -95,26 +106,64 @@ function parseErrorInfo(error: unknown): {
   };
 }
 
+function resolveByteUnit(index: number): string {
+  switch (index) {
+    case 0:
+      return recoveryText("db.backup.units.bytes");
+    case 1:
+      return recoveryText("db.backup.units.kb");
+    case 2:
+      return recoveryText("db.backup.units.mb");
+    case 3:
+      return recoveryText("db.backup.units.gb");
+    default:
+      return recoveryText("db.backup.units.tb");
+  }
+}
+
 function formatBytes(value: number | bigint): string {
   const numeric = typeof value === "bigint" ? Number(value) : value;
-  if (numeric < 1024) return `${numberFormatter.format(numeric)} bytes`;
-  const units = ["KB", "MB", "GB", "TB"] as const;
+  if (numeric < 1024) {
+    return recoveryText("db.backup.format.value_unit", {
+      value: numberFormatter.format(numeric),
+      unit: resolveByteUnit(0),
+    });
+  }
   let size = numeric;
-  let unitIndex = 0;
-  while (size >= 1024 && unitIndex < units.length - 1) {
+  let unitIndex = 1;
+  while (size >= 1024 && unitIndex < 4) {
     size /= 1024;
     unitIndex += 1;
   }
-  return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[unitIndex]}`;
+  const unitLabel = resolveByteUnit(unitIndex);
+  const formatted = size >= 10
+    ? numberFormatter.format(Math.round(size))
+    : size.toFixed(1);
+  return recoveryText("db.backup.format.value_unit", {
+    value: formatted,
+    unit: unitLabel,
+  });
 }
 
 function describeError(error: unknown): string {
-  if (!error) return "Unknown error";
+  if (!error) return recoveryText("db.common.unknown_error");
   if (typeof error === "string") return error;
-  if (typeof error === "object" && "message" in error) {
-    return String((error as { message?: unknown }).message ?? "Unknown error");
+  if (typeof error === "object") {
+    const record = error as { message?: unknown; code?: unknown };
+    const code = typeof record.code === "string" ? record.code : null;
+    if (code === "DB_IMPORT/VERSION") {
+      return recoveryText("db.import.error.version");
+    }
+    if ("message" in record) {
+      const text = String(record.message ?? "");
+      if (text.trim().length) return text;
+    }
   }
-  return JSON.stringify(error);
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return recoveryText("db.common.unknown_error");
+  }
 }
 
 function summarizeTablePlan(plan: ImportPlan): {
@@ -154,12 +203,16 @@ function renderAttachmentsSummary(
 ) {
   container.innerHTML = "";
   const heading = document.createElement("h4");
-  heading.textContent = "Attachments";
+  heading.textContent = recoveryText("db.import.summary.attachments");
   heading.className = "import__subheading";
 
   const summary = document.createElement("p");
   summary.className = "import__summary-line";
-  summary.textContent = `Adds ${numberFormatter.format(plan.adds)} · Updates ${numberFormatter.format(plan.updates)} · Skips ${numberFormatter.format(plan.skips)}`;
+  summary.textContent = recoveryText("db.import.summary.attachments_line", {
+    adds: numberFormatter.format(plan.adds),
+    updates: numberFormatter.format(plan.updates),
+    skips: numberFormatter.format(plan.skips),
+  });
 
   const frag = document.createDocumentFragment();
   frag.append(heading, summary);
@@ -167,31 +220,60 @@ function renderAttachmentsSummary(
   if (execution) {
     const executionLine = document.createElement("p");
     executionLine.className = "import__summary-line";
-    executionLine.textContent = `Applied: Adds ${numberFormatter.format(execution.adds)} · Updates ${numberFormatter.format(execution.updates)} · Skips ${numberFormatter.format(execution.skips)}`;
+    executionLine.textContent = recoveryText(
+      "db.import.summary.attachments_applied",
+      {
+        adds: numberFormatter.format(execution.adds),
+        updates: numberFormatter.format(execution.updates),
+        skips: numberFormatter.format(execution.skips),
+      },
+    );
     frag.append(executionLine);
   }
 
   if (plan.conflicts.length > 0) {
     const listHeading = document.createElement("p");
     listHeading.className = "import__summary-line";
-    listHeading.textContent = `Conflicts (${plan.conflicts.length}):`;
+    listHeading.textContent = recoveryText(
+      "db.import.summary.attachments_conflicts",
+      {
+        count: String(plan.conflicts.length),
+      },
+    );
 
     const list = document.createElement("ul");
     list.className = "import__conflicts";
     for (const conflict of plan.conflicts) {
       const item = document.createElement("li");
       const details: string[] = [
-        `${conflict.relativePath} – ${conflict.reason}`,
+        recoveryText("db.import.summary.attachments_conflict_detail", {
+          path: conflict.relativePath,
+          reason: conflict.reason,
+        }),
       ];
       const stampParts: string[] = [];
       if (conflict.bundleUpdatedAt !== null) {
-        stampParts.push(`bundle ${conflict.bundleUpdatedAt}`);
+        stampParts.push(
+          recoveryText(
+            "db.import.summary.attachments_conflict_bundle",
+            { timestamp: conflict.bundleUpdatedAt },
+          ),
+        );
       }
       if (conflict.liveUpdatedAt !== null) {
-        stampParts.push(`live ${conflict.liveUpdatedAt}`);
+        stampParts.push(
+          recoveryText("db.import.summary.attachments_conflict_live", {
+            timestamp: conflict.liveUpdatedAt,
+          }),
+        );
       }
       if (stampParts.length > 0) {
-        details.push(`timestamps: ${stampParts.join(" vs ")}`);
+        details.push(
+          recoveryText(
+            "db.import.summary.attachments_conflict_timestamps",
+            { details: stampParts.join(" vs ") },
+          ),
+        );
       }
       item.textContent = details.join(" — ");
       list.appendChild(item);
@@ -209,7 +291,7 @@ function renderPlanTables(
 ) {
   container.innerHTML = "";
   const heading = document.createElement("h4");
-  heading.textContent = "Tables";
+  heading.textContent = recoveryText("db.import.summary.tables");
   heading.className = "import__subheading";
 
   const table = document.createElement("table");
@@ -217,7 +299,13 @@ function renderPlanTables(
 
   const thead = document.createElement("thead");
   const headerRow = document.createElement("tr");
-  ["Table", "Adds", "Updates", "Skips", "Conflicts"].forEach((label) => {
+  [
+    recoveryText("db.import.summary.tables_headers.table"),
+    recoveryText("db.import.summary.tables_headers.adds"),
+    recoveryText("db.import.summary.tables_headers.updates"),
+    recoveryText("db.import.summary.tables_headers.skips"),
+    recoveryText("db.import.summary.tables_headers.conflicts"),
+  ].forEach((label) => {
     const th = document.createElement("th");
     th.scope = "col";
     th.textContent = label;
@@ -276,9 +364,18 @@ function renderPlanTables(
         const item = document.createElement("li");
         const bundleTs = conflict.bundleUpdatedAt ?? null;
         const liveTs = conflict.liveUpdatedAt ?? null;
-        const bundleLabel = bundleTs !== null ? new Date(bundleTs).toLocaleString() : "unknown";
-        const liveLabel = liveTs !== null ? new Date(liveTs).toLocaleString() : "unknown";
-        item.textContent = `${conflict.id} – bundle ${bundleLabel}, live ${liveLabel}`;
+        const bundleLabel =
+          bundleTs !== null
+            ? new Date(bundleTs).toLocaleString()
+            : recoveryText("db.import.summary.conflict_unknown");
+        const liveLabel =
+          liveTs !== null
+            ? new Date(liveTs).toLocaleString()
+            : recoveryText("db.import.summary.conflict_unknown");
+        item.textContent = recoveryText(
+          "db.import.summary.tables_conflict_detail",
+          { id: conflict.id, bundle: bundleLabel, live: liveLabel },
+        );
         list.appendChild(item);
       }
       cell.appendChild(list);
@@ -295,13 +392,21 @@ function renderPlanTables(
     const totals = summarizeExecution(execution);
     const summary = document.createElement("p");
     summary.className = "import__summary-line";
-    summary.textContent = `Applied: Adds ${numberFormatter.format(totals.adds)} · Updates ${numberFormatter.format(totals.updates)} · Skips ${numberFormatter.format(totals.skips)}`;
+    summary.textContent = recoveryText("db.import.summary.tables_applied", {
+      adds: numberFormatter.format(totals.adds),
+      updates: numberFormatter.format(totals.updates),
+      skips: numberFormatter.format(totals.skips),
+    });
     container.appendChild(summary);
   } else {
     const totals = summarizeTablePlan(plan);
     const summary = document.createElement("p");
     summary.className = "import__summary-line";
-    summary.textContent = `Planned: Adds ${numberFormatter.format(totals.adds)} · Updates ${numberFormatter.format(totals.updates)} · Skips ${numberFormatter.format(totals.skips)}`;
+    summary.textContent = recoveryText("db.import.summary.tables_planned", {
+      adds: numberFormatter.format(totals.adds),
+      updates: numberFormatter.format(totals.updates),
+      skips: numberFormatter.format(totals.skips),
+    });
     container.appendChild(summary);
   }
 }
@@ -309,20 +414,29 @@ function renderPlanTables(
 function renderValidationSummary(container: HTMLElement, report: ValidationReport) {
   container.innerHTML = "";
   const heading = document.createElement("h4");
-  heading.textContent = "Validation";
+  heading.textContent = recoveryText("db.import.summary.validation");
   heading.className = "import__subheading";
 
   const bundleSize = document.createElement("p");
   bundleSize.className = "import__summary-line";
-  bundleSize.textContent = `Bundle size: ${formatBytes(report.bundleSizeBytes)}`;
+  bundleSize.textContent = recoveryText(
+    "db.import.summary.validation_bundle_size",
+    { size: formatBytes(report.bundleSizeBytes) },
+  );
 
   const dataFiles = document.createElement("p");
   dataFiles.className = "import__summary-line";
-  dataFiles.textContent = `Data files verified: ${numberFormatter.format(report.dataFilesVerified)}`;
+  dataFiles.textContent = recoveryText(
+    "db.import.summary.validation_data_files",
+    { count: numberFormatter.format(report.dataFilesVerified) },
+  );
 
   const attachments = document.createElement("p");
   attachments.className = "import__summary-line";
-  attachments.textContent = `Attachments verified: ${numberFormatter.format(report.attachmentsVerified)}`;
+  attachments.textContent = recoveryText(
+    "db.import.summary.validation_attachments",
+    { count: numberFormatter.format(report.attachmentsVerified) },
+  );
 
   container.append(heading, bundleSize, dataFiles, attachments);
 }
@@ -334,11 +448,11 @@ export function createImportView(): ImportViewInstance {
 
   const heading = document.createElement("h3");
   heading.id = "settings-import";
-  heading.textContent = "Import data";
+  heading.textContent = recoveryText("db.import.section.title");
 
   const helper = document.createElement("p");
   helper.className = "settings__helper import__helper";
-  helper.textContent = "Validate bundles, review the dry-run plan, and apply imports with merge or replace modes.";
+  helper.textContent = recoveryText("db.import.section.helper");
 
   const modeGroup = document.createElement("div");
   modeGroup.className = "import__mode";
@@ -349,35 +463,50 @@ export function createImportView(): ImportViewInstance {
   mergeRadio.name = "import-mode";
   mergeRadio.value = "merge";
   mergeRadio.checked = true;
-  mergeLabel.append(mergeRadio, document.createTextNode(" Merge (newer wins)"));
+  mergeLabel.append(
+    mergeRadio,
+    document.createTextNode(` ${recoveryText("db.import.mode.merge")}`),
+  );
 
   const replaceLabel = document.createElement("label");
   const replaceRadio = document.createElement("input");
   replaceRadio.type = "radio";
   replaceRadio.name = "import-mode";
   replaceRadio.value = "replace";
-  replaceLabel.append(replaceRadio, document.createTextNode(" Replace (wipe & load)"));
+  replaceLabel.append(
+    replaceRadio,
+    document.createTextNode(` ${recoveryText("db.import.mode.replace")}`),
+  );
 
   modeGroup.append(mergeLabel, replaceLabel);
 
   const controls = document.createElement("div");
   controls.className = "import__controls";
 
-  const chooseButton = createButton({ label: "Choose bundle…", variant: "ghost" });
-  const previewButton = createButton({ label: "Run dry-run", variant: "ghost" });
-  const importButton = createButton({ label: "Import", variant: "primary" });
+  const chooseButton = createButton({
+    label: recoveryText("db.import.button.choose"),
+    variant: "ghost",
+  });
+  const previewButton = createButton({
+    label: recoveryText("db.import.button.preview"),
+    variant: "ghost",
+  });
+  const importButton = createButton({
+    label: recoveryText("db.import.button.import"),
+    variant: "primary",
+  });
   previewButton.disabled = true;
   importButton.disabled = true;
 
   const errorBanner = createErrorBanner({
-    message: "Import failed.",
+    message: recoveryText("db.import.error.banner"),
   });
   errorBanner.classList.add("import__error");
   errorBanner.hidden = true;
 
   const status = document.createElement("p");
   status.className = "import__status";
-  status.textContent = "No bundle selected.";
+  status.textContent = recoveryText("db.import.status.none");
 
   const validationSummary = document.createElement("div");
   validationSummary.className = "import__summary";
@@ -398,7 +527,10 @@ export function createImportView(): ImportViewInstance {
   const reportText = document.createElement("p");
   reportText.className = "import__summary-line";
 
-  const revealButton = createButton({ label: "Reveal report", variant: "ghost" });
+  const revealButton = createButton({
+    label: recoveryText("db.import.report.reveal"),
+    variant: "ghost",
+  });
   revealButton.disabled = true;
 
   reportContainer.append(reportText, revealButton);
@@ -441,8 +573,10 @@ export function createImportView(): ImportViewInstance {
 
   const showReport = (path: string, outcome: "success" | "failure") => {
     lastReportPath = path;
-    const prefix = outcome === "failure" ? "Failure report saved to" : "Report saved to";
-    reportText.textContent = `${prefix} ${path}`;
+    reportText.textContent =
+      outcome === "failure"
+        ? recoveryText("db.common.report_saved_failure", { path })
+        : recoveryText("db.common.report_saved", { path });
     reportContainer.hidden = false;
     revealButton.disabled = false;
   };
@@ -484,10 +618,12 @@ export function createImportView(): ImportViewInstance {
   chooseButton.onclick = async () => {
     if (busy) return;
     try {
-      const selected = await openDialog({ directory: true, multiple: false });
+      const selected = await openDirectoryDialog();
       if (typeof selected === "string" && selected.length > 0) {
         selectedPath = selected;
-        status.textContent = `Selected bundle: ${selected}`;
+        status.textContent = recoveryText("db.import.status.selected", {
+          path: selected,
+        });
         previewButton.disabled = false;
         validationSummary.hidden = true;
         planContainer.hidden = true;
@@ -505,7 +641,7 @@ export function createImportView(): ImportViewInstance {
   previewButton.onclick = async () => {
     if (!selectedPath || busy) return;
     setBusy(true);
-    status.textContent = "Running validation and planning…";
+    status.textContent = recoveryText("db.import.status.planning");
     validationSummary.hidden = true;
     planContainer.hidden = true;
     attachmentsSummary.hidden = true;
@@ -520,9 +656,12 @@ export function createImportView(): ImportViewInstance {
       planContainer.hidden = false;
       renderAttachmentsSummary(attachmentsSummary, preview.plan.attachments);
       attachmentsSummary.hidden = false;
-      status.textContent = "Dry-run complete. Review the plan below.";
+      status.textContent = recoveryText("db.import.status.ready");
       importButton.disabled = false;
-      toast.show({ kind: "success", message: "Dry-run completed successfully." });
+      toast.show({
+        kind: "success",
+        message: recoveryText("db.import.toast.dry_run"),
+      });
     } catch (error) {
       clearReport();
       showError(error);
@@ -536,7 +675,7 @@ export function createImportView(): ImportViewInstance {
   importButton.onclick = async () => {
     if (!selectedPath || !lastPreview || busy) return;
     setBusy(true);
-    status.textContent = "Executing import…";
+    status.textContent = recoveryText("db.import.status.executing");
     hideError();
     clearReport();
     try {
@@ -558,10 +697,10 @@ export function createImportView(): ImportViewInstance {
         result.execution.attachments,
       );
       attachmentsSummary.hidden = false;
-      status.textContent = "Import completed successfully.";
+      status.textContent = recoveryText("db.import.status.success");
       toast.show({
         kind: "success",
-        message: "Import completed successfully.",
+        message: recoveryText("db.import.toast.success"),
       });
       showReport(result.reportPath, "success");
       hideError();
@@ -583,7 +722,10 @@ export function createImportView(): ImportViewInstance {
     } catch {
       try {
         await navigator.clipboard?.writeText?.(lastReportPath);
-        toast.show({ kind: "info", message: "Report path copied to clipboard." });
+        toast.show({
+          kind: "info",
+          message: recoveryText("db.import.toast.report_copied"),
+        });
       } catch {
         // ignore copy failures
       }
