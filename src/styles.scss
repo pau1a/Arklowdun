@@ -76,7 +76,7 @@ main {
 }
 
 #view {
-  background-color: #001220;
+  background-color: var(--color-panel);
   background-image: url("/src/assets/backgrounds/dashboard.svg");
   background-size: cover;
   background-position: center;
