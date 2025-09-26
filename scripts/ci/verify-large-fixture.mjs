@@ -154,6 +154,11 @@ async function main() {
 
     const expectedAttachments = JSON.parse(await fsPromises.readFile(expectedAttachmentsPath, 'utf8'));
 
+    const sortByRootAndPath = (a, b) => {
+      if (a.rootKey !== b.rootKey) return a.rootKey.localeCompare(b.rootKey);
+      return a.relativePath.localeCompare(b.relativePath);
+    };
+
     const attachmentsActual = [
       ...(await collectAttachments(attachmentsDir, 'attachments')),
       ...(await collectAttachments(path.dirname(dbPath), 'appData', {
@@ -165,6 +170,8 @@ async function main() {
         },
       })),
     ];
+
+    attachmentsActual.sort(sortByRootAndPath);
 
     if (stableSerialize(attachmentsActual) !== stableSerialize(expectedAttachments)) {
       console.error('Attachment corpus output does not match golden snapshot.');
