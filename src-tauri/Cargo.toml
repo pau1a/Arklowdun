@@ -38,6 +38,7 @@ tauri-plugin-clipboard-manager = "2"
 uuid = { version = "1", features = ["v7", "serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 chrono-tz = "=0.10.4"
+iana-time-zone = "0.1"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
 anyhow = "1"
 ts-rs = { version = "10", features = ["no-serde-warnings"] }

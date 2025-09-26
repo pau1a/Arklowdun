@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Local, SecondsFormat, Utc};
-use chrono_tz::system::get_timezone;
+use iana_time_zone::get_timezone;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 use sqlx::SqlitePool;
@@ -106,8 +106,8 @@ impl ReportError {
                 "Report exceeded {MAX_REPORT_BYTES} bytes; truncated {total_dropped} array elements"
             ),
         )
-        .with_context("limit_bytes", MAX_REPORT_BYTES.into())
-        .with_context("dropped_elements", total_dropped.into())
+        .with_context("limit_bytes", MAX_REPORT_BYTES as u64)
+        .with_context("dropped_elements", total_dropped as u64)
     }
 }
 
@@ -322,7 +322,7 @@ fn debug_validate_against_schema(bytes: &[u8]) {
     let value: Value =
         serde_json::from_slice(bytes).expect("persisted reports must serialize into valid JSON");
     if let Err(err) = REPORT_SCHEMA.validate(&value) {
-        panic!("persisted report failed schema validation: {err}");
+        panic!("persisted report failed schema validation: {err:?}");
     }
 }
 
@@ -406,7 +406,7 @@ fn host_timezone_label() -> String {
     let now = Local::now();
     let offset = now.format("%:z");
     match get_timezone() {
-        Ok(tz) => format!("{} ({offset})", tz.name()),
+        Ok(tz_name) => format!("{tz_name} ({offset})"),
         Err(_) => {
             let label = now.format("%Z").to_string();
             if label.trim().is_empty() {

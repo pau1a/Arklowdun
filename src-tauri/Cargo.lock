@@ -166,6 +166,7 @@ dependencies = [
  "file-rotate",
  "fs2",
  "futures",
+ "iana-time-zone",
  "include_dir",
  "jsonschema",
  "libc",
