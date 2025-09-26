@@ -120,6 +120,7 @@ pub mod ipc;
 pub mod logging;
 pub mod migrate;
 pub mod migration_guard;
+pub mod ops;
 mod repo;
 pub mod security;
 mod state;

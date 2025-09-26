@@ -3,13 +3,4 @@ import type { AppError } from "./AppError";
 import type { DbHealthReport } from "./DbHealthReport";
 import type { DbRepairStepReport } from "./DbRepairStepReport";
 
-export type DbRepairSummary = {
-  success: boolean,
-  steps: Array<DbRepairStepReport>,
-  error?: AppError | null,
-  health_report?: DbHealthReport | null,
-  backup_directory?: string | null,
-  backup_sqlite_path?: string | null,
-  archived_db_path?: string | null,
-  duration_ms: number,
-};
+export type DbRepairSummary = { success: boolean, steps: Array<DbRepairStepReport>, error?: AppError, health_report?: DbHealthReport, backup_directory?: string, backup_sqlite_path?: string, archived_db_path?: string, duration_ms: number, };

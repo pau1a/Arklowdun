@@ -12,6 +12,9 @@ use std::pin::Pin;
 use std::str::FromStr;
 use tauri::{AppHandle, Manager};
 
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, Ordering};
+
 #[path = "db/health.rs"]
 pub mod health;
 
@@ -34,6 +37,10 @@ pub mod swap;
 pub mod schema_rebuild;
 
 #[allow(dead_code)]
+#[cfg(test)]
+pub(super) static WRITE_ATOMIC_CRASH_BEFORE_RENAME: AtomicBool = AtomicBool::new(false);
+
+#[allow(dead_code)]
 pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     let dir = path
         .parent()
@@ -49,6 +56,11 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     tmp.write_all(data)?;
     tmp.as_file().sync_all()?;
     let tmp_path = tmp.into_temp_path();
+
+    #[cfg(test)]
+    if WRITE_ATOMIC_CRASH_BEFORE_RENAME.swap(false, Ordering::SeqCst) {
+        return Err(anyhow!("simulated crash before rename"));
+    }
 
     #[cfg(unix)]
     {
@@ -227,6 +239,59 @@ async fn log_effective_pragmas(pool: &Pool<Sqlite>) {
             event = "db_open_warning",
             msg = "journal_mode != WAL; running with reduced crash safety"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::sync::atomic::Ordering;
+    use tempfile::tempdir;
+
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_preserves_existing_permissions() {
+        super::WRITE_ATOMIC_CRASH_BEFORE_RENAME.store(false, Ordering::SeqCst);
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("data.json");
+        fs::write(&path, b"old").unwrap();
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o700);
+        fs::set_permissions(&path, perms.clone()).unwrap();
+
+        write_atomic(&path, b"new").unwrap();
+
+        let updated = fs::metadata(&path).unwrap().permissions();
+        assert_eq!(updated.mode() & 0o777, 0o700);
+    }
+
+    #[test]
+    fn write_atomic_failure_does_not_corrupt_existing_file() {
+        super::WRITE_ATOMIC_CRASH_BEFORE_RENAME.store(false, Ordering::SeqCst);
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("artifact.txt");
+        fs::write(&path, b"stable").unwrap();
+
+        // Successful write establishes baseline content.
+        write_atomic(&path, b"baseline").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"baseline");
+
+        // Next invocation simulates a crash prior to rename.
+        super::WRITE_ATOMIC_CRASH_BEFORE_RENAME.store(true, Ordering::SeqCst);
+        let err = write_atomic(&path, b"corrupted").unwrap_err();
+        assert_eq!(err.to_string(), "simulated crash before rename");
+
+        // The final file is untouched and no stray temp files remain.
+        assert_eq!(fs::read(&path).unwrap(), b"baseline");
+        let entries: Vec<_> = fs::read_dir(temp.path())
+            .unwrap()
+            .map(|res| res.unwrap().path())
+            .collect();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(fs::read(&entries[0]).unwrap(), b"baseline");
     }
 }
 
