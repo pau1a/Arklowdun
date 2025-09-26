@@ -2,8 +2,4 @@
 import type { DbRepairStep } from "./DbRepairStep";
 import type { DbRepairStepState } from "./DbRepairStepState";
 
-export type DbRepairStepReport = {
-  step: DbRepairStep,
-  status: DbRepairStepState,
-  message?: string | null,
-};
+export type DbRepairStepReport = { step: DbRepairStep, status: DbRepairStepState, message?: string, };
