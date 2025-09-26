@@ -1,4 +1,6 @@
-use super::fs_policy::{canonicalize_and_verify, reject_symlinks, FsPolicyError, RootKey};
+use super::fs_policy::{
+    base_for, canonicalize_and_verify, reject_symlinks, FsPolicyError, RootKey,
+};
 use tauri::Manager;
 use tempfile::tempdir;
 
@@ -8,9 +10,9 @@ fn setup() -> (
 ) {
     let app = tauri::test::mock_app();
     let handle = app.app_handle();
-    // Ensure attachments dir exists under the mock app_data_dir
-    let base = handle.path().app_data_dir().unwrap();
-    std::fs::create_dir_all(base.join("attachments")).unwrap();
+    // Ensure attachments dir exists under whichever base the policy resolves
+    let attachments = base_for(RootKey::Attachments, &handle).unwrap();
+    std::fs::create_dir_all(&attachments).unwrap();
     // Keep a tempdir alive for parity with previous signature; unused
     let dir = tempdir().unwrap();
     (handle.clone(), dir)
@@ -46,11 +48,8 @@ fn reject_cross_volume() {
 #[test]
 fn allow_absolute_inside() {
     let (handle, _tmp) = setup();
-    let abs = handle
-        .path()
-        .app_data_dir()
+    let abs = base_for(RootKey::Attachments, &handle)
         .unwrap()
-        .join("attachments")
         .join("img.png");
     let res =
         canonicalize_and_verify(abs.to_str().unwrap(), RootKey::Attachments, &handle).unwrap();
@@ -61,11 +60,8 @@ fn allow_absolute_inside() {
 fn allow_relative_inside() {
     let (handle, _tmp) = setup();
     let res = canonicalize_and_verify("file.txt", RootKey::Attachments, &handle).unwrap();
-    let expected = handle
-        .path()
-        .app_data_dir()
+    let expected = base_for(RootKey::Attachments, &handle)
         .unwrap()
-        .join("attachments")
         .join("file.txt");
     assert_eq!(res.real_path, expected);
 }
@@ -75,7 +71,8 @@ fn allow_relative_inside() {
 fn reject_symlink_segment() {
     use std::os::unix::fs::symlink;
     let (handle, _tmp) = setup();
-    let base = handle.path().app_data_dir().unwrap();
+    let attachments = base_for(RootKey::Attachments, &handle).unwrap();
+    let base = attachments.parent().unwrap().to_path_buf();
     let outside = base.join("outside");
     std::fs::create_dir_all(&outside).unwrap();
     // Create a unique symlink name to avoid collisions across parallel runs
@@ -86,7 +83,7 @@ fn reject_symlink_segment() {
             .unwrap()
             .as_nanos()
     );
-    let link = base.join("attachments").join(&unique);
+    let link = attachments.join(&unique);
     if link.exists() {
         let _ = std::fs::remove_file(&link);
     }
@@ -100,8 +97,8 @@ fn reject_symlink_segment() {
 #[test]
 fn reject_outside_root() {
     let (handle, _tmp) = setup();
-    let base = handle.path().app_data_dir().unwrap();
-    let outside = base.parent().unwrap().join("evil.txt");
+    let attachments = base_for(RootKey::Attachments, &handle).unwrap();
+    let outside = attachments.parent().unwrap().join("evil.txt");
     let err = canonicalize_and_verify(outside.to_str().unwrap(), RootKey::Attachments, &handle)
         .unwrap_err();
     assert!(matches!(err, FsPolicyError::OutsideRoot));

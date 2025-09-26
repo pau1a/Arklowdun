@@ -245,14 +245,28 @@ async fn log_effective_pragmas(pool: &Pool<Sqlite>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use once_cell::sync::Lazy;
     use std::fs;
     use std::sync::atomic::Ordering;
+    use std::sync::Mutex;
     use tempfile::tempdir;
+
+    // Serialize tests that mutate the global crash flag to avoid interleaving.
+    static WRITE_ATOMIC_TEST_GUARD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     #[cfg(unix)]
     #[test]
     fn write_atomic_preserves_existing_permissions() {
+        let _g = WRITE_ATOMIC_TEST_GUARD.lock().unwrap();
+        // Always start clean and ensure we leave it clean.
         super::WRITE_ATOMIC_CRASH_BEFORE_RENAME.store(false, Ordering::SeqCst);
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                super::WRITE_ATOMIC_CRASH_BEFORE_RENAME.store(false, Ordering::SeqCst);
+            }
+        }
+        let _reset = Reset;
         use std::os::unix::fs::PermissionsExt;
 
         let temp = tempdir().unwrap();
@@ -270,7 +284,15 @@ mod tests {
 
     #[test]
     fn write_atomic_failure_does_not_corrupt_existing_file() {
+        let _g = WRITE_ATOMIC_TEST_GUARD.lock().unwrap();
         super::WRITE_ATOMIC_CRASH_BEFORE_RENAME.store(false, Ordering::SeqCst);
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                super::WRITE_ATOMIC_CRASH_BEFORE_RENAME.store(false, Ordering::SeqCst);
+            }
+        }
+        let _reset = Reset;
         let temp = tempdir().unwrap();
         let path = temp.path().join("artifact.txt");
         fs::write(&path, b"stable").unwrap();
@@ -292,6 +314,8 @@ mod tests {
             .collect();
         assert_eq!(entries.len(), 1);
         assert_eq!(fs::read(&entries[0]).unwrap(), b"baseline");
+
+        // (reset handled by Drop guard)
     }
 }
 
