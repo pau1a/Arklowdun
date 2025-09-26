@@ -330,10 +330,43 @@ for candidate in "$REPO_ROOT/scripts/roundtrip-verify.ts" "$REPO_ROOT/scripts/ro
   fi
 done
 
+VERIFY_EXIT_CODE=0
+ROUNDTRIP_VERIFY_STATUS="skipped (no verifier detected)"
+VERIFY_REPORT_COPY=""
+
 if [[ -n "$ROUNDTRIP_VERIFY_SCRIPT" ]]; then
-  log_step "Verification script detected at $ROUNDTRIP_VERIFY_SCRIPT (not yet invoked; Phase 3 will integrate)"
+  VERIFY_REPORT_RAW="$TMP_DIR/roundtrip-diff.json"
+  VERIFY_REPORT_COPY="$ARTIFACT_DIR/roundtrip-diff.json"
+  ROUNDTRIP_VERIFY_STATUS="passed"
+  rm -f "$VERIFY_REPORT_RAW"
+  log_step "Running verification script at $ROUNDTRIP_VERIFY_SCRIPT"
+
+  set +e
+  node --loader ts-node/esm "$ROUNDTRIP_VERIFY_SCRIPT" \
+    --before "$EXPORT_DIR" \
+    --after "$APPDATA_DIR" \
+    --out "$VERIFY_REPORT_RAW" \
+    2>&1 | tee -a "$LOG_PATH"
+  VERIFY_EXIT_CODE=${PIPESTATUS[0]}
+  set -e
+
+  if [[ -f "$VERIFY_REPORT_RAW" ]]; then
+    cp "$VERIFY_REPORT_RAW" "$VERIFY_REPORT_COPY"
+    log_step "Copied verification report to $VERIFY_REPORT_COPY"
+  else
+    log_step "Verification report not generated (expected at $VERIFY_REPORT_RAW)"
+    VERIFY_REPORT_COPY="$VERIFY_REPORT_RAW"
+  fi
+
+  if [[ $VERIFY_EXIT_CODE -ne 0 ]]; then
+    ROUNDTRIP_VERIFY_STATUS="failed (exit $VERIFY_EXIT_CODE)"
+    log_step "Round-trip verification failed; see $VERIFY_REPORT_COPY"
+  else
+    log_step "Round-trip verification succeeded; report at $VERIFY_REPORT_COPY"
+  fi
 else
   log_step "No verification script detected (expected until Phase 3)."
+  ROUNDTRIP_VERIFY_STATUS="skipped (no verifier detected)"
 fi
 
 log_step "Writing round-trip context metadata"
@@ -352,6 +385,7 @@ VERIFY_SH_VALUE="$VERIFY_SH_PATH" \
 VERIFY_PS1_VALUE="$VERIFY_PS1_PATH" \
 IMPORT_REPORT_VALUE="$IMPORT_REPORT_PATH" \
 CLI_VERSION_VALUE="$CLI_VERSION" \
+VERIFY_REPORT_VALUE="$VERIFY_REPORT_COPY" \
   node --input-type=module <<'JS' 2>&1 | tee -a "$LOG_PATH"
 import fs from 'node:fs';
 import path from 'node:path';
@@ -376,6 +410,7 @@ const data = {
   verifyScript: process.env.VERIFY_SH_VALUE,
   verifyScriptPowerShell: process.env.VERIFY_PS1_VALUE,
   importReport: process.env.IMPORT_REPORT_VALUE,
+  verifyReport: process.env.VERIFY_REPORT_VALUE,
   cliVersion: process.env.CLI_VERSION_VALUE,
 };
 
@@ -390,6 +425,16 @@ JS
 
 log_step "Round-trip orchestration complete"
 
+if [[ -n "$VERIFY_REPORT_COPY" ]]; then
+  SUMMARY_VERIFY_LINES=$(cat <<EOF
+  Verification status: $ROUNDTRIP_VERIFY_STATUS
+  Verification diff report: $VERIFY_REPORT_COPY
+EOF
+)
+else
+  SUMMARY_VERIFY_LINES="  Verification status: $ROUNDTRIP_VERIFY_STATUS"
+fi
+
 cat <<SUMMARY | tee -a "$LOG_PATH"
 ---
 Round-trip artifacts:
@@ -400,5 +445,10 @@ Round-trip artifacts:
   Manifest copy: $EXPORT_MANIFEST_COPY
   Import report copy: $IMPORT_REPORT_COPY
   Context: $CONTEXT_PATH
+$SUMMARY_VERIFY_LINES
 ---
 SUMMARY
+
+if [[ $VERIFY_EXIT_CODE -ne 0 ]]; then
+  exit "$VERIFY_EXIT_CODE"
+fi
