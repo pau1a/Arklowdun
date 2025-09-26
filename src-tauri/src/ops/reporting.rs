@@ -815,13 +815,12 @@ mod tests {
             .join("report-v1.schema.json");
         let schema: Value = serde_json::from_slice(&fs::read(&schema_path).unwrap()).unwrap();
         let compiled = JSONSchema::compile(&schema).expect("compile schema");
-        if let Err(errors) = compiled.validate(&value) {
-            let msgs = errors
-                .map(|e| e.to_string())
-                .collect::<Vec<_>>()
-                .join("\n");
-            panic!("report does not satisfy schema:\n{msgs}");
-        }
+        // Bind the result so the error iterator is dropped before `compiled`/`value`.
+        let validation = compiled.validate(&value);
+        if let Err(errors) = validation {
+            let msgs: Vec<String> = errors.map(|e| e.to_string()).collect();
+            panic!("report does not satisfy schema:\n{}", msgs.join("\n"));
+        };
     }
 
     #[cfg(unix)]
@@ -879,7 +878,7 @@ mod tests {
 
         let contents = fs::read_to_string(path).unwrap();
         let value: Value = serde_json::from_str(&contents).unwrap();
-        assert_eq!(value["elapsed_ms"], 1500.into());
+        assert_eq!(value["elapsed_ms"], serde_json::json!(1500));
         let parsed_started: DateTime<Utc> = value["started_at"].as_str().unwrap().parse().unwrap();
         let parsed_finished: DateTime<Utc> =
             value["finished_at"].as_str().unwrap().parse().unwrap();
