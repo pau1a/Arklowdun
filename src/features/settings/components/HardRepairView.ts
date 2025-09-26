@@ -2,6 +2,7 @@ import type { HardRepairOutcome } from "@bindings/HardRepairOutcome";
 import createButton from "@ui/Button";
 import createModal from "@ui/Modal";
 import { toast } from "@ui/Toast";
+import { recoveryText } from "@strings/recovery";
 
 import { runHardRepair } from "../api/hardRepair";
 import { copyText } from "../api/clipboard";
@@ -24,24 +25,23 @@ export function createHardRepairView(): HardRepairViewInstance {
 
   const heading = document.createElement("h3");
   heading.id = "settings-hard-repair";
-  heading.textContent = "Hard repair";
+  heading.textContent = recoveryText("db.hard_repair.section.title");
 
   const helper = document.createElement("p");
   helper.className = "settings__helper repair__helper";
-  helper.textContent =
-    "Hard Repair rebuilds the database schema from scratch and copies tables one by one. It may skip corrupted rows but always produces a recovery report.";
+  helper.textContent = recoveryText("db.hard_repair.section.helper");
 
   const controls = document.createElement("div");
   controls.className = "repair__controls";
 
   const repairButton = createButton({
-    label: "Run hard repair",
+    label: recoveryText("db.hard_repair.button.run"),
     variant: "ghost",
     className: "repair__action",
   });
 
   const reportButton = createButton({
-    label: "Copy recovery report path",
+    label: recoveryText("db.hard_repair.button.report"),
     variant: "ghost",
     className: "repair__link",
   });
@@ -79,7 +79,7 @@ export function createHardRepairView(): HardRepairViewInstance {
   const title = document.createElement("h2");
   title.id = "hard-repair-modal-title";
   title.className = "repair-modal__title";
-  title.textContent = "Run hard repair";
+  title.textContent = recoveryText("db.hard_repair.modal.title");
 
   header.appendChild(title);
 
@@ -89,24 +89,22 @@ export function createHardRepairView(): HardRepairViewInstance {
   const summary = document.createElement("p");
   summary.id = "hard-repair-modal-description";
   summary.className = "repair__outcome";
-  summary.textContent =
-    "Hard Repair may recover most data but some records may be lost. A recovery report will be generated with any omissions.";
+  summary.textContent = recoveryText("db.hard_repair.modal.warning");
 
   const warning = document.createElement("p");
   warning.className = "repair__note";
-  warning.textContent =
-    "During Hard Repair the application will be unavailable. The original database is preserved as a backup.";
+  warning.textContent = recoveryText("db.hard_repair.modal.note");
 
   const footer = document.createElement("div");
   footer.className = "repair-modal__footer";
 
   const cancelButton = createButton({
-    label: "Cancel",
+    label: recoveryText("db.hard_repair.button.cancel"),
     variant: "ghost",
   });
 
   const startButton = createButton({
-    label: "Start hard repair",
+    label: recoveryText("db.hard_repair.button.start"),
     variant: "primary",
   });
 
@@ -132,20 +130,28 @@ export function createHardRepairView(): HardRepairViewInstance {
     if (!outcome) return;
     try {
       await copyText(outcome.reportPath);
-      toast.show({ kind: "success", message: "Recovery report path copied." });
+      toast.show({
+        kind: "success",
+        message: recoveryText("db.hard_repair.toast.copy_success"),
+      });
     } catch (error) {
       toast.show({
         kind: "error",
-        message: `Failed to copy path: ${describeError(error)}`,
+        message: recoveryText("db.hard_repair.toast.copy_failure", {
+          message: describeError(error),
+        }),
       });
     }
   }
 
   function describeError(error: unknown): string {
-    if (!error) return "Unknown error";
+    if (!error) return recoveryText("db.common.unknown_error");
     if (typeof error === "string") return error;
     if (typeof error === "object" && error && "message" in error) {
-      return String((error as { message?: unknown }).message ?? "Unknown error");
+      return (
+        String((error as { message?: unknown }).message ?? "") ||
+        recoveryText("db.common.unknown_error")
+      );
     }
     try {
       return JSON.stringify(error);
@@ -156,23 +162,26 @@ export function createHardRepairView(): HardRepairViewInstance {
 
   function formatOutcome(outcome: HardRepairOutcome): string {
     const failedTotal = Object.values(outcome.recovery.tables).reduce(
-      (sum, entry) => sum + Number(entry.failed ?? 0),
+      (sum, entry) => sum + Number(entry?.failed ?? 0),
       0,
     );
     if (outcome.omitted) {
       if (failedTotal > 0) {
-        return `Hard Repair complete. ${failedTotal} record${failedTotal === 1 ? "" : "s"} could not be restored — view report.`;
+        return recoveryText("db.hard_repair.status.partial", {
+          count: String(failedTotal),
+          suffix: failedTotal === 1 ? "" : "s",
+        });
       }
-      return "Hard Repair complete with warnings — check the recovery report for details.";
+      return recoveryText("db.hard_repair.status.complete_warnings");
     }
-    return "Hard Repair complete. All tables were restored successfully.";
+    return recoveryText("db.hard_repair.status.complete");
   }
 
   async function executeHardRepair() {
     if (state.running) return;
     state.running = true;
     state.error = null;
-    summary.textContent = "Running Hard Repair. This may take several minutes.";
+    summary.textContent = recoveryText("db.hard_repair.status.running");
     syncButtons();
 
     try {
@@ -186,8 +195,11 @@ export function createHardRepairView(): HardRepairViewInstance {
       const message = describeError(error);
       state.error = message;
       state.outcome = null;
-      summary.textContent = `Hard Repair failed: ${message}`;
-      status.textContent = `Hard Repair failed: ${message}`;
+      const failure = recoveryText("db.hard_repair.status.failure", {
+        message,
+      });
+      summary.textContent = failure;
+      status.textContent = failure;
       reportButton.hidden = true;
       toast.show({ kind: "error", message });
     } finally {
