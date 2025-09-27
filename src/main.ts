@@ -403,7 +403,7 @@ async function handleRouteChange() {
 
 window.addEventListener("DOMContentLoaded", () => {
   const root = document.getElementById("app") ?? document.body;
-  mountMacToolbar(root);
+  void mountMacToolbar(root);
 
   log.debug("app booted");
   defaultHouseholdId().catch((e) => console.error("DB init failed:", e));
