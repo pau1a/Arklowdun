@@ -47,7 +47,7 @@ export async function DashboardView(container: HTMLElement) {
   ambientHost.className = "view__ambient";
   ambientHost.setAttribute("aria-hidden", "true");
 
-  const waves = createAnimatedWaves({ variant: "dark" });
+  const waves = createAnimatedWaves({ variant: "dark", morph: true });
   waves.update({ className: "view__ambient-waves" });
   ambientHost.appendChild(waves);
 
