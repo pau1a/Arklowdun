@@ -1,11 +1,11 @@
 .ark-waves {
   display: block;
-  position: relative;
-  width: 120%;
-  height: auto;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
-  --ark-waves-base-translate: 0%;
-  transform: translate3d(var(--ark-waves-base-translate), 0, 0);
+}
+
+.ark-waves__motion {
   will-change: transform;
   animation: ark-waves-drift-x 40s ease-in-out infinite alternate;
 }
@@ -62,14 +62,15 @@
 
 @keyframes ark-waves-drift-x {
   0% {
-    transform: translate3d(calc(var(--ark-waves-base-translate) - 10px), 0, 0);
+    transform: translate3d(-10px, 0, 0);
   }
   100% {
-    transform: translate3d(calc(var(--ark-waves-base-translate) + 10px), 0, 0);
+    transform: translate3d(10px, 0, 0);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .ark-waves__motion,
   .ark-waves {
     animation: none !important;
   }

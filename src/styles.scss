@@ -88,22 +88,18 @@ main {
   position: absolute;
   inset: 0;
   z-index: 0;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
   overflow: hidden;
   pointer-events: none;
 }
 
 .view__ambient-waves {
   position: absolute;
-  left: 50%;
+  left: 0;
+  right: 0;
   bottom: 0;
-  width: clamp(110%, 120%, 140%);
-  max-width: 1600px;
-  min-width: 960px;
+  width: 100%;
+  height: clamp(220px, 34vh, 380px);
   opacity: 0.9;
-  --ark-waves-base-translate: -50%;
 }
 
 .container__banner,

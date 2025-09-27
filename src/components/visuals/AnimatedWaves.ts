@@ -1,3 +1,4 @@
+import { interpolate } from "flubber";
 import "./animated-waves.css";
 
 export type AnimatedWavesVariant = "light" | "dark";
@@ -60,7 +61,7 @@ export default function createAnimatedWaves(options: AnimatedWavesOptions = {}):
   const svg = document.createElementNS(SVG_NS, "svg") as AnimatedWavesElement;
   svg.classList.add("ark-waves");
   svg.setAttribute("viewBox", "0 0 900 600");
-  svg.setAttribute("preserveAspectRatio", "xMidYMax meet");
+  svg.setAttribute("preserveAspectRatio", "xMidYMax slice");
   svg.setAttribute("xmlns", SVG_NS);
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("focusable", "false");
@@ -72,12 +73,16 @@ export default function createAnimatedWaves(options: AnimatedWavesOptions = {}):
     svg.classList.add(...customClassTokens);
   }
 
+  const motionGroup = document.createElementNS(SVG_NS, "g");
+  motionGroup.classList.add("ark-waves__motion");
+  svg.appendChild(motionGroup);
+
   const pathElements = PATHS.map((d, index) => {
     const path = document.createElementNS(SVG_NS, "path");
     path.classList.add("ark-waves__layer");
     path.id = `ark-waves-path-${index + 1}`;
     path.setAttribute("d", d);
-    svg.appendChild(path);
+    motionGroup.appendChild(path);
     return path;
   });
 
@@ -102,18 +107,10 @@ export default function createAnimatedWaves(options: AnimatedWavesOptions = {}):
 
   const reduceMotion = reduceMotionQuery();
 
-  const startMorph = async () => {
+  const startMorph = () => {
     if (raf !== null || !currentMorph || reduceMotion?.matches) return;
-    try {
-      const { interpolate } = await import("flubber");
-      if (!currentMorph || reduceMotion?.matches) return;
-      interpolators = PATHS.map((d, index) => interpolate(d, PATHS_ALT[index], { maxSegmentLength: 3 }));
-    } catch (error) {
-      if (import.meta.env?.DEV) {
-        console.warn("AnimatedWaves: failed to start morph animation", error);
-      }
-      return;
-    }
+
+    interpolators = PATHS.map((d, index) => interpolate(d, PATHS_ALT[index], { maxSegmentLength: 3 }));
     let start = performance.now();
 
     const tick = (now: number) => {
