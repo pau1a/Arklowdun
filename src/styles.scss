@@ -5,7 +5,6 @@
   --z-index-dropdown: 200;
   --layout-sidebar-collapsed: 72px;
   --layout-sidebar-collapsed-sm: 56px;
-  --app-toolbar-height: 64px;
 }
 
 [hidden] {
@@ -532,14 +531,14 @@ textarea:focus-visible {
 .sidebar {
   inline-size: max-content;
   padding: var(--space-4) var(--space-4) var(--space-5);
-  padding-block-start: calc(var(--space-4) + var(--app-toolbar-height));
+  padding-block-start: calc(var(--space-4) + 32px);
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   background-color: var(--color-sidebar-bg);
   border-inline-end: 1px solid var(--color-sidebar-border);
   color: var(--color-text);
-  min-height: calc(100vh - var(--app-toolbar-height));
+  min-height: calc(100vh - 32px);
 }
 
 .sidebar__top {
@@ -2782,23 +2781,23 @@ mark.search-hit {
 /* MAC TOOLBAR                                                                */
 /* ========================================================================== */
 
+
 .app-toolbar {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  height: var(--app-toolbar-height);
-  min-height: var(--app-toolbar-height);
+  height: 32px;
+  min-height: 32px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 16px;
-  z-index: 10000;
+  padding: 0 10px;
   background: var(--color-panel, #fff);
   border-bottom: 1px solid var(--color-border, #e5e7eb);
   -webkit-user-select: none;
   user-select: none;
-  -webkit-app-region: drag;
+  z-index: 1000;
 }
 
 .traffic {
@@ -2807,40 +2806,14 @@ mark.search-hit {
 }
 
 .traffic__btn {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 15px;
-  height: 15px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   padding: 0;
   margin: 0;
   border: 1px solid rgba(0, 0, 0, 0.15);
-  box-shadow:
-    inset 0 0 0 0.5px rgba(255, 255, 255, 0.6),
-    0 0 0 1px rgba(0, 0, 0, 0.08);
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.5);
   -webkit-app-region: no-drag;
-}
-
-.traffic__btn::after {
-  content: "";
-  color: rgba(0, 0, 0, 0.65);
-  font-size: 10px;
-  line-height: 1;
-}
-
-.traffic__close:hover::after {
-  content: "×";
-}
-
-.traffic__min:hover::after {
-  content: "–";
-}
-
-.traffic__max:hover::after {
-  content: "‹›";
-  letter-spacing: -1px;
 }
 
 .traffic__close {
@@ -2855,11 +2828,15 @@ mark.search-hit {
   background: #28c940;
 }
 
+.traffic__btn:hover {
+  filter: brightness(1.05);
+}
+
 #app,
 #content,
 #view,
 .container {
-  padding-top: var(--app-toolbar-height);
+  padding-top: 32px;
 }
 
 /* ========================================================================== */
