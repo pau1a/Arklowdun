@@ -2780,17 +2780,20 @@ mark.search-hit {
 /* ========================================================================== */
 
 .app-toolbar {
+  position: fixed;
+  inset: 0 auto auto 0;
+  right: 0;
   height: 32px;
   min-height: 32px;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 0 10px;
+  z-index: 10000;
   background: var(--color-panel, #fff);
   border-bottom: 1px solid var(--color-border, #e5e7eb);
   -webkit-user-select: none;
   user-select: none;
-  z-index: 1000;
 }
 
 .traffic {
@@ -2805,7 +2808,9 @@ mark.search-hit {
   padding: 0;
   margin: 0;
   border: 1px solid rgba(0, 0, 0, 0.15);
-  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.5);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.6),
+    0 0 0 1px rgba(0, 0, 0, 0.08);
   -webkit-app-region: no-drag;
 }
 
@@ -2821,15 +2826,16 @@ mark.search-hit {
   background: #28c940;
 }
 
-.traffic__btn:hover {
-  filter: brightness(1.05);
-}
-
 #app,
 #content,
 #view,
 .container {
   padding-top: 32px;
+}
+
+.sidebar {
+  top: 32px;
+  height: calc(100vh - 32px);
 }
 
 /* ========================================================================== */

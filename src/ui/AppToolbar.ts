@@ -1,3 +1,4 @@
+// src/ui/AppToolbar.ts
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export function mountMacToolbar(host: HTMLElement): void {
@@ -15,16 +16,24 @@ export function mountMacToolbar(host: HTMLElement): void {
     </div>
   `;
 
+  // === Programmatic drag fallback (works even if drag-region is ignored) ===
+  // Only start dragging when clicking empty toolbar space (not on a button/input/etc.)
+  bar.addEventListener("mousedown", (e) => {
+    const target = e.target as HTMLElement;
+    const interactive = target.closest(
+      "button, a, input, textarea, select, [data-tauri-drag-region='false']"
+    );
+
+    if (!interactive && e.button === 0) {
+      void win.startDragging();
+    }
+  });
+
+  // Hook up the three mac buttons
   const query = (selector: string) => bar.querySelector<HTMLButtonElement>(selector)!;
 
-  query(".traffic__close").addEventListener("click", () => {
-    void win.close();
-  });
-
-  query(".traffic__min").addEventListener("click", () => {
-    void win.minimize();
-  });
-
+  query(".traffic__close").addEventListener("click", () => void win.close());
+  query(".traffic__min").addEventListener("click", () => void win.minimize());
   query(".traffic__max").addEventListener("click", async () => {
     (await win.isMaximized()) ? await win.unmaximize() : await win.maximize();
   });
