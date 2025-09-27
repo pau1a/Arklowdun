@@ -2784,12 +2784,12 @@ mark.search-hit {
   top: 0;
   left: 0;
   right: 0;
-  height: 32px;
-  min-height: 32px;
+  height: 64px;
+  min-height: 64px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 10px;
+  padding: 0 16px;
   z-index: 10000;
   background: var(--color-panel, #fff);
   border-bottom: 1px solid var(--color-border, #e5e7eb);
@@ -2804,8 +2804,12 @@ mark.search-hit {
 }
 
 .traffic__btn {
-  width: 12px;
-  height: 12px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
   border-radius: 50%;
   padding: 0;
   margin: 0;
@@ -2814,6 +2818,26 @@ mark.search-hit {
     inset 0 0 0 0.5px rgba(255, 255, 255, 0.6),
     0 0 0 1px rgba(0, 0, 0, 0.08);
   -webkit-app-region: no-drag;
+}
+
+.traffic__btn::after {
+  content: "";
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.traffic__close:hover::after {
+  content: "×";
+}
+
+.traffic__min:hover::after {
+  content: "–";
+}
+
+.traffic__max:hover::after {
+  content: "‹›";
+  letter-spacing: -1px;
 }
 
 .traffic__close {
@@ -2832,12 +2856,12 @@ mark.search-hit {
 #content,
 #view,
 .container {
-  padding-top: 32px;
+  padding-top: 64px;
 }
 
 .sidebar {
-  top: 32px;
-  height: calc(100vh - 32px);
+  top: 64px;
+  height: calc(100vh - 64px);
 }
 
 /* ========================================================================== */
