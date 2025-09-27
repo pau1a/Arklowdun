@@ -1,7 +1,5 @@
 // src/ui/AppToolbar.ts
 
-import { toast } from "@ui/Toast";
-
 type TauriWin = {
   isMaximized: () => Promise<boolean>;
   maximize: () => Promise<void>;
@@ -58,19 +56,34 @@ export async function mountMacToolbar(host: HTMLElement): Promise<void> {
       <button class="traffic__btn traffic__close" title="Close" data-tauri-drag-region="false" aria-label="Close"></button>
       <button class="traffic__btn traffic__min" title="Minimize" data-tauri-drag-region="false" aria-label="Minimize"></button>
       <button class="traffic__btn traffic__max" title="Zoom" data-tauri-drag-region="false" aria-label="Zoom"></button>
-      <button class="traffic__btn traffic__toast" title="Say hi" data-tauri-drag-region="false" aria-label="Say hi"></button>
     </div>
   `;
 
-  bar.addEventListener("mousedown", (event) => {
+  bar.addEventListener("pointerdown", (event) => {
     const target = event.target as HTMLElement;
     const interactive = target.closest(
       "button, a, input, textarea, select, [data-tauri-drag-region='false']",
     );
+    if (interactive || event.button !== 0) return;
 
-    if (!interactive && event.button === 0) {
-      void win.startDragging();
+    event.preventDefault();
+    requestAnimationFrame(() => {
+      void win.startDragging().catch(() => {
+        // no-op: dragging may fail if window API becomes unavailable mid-gesture
+      });
+    });
+  });
+
+  bar.addEventListener("dblclick", async (event) => {
+    if (
+      (event.target as HTMLElement).closest(
+        "[data-tauri-drag-region='false']",
+      )
+    ) {
+      return;
     }
+
+    (await win.isMaximized()) ? await win.unmaximize() : await win.maximize();
   });
 
   const query = (selector: string) => bar.querySelector<HTMLButtonElement>(selector)!;
@@ -85,10 +98,6 @@ export async function mountMacToolbar(host: HTMLElement): Promise<void> {
 
   query(".traffic__max").addEventListener("click", async () => {
     (await win.isMaximized()) ? await win.unmaximize() : await win.maximize();
-  });
-
-  query(".traffic__toast").addEventListener("click", () => {
-    toast.show({ kind: "info", message: "Hi from my new toolbar" });
   });
 
   host.prepend(bar);

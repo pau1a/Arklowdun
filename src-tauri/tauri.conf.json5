@@ -18,6 +18,7 @@
         "label": "main",
         "title": "Arklowdun",
         "decorations": false,
+        "acceptFirstMouse": true, // macOS: let first click both focus and interact
         "resizable": true,
         "transparent": false,
         "width": 800,
