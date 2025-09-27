@@ -50,4 +50,3 @@ export function Page({ sidebar, content, footer, toolbar }: PageProps): PageInst
 
   return { mount };
 }
-
