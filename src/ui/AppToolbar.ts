@@ -1,5 +1,7 @@
 // src/ui/AppToolbar.ts
 
+import { toast } from "@ui/Toast";
+
 type TauriWin = {
   isMaximized: () => Promise<boolean>;
   maximize: () => Promise<void>;
@@ -56,6 +58,7 @@ export async function mountMacToolbar(host: HTMLElement): Promise<void> {
       <button class="traffic__btn traffic__close" title="Close" data-tauri-drag-region="false" aria-label="Close"></button>
       <button class="traffic__btn traffic__min" title="Minimize" data-tauri-drag-region="false" aria-label="Minimize"></button>
       <button class="traffic__btn traffic__max" title="Zoom" data-tauri-drag-region="false" aria-label="Zoom"></button>
+      <button class="traffic__btn traffic__toast" title="Say hi" data-tauri-drag-region="false" aria-label="Say hi"></button>
     </div>
   `;
 
@@ -82,6 +85,10 @@ export async function mountMacToolbar(host: HTMLElement): Promise<void> {
 
   query(".traffic__max").addEventListener("click", async () => {
     (await win.isMaximized()) ? await win.unmaximize() : await win.maximize();
+  });
+
+  query(".traffic__toast").addEventListener("click", () => {
+    toast.show({ kind: "info", message: "Hi from my new toolbar" });
   });
 
   host.prepend(bar);
