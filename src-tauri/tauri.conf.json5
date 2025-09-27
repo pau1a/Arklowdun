@@ -17,9 +17,12 @@
       {
         "label": "main",
         "title": "Arklowdun",
-        "decorations": false,
+        "decorations": true,
+        "shadow": true,
+        "titleBarStyle": "Overlay",
         "acceptFirstMouse": true, // macOS: let first click both focus and interact
         "resizable": true,
+        // Opaque window; macOS draws rounded corners with overlay title bar
         "transparent": false,
         "width": 800,
         "height": 600,

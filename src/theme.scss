@@ -122,6 +122,8 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 .theme-v1 .container {
   background-color: var(--color-panel);
   border: 1px solid var(--color-border);
+  /* Remove the top edge so there is no separator under the toolbar */
+  border-top: none;
   border-radius: var(--radius-base);
   box-shadow: var(--shadow-base);
 }

@@ -7,7 +7,7 @@
   --layout-sidebar-collapsed-sm: 56px;
   /* App window corner radius */
   --window-radius: 10pt;
-  --window-surface-inset: 8px;
+  --window-surface-inset: 0px;
   /* Height for the custom macOS-style toolbar (2x previous) */
   --app-toolbar-height: 64px;
 }
@@ -35,31 +35,22 @@ body {
 
 /* 4) Optional: avoid micro scrollbars during rapid resize */
 /* Body is the grid container and rounded surface */
+/* Apply the corner clip at the root WebView element for reliability */
+html {
+  border-radius: var(--window-radius);
+  overflow: hidden;
+}
+
 body {
   display: grid;
   grid-template-columns: minmax(160px, max-content) 1fr;
   grid-template-rows: var(--app-toolbar-height) 1fr auto;
   margin: 0;
-  overflow: visible; /* allow window shadow to render from background layer */
   position: relative;
 }
 
-/* Visual rounded window surface that does not affect layout */
-.window-surface {
-  position: fixed;
-  inset: var(--window-surface-inset);
-  border-radius: var(--window-radius);
-  background: var(--color-background);
-  box-shadow: var(--shadow-lg);
-  pointer-events: none;
-  z-index: 0; /* keep behind all app chrome */
-}
-
-/* Raise main chrome above the background surface */
-body > *:not(.window-surface) {
-  position: relative;
-  z-index: 1;
-}
+/* Remove experimental background layer */
+.window-surface { display: none !important; }
 
 @media (max-width: 900px) {
   body {
@@ -2826,6 +2817,32 @@ mark.search-hit {
   /* Span across the two grid columns (sidebar + content) */
   grid-column: 1 / -1;
 }
+
+/* When the native title bar is overlaid, hide our faux traffic
+   lights and reserve space for the OS controls to avoid overlap. */
+.titlebar-overlay .traffic { display: none; }
+.titlebar-overlay .app-toolbar { padding-left: 72px; }
+
+/* Right side pill button */
+.toolbar__spacer { flex: 1 1 auto; }
+
+.dog-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0,0,0,.06);
+  cursor: pointer;
+}
+.dog-pill i { color: currentColor; }
+.dog-pill:hover { filter: brightness(1.05); }
+.dog-pill:active { transform: translateY(1px); }
 
 .traffic {
   display: inline-flex;
