@@ -28,13 +28,24 @@ export function Page({ sidebar, content, footer, toolbar }: PageProps): PageInst
       content.element.prepend(toolbar.element);
     }
 
-    target.replaceChildren(
+    const nextChildren: Node[] = [];
+
+    const customToolbar =
+      target.querySelector<HTMLElement>(".app-toolbar") ??
+      document.querySelector<HTMLElement>(".app-toolbar");
+    if (customToolbar) {
+      nextChildren.push(customToolbar);
+    }
+
+    nextChildren.push(
       sidebar.element,
       content.element,
       footer.element,
       modalRoot,
       liveRegion,
     );
+
+    target.replaceChildren(...nextChildren);
   }
 
   return { mount };

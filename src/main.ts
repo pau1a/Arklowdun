@@ -37,6 +37,7 @@ import { initTheme } from "@ui/ThemeToggle";
 import { getStartupWindow } from "@lib/ipc/startup";
 import { ensureDbHealthReport, recheckDbHealth } from "./services/dbHealth";
 import { recoveryText } from "@strings/recovery";
+import { mountMacToolbar } from "@ui/AppToolbar";
 
 const appWindow = getStartupWindow();
 
@@ -401,6 +402,9 @@ async function handleRouteChange() {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
+  const root = document.getElementById("app") ?? document.body;
+  mountMacToolbar(root);
+
   log.debug("app booted");
   defaultHouseholdId().catch((e) => console.error("DB init failed:", e));
 
