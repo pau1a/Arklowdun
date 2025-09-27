@@ -21,5 +21,21 @@
     <script type="module" src="/src/main.ts" defer></script>
   </head>
 
-  <body class="theme-v1"></body>
+  <!--
+    To show a decorative slice image in the top toolbar background,
+    place your image into a `public/` folder (e.g., public/toolbar-bg.jpg)
+    and set the data attribute below to its root-relative URL.
+    You can also optionally set:
+      data-toolbar-bg-position (e.g., "center top"),
+      data-toolbar-bg-size (e.g., "auto var(--app-toolbar-height)"),
+      data-toolbar-bg-repeat (e.g., "no-repeat" or "repeat-x").
+    The defaults produce a single slice scaled to the toolbar height.
+  -->
+  <body
+    class="theme-v1"
+    data-toolbar-bg="/toolbar-bg.png"
+    data-toolbar-bg-position="center center"
+    data-toolbar-bg-size="cover"
+    data-toolbar-bg-repeat="no-repeat"
+  ></body>
 </html>

@@ -2809,7 +2809,13 @@ mark.search-hit {
   align-items: center;
   gap: 8px;
   padding: 0 10px;
-  background: var(--color-panel, #fff);
+  /* Keep color separate so background-image layering works */
+  background-color: var(--color-panel, #fff);
+  /* Optional decorative background slice */
+  background-image: var(--toolbar-bg-image, none);
+  background-size: var(--toolbar-bg-size, auto var(--app-toolbar-height));
+  background-position: var(--toolbar-bg-position, center center);
+  background-repeat: var(--toolbar-bg-repeat, no-repeat);
   border-bottom: none;
   -webkit-user-select: none;
   user-select: none;

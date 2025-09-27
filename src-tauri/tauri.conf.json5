@@ -16,7 +16,8 @@
     "windows": [
       {
         "label": "main",
-        "title": "Arklowdun",
+        // Hide small title text beside macOS traffic lights
+        "title": " ",
         "decorations": true,
         "shadow": true,
         "titleBarStyle": "Overlay",
