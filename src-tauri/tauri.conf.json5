@@ -16,7 +16,10 @@
     "windows": [
       {
         "label": "main",
-        "title": "Arklowdun - Home Management",
+        "title": "Arklowdun",
+        "decorations": false,
+        "resizable": true,
+        "transparent": false,
         "width": 800,
         "height": 600,
         "backgroundColor": "#ffffffff"
