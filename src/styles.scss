@@ -5,6 +5,11 @@
   --z-index-dropdown: 200;
   --layout-sidebar-collapsed: 72px;
   --layout-sidebar-collapsed-sm: 56px;
+  /* App window corner radius */
+  --window-radius: 10pt;
+  --window-surface-inset: 8px;
+  /* Height for the custom macOS-style toolbar (2x previous) */
+  --app-toolbar-height: 64px;
 }
 
 [hidden] {
@@ -25,16 +30,35 @@ body {
   margin: 0;
   padding: 0;
   height: 100%;
-  background: inherit;
+  background: transparent; /* allow rounded window with transparent corners */
 }
 
 /* 4) Optional: avoid micro scrollbars during rapid resize */
+/* Body is the grid container and rounded surface */
 body {
   display: grid;
   grid-template-columns: minmax(160px, max-content) 1fr;
-  grid-template-rows: 1fr auto;
+  grid-template-rows: var(--app-toolbar-height) 1fr auto;
   margin: 0;
-  overflow: hidden; // switch to 'auto' if you need full-page scroll
+  overflow: visible; /* allow window shadow to render from background layer */
+  position: relative;
+}
+
+/* Visual rounded window surface that does not affect layout */
+.window-surface {
+  position: fixed;
+  inset: var(--window-surface-inset);
+  border-radius: var(--window-radius);
+  background: var(--color-background);
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+  z-index: 0; /* keep behind all app chrome */
+}
+
+/* Raise main chrome above the background surface */
+body > *:not(.window-surface) {
+  position: relative;
+  z-index: 1;
 }
 
 @media (max-width: 900px) {
@@ -50,12 +74,7 @@ body {
 }
 
 /* 2) Ensure your app root always covers the viewport */
-#app {
-  min-height: 100vh;
-  min-width: 100vw;
-  display: flex;
-  flex-direction: column;
-}
+/* #app specific layout not used; body is the container */
 
 /* 3) The primary content area should absorb extra space cleanly */
 #content,
@@ -63,6 +82,8 @@ main {
   flex: 1 1 auto;
   min-height: 0; /* critical: prevents flex children forcing overflow gaps */
   overflow: auto; /* or 'hidden' if you manage internal scrolls */
+  border-top: none;
+  box-shadow: none;
 }
 
 .container {
@@ -73,6 +94,9 @@ main {
   flex-direction: column;
   gap: var(--space-3);
   background-color: var(--color-panel);
+  /* Ensure there is no visible separator beneath the toolbar */
+  border-top: none;
+  box-shadow: none;
 }
 
 .container__banner,
@@ -531,14 +555,15 @@ textarea:focus-visible {
 .sidebar {
   inline-size: max-content;
   padding: var(--space-4) var(--space-4) var(--space-5);
-  padding-block-start: calc(var(--space-4) + 32px);
+  padding-block-start: var(--space-4);
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   background-color: var(--color-sidebar-bg);
   border-inline-end: 1px solid var(--color-sidebar-border);
   color: var(--color-text);
-  min-height: calc(100vh - 32px);
+  /* Occupies the second grid row fully; height is handled by grid */
+  min-height: 0;
 }
 
 .sidebar__top {
@@ -2783,21 +2808,23 @@ mark.search-hit {
 
 
 .app-toolbar {
-  position: fixed;
+  position: sticky;
   top: 0;
   left: 0;
   right: 0;
-  height: 32px;
-  min-height: 32px;
+  height: var(--app-toolbar-height);
+  min-height: var(--app-toolbar-height);
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 0 10px;
   background: var(--color-panel, #fff);
-  border-bottom: 1px solid var(--color-border, #e5e7eb);
+  border-bottom: none;
   -webkit-user-select: none;
   user-select: none;
   z-index: 1000;
+  /* Span across the two grid columns (sidebar + content) */
+  grid-column: 1 / -1;
 }
 
 .traffic {
@@ -2832,12 +2859,7 @@ mark.search-hit {
   filter: brightness(1.05);
 }
 
-#app,
-#content,
-#view,
-.container {
-  padding-top: 32px;
-}
+/* No global top padding needed; the grid row above reserves space. */
 
 /* ========================================================================== */
 /* END                                                                        */

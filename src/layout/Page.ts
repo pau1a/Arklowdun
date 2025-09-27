@@ -24,11 +24,18 @@ export function Page({ sidebar, content, footer, toolbar }: PageProps): PageInst
   liveRegion.setAttribute("aria-live", "polite");
 
   function mount(target: HTMLElement = document.body) {
+    // Keep an existing visual window background if present
+    const windowSurface =
+      target.querySelector<HTMLElement>(".window-surface") ??
+      document.querySelector<HTMLElement>(".window-surface");
     if (toolbar && !content.element.contains(toolbar.element)) {
       content.element.prepend(toolbar.element);
     }
 
     const nextChildren: Node[] = [];
+    if (windowSurface) {
+      nextChildren.push(windowSurface);
+    }
 
     const customToolbar =
       target.querySelector<HTMLElement>(".app-toolbar") ??
@@ -50,4 +57,3 @@ export function Page({ sidebar, content, footer, toolbar }: PageProps): PageInst
 
   return { mount };
 }
-
