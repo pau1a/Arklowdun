@@ -2778,3 +2778,42 @@ mark.search-hit {
 /* ========================================================================== */
 /* END                                                                        */
 /* ========================================================================== */
+
+/* Prismatic Aurora refinements (structure untouched) */
+
+/* 1) Focus clarity across the app */
+:where(button, [role="button"], a, input, select, textarea):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: max(var(--radius-base, 8px), 6px);
+}
+
+/* 2) Primary actions feel boutique, not default */
+.btn--accent,
+button.btn--accent {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 80%, transparent);
+  box-shadow: 0 1px 0 color-mix(in srgb, #000 20%, transparent);
+}
+.btn--accent:hover { background: color-mix(in srgb, var(--color-accent) 88%, #fff 12%); }
+.btn--accent:active { transform: translateY(0.5px); }
+
+/* 3) Subtle “glass” for the dashboard header band */
+.dashboard__header {
+  background: var(--grad-aurora-soft);
+  backdrop-filter: saturate(110%) blur(10px);
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  box-shadow: var(--shadow-base);
+}
+
+/* 4) Hairlines unify the vibe */
+hr, .rule, .sidebar__divider { border-color: var(--color-rule); }
+
+/* 5) Elevation polish on cards */
+.card {
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-base);
+}
+.card:hover { box-shadow: var(--shadow-lg); }

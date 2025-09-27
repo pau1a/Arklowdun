@@ -30,68 +30,93 @@ html, body {
 h1, h2, h3 { letter-spacing: -0.01em; }
 
 @mixin theme-dark {
-  --color-background: #1f2937;
-  --color-panel: #111827;
-  --color-text: #f9fafb;
-  --color-text-muted: #9ca3af;
-  --color-border: #374151;
-  --color-accent: #ff7e36;
-  --color-accent-text: #ffffff;
-  --color-accent-soft: #3b2a21;
-  --color-accent-soft-hover: #4c372b;
-  --color-sidebar-bg: #1e293b;
-  --color-sidebar-border: #334155;
-  --color-rule: #2a2f38;
+  /* Surfaces */
+  --color-background: #07111F;        /* near-black indigo */
+  --color-panel:      #0E1B2B;        /* deep navy panel */
+  --color-border:     #233143;        /* cool slate border */
+  --color-rule:       #1A2738;        /* hairlines */
+  --color-sidebar-bg: #0E1B2B;
+  --color-sidebar-border: #223044;
   --color-sidebar-rule: var(--color-rule);
-  --shadow-base: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --color-row-hover: #4c372b;
-  --overlay-bg: rgba(0, 0, 0, 0.6);
-  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.6);
+
+  /* Text */
+  --color-text:         #E6EEF7;      /* icy high-contrast */
+  --color-text-muted:   #A9B6C6;      /* slate */
+  --color-accent-text:  #07111F;      /* contrast inside accent blocks */
+
+  /* Aurora accents (primary/secondary/tertiary) */
+  --color-accent:            #11C5D9; /* cyan-teal */
+  --color-accent-2:          #20D3AC; /* emerald-teal */
+  --color-accent-3:          #B497FF; /* lavender hint */
+  --color-accent-soft:       #0A2430; /* subtle wash for chips/bg */
+  --color-accent-soft-hover: #0E2E3C;
+
+  /* States */
+  --color-success: #2DD4BF;  /* aqua-mint */
+  --color-danger:  #F05252;  /* calm red */
+  --color-row-hover: #112338;
+
+  /* Overlays & shadows */
+  --overlay-bg: rgba(2, 6, 16, 0.65);
+  --shadow-base: 0 1px 2px rgba(0, 0, 0, 0.55);
+  --shadow-lg:   0 6px 24px rgba(0, 0, 0, 0.7);
+
+  /* Extra tokens (used by styles below; backward-compatible to ignore) */
+  --focus-ring:    0 0 0 3px rgba(17, 197, 217, 0.35);
+  --grad-aurora:       linear-gradient(135deg, #11C5D9 0%, #20D3AC 55%, #B497FF 100%);
+  --grad-aurora-soft:  linear-gradient(180deg, rgba(17,197,217,0.10), rgba(32,211,172,0.08) 60%, rgba(180,151,255,0.08));
+
+  /* Legacy compat */
   --color-bg: var(--color-panel);
   color-scheme: dark;
 }
 
 /* Theme tokens and base styles scoped to theme-v1 */
 .theme-v1 {
-  /* Colors */
-  --color-background: #f7f8fb;
-  --color-panel: #ffffff;
-  --color-text: #0f172a;
-  --color-text-muted: #64748b;
-  --color-border: #e2e8f0;
-  --color-accent: #ff7e36;
-  --color-accent-text: #ffffff;
-  --color-accent-soft: #ffe4d5;
-  --color-accent-soft-hover: #fcd9a8;
-  --color-bg: var(--color-panel);
-  --color-row-hover: var(--color-accent-soft-hover);
-  --overlay-bg: rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 4px 16px rgba(15, 23, 42, 0.15);
-  --color-success: #166534;
-  --color-danger: #b91c1c;
-  --color-sidebar-bg: #e9edf2;
-  --color-sidebar-border: #d2dae3;
-
-  /* New: rule/separator colors (light theme defaults) */
-  --color-rule: #d9e1ec; /* general subtle rule */
+  /* Surfaces */
+  --color-background: #EDF3F9;        /* cool, airy */
+  --color-panel:      #FFFFFF;        /* clean panels */
+  --color-border:     #CDD8E6;        /* cool border */
+  --color-rule:       #D8E2EE;        /* hairlines */
+  --color-sidebar-bg: #F3F7FB;
+  --color-sidebar-border: #D5DFEA;
   --color-sidebar-rule: var(--color-rule);
 
-  /* Typography */
+  /* Text */
+  --color-text:         #102033;      /* cool navy text */
+  --color-text-muted:   #5B6E85;      /* desaturated slate */
+  --color-accent-text:  #FFFFFF;
+
+  /* Aurora accents */
+  --color-accent:            #0891B2; /* cyan-teal, calmer than dark */
+  --color-accent-2:          #10B981; /* emerald secondary */
+  --color-accent-3:          #7C8CFB; /* lavender-blue hint */
+  --color-accent-soft:       #E6F6FB; /* pale cyan wash */
+  --color-accent-soft-hover: #D5F0F9;
+
+  /* States */
+  --color-success: #10B981;
+  --color-danger:  #E53955;
+  --color-row-hover: var(--color-accent-soft-hover);
+
+  /* Overlays & shadows */
+  --overlay-bg: rgba(0, 10, 20, 0.20);
+  --shadow-base: 0 1px 2px rgba(16, 32, 51, 0.08);
+  --shadow-lg:   0 8px 28px rgba(16, 32, 51, 0.18);
+
+  /* Type/spacing/radius (unchanged) */
   --font-family-base: var(--font-sans);
   --font-size-base: 16px;
+  --space-1: 6px; --space-2: 10px; --space-3: 16px; --space-4: 24px; --space-5: 36px;
+  --radius-base: 10px; --radius-lg: 16px; --radius-pill: 9999px;
 
-  /* Spacing */
-  --space-1: 6px;
-  --space-2: 10px;
-  --space-3: 16px;
-  --space-4: 24px;
-  --space-5: 36px;
+  /* Extra tokens */
+  --focus-ring:    0 0 0 3px rgba(8,145,178,0.35);
+  --grad-aurora:       linear-gradient(135deg, #0891B2 0%, #10B981 55%, #7C8CFB 100%);
+  --grad-aurora-soft:  linear-gradient(180deg, rgba(8,145,178,0.10), rgba(16,185,129,0.08) 60%, rgba(124,140,251,0.08));
 
-  /* Shape */
-  --radius-base: 10px;
-  --radius-lg: 16px;
-  --radius-pill: 9999px;
-  --shadow-base: 0 1px 2px rgba(15, 23, 42, 0.05);
+  /* Legacy compat */
+  --color-bg: var(--color-panel);
 
   background-color: var(--color-background);
   color: var(--color-text);
