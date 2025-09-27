@@ -1,5 +1,7 @@
 // src/DashboardView.ts
+import createAnimatedWaves from "./components/visuals/AnimatedWaves";
 import { nowMs, toDate } from "./db/time";
+import { registerViewCleanup } from "./utils/viewLifecycle";
 import { defaultHouseholdId } from "./db/household";
 import { billsApi, policiesRepo, eventsApi } from "./repos";
 import { vehiclesRepo } from "./db/vehiclesRepo";
@@ -40,8 +42,24 @@ export async function DashboardView(container: HTMLElement) {
         <p>Coming soon</p>
       </div>
     `;
+
+  const ambientHost = document.createElement("div");
+  ambientHost.className = "view__ambient";
+  ambientHost.setAttribute("aria-hidden", "true");
+
+  const waves = createAnimatedWaves({ variant: "dark", morph: true });
+  waves.update({ className: "view__ambient-waves" });
+  ambientHost.appendChild(waves);
+
   container.innerHTML = "";
-  container.appendChild(section);
+  container.classList.add("view--ambient");
+  container.append(ambientHost, section);
+
+  registerViewCleanup(container, () => {
+    waves.destroy();
+    ambientHost.remove();
+    container.classList.remove("view--ambient");
+  });
 
   const listEl = section.querySelector<HTMLDivElement>("#dash-list");
   const items: { date: number; text: string }[] = [];

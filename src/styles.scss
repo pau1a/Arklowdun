@@ -75,6 +75,33 @@ main {
   background-color: var(--color-panel);
 }
 
+#view {
+  position: relative;
+  background-color: var(--color-panel);
+}
+
+#view.view--ambient {
+  background-color: #001220;
+}
+
+.view__ambient {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.view__ambient-waves {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: clamp(220px, 34vh, 380px);
+  opacity: 0.9;
+}
+
 .container__banner,
 .container__view {
   display: contents;
@@ -457,13 +484,21 @@ textarea:focus-visible {
 /* ========================================================================== */
 
 .dashboard {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: var(--space-4);
   max-width: 1280px;
   margin: 0 auto;
   padding-inline: var(--space-4);
+  padding-block: clamp(var(--space-4), 6vw, var(--space-5));
   align-items: start;
+}
+
+.dashboard > * {
+  position: relative;
+  z-index: 1;
 }
 
 /* Let all grid children shrink when needed */
@@ -478,11 +513,21 @@ textarea:focus-visible {
   grid-template-columns: repeat(12, minmax(0, 1fr));
   align-items: start;
   column-gap: var(--space-4);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: rgba(0, 18, 32, 0.7);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #f8fafc;
 }
 
 .dashboard__header > :first-child {
   grid-column: 1 / span 8;
   min-width: 0;
+}
+
+.dashboard__header .kicker {
+  color: rgba(248, 250, 252, 0.75);
 }
 
 .dashboard__actions {
