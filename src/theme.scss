@@ -30,50 +30,52 @@ html, body {
 h1, h2, h3 { letter-spacing: -0.01em; }
 
 @mixin theme-dark {
-  --color-background: #1f2937;
-  --color-panel: #111827;
-  --color-text: #f9fafb;
-  --color-text-muted: #9ca3af;
-  --color-border: #374151;
-  --color-accent: #ff7e36;
-  --color-accent-text: #ffffff;
-  --color-accent-soft: #3b2a21;
-  --color-accent-soft-hover: #4c372b;
-  --color-sidebar-bg: #1e293b;
-  --color-sidebar-border: #334155;
-  --color-rule: #2a2f38;
+  --color-background: #0D1B2A;
+  --color-panel: #1B263B;
+  --color-text: #E0E8F9;
+  --color-text-muted: #94A3B8;
+  --color-border: #2C3E50;
+  --color-accent: #00BFA5;
+  --color-accent-text: #0D1B2A;
+  --color-accent-soft: #12343F;
+  --color-accent-soft-hover: #18515A;
+  --color-sidebar-bg: #1B263B;
+  --color-sidebar-border: #2C3E50;
+  --color-rule: #243447;
   --color-sidebar-rule: var(--color-rule);
-  --shadow-base: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --color-row-hover: #4c372b;
-  --overlay-bg: rgba(0, 0, 0, 0.6);
-  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.6);
+  --shadow-base: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --color-row-hover: #13293D;
+  --overlay-bg: rgba(0, 0, 0, 0.65);
+  --shadow-lg: 0 6px 20px rgba(0, 0, 0, 0.7);
   --color-bg: var(--color-panel);
+  --color-success: #2DD4BF;
+  --color-danger: #EF4444;
   color-scheme: dark;
 }
 
 /* Theme tokens and base styles scoped to theme-v1 */
 .theme-v1 {
   /* Colors */
-  --color-background: #f7f8fb;
-  --color-panel: #ffffff;
-  --color-text: #0f172a;
-  --color-text-muted: #64748b;
-  --color-border: #e2e8f0;
-  --color-accent: #ff7e36;
-  --color-accent-text: #ffffff;
-  --color-accent-soft: #ffe4d5;
-  --color-accent-soft-hover: #fcd9a8;
+  --color-background: #F4F8FB;
+  --color-panel: #FFFFFF;
+  --color-text: #1E293B;
+  --color-text-muted: #64748B;
+  --color-border: #CBD5E1;
+  --color-accent: #3B82F6;
+  --color-accent-text: #FFFFFF;
+  --color-accent-soft: #E0F2FE;
+  --color-accent-soft-hover: #BAE6FD;
   --color-bg: var(--color-panel);
   --color-row-hover: var(--color-accent-soft-hover);
-  --overlay-bg: rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 4px 16px rgba(15, 23, 42, 0.15);
-  --color-success: #166534;
-  --color-danger: #b91c1c;
-  --color-sidebar-bg: #e9edf2;
-  --color-sidebar-border: #d2dae3;
+  --overlay-bg: rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 6px 20px rgba(30, 41, 59, 0.15);
+  --color-success: #10B981;
+  --color-danger: #F43F5E;
+  --color-sidebar-bg: #EDF2F7;
+  --color-sidebar-border: #CBD5E1;
 
   /* New: rule/separator colors (light theme defaults) */
-  --color-rule: #d9e1ec; /* general subtle rule */
+  --color-rule: #E2E8F0; /* general subtle rule */
   --color-sidebar-rule: var(--color-rule);
 
   /* Typography */
@@ -91,7 +93,7 @@ h1, h2, h3 { letter-spacing: -0.01em; }
   --radius-base: 10px;
   --radius-lg: 16px;
   --radius-pill: 9999px;
-  --shadow-base: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-base: 0 1px 2px rgba(30, 41, 59, 0.08);
 
   background-color: var(--color-background);
   color: var(--color-text);
