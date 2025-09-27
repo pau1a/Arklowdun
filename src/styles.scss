@@ -96,11 +96,14 @@ main {
 }
 
 .view__ambient-waves {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
   width: clamp(110%, 120%, 140%);
   max-width: 1600px;
   min-width: 960px;
-  margin-top: -12vh;
   opacity: 0.9;
+  --ark-waves-base-translate: -50%;
 }
 
 .container__banner,

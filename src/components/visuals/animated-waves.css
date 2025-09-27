@@ -4,7 +4,9 @@
   width: 120%;
   height: auto;
   pointer-events: none;
-  transform: translateZ(0);
+  --ark-waves-base-translate: 0%;
+  transform: translate3d(var(--ark-waves-base-translate), 0, 0);
+  will-change: transform;
   animation: ark-waves-drift-x 40s ease-in-out infinite alternate;
 }
 
@@ -60,15 +62,18 @@
 
 @keyframes ark-waves-drift-x {
   0% {
-    transform: translateX(-10px);
+    transform: translate3d(calc(var(--ark-waves-base-translate) - 10px), 0, 0);
   }
   100% {
-    transform: translateX(10px);
+    transform: translate3d(calc(var(--ark-waves-base-translate) + 10px), 0, 0);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ark-waves,
+  .ark-waves {
+    animation: none !important;
+  }
+
   .ark-waves__layer {
     animation: none !important;
     transform: none !important;
