@@ -292,6 +292,40 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
         }
     }
 
+    const BASELINE_VERSION: &str = "0001_baseline.sql";
+    let baseline_recorded =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM schema_migrations WHERE version = ?")
+            .bind(BASELINE_VERSION)
+            .fetch_one(pool)
+            .await?;
+
+    if baseline_recorded == 0 {
+        let existing_domain_tables = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM sqlite_master \
+             WHERE type='table' AND name IN ('household','events','notes','files_index','files_index_meta','categories')",
+        )
+        .fetch_one(pool)
+        .await?;
+
+        if existing_domain_tables > 0 {
+            let mut tx = pool.begin().await?;
+            let result = sqlx::query(
+                "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+            )
+            .bind(BASELINE_VERSION)
+            .bind(now_ms())
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            info!(
+                target: "arklowdun",
+                event = "migration_bootstrap_baseline",
+                existing_tables = existing_domain_tables,
+                inserted = result.rows_affected() > 0
+            );
+        }
+    }
+
     let rows = sqlx::query("SELECT version FROM schema_migrations")
         .fetch_all(pool)
         .await?;

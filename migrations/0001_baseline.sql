@@ -342,5 +342,8 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
   applied_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
 );
 
-INSERT INTO schema_migrations(version)
-VALUES ('0001_baseline.sql');
+INSERT OR IGNORE INTO schema_migrations(version, applied_at)
+VALUES (
+  '0001_baseline.sql',
+  CAST(strftime('%s','now') AS INTEGER) * 1000
+);
