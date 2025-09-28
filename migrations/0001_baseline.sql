@@ -268,7 +268,9 @@ CREATE TABLE vehicle_maintenance (
   relative_path TEXT
 );
 
-CREATE VIEW IF NOT EXISTS shopping_live AS
+-- NOTE: Legacy views are intentionally not created in the baseline to keep
+-- the canonical schema minimal and focused on tables + indexes.
+-- (shopping_live was removed)
   SELECT * FROM shopping_items WHERE deleted_at IS NULL;
 
 -- Indexes
@@ -317,29 +319,12 @@ CREATE INDEX vehicle_maintenance_household_updated_idx ON vehicle_maintenance(ho
 CREATE INDEX vehicle_maintenance_vehicle_date_idx ON vehicle_maintenance(vehicle_id, date);
 CREATE UNIQUE INDEX vehicles_household_position_idx ON vehicles(household_id, position) WHERE deleted_at IS NULL;
 
--- Seeds
-INSERT INTO household (id, name, created_at, updated_at, deleted_at, tz)
-VALUES ('default', 'Default Household', 1672531200000, 1672531200000, NULL, 'UTC');
 
-INSERT INTO categories (id, household_id, name, slug, color, position, z, created_at, updated_at, deleted_at)
-VALUES
-  ('cat_primary',   'default', 'Primary',   'primary',   '#4F46E5', 0, 0, 1672531200000, 1672531200000, NULL),
-  ('cat_secondary', 'default', 'Secondary', 'secondary', '#1D4ED8', 1, 0, 1672531200000, 1672531200000, NULL),
-  ('cat_tasks',     'default', 'Tasks',     'tasks',     '#0EA5E9', 2, 0, 1672531200000, 1672531200000, NULL),
-  ('cat_bills',     'default', 'Bills',     'bills',     '#F59E0B', 3, 0, 1672531200000, 1672531200000, NULL),
-  ('cat_insurance', 'default', 'Insurance', 'insurance', '#EA580C', 4, 0, 1672531200000, 1672531200000, NULL),
-  ('cat_property',  'default', 'Property',  'property',  '#F97316', 5, 0, 1672531200000, 1672531200000, NULL),
-  ('cat_vehicles',  'default', 'Vehicles',  'vehicles',  '#22C55E', 6, 0, 1672531200000, 1672531200000, NULL),
-  ('cat_pets',      'default', 'Pets',      'pets',      '#16A34A', 7, 0, 1672531200000, 1672531200000, NULL),
-  ('cat_family',    'default', 'Family',    'family',    '#EF4444', 8, 0, 1672531200000, 1672531200000, NULL),
-  ('cat_inventory', 'default', 'Inventory', 'inventory', '#C026D3', 9, 0, 1672531200000, 1672531200000, NULL),
-  ('cat_budget',    'default', 'Budget',    'budget',    '#A855F7', 10, 0, 1672531200000, 1672531200000, NULL),
-  ('cat_shopping',  'default', 'Shopping',  'shopping',  '#6366F1', 11, 0, 1672531200000, 1672531200000, NULL);
 
 -- Record baseline version in schema_migrations
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version TEXT PRIMARY KEY,
-  applied_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
+  applied_at INTEGER NOT NULL
 );
 
 INSERT OR IGNORE INTO schema_migrations(version, applied_at)
@@ -347,3 +332,24 @@ VALUES (
   '0001_baseline.sql',
   CAST(strftime('%s','now') AS INTEGER) * 1000
 );
+
+-- Seed default household and categories for a usable baseline
+-- Seeded timestamps fixed at 2023-01-01T00:00:00Z (ms)
+INSERT OR IGNORE INTO household (id, name, created_at, updated_at, deleted_at, tz)
+VALUES ('default', 'Default Household', 1672531200000, 1672531200000, NULL, 'UTC');
+
+INSERT OR IGNORE INTO categories
+  (id, household_id, name, slug, color, position, z, created_at, updated_at, deleted_at)
+VALUES
+  ('cat_primary',   'default', 'Primary',   'primary',   '#4F46E5',  0, 0, 1672531200000, 1672531200000, NULL),
+  ('cat_secondary', 'default', 'Secondary', 'secondary', '#1D4ED8',  1, 0, 1672531200000, 1672531200000, NULL),
+  ('cat_tasks',     'default', 'Tasks',     'tasks',     '#0EA5E9',  2, 0, 1672531200000, 1672531200000, NULL),
+  ('cat_bills',     'default', 'Bills',     'bills',     '#F59E0B',  3, 0, 1672531200000, 1672531200000, NULL),
+  ('cat_insurance', 'default', 'Insurance', 'insurance', '#EA580C',  4, 0, 1672531200000, 1672531200000, NULL),
+  ('cat_property',  'default', 'Property',  'property',  '#F97316',  5, 0, 1672531200000, 1672531200000, NULL),
+  ('cat_vehicles',  'default', 'Vehicles',  'vehicles',  '#22C55E',  6, 0, 1672531200000, 1672531200000, NULL),
+  ('cat_pets',      'default', 'Pets',      'pets',      '#16A34A',  7, 0, 1672531200000, 1672531200000, NULL),
+  ('cat_family',    'default', 'Family',    'family',    '#EF4444',  8, 0, 1672531200000, 1672531200000, NULL),
+  ('cat_inventory', 'default', 'Inventory', 'inventory', '#C026D3',  9, 0, 1672531200000, 1672531200000, NULL),
+  ('cat_budget',    'default', 'Budget',    'budget',    '#A855F7', 10, 0, 1672531200000, 1672531200000, NULL),
+  ('cat_shopping',  'default', 'Shopping',  'shopping',  '#6366F1', 11, 0, 1672531200000, 1672531200000, NULL);

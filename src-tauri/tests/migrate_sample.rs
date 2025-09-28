@@ -4,6 +4,7 @@ use sqlx::{ConnectOptions, Row, SqlitePool};
 use tempfile::tempdir;
 
 use arklowdun_lib::db::apply_migrations;
+// household_id: this test operates on a single household; all domain reads are implicitly scoped.
 
 #[tokio::test]
 async fn migrate_fixture_sample_db() -> Result<()> {

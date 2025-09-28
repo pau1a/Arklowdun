@@ -76,7 +76,7 @@ pub fn ensure_db_writable(state: &(impl AppStateRef + ?Sized)) -> AppResult<DbWr
     let report = state
         .db_health
         .lock()
-        .expect("db health cache poisoned")
+        .map_err(|_| AppError::new("STATE/LOCK_POISONED", "Failed to access database health cache"))?
         .clone();
 
     if !matches!(report.status, DbHealthStatus::Ok) {

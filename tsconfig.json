@@ -20,7 +20,9 @@
       "@bindings/*": ["bindings/*"],
       "@store/*": ["store/*"],
       "@utils/*": ["utils/*"],
-      "@strings/*": ["strings/*"]
+      "@strings/*": ["strings/*"],
+      "@db/*": ["db/*"],
+      "@files/*": ["files/*"]
     },
     "isolatedModules": true,
     "noEmit": true,

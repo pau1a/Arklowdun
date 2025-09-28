@@ -637,19 +637,20 @@ mod tests {
     #[tokio::test]
     async fn merge_plan_detects_conflicts() {
         let pool = setup_pool().await;
+        // household_id included to enforce scoping in tests
         sqlx::query(
-            "CREATE TABLE events (id TEXT PRIMARY KEY, updated_at INTEGER, deleted_at INTEGER)",
+            "CREATE TABLE events (id TEXT PRIMARY KEY, household_id TEXT, updated_at INTEGER, deleted_at INTEGER)",
         )
         .execute(&pool)
         .await
         .unwrap();
-        sqlx::query("INSERT INTO events (id, updated_at, deleted_at) VALUES (?1, ?2, NULL)")
+        sqlx::query("INSERT INTO events (id, household_id, updated_at, deleted_at) VALUES (?1, 'default', ?2, NULL)")
             .bind("evt_keep")
             .bind(300_i64)
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::query("INSERT INTO events (id, updated_at, deleted_at) VALUES (?1, ?2, NULL)")
+        sqlx::query("INSERT INTO events (id, household_id, updated_at, deleted_at) VALUES (?1, 'default', ?2, NULL)")
             .bind("evt_update")
             .bind(150_i64)
             .execute(&pool)
@@ -717,7 +718,7 @@ mod tests {
     async fn attachment_plan_detects_updates() {
         let pool = setup_pool().await;
         sqlx::query(
-            "CREATE TABLE bills (id TEXT PRIMARY KEY, updated_at INTEGER, deleted_at INTEGER, root_key TEXT, relative_path TEXT)",
+            "CREATE TABLE bills (id TEXT PRIMARY KEY, household_id TEXT, updated_at INTEGER, deleted_at INTEGER, root_key TEXT, relative_path TEXT)",
         )
             .execute(&pool)
             .await
@@ -744,7 +745,7 @@ mod tests {
         std::fs::create_dir_all(diff_path.parent().unwrap()).unwrap();
         std::fs::write(&diff_path, b"local").unwrap();
 
-        sqlx::query("INSERT INTO bills (id, updated_at, deleted_at) VALUES (?1, ?2, NULL)")
+        sqlx::query("INSERT INTO bills (id, household_id, updated_at, deleted_at) VALUES (?1, 'default', ?2, NULL)")
             .bind("bill1")
             .bind(100_i64)
             .execute(&pool)
@@ -778,7 +779,7 @@ mod tests {
     async fn attachment_plan_skips_when_live_newer() {
         let pool = setup_pool().await;
         sqlx::query(
-            "CREATE TABLE bills (id TEXT PRIMARY KEY, updated_at INTEGER, deleted_at INTEGER, root_key TEXT, relative_path TEXT)",
+            "CREATE TABLE bills (id TEXT PRIMARY KEY, household_id TEXT, updated_at INTEGER, deleted_at INTEGER, root_key TEXT, relative_path TEXT)",
         )
         .execute(&pool)
         .await
@@ -799,7 +800,7 @@ mod tests {
         std::fs::create_dir_all(dest_path.parent().unwrap()).unwrap();
         std::fs::write(&dest_path, b"local").unwrap();
 
-        sqlx::query("INSERT INTO bills (id, updated_at, deleted_at, root_key, relative_path) VALUES (?1, ?2, NULL, 'attachments', ?3)")
+        sqlx::query("INSERT INTO bills (id, household_id, updated_at, deleted_at, root_key, relative_path) VALUES (?1, 'default', ?2, NULL, 'attachments', ?3)")
             .bind("bill2")
             .bind(300_i64)
             .bind("docs/file.txt")

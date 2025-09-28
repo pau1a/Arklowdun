@@ -1,11 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 export LC_ALL=C
+
 MIG_DIR="$(cd "$(dirname "$0")/../migrations" && pwd)"
 
-mapfile -t BASELINES < <(find "$MIG_DIR" -maxdepth 1 -type f -name '*_*.sql' ! -name '*_*.up.sql' ! -name '*_*.down.sql' | sort)
-mapfile -t UPS < <(find "$MIG_DIR" -maxdepth 1 -type f -name '*_*.up.sql' | sort)
-mapfile -t DOWNS < <(find "$MIG_DIR" -maxdepth 1 -type f -name '*_*.down.sql' | sort)
+# Collect files without using 'mapfile' (Bash 3 compatible)
+BASELINES=()
+UPS=()
+DOWNS=()
+
+# baselines: "*_*.sql" excluding ".up.sql" and ".down.sql"
+while IFS= read -r p; do
+  [ -n "${p:-}" ] && BASELINES+=("$p")
+done < <(find "$MIG_DIR" -maxdepth 1 -type f -name '*_*.sql' ! -name '*_*.up.sql' ! -name '*_*.down.sql' | sort)
+
+# ups: "*_*.up.sql"
+while IFS= read -r p; do
+  [ -n "${p:-}" ] && UPS+=("$p")
+done < <(find "$MIG_DIR" -maxdepth 1 -type f -name '*_*.up.sql' | sort)
+
+# downs: "*_*.down.sql"
+while IFS= read -r p; do
+  [ -n "${p:-}" ] && DOWNS+=("$p")
+done < <(find "$MIG_DIR" -maxdepth 1 -type f -name '*_*.down.sql' | sort)
 
 if [[ ${#BASELINES[@]} -eq 0 && ${#UPS[@]} -eq 0 ]]; then
   echo "no migrations found"
@@ -14,13 +31,13 @@ fi
 
 if [[ ${#BASELINES[@]} -ne 1 ]]; then
   echo "expected exactly one baseline file, found ${#BASELINES[@]}:" >&2
-  printf '  %s\n' "${BASELINES[@]}" >&2
+  for b in "${BASELINES[@]}"; do echo "  $b" >&2; done
   exit 1
 fi
 
 if [[ ${#DOWNS[@]} -ne 0 ]]; then
   echo "down migrations are no longer supported; remove these files:" >&2
-  printf '  %s\n' "${DOWNS[@]}" >&2
+  for d in "${DOWNS[@]}"; do echo "  $d" >&2; done
   exit 1
 fi
 
@@ -35,11 +52,11 @@ if [[ "${BASH_REMATCH[1]}" != "$baseline_expected" ]]; then
   echo "baseline numbering mismatch: saw ${BASH_REMATCH[1]} expected $baseline_expected" >&2
   exit 1
 fi
-
 echo "CHECK: baseline=$base_name"
 
+# subsequent .up.sql must be 0002_, 0003_, …
 expected=$((10#$baseline_expected + 1))
-
+if [[ ${#UPS[@]} -gt 0 ]]; then
 for up in "${UPS[@]}"; do
   base="$(basename "$up")"
   if [[ ! "$base" =~ ^([0-9]{4})_.+\.up\.sql$ ]]; then
@@ -52,7 +69,8 @@ for up in "${UPS[@]}"; do
     exit 1
   fi
   echo "CHECK: up=$base num=${BASH_REMATCH[1]}"
-  ((expected++))
+  expected=$((expected + 1))
 done
+fi
 
 echo "OK"

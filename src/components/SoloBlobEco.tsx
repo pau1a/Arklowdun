@@ -103,69 +103,7 @@ function quantizeAlpha(alpha: number, step = 0.02): number {
   return Math.max(0, Math.min(1, quantized));
 }
 
-// Draw an irregular, haikei-style blob directly to the target context.
-function drawIrregularBlob(
-  ctx: CanvasRenderingContext2D,
-  cx: number,
-  cy: number,
-  radius: number,
-  color: string,
-  alpha: number,
-  shapeSeed: number,
-  phase: number,
-): void {
-  const [r0, g0, b0] = toRgb(color);
-  // Lighten color towards white by a configurable factor (default 0.5)
-  const lighten = Math.max(0, Math.min(1, parseAlpha("--blob-lighten") || 0.5));
-  const r = Math.round(r0 + (255 - r0) * lighten);
-  const g = Math.round(g0 + (255 - g0) * lighten);
-  const b = Math.round(b0 + (255 - b0) * lighten);
-  const edgeHard = Math.max(0, Math.min(1, parseAlpha("--blob-edge-hardness") || 0.95));
-  const innerScale = 0.72 + 0.15 * edgeHard;
-  const midScale = innerScale + (1 - innerScale) * 0.45;
-  const outerScale = 1.0;
-  const twoPi = Math.PI * 2;
-  const points = 160; // higher resolution outline to avoid aliasing/jitter
-  const rng = mulberry32(((shapeSeed * 1_000_003) ^ 0x9e3779b9) >>> 0);
-  const f1 = 1 + Math.floor(rng() * 3);
-  const f2 = 2 + Math.floor(rng() * 4);
-  const f3 = 3 + Math.floor(rng() * 5);
-  const p1 = rng() * twoPi;
-  const p2 = rng() * twoPi;
-  const p3 = rng() * twoPi;
-  const morph = (phase % 1) * twoPi;
-  const a1 = 0.18 + rng() * 0.08;
-  const a2 = 0.10 + rng() * 0.06;
-  const a3 = 0.06 + rng() * 0.04;
-
-  const build = (scale: number) => {
-    ctx.beginPath();
-    for (let i = 0; i <= points; i += 1) {
-      const t = (i % points) / points;
-      const ang = t * twoPi;
-      const noise = (a1 * (0.85 + 0.15 * Math.sin(morph))) * Math.sin(f1 * ang + p1 + morph * 0.6)
-        + (a2 * (0.85 + 0.15 * Math.cos(morph * 1.2))) * Math.sin(f2 * ang + p2 + morph * 1.1)
-        + (a3 * (0.85 + 0.15 * Math.sin(morph * 0.8))) * Math.sin(f3 * ang + p3 - morph * 0.9);
-      const rad = Math.max(1, radius * scale * (1 + noise));
-      const x = cx + Math.cos(ang) * rad;
-      const y = cy + Math.sin(ang) * rad;
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }
-    ctx.closePath();
-  };
-
-  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-  build(innerScale);
-  ctx.fill();
-
-  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.45})`;
-  build(midScale);
-  ctx.fill();
-
-  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.18})`;
-  build(outerScale);
-  ctx.fill();
-}
+// (former drawIrregularBlob removed: sprite-based + radii pipeline replaced it)
 
 // Compute per-angle radii for a phase (used for temporal smoothing)
 function computeRadii(

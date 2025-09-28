@@ -1,5 +1,5 @@
-#!/bin/sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
 if [ "${1:-}" = "" ]; then
   echo "usage: $0 \"label for migration\"" >&2

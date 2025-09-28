@@ -15,7 +15,7 @@ import { createHardRepairView } from "@features/settings/components/HardRepairVi
 import { createEmptyState } from "./ui/EmptyState";
 import { STR } from "./ui/strings";
 import createButton from "@ui/Button";
-import { createAttributionSection } from "@features/settings/components/AttributionSection";
+import { createAttributionSectionAsync } from "@features/settings/components/AttributionSection";
 import { createAmbientBackgroundSection } from "@features/settings/components/AmbientBackgroundSection";
 
 export function SettingsView(container: HTMLElement) {
@@ -136,14 +136,22 @@ export function SettingsView(container: HTMLElement) {
   preview.hidden = true;
   preview.setAttribute("aria-label", "Latest copied diagnostics summary");
 
-  const attribution = createAttributionSection();
   const bodyChildren: HTMLElement[] = [metaList, note];
-  if (attribution) {
-    bodyChildren.push(attribution);
-  }
   bodyChildren.push(actions, status, preview);
 
   aboutBody.append(...bodyChildren);
+  // Load attribution asynchronously to avoid deep relative imports and keep UI responsive
+  void createAttributionSectionAsync().then((attribution) => {
+    if (attribution) {
+      // Insert before actions if still present
+      const anchor = aboutBody.querySelector<HTMLElement>(".settings__actions");
+      if (anchor?.parentElement === aboutBody) {
+        aboutBody.insertBefore(attribution, anchor);
+      } else {
+        aboutBody.appendChild(attribution);
+      }
+    }
+  });
   about.append(aboutHeading, aboutBody);
 
   section.append(

@@ -10,6 +10,8 @@ const resolveAlias = {
   "@store": fileURLToPath(new URL("./src/store", import.meta.url)),
   "@utils": fileURLToPath(new URL("./src/utils", import.meta.url)),
   "@strings": fileURLToPath(new URL("./src/strings", import.meta.url)),
+  "@db": fileURLToPath(new URL("./src/db", import.meta.url)),
+  "@files": fileURLToPath(new URL("./src/files", import.meta.url)),
 };
 
 // @ts-expect-error process is a nodejs global

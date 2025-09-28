@@ -1,10 +1,10 @@
 // src/ui/AppToolbar.ts
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getWindow } from "@lib/ipc/window";
 
 let pageTitleEl: HTMLHeadingElement | null = null;
 
 export function mountMacToolbar(host: HTMLElement): void {
-  const win = getCurrentWindow();
+  const win = getWindow();
 
   const bar = document.createElement("header");
   bar.className = "app-toolbar";

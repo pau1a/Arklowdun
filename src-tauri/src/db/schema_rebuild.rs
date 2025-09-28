@@ -15,7 +15,17 @@ fn sorted_migrations() -> Vec<&'static include_dir::File<'static>> {
             file.path()
                 .file_name()
                 .and_then(|name| name.to_str())
-                .map(|name| name.ends_with(".up.sql") && !name.starts_with('_'))
+                .map(|name| {
+                    // Accept numbered migrations: e.g., 0001_baseline.sql, 0002_feature.up.sql
+                    // Exclude any *.down.sql and helper files like template.sql or names starting with '_'.
+                    let not_disabled = !name.starts_with('_');
+                    let is_sql = name.ends_with(".sql");
+                    let is_down = name.ends_with(".down.sql");
+                    let starts_with_digits = name.len() > 5
+                        && name.chars().take(4).all(|c| c.is_ascii_digit())
+                        && name.chars().nth(4) == Some('_');
+                    not_disabled && is_sql && !is_down && starts_with_digits
+                })
                 .unwrap_or(false)
         })
         .collect();

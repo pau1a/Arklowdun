@@ -1,6 +1,6 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Verify that all migrations on disk have been applied to the target database.
-set -eu
+set -euo pipefail
 
 DB="${1:-${DB:-dev.sqlite}}"
 echo "Checking pending migrations against DB: $DB"

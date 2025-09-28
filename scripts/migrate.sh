@@ -1,5 +1,5 @@
-#!/usr/bin/env sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
 command -v sqlite3 >/dev/null 2>&1 || {
   echo "error: sqlite3 is required" >&2

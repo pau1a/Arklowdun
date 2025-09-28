@@ -1385,7 +1385,7 @@ async fn db_get_health_report(state: State<'_, AppState>) -> AppResult<DbHealthR
     let report = state
         .db_health
         .lock()
-        .expect("db health cache poisoned")
+        .map_err(|_| AppError::new("STATE/LOCK_POISONED", "Failed to access database health cache"))?
         .clone();
     Ok(report)
 }
@@ -1405,7 +1405,9 @@ async fn db_recheck(state: State<'_, AppState>) -> AppResult<DbHealthReport> {
                 .await
                 .map_err(|err| AppError::from(err).with_context("operation", "db_recheck"))?;
             log_db_health(&report);
-            let mut guard = cache.lock().expect("db health cache poisoned");
+            let mut guard = cache
+                .lock()
+                .map_err(|_| AppError::new("STATE/LOCK_POISONED", "Failed to update database health cache"))?;
             *guard = report.clone();
             Ok(report)
         }
@@ -2127,7 +2129,9 @@ async fn db_repair_run(
                                     .with_context("operation", "reopen_pool_after_swap")
                             })?;
                         {
-                            let mut guard = pool_handle.write().expect("pool lock poisoned");
+                            let mut guard = pool_handle
+                                .write()
+                                .unwrap_or_else(|e| e.into_inner());
                             *guard = new_pool.clone();
                         }
                         let report = crate::db::health::run_health_checks(&new_pool, &db_path)
@@ -2137,7 +2141,9 @@ async fn db_repair_run(
                                     .with_context("operation", "repair_post_swap_health")
                             })?;
                         {
-                            let mut guard = cache.lock().expect("db health cache poisoned");
+                            let mut guard = cache
+                                .lock()
+                                .map_err(|_| AppError::new("STATE/LOCK_POISONED", "Failed to update database health cache"))?;
                             *guard = report.clone();
                         }
                         flag.store(false, Ordering::SeqCst);
@@ -2200,7 +2206,9 @@ async fn db_hard_repair_run(state: State<'_, AppState>) -> AppResult<HardRepairO
                     AppError::from(err).with_context("operation", "reopen_pool_after_hard_repair")
                 })?;
             {
-                let mut guard = pool_handle.write().expect("pool lock poisoned");
+                let mut guard = pool_handle
+                    .write()
+                    .unwrap_or_else(|e| e.into_inner());
                 *guard = new_pool.clone();
             }
             let health = crate::db::health::run_health_checks(&new_pool, &db_path)
@@ -2209,7 +2217,9 @@ async fn db_hard_repair_run(state: State<'_, AppState>) -> AppResult<HardRepairO
                     AppError::from(err).with_context("operation", "hard_repair_post_health")
                 })?;
             {
-                let mut guard = cache.lock().expect("db health cache poisoned");
+                let mut guard = cache
+                    .lock()
+                    .map_err(|_| AppError::new("STATE/LOCK_POISONED", "Failed to update database health cache"))?;
                 *guard = health;
             }
             pool_closed.store(false, Ordering::SeqCst);
@@ -2427,7 +2437,22 @@ pub fn run() {
                 crate::db::health::run_health_checks(&pool, &db_path),
             )?;
             log_db_health(&health_report);
-            let hh = tauri::async_runtime::block_on(crate::household::default_household_id(&pool))?;
+            // Avoid creating new rows when the database is unhealthy. This preserves
+            // write-block semantics during startup and aligns with the IPC write guard.
+            let hh = if matches!(health_report.status, DbHealthStatus::Ok) {
+                tauri::async_runtime::block_on(crate::household::default_household_id(&pool))?
+            } else {
+                // Attempt to use the first existing household id (if any). If none
+                // exist, leave empty and let the UI handle the unhealthy state.
+                if let Some(row) = tauri::async_runtime::block_on(
+                    crate::repo::admin::first_active_for_all_households(&pool, "household", None),
+                )? {
+                    // `Row` is in scope; fall back to empty string on decode error.
+                    row.try_get::<String, _>("id").unwrap_or_default()
+                } else {
+                    String::new()
+                }
+            };
             let db_health = Arc::new(Mutex::new(health_report));
             let db_path = Arc::new(db_path);
             let pool_handle = Arc::new(RwLock::new(pool.clone()));
@@ -2751,6 +2776,16 @@ mod write_guard_tests {
             .build()
             .expect("create window");
 
+        // Record count before attempting the blocked mutation
+        let runtime = Runtime::new().expect("create runtime");
+        let before = runtime.block_on(async {
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM household")
+                .fetch_one(&pool)
+                .await
+                .expect("query household count (before)")
+        });
+        drop(runtime);
+
         let payload = serde_json::json!({
             "data": { "name": "Blocked" }
         });
@@ -2775,14 +2810,15 @@ mod write_guard_tests {
             .expect("health report attached");
         assert_eq!(health.get("status").and_then(|v| v.as_str()), Some("error"));
 
+        // Ensure the failed write did not change the household table size.
         let runtime = Runtime::new().expect("create runtime");
-        let count = runtime.block_on(async {
+        let after = runtime.block_on(async {
             sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM household")
                 .fetch_one(&pool)
                 .await
-                .expect("query household count")
+                .expect("query household count (after)")
         });
         drop(runtime);
-        assert_eq!(count, 0, "mutation should not have been applied");
+        assert_eq!(after, before, "mutation should not have been applied");
     }
 }

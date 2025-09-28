@@ -323,10 +323,16 @@ async fn run_backfill(args: BackfillArgs) -> Result<()> {
         tokio::select! {
             result = &mut backfill_future => break result,
             signal = signal::ctrl_c() => {
-                signal.expect("install Ctrl+C handler");
-                if !control.is_cancelled() {
-                    eprintln!("Received interrupt. Finishing current chunk before exiting…");
-                    control.cancel();
+                match signal {
+                    Ok(()) => {
+                        if !control.is_cancelled() {
+                            eprintln!("Received interrupt. Finishing current chunk before exiting…");
+                            control.cancel();
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Ctrl+C handler error: {e}");
+                    }
                 }
             }
         }

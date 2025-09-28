@@ -1,4 +1,5 @@
 use anyhow::Result;
+// household_id: this test uses synthetic tables; domain scoping is not relevant here.
 use arklowdun_lib::db::with_tx;
 
 #[path = "util.rs"]

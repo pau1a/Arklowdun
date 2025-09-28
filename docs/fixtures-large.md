@@ -116,6 +116,8 @@ The generator enforces the following invariants:
 - ≥ 5,000 notes with ≥ 25% deadlines, ≥ 5% soft-deleted, and ≥ 2% deleted-then-restored records.
 - ≥ 300 attachment-backed records mapped deterministically from a fixed corpus with both `attachments` and `appData` roots, small and medium payloads, and reuse of logical files.
 
+Household scope: all seeded rows include a valid `household_id` and all queries/examples in this document are understood to be executed per household.
+
 ## Unicode attachment corpus
 
 `fixtures/large/attachments/` contains only text payloads, but the filenames include NFC, NFD, and CJK codepoints to exercise cross-platform path handling. macOS users should be aware that Finder may transparently normalise filenames to NFD; when testing on macOS, rely on checksums rather than literal filename comparisons.
