@@ -8,6 +8,9 @@ export function mountMacToolbar(host: HTMLElement): void {
   bar.className = "app-toolbar";
   bar.setAttribute("data-tauri-drag-region", "true");
 
+  // Resolve app logo for use in the toolbar brand
+  const logoUrl = new URL("../assets/logo.svg", import.meta.url).href;
+
   bar.innerHTML = `
     <div class="traffic" aria-label="Window controls">
       <button class="traffic__btn traffic__close" title="Close" data-tauri-drag-region="false"></button>
@@ -15,10 +18,10 @@ export function mountMacToolbar(host: HTMLElement): void {
       <button class="traffic__btn traffic__max" title="Zoom" data-tauri-drag-region="false"></button>
     </div>
     <div class="toolbar__spacer" data-tauri-drag-region="true"></div>
-    <button class="dog-pill" title="Dog" aria-label="Dog" data-tauri-drag-region="false">
-      <i class="fa-solid fa-dog" aria-hidden="true"></i>
-      <span class="dog-pill__label">Dog</span>
-    </button>
+    <div class="toolbar-brand" data-tauri-drag-region="false" aria-label="Application">
+      <img class="brand__logo" alt="" src="${logoUrl}" />
+      <span class="brand__title">Arklowdun</span>
+    </div>
   `;
 
   const query = (selector: string) => bar.querySelector<HTMLButtonElement>(selector)!;
@@ -66,11 +69,5 @@ export function mountMacToolbar(host: HTMLElement): void {
     bar.style.setProperty("--toolbar-bg-position", bar.style.backgroundPosition);
     bar.style.setProperty("--toolbar-bg-repeat", bar.style.backgroundRepeat);
   }
-  // Dog pill interaction: simple popup
-  const dogBtn = bar.querySelector<HTMLButtonElement>(".dog-pill");
-  dogBtn?.addEventListener("click", () => {
-    // keep it simple per request
-    alert("woof!");
-  });
   // Respect the CSS variable driven height.
 }

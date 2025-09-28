@@ -12,6 +12,38 @@
   --app-toolbar-height: 64px;
 }
 
+/* Animatable gradient variables for the app-wide backdrop */
+@property --angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 120deg;
+}
+@property --g1 {
+  syntax: '<color>';
+  inherits: false;
+  initial-value: #f3f8ff;
+}
+@property --g2 {
+  syntax: '<color>';
+  inherits: false;
+  initial-value: #f6fefe;
+}
+@property --g3 {
+  syntax: '<color>';
+  inherits: false;
+  initial-value: #ffffff;
+}
+@property --p2 {
+  syntax: '<percentage>';
+  inherits: false;
+  initial-value: 30%;
+}
+@property --p3 {
+  syntax: '<percentage>';
+  inherits: false;
+  initial-value: 70%;
+}
+
 [hidden] {
   display: none !important;
 }
@@ -56,12 +88,10 @@ body {
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  /* Default gradient; override via CSS vars for themes/animations */
-  --app-backdrop: linear-gradient(120deg, #b3e5fc, #e0f7fa 30%, #f1f5f9 70%);
-  background: var(--app-backdrop);
-  /* Optional animated gradient support */
-  background-size: 400% 400%;
-  animation: app-backdrop-shift 6s ease-in-out infinite;
+  /* Gradient defined using animatable custom properties */
+  background: linear-gradient(var(--angle), var(--g1) 0%, var(--g2) var(--p2), var(--g3) var(--p3));
+  /* Animate the gradient itself (colors/stop positions) */
+  animation: app-backdrop-colors 30s ease-in-out infinite;
 }
 
 /* Ensure primary shell layers paint above the backdrop */
@@ -76,6 +106,35 @@ footer {
   0% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }
   100% { background-position: 0% 50%; }
+}
+
+/* Smoothly morph the gradient colors and stop positions */
+@keyframes app-backdrop-colors {
+  0% {
+    --angle: 120deg;
+    --g1: #f3f8ff; /* near-white blue */
+    --g2: #f6fefe; /* near-white aqua */
+    --g3: #ffffff; /* white */
+    --p2: 32%;
+    --p3: 73%;
+  }
+  50% {
+    /* subtle motion: whites with slight tint shifts */
+    --angle: 125deg;
+    --g1: #eef5ff;
+    --g2: #f7fffe;
+    --g3: #ffffff;
+    --p2: 33.5%;
+    --p3: 74%;
+  }
+  100% {
+    --angle: 120deg;
+    --g1: #f3f8ff;
+    --g2: #f6fefe;
+    --g3: #ffffff;
+    --p2: 32%;
+    --p3: 73%;
+  }
 }
 
 /* Remove experimental background layer */
@@ -619,6 +678,9 @@ textarea:focus-visible {
 .sidebar a {
   color: var(--color-text);
 }
+
+/* Hide in-sidebar brand to avoid duplication with toolbar brand */
+.sidebar .brand { display: none !important; }
 
 /* Rhythm */
 .nav {
@@ -2866,22 +2928,28 @@ mark.search-hit {
 /* Right side pill button */
 .toolbar__spacer { flex: 1 1 auto; }
 
-.dog-pill {
+/* Toolbar brand (logo + title) placed on the right */
+.toolbar-brand {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 36px;
-  padding: 0 14px;
-  border: none;
+  gap: 12px;
+  height: 44px;
+  padding: 0 12px;
   border-radius: var(--radius-pill);
-  background: var(--color-accent);
-  color: var(--color-accent-text);
-  font-weight: 600;
-  box-shadow: 0 1px 2px rgba(0,0,0,.06);
-  cursor: pointer;
+  color: var(--color-text);
+  background: transparent;
+  -webkit-user-select: none;
+  user-select: none;
 }
-.dog-pill i { color: currentColor; }
-.dog-pill:hover { filter: brightness(1.05); }
+.toolbar-brand .brand__logo {
+  width: 36px;
+  height: 36px;
+}
+.toolbar-brand .brand__title {
+  font-weight: 800;
+  font-size: 1.5rem;
+  letter-spacing: -0.01em;
+}
 .dog-pill:active { transform: translateY(1px); }
 
 .traffic {

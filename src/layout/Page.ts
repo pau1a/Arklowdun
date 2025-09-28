@@ -2,6 +2,7 @@ import type { SidebarInstance } from "./Sidebar";
 import type { ContentInstance } from "./Content";
 import type { ToolbarInstance } from "./Toolbar";
 import type { FooterInstance } from "./Footer";
+import { Backdrop } from "./Backdrop";
 
 export interface PageProps {
   sidebar: SidebarInstance;
@@ -15,6 +16,8 @@ export interface PageInstance {
 }
 
 export function Page({ sidebar, content, footer, toolbar }: PageProps): PageInstance {
+  // Persistent, app-wide backdrop layer (e.g., gradient) behind all panels.
+  const backdrop = Backdrop();
   const modalRoot = document.createElement("div");
   modalRoot.id = "modal-root";
 
@@ -29,6 +32,9 @@ export function Page({ sidebar, content, footer, toolbar }: PageProps): PageInst
     }
 
     const nextChildren: Node[] = [];
+
+    // Always ensure the backdrop is first so everything else paints above it.
+    nextChildren.push(backdrop.element);
 
     const customToolbar =
       target.querySelector<HTMLElement>(".app-toolbar") ??
