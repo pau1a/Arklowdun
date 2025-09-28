@@ -1,0 +1,36 @@
+:root {
+  --blob-main:  #00C896;
+  --blob-tint:  #66E0C2;
+  --blob-shade: #008060;
+  --blob-aqua:  #00B2C8;
+  --blob-coral: #C84600;
+
+  --blob-alpha-main:  0.275;
+  --blob-alpha-tint:  0.24;
+  --blob-alpha-shade: 0.175;
+  --blob-alpha-aqua:  0.24;
+  --blob-alpha-coral: 0.14;
+
+  /* 0.0 (very soft) … 1.0 (crisper edge) */
+  --blob-edge-hardness: 0.95;
+
+  /* Debug only: 0 to disable, 0.1+ to overlay a magenta tint */
+  --ambient-debug-overlay: 0;
+  /* Global multiplier applied at render time for live tuning */
+  --blob-alpha-mult: 0.5;
+  /* How much to lighten blob color towards white (0-1); 0.5 = 50% */
+  --blob-lighten: 0.5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --blob-alpha-main:  0.225;
+    --blob-alpha-tint:  0.20;
+    --blob-alpha-shade: 0.15;
+    --blob-alpha-aqua:  0.20;
+    --blob-alpha-coral: 0.12;
+    --blob-edge-hardness: 0.95;
+    --blob-alpha-mult: 0.5;
+    --blob-lighten: 0.5;
+  }
+}

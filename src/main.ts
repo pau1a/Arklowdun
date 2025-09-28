@@ -4,6 +4,7 @@ import "@fortawesome/fontawesome-free/css/all.min.css";
 import "./debug";
 import "./theme.scss";
 import "./styles.scss";
+import "./styles/blob-tokens.css";
 import { Page, type PageInstance } from "@layout/Page";
 import {
   Sidebar,
@@ -38,6 +39,7 @@ import { getStartupWindow } from "@lib/ipc/startup";
 import { ensureDbHealthReport, recheckDbHealth } from "./services/dbHealth";
 import { recoveryText } from "@strings/recovery";
 import { mountMacToolbar, setAppToolbarTitle } from "@ui/AppToolbar";
+import { initAmbientBackground, type AmbientBackgroundController } from "@ui/AmbientBackground";
 
 // Resolve main app logo (SVG) as a URL the bundler can serve
 const appLogoUrl = new URL("./assets/logo.svg", import.meta.url).href;
@@ -77,6 +79,40 @@ let currentRouteId: AppPane | null = null;
 let renderSequence = 0;
 let dbHealthUi: DbHealthUiContext | null = null;
 const numberFormatter = new Intl.NumberFormat();
+let ambientController: AmbientBackgroundController | null = null;
+let ambientInit: Promise<void> | null = null;
+
+function ensureAmbientBackground(): void {
+  if (ambientInit) return;
+  // Prefer a dedicated overlay container to avoid any stacking quirks
+  let host = document.getElementById("ambient-overlay") as HTMLElement | null;
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "ambient-overlay";
+    (host.style as any).inset = "0";
+    host.style.position = "fixed";
+    host.style.top = "0";
+    host.style.right = "0";
+    host.style.bottom = "0";
+    host.style.left = "0";
+    host.style.pointerEvents = "none";
+    // Place ambient between backdrop (z:0) and UI (z:1)
+    host.style.zIndex = "0";
+    document.body.appendChild(host);
+    log.debug("ambient:overlay-mounted");
+  }
+  ambientInit = initAmbientBackground(host)
+    .then((controller) => {
+      ambientController = controller;
+    })
+    .catch((error) => {
+      ambientInit = null;
+      log.warn("ambient:bootstrap", error);
+    })
+    .then(() => {
+      // noop
+    });
+}
 
 function toSidebarItem(route: RouteDefinition, section: "hub" | "primary"): SidebarItemConfig {
   const display = route.display;
@@ -267,6 +303,7 @@ function ensureLayout(): LayoutContext {
   if (!layoutMounted) {
     ctx.page.mount();
     layoutMounted = true;
+    ensureAmbientBackground();
   }
 
   return ctx;
@@ -450,11 +487,14 @@ window.addEventListener("DOMContentLoaded", () => {
       console.log("Runtime window label:", appWindow.label);
       setupDynamicMinSize();
     });
+
+    // ambient debug probe removed; overlay verified
   })();
 });
 
 window.addEventListener("beforeunload", () => {
   dbHealthUi?.unsubscribe?.();
+  ambientController?.destroy?.();
 });
 
 // minimal debug handle without ts-expect-error
