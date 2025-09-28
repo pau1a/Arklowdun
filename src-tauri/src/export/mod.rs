@@ -570,7 +570,7 @@ mod tests {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS schema_migrations (
                 version TEXT PRIMARY KEY,
-                applied_at TEXT DEFAULT CURRENT_TIMESTAMP
+                applied_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
             )",
         )
         .execute(&pool)
@@ -578,7 +578,7 @@ mod tests {
         sqlx::query("DELETE FROM schema_migrations")
             .execute(&pool)
             .await?;
-        sqlx::query("INSERT INTO schema_migrations (version) VALUES (?1)")
+        sqlx::query("INSERT OR IGNORE INTO schema_migrations (version) VALUES (?1)")
             .bind(version)
             .execute(&pool)
             .await?;
@@ -671,7 +671,7 @@ mod tests {
 
     #[tokio::test]
     async fn manifest_records_canonical_schema_version() {
-        let version = "0023_events_drop_legacy_time";
+        let version = "0001_baseline.sql";
         let db_dir = TempDir::new().expect("create db dir");
         let pool = setup_pool(&db_dir, version)
             .await
@@ -705,7 +705,10 @@ mod tests {
         .await
         .expect("fetch schema version");
 
-        assert_eq!(manifest.schema_version, db_version);
+        assert_eq!(
+            manifest.schema_version,
+            db_manifest::normalize_schema_version_owned(db_version)
+        );
         assert!(!manifest
             .schema_version
             .to_ascii_lowercase()

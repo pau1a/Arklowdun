@@ -520,7 +520,9 @@ async fn run_cli_import(
             .map_err(ImportCliError::Validation)?;
 
         let minimum_version = Version::parse(MIN_SUPPORTED_APP_VERSION)
-            .expect("MIN_SUPPORTED_APP_VERSION is valid semver");
+            .map_err(anyhow::Error::new)
+            .context("parse MIN_SUPPORTED_APP_VERSION")
+            .map_err(ImportCliError::Validation)?;
         let validation_ctx = ValidationContext {
             pool: &pool,
             target_root: target_root.as_path(),

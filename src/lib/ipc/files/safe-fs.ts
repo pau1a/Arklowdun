@@ -1,1 +1,1 @@
-export * from "../../../files/safe-fs";
+export * from "@files/safe-fs";

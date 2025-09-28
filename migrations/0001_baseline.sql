@@ -1,3 +1,8 @@
+-- 0001_baseline.sql
+-- Canonical schema baseline for Arklowdun.
+-- Apply this migration to create an empty database with seeded household and categories.
+
+-- Core tables
 CREATE TABLE household (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -6,6 +11,7 @@ CREATE TABLE household (
   deleted_at INTEGER,
   tz TEXT
 );
+
 CREATE TABLE categories (
   id TEXT PRIMARY KEY,
   household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -18,6 +24,7 @@ CREATE TABLE categories (
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER
 );
+
 CREATE TABLE events (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
@@ -32,6 +39,7 @@ CREATE TABLE events (
   rrule TEXT,
   exdates TEXT
 );
+
 CREATE TABLE notes (
   id TEXT PRIMARY KEY,
   household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -47,6 +55,7 @@ CREATE TABLE notes (
   deadline INTEGER,
   deadline_tz TEXT
 );
+
 CREATE TABLE files_index (
   id INTEGER PRIMARY KEY,
   household_id TEXT NOT NULL,
@@ -58,6 +67,7 @@ CREATE TABLE files_index (
   UNIQUE (household_id, file_id),
   FOREIGN KEY (household_id) REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE
 );
+
 CREATE TABLE files_index_meta (
   household_id TEXT PRIMARY KEY,
   last_built_at_utc TEXT NOT NULL,
@@ -66,6 +76,8 @@ CREATE TABLE files_index_meta (
   version INTEGER NOT NULL,
   FOREIGN KEY (household_id) REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE
 );
+
+-- Legacy domain tables retained for feature parity
 CREATE TABLE bills (
   id TEXT PRIMARY KEY,
   amount INTEGER NOT NULL,
@@ -80,6 +92,7 @@ CREATE TABLE bills (
   root_key TEXT,
   relative_path TEXT
 );
+
 CREATE TABLE budget_categories (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -90,6 +103,7 @@ CREATE TABLE budget_categories (
   deleted_at INTEGER,
   position INTEGER NOT NULL DEFAULT 0
 );
+
 CREATE TABLE expenses (
   id TEXT PRIMARY KEY,
   category_id TEXT NOT NULL REFERENCES budget_categories(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -101,6 +115,7 @@ CREATE TABLE expenses (
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER
 );
+
 CREATE TABLE family_members (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -112,6 +127,7 @@ CREATE TABLE family_members (
   deleted_at INTEGER,
   position INTEGER NOT NULL DEFAULT 0
 );
+
 CREATE TABLE import_id_map (
   entity TEXT NOT NULL,
   old_id TEXT NOT NULL,
@@ -119,6 +135,7 @@ CREATE TABLE import_id_map (
   PRIMARY KEY (entity, old_id),
   UNIQUE (new_uuid)
 );
+
 CREATE TABLE inventory_items (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -134,6 +151,7 @@ CREATE TABLE inventory_items (
   root_key TEXT,
   relative_path TEXT
 );
+
 CREATE TABLE pets (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -144,6 +162,7 @@ CREATE TABLE pets (
   deleted_at INTEGER,
   position INTEGER NOT NULL DEFAULT 0
 );
+
 CREATE TABLE pet_medical (
   id TEXT PRIMARY KEY,
   pet_id TEXT NOT NULL REFERENCES pets(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -158,6 +177,7 @@ CREATE TABLE pet_medical (
   root_key TEXT,
   relative_path TEXT
 );
+
 CREATE TABLE policies (
   id TEXT PRIMARY KEY,
   amount INTEGER NOT NULL,
@@ -172,6 +192,7 @@ CREATE TABLE policies (
   root_key TEXT,
   relative_path TEXT
 );
+
 CREATE TABLE property_documents (
   id TEXT PRIMARY KEY,
   description TEXT NOT NULL,
@@ -186,6 +207,7 @@ CREATE TABLE property_documents (
   root_key TEXT,
   relative_path TEXT
 );
+
 CREATE TABLE shadow_read_audit (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   total_rows INTEGER NOT NULL DEFAULT 0,
@@ -201,6 +223,7 @@ CREATE TABLE shadow_read_audit (
   last_end_delta_ms INTEGER,
   last_observed_at_ms INTEGER
 );
+
 CREATE TABLE shopping_items (
   id TEXT PRIMARY KEY,
   household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -209,6 +232,7 @@ CREATE TABLE shopping_items (
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER
 );
+
 CREATE TABLE vehicles (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -228,6 +252,7 @@ CREATE TABLE vehicles (
   next_mot_due INTEGER,
   next_service_due INTEGER
 );
+
 CREATE TABLE vehicle_maintenance (
   id TEXT PRIMARY KEY,
   vehicle_id TEXT NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -242,9 +267,13 @@ CREATE TABLE vehicle_maintenance (
   root_key TEXT,
   relative_path TEXT
 );
-CREATE VIEW shopping_live AS
-  SELECT * FROM shopping_items WHERE deleted_at IS NULL
-/* shopping_live(id,household_id,position,created_at,updated_at,deleted_at) */;
+
+-- NOTE: Legacy views are intentionally not created in the baseline to keep
+-- the canonical schema minimal and focused on tables + indexes.
+-- (shopping_live was removed)
+  SELECT * FROM shopping_items WHERE deleted_at IS NULL;
+
+-- Indexes
 CREATE UNIQUE INDEX bills_household_file_idx ON bills(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
 CREATE UNIQUE INDEX bills_household_position_idx ON bills(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX bills_household_updated_idx ON bills(household_id, updated_at);
@@ -289,7 +318,38 @@ CREATE UNIQUE INDEX vehicle_maintenance_household_file_idx ON vehicle_maintenanc
 CREATE INDEX vehicle_maintenance_household_updated_idx ON vehicle_maintenance(household_id, updated_at);
 CREATE INDEX vehicle_maintenance_vehicle_date_idx ON vehicle_maintenance(vehicle_id, date);
 CREATE UNIQUE INDEX vehicles_household_position_idx ON vehicles(household_id, position) WHERE deleted_at IS NULL;
-CREATE TABLE schema_migrations (
+
+
+
+-- Record baseline version in schema_migrations
+CREATE TABLE IF NOT EXISTS schema_migrations (
   version TEXT PRIMARY KEY,
-  applied_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
+  applied_at INTEGER NOT NULL
 );
+
+INSERT OR IGNORE INTO schema_migrations(version, applied_at)
+VALUES (
+  '0001_baseline.sql',
+  CAST(strftime('%s','now') AS INTEGER) * 1000
+);
+
+-- Seed default household and categories for a usable baseline
+-- Seeded timestamps fixed at 2023-01-01T00:00:00Z (ms)
+INSERT OR IGNORE INTO household (id, name, created_at, updated_at, deleted_at, tz)
+VALUES ('default', 'Default Household', 1672531200000, 1672531200000, NULL, 'UTC');
+
+INSERT OR IGNORE INTO categories
+  (id, household_id, name, slug, color, position, z, created_at, updated_at, deleted_at)
+VALUES
+  ('cat_primary',   'default', 'Primary',   'primary',   '#4F46E5',  0, 0, 1672531200000, 1672531200000, NULL),
+  ('cat_secondary', 'default', 'Secondary', 'secondary', '#1D4ED8',  1, 0, 1672531200000, 1672531200000, NULL),
+  ('cat_tasks',     'default', 'Tasks',     'tasks',     '#0EA5E9',  2, 0, 1672531200000, 1672531200000, NULL),
+  ('cat_bills',     'default', 'Bills',     'bills',     '#F59E0B',  3, 0, 1672531200000, 1672531200000, NULL),
+  ('cat_insurance', 'default', 'Insurance', 'insurance', '#EA580C',  4, 0, 1672531200000, 1672531200000, NULL),
+  ('cat_property',  'default', 'Property',  'property',  '#F97316',  5, 0, 1672531200000, 1672531200000, NULL),
+  ('cat_vehicles',  'default', 'Vehicles',  'vehicles',  '#22C55E',  6, 0, 1672531200000, 1672531200000, NULL),
+  ('cat_pets',      'default', 'Pets',      'pets',      '#16A34A',  7, 0, 1672531200000, 1672531200000, NULL),
+  ('cat_family',    'default', 'Family',    'family',    '#EF4444',  8, 0, 1672531200000, 1672531200000, NULL),
+  ('cat_inventory', 'default', 'Inventory', 'inventory', '#C026D3',  9, 0, 1672531200000, 1672531200000, NULL),
+  ('cat_budget',    'default', 'Budget',    'budget',    '#A855F7', 10, 0, 1672531200000, 1672531200000, NULL),
+  ('cat_shopping',  'default', 'Shopping',  'shopping',  '#6366F1', 11, 0, 1672531200000, 1672531200000, NULL);

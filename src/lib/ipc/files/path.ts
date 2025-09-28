@@ -1,1 +1,1 @@
-export * from "../../../files/path";
+export * from "@files/path";

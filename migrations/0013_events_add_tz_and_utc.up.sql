@@ -1,5 +1,0 @@
-ALTER TABLE events RENAME COLUMN starts_at TO start_at;
-ALTER TABLE events ADD COLUMN end_at INTEGER;
-ALTER TABLE events ADD COLUMN tz TEXT;
-ALTER TABLE events ADD COLUMN start_at_utc INTEGER;
-ALTER TABLE events ADD COLUMN end_at_utc INTEGER;

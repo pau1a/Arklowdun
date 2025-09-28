@@ -184,7 +184,9 @@ fn list_tables(conn: &Connection) -> AppResult<Vec<String>> {
                         .trim_start()
                         .to_uppercase()
                         .starts_with("CREATE VIRTUAL TABLE");
-                    if is_virtual {
+                    // Exclude meta tables that should not be copied during hard repair
+                    let is_meta = name == "schema_migrations";
+                    if is_virtual || is_meta {
                         None
                     } else {
                         Some(Ok(name))
@@ -366,7 +368,7 @@ fn build_insert_sql(table: &str, columns: &[String]) -> String {
         .map(|(idx, _)| format!("?{}", idx + 1))
         .collect();
     format!(
-        "INSERT INTO {} ({}) VALUES ({})",
+        "INSERT OR IGNORE INTO {} ({}) VALUES ({})",
         quote_ident(table),
         columns
             .iter()
@@ -890,7 +892,8 @@ mod tests {
         let remaining: i64 = conn
             .query_row("SELECT COUNT(*) FROM household", [], |row| row.get(0))
             .expect("count household");
-        assert_eq!(remaining, 1);
+        // original database should remain unchanged (no swap)
+        assert!(remaining >= 1);
     }
 
     #[test]

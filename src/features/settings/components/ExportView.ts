@@ -1,6 +1,7 @@
 import createButton from "@ui/Button";
 import { toast } from "@ui/Toast";
 import { runExport } from "../api/export";
+import { revealPath } from "@lib/ipc/opener";
 import { openDirectoryDialog } from "../api/dialog";
 import { recoveryText } from "@strings/recovery";
 
@@ -65,18 +66,11 @@ export function createExportView(): ExportViewInstance {
         path: entry.directory,
       });
       try {
-        const mod = await import("@tauri-apps/plugin-opener");
-        const reveal = (mod as any)?.open as undefined | ((p: string) => Promise<void>);
         const action = {
           label: recoveryText("db.common.reveal"),
           onSelect: async () => {
-            if (typeof reveal === "function") {
-              try {
-                await reveal(entry.manifestPath);
-              } catch {
-                /* ignore */
-              }
-            } else {
+            const ok = await revealPath(entry.manifestPath);
+            if (!ok) {
               try { await navigator?.clipboard?.writeText?.(entry.directory); } catch {}
             }
           },

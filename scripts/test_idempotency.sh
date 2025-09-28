@@ -1,5 +1,5 @@
-#!/bin/sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
 KEEP=0
 LOOSE=0
@@ -29,12 +29,13 @@ for cmd in sqlite3 diff sed; do
 done
 
 MIG_DIR="$REPO_ROOT/migrations"
-set -- "$MIG_DIR"/[0-9]*.up.sql
+set -- "$MIG_DIR"/[0-9]*.sql "$MIG_DIR"/[0-9]*.up.sql
 if [ ! -e "$1" ]; then
   echo "no migrations found; nothing to test"
   exit 0
 fi
-UP_COUNT=$(printf '%s\n' "$@" | wc -l | tr -d ' ')
+MIG_FILES=$(printf '%s\n' "$@" | grep -E '/[0-9]+_.*\.sql$' | sort -u)
+UP_COUNT=$(printf '%s\n' "$MIG_FILES" | sed '/^$/d' | wc -l | tr -d ' ')
 
 export LC_ALL=C
 
@@ -69,7 +70,7 @@ if [ "$MIG_ROW_COUNT" -ne "$UP_COUNT" ]; then
 fi
 
 echo "[3/6] Second run (should no-op)..."
-DB="$TMPDB" scripts/migrate.sh up-all >/dev/null
+DB="$TMPDB" scripts/migrate.sh up >/dev/null
 
 echo "[4/6] Snapshot after second run..."
 if [ "$LOOSE" -eq 1 ]; then

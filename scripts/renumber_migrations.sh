@@ -4,7 +4,10 @@ export LC_ALL=C
 APPLY="${1:-}"
 MIG_DIR="$(cd "$(dirname "$0")/../migrations" && pwd)"
 
-mapfile -t UPS < <(printf '%s\n' "$MIG_DIR"/[0-9]*.up.sql 2>/dev/null | sort -V)
+UPS=()
+while IFS= read -r p; do
+  [ -n "${p:-}" ] && UPS+=("$p")
+done < <(printf '%s\n' "$MIG_DIR"/[0-9]*.up.sql 2>/dev/null | LC_ALL=C sort)
 if [[ ${#UPS[@]} -eq 0 ]]; then
   echo "no migrations found"
   exit 0

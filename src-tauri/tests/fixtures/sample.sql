@@ -2,31 +2,9 @@ PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
 CREATE TABLE schema_migrations (
   version TEXT PRIMARY KEY,
-  applied_at INTEGER NOT NULL
+  applied_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
 );
-INSERT INTO schema_migrations VALUES('0001_initial.up.sql',0);
-INSERT INTO schema_migrations VALUES('0002_household.up.sql',0);
-INSERT INTO schema_migrations VALUES('0003_domain_tables.up.sql',0);
-INSERT INTO schema_migrations VALUES('0004_add_deleted_at.up.sql',0);
-INSERT INTO schema_migrations VALUES('0005_add_positions.up.sql',0);
-INSERT INTO schema_migrations VALUES('0006_add_file_paths.up.sql',0);
-INSERT INTO schema_migrations VALUES('0007_import_id_map.up.sql',0);
-INSERT INTO schema_migrations VALUES('0008_explicit_fk_actions.up.sql',0);
-INSERT INTO schema_migrations VALUES('0009_soft_delete_notes_shopping.up.sql',0);
-INSERT INTO schema_migrations VALUES('0010_notes_z_index.up.sql',0);
-INSERT INTO schema_migrations VALUES('0011_events_start_idx.up.sql',0);
-INSERT INTO schema_migrations VALUES('0012_household_add_tz.up.sql',0);
-INSERT INTO schema_migrations VALUES('0013_events_add_tz_and_utc.up.sql',0);
-INSERT INTO schema_migrations VALUES('0014_events_start_at_utc_index.up.sql',0);
-INSERT INTO schema_migrations VALUES('0015_vehicles_rework.up.sql',0);
-INSERT INTO schema_migrations VALUES('0016_idx_bills_household_due.up.sql',0);
-INSERT INTO schema_migrations VALUES('0017_events_add_rrule_exdates.up.sql',0);
-INSERT INTO schema_migrations VALUES('0018_search_indexes.up.sql',0);
-INSERT INTO schema_migrations VALUES('0019_files_index.up.sql',0);
-INSERT INTO schema_migrations VALUES('0020_files_index_fks.up.sql',0);
-INSERT INTO schema_migrations VALUES('0021_events_end_at_utc_index.up.sql',0);
-INSERT INTO schema_migrations VALUES('0022_shadow_read_audit.up.sql',0);
-INSERT INTO schema_migrations VALUES('0023_events_drop_legacy_time.up.sql',0);
+INSERT INTO schema_migrations(version) VALUES('0001_baseline.sql');
 CREATE TABLE household (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -226,6 +204,18 @@ CREATE TABLE IF NOT EXISTS "budget_categories" (
   deleted_at INTEGER,
   position INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS "categories" (
+  id TEXT PRIMARY KEY,
+  household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  name TEXT NOT NULL,
+  slug TEXT NOT NULL,
+  color TEXT NOT NULL,
+  position INTEGER NOT NULL DEFAULT 0,
+  z INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL DEFAULT 0,
+  deleted_at INTEGER
+);
 CREATE TABLE IF NOT EXISTS "expenses" (
   id TEXT PRIMARY KEY,
   category_id TEXT NOT NULL REFERENCES budget_categories(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -243,8 +233,15 @@ CREATE TABLE notes (
   position     INTEGER NOT NULL DEFAULT 0,
   created_at   INTEGER NOT NULL DEFAULT 0,
   updated_at   INTEGER NOT NULL DEFAULT 0,
-  deleted_at   INTEGER
-, z INTEGER NOT NULL DEFAULT 0);
+  deleted_at   INTEGER,
+  z            INTEGER NOT NULL DEFAULT 0,
+  text         TEXT NOT NULL DEFAULT '',
+  color        TEXT NOT NULL DEFAULT '#FFF4B8',
+  x            REAL NOT NULL DEFAULT 0,
+  y            REAL NOT NULL DEFAULT 0,
+  deadline     INTEGER,
+  deadline_tz  TEXT
+);
 CREATE TABLE shopping_items (
   id           TEXT PRIMARY KEY,
   household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -299,6 +296,7 @@ CREATE UNIQUE INDEX bills_household_file_idx ON bills(household_id, root_key, re
 CREATE INDEX idx_bills_household_due ON bills(household_id, due_date);
 CREATE INDEX policies_household_updated_idx ON policies(household_id, updated_at);
 CREATE UNIQUE INDEX policies_household_position_idx ON policies(household_id, position) WHERE deleted_at IS NULL;
+CREATE INDEX notes_deadline_idx ON notes(household_id, deadline) WHERE deadline IS NOT NULL AND deleted_at IS NULL;
 CREATE UNIQUE INDEX policies_household_file_idx ON policies(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
 CREATE INDEX property_documents_household_updated_idx ON property_documents(household_id, updated_at);
 CREATE UNIQUE INDEX property_documents_household_position_idx ON property_documents(household_id, position) WHERE deleted_at IS NULL;
@@ -321,6 +319,9 @@ CREATE INDEX family_members_household_updated_idx ON family_members(household_id
 CREATE UNIQUE INDEX family_members_household_position_idx ON family_members(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX budget_categories_household_updated_idx ON budget_categories(household_id, updated_at);
 CREATE UNIQUE INDEX budget_categories_household_position_idx ON budget_categories(household_id, position) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX categories_household_position_idx ON categories(household_id, position) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX categories_household_slug_idx ON categories(household_id, slug) WHERE deleted_at IS NULL;
+CREATE INDEX categories_household_updated_idx ON categories(household_id, updated_at);
 CREATE INDEX expenses_household_updated_idx ON expenses(household_id, updated_at);
 CREATE INDEX expenses_category_date_idx ON expenses(category_id, date);
 CREATE INDEX notes_scope_idx
@@ -338,8 +339,6 @@ CREATE INDEX events_household_start_at_utc_idx ON events(household_id, start_at_
 CREATE INDEX events_household_end_at_utc_idx ON events(household_id, end_at_utc);
 CREATE INDEX idx_events_household_rrule ON events(household_id, rrule);
 CREATE INDEX idx_events_household_title ON events(household_id, title);
-CREATE VIEW IF NOT EXISTS notes_live AS
-  SELECT * FROM notes WHERE deleted_at IS NULL;
 CREATE VIEW IF NOT EXISTS shopping_live AS
   SELECT * FROM shopping_items WHERE deleted_at IS NULL;
 COMMIT;

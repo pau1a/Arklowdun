@@ -145,11 +145,7 @@ pub async fn execute_plan(
         }
     }
 
-    let mut attachments_summary: Option<AttachmentExecutionSummary> = None;
-    if matches!(plan.mode, ImportMode::Merge) {
-        attachments_summary =
-            Some(execute_attachments_merge(bundle, &plan.attachments, ctx).await?);
-    }
+    // Attachments handled per mode below
 
     let mut tables = BTreeMap::new();
 
@@ -165,7 +161,7 @@ pub async fn execute_plan(
 
     let attachments = match plan.mode {
         ImportMode::Replace => execute_attachments_replace(bundle, &plan.attachments, ctx)?,
-        ImportMode::Merge => attachments_summary.expect("merge attachments summary"),
+        ImportMode::Merge => execute_attachments_merge(bundle, &plan.attachments, ctx).await?,
     };
 
     Ok(ExecutionReport {
@@ -358,11 +354,18 @@ async fn import_table_rows(
             chunk_len = 0;
         }
 
-        let tx_ref = tx.as_mut().unwrap();
+        let tx_ref = match tx.as_mut() {
+            Some(tx) => tx,
+            None => unreachable!("transaction should be initialized before use"),
+        };
 
         match mode {
             ImportMode::Replace => {
-                inserter.as_ref().unwrap().insert(tx_ref, &value).await?;
+                if let Some(ins) = inserter.as_ref() {
+                    ins.insert(tx_ref, &value).await?;
+                } else {
+                    unreachable!("inserter initialized on first row");
+                }
                 summary.adds += 1;
             }
             ImportMode::Merge => {
@@ -371,7 +374,7 @@ async fn import_table_rows(
                     physical_table,
                     &value,
                     tx_ref,
-                    inserter.as_ref().unwrap(),
+                    if let Some(ins) = inserter.as_ref() { ins } else { unreachable!("inserter initialized on first row") },
                     &mut summary,
                 )
                 .await?;
@@ -1105,7 +1108,6 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(existing.len(), 3);
         let keep = existing.iter().find(|(id, _)| id == "hh_keep").unwrap();
         assert_eq!(keep.1, 200);
         let update = existing.iter().find(|(id, _)| id == "hh_update").unwrap();

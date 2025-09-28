@@ -1,4 +1,4 @@
-import { listen } from "@tauri-apps/api/event";
+import { onWindowBlur, onWindowFocus } from "@lib/ipc/event";
 import { log } from "@utils/logger";
 import {
   mountSoloBlobEco,
@@ -70,21 +70,16 @@ class AmbientBackgroundManager implements AmbientBackgroundController {
       this.applySeed(seed);
     });
 
-    void listen("tauri://focus", () => {
+    void onWindowFocus(() => {
       void this.ensureSeedForRotation();
       if (this.mode !== "off") {
         this.renderer?.setPaused(false);
       }
-    }).then((unlisten) => {
-      this.unlistenFocus = unlisten;
-    }).catch(() => {});
+    }).then((unlisten) => { this.unlistenFocus = unlisten; }).catch(() => {});
 
-    void listen("tauri://blur", () => {
+    void onWindowBlur(() => {
       // Do not pause immediately on blur; allow renderer to manage grace period
-      // (kept for future hooks if needed)
-    }).then((unlisten) => {
-      this.unlistenBlur = unlisten;
-    }).catch(() => {});
+    }).then((unlisten) => { this.unlistenBlur = unlisten; }).catch(() => {});
   }
 
   private enforceHostStyles(): void {

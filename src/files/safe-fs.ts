@@ -6,6 +6,7 @@ import {
 } from "./path";
 export type { RootKey };
 export { PathError };
+/* eslint-disable no-restricted-imports */
 import type * as fsTypes from "@tauri-apps/plugin-fs";
 export type FsEntry = fsTypes.DirEntry;
 
@@ -44,7 +45,7 @@ export function __setMocks(mocks: {
   canonicalizeAndVerify?: typeof canonicalizeAndVerifyReal;
   rejectSymlinks?: typeof rejectSymlinksReal;
 }) {
-  if (mocks.fs) fsImpl = { ...(fsImpl ?? ({} as FsImpl)), ...mocks.fs } as FsImpl;
+  if (mocks.fs) fsImpl = { ...fsImpl, ...mocks.fs } as FsImpl;
   if (mocks.canonicalizeAndVerify) canonicalizeAndVerifyImpl = mocks.canonicalizeAndVerify;
   if (mocks.rejectSymlinks) rejectSymlinksImpl = mocks.rejectSymlinks;
 }
@@ -125,8 +126,8 @@ export async function exists(relPath: string, root: RootKey): Promise<boolean> {
   }
   const { realPath } = await canonicalizeAndVerifyImpl(relPath, root);
   await rejectSymlinksImpl(realPath, root);
-  const fs = await getFs();
   try {
+    const fs = await getFs();
     await fs.lstat(realPath);
     return true;
   } catch (e: any) {

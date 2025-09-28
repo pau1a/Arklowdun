@@ -714,21 +714,17 @@ export function createImportView(): ImportViewInstance {
   revealButton.onclick = async () => {
     if (!lastReportPath) return;
     try {
-      const opener = await import("@tauri-apps/plugin-opener");
-      const reveal = (opener as any)?.open as undefined | ((path: string) => Promise<void>);
-      if (typeof reveal === "function") {
-        await reveal(lastReportPath);
-      }
-    } catch {
-      try {
+      const { revealPath } = await import("@lib/ipc/opener");
+      const ok = await revealPath(lastReportPath);
+      if (!ok) {
         await navigator.clipboard?.writeText?.(lastReportPath);
         toast.show({
           kind: "info",
           message: recoveryText("db.import.toast.report_copied"),
         });
-      } catch {
-        // ignore copy failures
       }
+    } catch {
+      // ignore
     }
   };
 

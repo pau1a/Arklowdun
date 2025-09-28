@@ -1,7 +1,0 @@
-$ cargo run --locked --quiet --manifest-path /workspace/Arklowdun/src-tauri/Cargo.toml --bin migrate -- --db /workspace/Arklowdun/target/drop-legacy-evidence/fail.sqlite check
-Database: /workspace/Arklowdun/target/drop-legacy-evidence/fail.sqlite
-{"timestamp":"2025-09-22T17:50:16.036254584Z","level":"INFO","fields":{"event":"events_legacy_column_check","ready":false,"has_start_at":true,"has_end_at":true,"legacy_columns":"start_at, end_at"},"target":"arklowdun"}
-{"timestamp":"2025-09-22T17:50:16.036417758Z","level":"ERROR","fields":{"event":"events_legacy_columns_present","legacy_columns":"start_at, end_at"},"target":"arklowdun"}
-Legacy events columns: Legacy events columns still exist: start_at, end_at. Run migrations before launching the desktop app.
-Error: Arklowdun needs to finish a database update. Close the app and run the migration tool from Settings → Maintenance.
-exit status: 1

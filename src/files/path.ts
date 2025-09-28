@@ -20,6 +20,7 @@ async function ensureLoaded() {
   }
   if (!lstatImpl) {
     try {
+      /* eslint-disable no-restricted-imports */
       const fsmod = await import("@tauri-apps/plugin-fs");
       lstatImpl = fsmod.lstat;
     } catch {

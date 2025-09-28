@@ -5,7 +5,7 @@ use arklowdun_lib::migration_guard::{self, GuardError};
 use clap::{Parser, Subcommand};
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
-    ConnectOptions, Row, SqliteConnection, SqlitePool,
+    ConnectOptions as _, Row as _, SqlitePool,
 };
 use std::{
     collections::HashSet,
@@ -123,21 +123,50 @@ fn migrations_dir() -> Result<PathBuf> {
     Ok(root.join("migrations"))
 }
 
-fn discover_migrations() -> Result<Vec<(String, PathBuf, Option<PathBuf>)>> {
+struct CliMigration {
+    stem: String,
+    filename: String,
+    path: PathBuf,
+    down: Option<PathBuf>,
+}
+
+fn discover_migrations() -> Result<Vec<CliMigration>> {
     let dir = migrations_dir()?;
-    let mut ups = vec![];
+    let mut entries = vec![];
     for entry in fs::read_dir(&dir).with_context(|| format!("read {:?}", dir))? {
         let p = entry?.path();
         if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-            if name.ends_with(".up.sql") {
-                let stem = name.trim_end_matches(".up.sql").to_string();
-                let down = dir.join(format!("{}.down.sql", stem));
-                ups.push((stem, p.clone(), down.exists().then_some(down)));
+            if !name.ends_with(".sql") || name.starts_with('_') {
+                continue;
             }
+            if name.ends_with(".down.sql") {
+                continue;
+            }
+            let stem = if name.ends_with(".up.sql") {
+                name.trim_end_matches(".up.sql").to_string()
+            } else {
+                name.trim_end_matches(".sql").to_string()
+            };
+            let down = if name.ends_with(".up.sql") {
+                let candidate = dir.join(format!("{}.down.sql", stem));
+                if candidate.exists() {
+                    Some(candidate)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            entries.push(CliMigration {
+                stem,
+                filename: name.to_string(),
+                path: p.clone(),
+                down,
+            });
         }
     }
-    ups.sort_by_key(|(stem, _, _)| stem.clone());
-    Ok(ups)
+    entries.sort_by(|a, b| a.stem.cmp(&b.stem));
+    Ok(entries)
 }
 
 async fn applied_set(pool: &SqlitePool) -> Result<HashSet<String>> {
@@ -166,14 +195,13 @@ async fn list(db: &Path) -> Result<()> {
         HashSet::new()
     };
     println!("DB: {}", db.display());
-    for (stem, _up, _down) in discover_migrations()? {
-        let fname = format!("{}.up.sql", stem);
-        let state = if applied.contains(&fname) {
+    for mig in discover_migrations()? {
+        let state = if applied.contains(&mig.filename) {
             "applied"
         } else {
             "pending"
         };
-        println!("{:<32}  {}", stem, state);
+        println!("{:<32}  {}", mig.stem, state);
     }
     Ok(())
 }
@@ -188,13 +216,13 @@ async fn status(db: &Path) -> Result<()> {
     };
     let applied_count = all
         .iter()
-        .filter(|(stem, _, _)| applied.contains(&format!("{}.up.sql", stem)))
+        .filter(|mig| applied.contains(&mig.filename))
         .count();
     let head = all
         .iter()
         .rev()
-        .find(|(stem, _, _)| applied.contains(&format!("{}.up.sql", stem)))
-        .map(|(s, _, _)| s.as_str())
+        .find(|mig| applied.contains(&mig.filename))
+        .map(|mig| mig.stem.as_str())
         .unwrap_or("<none>");
     println!("DB: {}", db.display());
     println!("Applied: {}/{}", applied_count, all.len());
@@ -208,14 +236,13 @@ async fn up(db: &Path, dry: bool, to: Option<&str>) -> Result<()> {
     let applied = applied_set(&pool).await?;
 
     let mut plan: Vec<(String, String)> = vec![];
-    for (stem, up_path, _) in &all {
-        let fname = format!("{}.up.sql", stem);
-        if applied.contains(&fname) {
+    for mig in &all {
+        if applied.contains(&mig.filename) {
             continue;
         }
-        plan.push((fname.clone(), fs::read_to_string(up_path)?));
+        plan.push((mig.filename.clone(), fs::read_to_string(&mig.path)?));
         if let Some(target) = to {
-            if stem.split('_').next() == Some(target) {
+            if mig.stem.split('_').next() == Some(target) {
                 break;
             }
         }
@@ -240,9 +267,6 @@ async fn up(db: &Path, dry: bool, to: Option<&str>) -> Result<()> {
         sqlx::query("PRAGMA foreign_keys=ON")
             .execute(&mut *tx)
             .await?;
-        if filename == "0023_events_drop_legacy_time.up.sql" {
-            ensure_events_utc_time_columns_clean(tx.as_mut()).await?;
-        }
         let start = Instant::now();
         for stmt in split_stmts(&sql) {
             sqlx::query(&stmt)
@@ -257,37 +281,20 @@ async fn up(db: &Path, dry: bool, to: Option<&str>) -> Result<()> {
         {
             anyhow::bail!("foreign key violations in {}", filename);
         }
-        sqlx::query(
-            "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, strftime('%s','now'))",
-        )
-        .bind(&filename)
-        .execute(&mut *tx)
-        .await?;
-        tx.commit().await?;
-        if filename == "0023_events_drop_legacy_time.up.sql" {
-            let rows: Vec<String> = sqlx::query_scalar("PRAGMA integrity_check;")
-                .fetch_all(&pool)
-                .await?;
-            let status = if rows.is_empty() {
-                "no_result".to_string()
-            } else {
-                rows.join("; ")
-            };
-            if status == "ok" {
-                tracing::info!(
-                    target: "arklowdun",
-                    event = "sqlite_integrity_check",
-                    status = "ok"
-                );
-            } else {
-                tracing::warn!(
-                    target: "arklowdun",
-                    event = "sqlite_integrity_check",
-                    status = %status
-                );
-            }
-            migration_guard::ensure_events_indexes(&pool).await?;
+        if filename == "0001_baseline.sql" {
+            log::debug!(
+                "skip recording {} because the baseline SQL already persisted the version",
+                filename
+            );
+        } else {
+            sqlx::query(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, strftime('%s','now') * 1000)",
+            )
+            .bind(&filename)
+            .execute(&mut *tx)
+            .await?;
         }
+        tx.commit().await?;
         log::info!("migration success {} in {:?}", filename, start.elapsed());
         if let Some(target) = to {
             if filename.split('_').next() == Some(target) {
@@ -311,10 +318,9 @@ async fn down(db: &Path, dry: bool, to: Option<&str>) -> Result<()> {
     let all = discover_migrations()?;
     let applied = applied_set(&pool).await?;
 
-    let mut applied_in_order: Vec<(String, Option<PathBuf>)> = all
+    let mut applied_in_order: Vec<CliMigration> = all
         .into_iter()
-        .filter(|(stem, _up, _down)| applied.contains(&format!("{}.up.sql", stem)))
-        .map(|(stem, _up, down)| (stem, down))
+        .filter(|mig| applied.contains(&mig.filename))
         .collect();
 
     if applied_in_order.is_empty() {
@@ -322,14 +328,20 @@ async fn down(db: &Path, dry: bool, to: Option<&str>) -> Result<()> {
         return Ok(());
     }
 
-    let mut plan: Vec<(String, String)> = vec![];
-    while let Some((stem, down_path)) = applied_in_order.pop() {
-        let fname = format!("{}.down.sql", stem);
-        let path = down_path.ok_or_else(|| anyhow!("no down file for {}", stem))?;
-        let sql = fs::read_to_string(&path)?;
-        plan.push((fname.clone(), sql));
+    let mut plan: Vec<(String, String, String)> = vec![];
+    while let Some(mig) = applied_in_order.pop() {
+        let down_path = mig
+            .down
+            .ok_or_else(|| anyhow!("no down file for {}", mig.stem))?;
+        let down_sql = fs::read_to_string(&down_path)?;
+        let down_name = down_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| anyhow!("invalid down filename"))?
+            .to_string();
+        plan.push((down_name, down_sql, mig.filename.clone()));
         if let Some(target) = to {
-            if stem.split('_').next() == Some(target) {
+            if mig.stem.split('_').next() == Some(target) {
                 break;
             }
         } else {
@@ -338,21 +350,21 @@ async fn down(db: &Path, dry: bool, to: Option<&str>) -> Result<()> {
     }
 
     println!("Plan (down):");
-    for (f, _) in &plan {
+    for (f, _, _) in &plan {
         println!("  {}", f);
     }
     if dry {
         return Ok(());
     }
 
-    for (filename, sql) in plan {
-        log::info!("rollback start {}", filename);
+    for (down_file, sql, applied_name) in plan {
+        log::info!("rollback start {}", down_file);
         let mut tx = pool.begin().await?;
         sqlx::query("PRAGMA foreign_keys=ON")
             .execute(&mut *tx)
             .await?;
         sqlx::query("DELETE FROM schema_migrations WHERE version=?1")
-            .bind(filename.replace(".down.sql", ".up.sql"))
+            .bind(&applied_name)
             .execute(&mut *tx)
             .await
             .ok();
@@ -360,10 +372,10 @@ async fn down(db: &Path, dry: bool, to: Option<&str>) -> Result<()> {
             sqlx::query(&stmt)
                 .execute(&mut *tx)
                 .await
-                .with_context(|| format!("{}: {}", filename, stmt_preview(&stmt)))?;
+                .with_context(|| format!("{}: {}", down_file, stmt_preview(&stmt)))?;
         }
         tx.commit().await?;
-        log::info!("rollback success {}", filename);
+        log::info!("rollback success {}", down_file);
     }
     Ok(())
 }
@@ -438,27 +450,4 @@ fn stmt_preview(s: &str) -> String {
     } else {
         s
     }
-}
-
-async fn ensure_events_utc_time_columns_clean(conn: &mut SqliteConnection) -> Result<()> {
-    let missing_start_utc: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM events WHERE start_at_utc IS NULL")
-            .fetch_one(&mut *conn)
-            .await
-            .context("precheck: count NULL start_at_utc values")?;
-
-    let missing_end_utc: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM events WHERE end_at IS NOT NULL AND end_at_utc IS NULL",
-    )
-    .fetch_one(&mut *conn)
-    .await
-    .context("precheck: count legacy end_at rows missing end_at_utc")?;
-
-    if missing_start_utc > 0 || missing_end_utc > 0 {
-        anyhow::bail!(format!(
-            "Migration 0023 blocked: {missing_start_utc} rows have NULL start_at_utc and {missing_end_utc} rows still rely on legacy end_at without end_at_utc. Run the timezone backfill before dropping start_at/end_at."
-        ));
-    }
-
-    Ok(())
 }

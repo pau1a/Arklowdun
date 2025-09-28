@@ -1,5 +1,5 @@
-#!/usr/bin/env sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
 command -v sqlite3 >/dev/null 2>&1 || {
   echo "error: sqlite3 is required" >&2
@@ -40,7 +40,7 @@ PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version TEXT PRIMARY KEY,
-  applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+  applied_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
 );
 SQL
 }
@@ -50,12 +50,14 @@ remove_database() {
 }
 
 list_migrations() {
-  find "$MIG_DIR" -type f -name '*_*.up.sql' -print | LC_ALL=C sort
+  find "$MIG_DIR" -type f \
+    \( -name '*_*.sql' ! -name '*_*.down.sql' \) \
+    -print | LC_ALL=C sort
 }
 
 has_migration_run() {
-  version="$1"
-  escaped=$(escape_sql "$version")
+  version_token="$1"
+  escaped=$(escape_sql "$version_token")
   sqlite3 "$DB_PATH" "SELECT 1 FROM schema_migrations WHERE version = '$escaped' LIMIT 1;" | grep -q 1
 }
 
@@ -68,19 +70,30 @@ apply_migration() {
   fi
 
   base=$(basename "$file")
-  version=${base%\.up.sql}
+  case "$base" in
+    *_*.up.sql)
+      version=${base%\.up.sql}
+      ;;
+    *_*.sql)
+      version=${base%\.sql}
+      ;;
+    *)
+      echo "error: unsupported migration filename: $base" >&2
+      exit 1
+      ;;
+  esac
 
-  if has_migration_run "$version"; then
+  if has_migration_run "$base"; then
     echo "Skipping migration $version (already applied)"
     return 0
   fi
 
-  escaped_version=$(escape_sql "$version")
+  escaped_version=$(escape_sql "$base")
   if ! sqlite3 "$DB_PATH" <<SQL
 BEGIN IMMEDIATE;
 PRAGMA foreign_keys=ON;
 $(cat "$file")
-INSERT INTO schema_migrations(version) VALUES('$escaped_version');
+INSERT OR IGNORE INTO schema_migrations(version) VALUES('$escaped_version');
 COMMIT;
 SQL
   then

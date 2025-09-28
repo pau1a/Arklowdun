@@ -1,26 +1,70 @@
 // src/ManageView.ts
+import { defaultHouseholdId } from "./db/household";
+import { categoriesRepo } from "./repos";
+import { showError } from "./ui/errors";
+import type { Category } from "./models";
 
-export function ManageView(container: HTMLElement) {
+export interface ManageViewOptions {
+  householdId?: string;
+  loadCategories?: (householdId: string) => Promise<Category[]>;
+  onError?: (error: unknown) => void;
+}
+
+async function fetchCategories(householdId: string): Promise<Category[]> {
+  return categoriesRepo.list({ householdId, orderBy: "position, created_at, id" });
+}
+
+function renderNav(nav: HTMLElement, categories: Category[]) {
+  nav.innerHTML = "";
+  if (categories.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "manage__empty";
+    empty.textContent = "No categories available.";
+    nav.appendChild(empty);
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  categories.forEach((category) => {
+    const link = document.createElement("a");
+    link.id = `nav-${category.slug}`;
+    link.href = `#${category.slug}`;
+    link.textContent = category.name;
+    frag.appendChild(link);
+  });
+  nav.appendChild(frag);
+}
+
+export async function ManageView(
+  container: HTMLElement,
+  options: ManageViewOptions = {},
+): Promise<void> {
   const section = document.createElement("section");
   section.className = "manage-page";
 
-  section.innerHTML = `
-    <nav class="manage" aria-label="Manage categories">
-      <a id="nav-primary" href="#primary">Primary</a>
-      <a id="nav-secondary" href="#secondary">Secondary</a>
-      <a id="nav-tasks" href="#tasks">Tasks</a>
-      <a id="nav-bills" href="#bills">Bills</a>
-      <a id="nav-insurance" href="#insurance">Insurance</a>
-      <a id="nav-property" href="#property">Property</a>
-      <a id="nav-vehicles" href="#vehicles">Vehicles</a>
-      <a id="nav-pets" href="#pets">Pets</a>
-      <a id="nav-family" href="#family">Family</a>
-      <a id="nav-inventory" href="#inventory">Inventory</a>
-      <a id="nav-budget" href="#budget">Budget</a>
-      <a id="nav-shopping" href="#shopping">Shopping List</a>
-    </nav>
-  `;
+  const nav = document.createElement("nav");
+  nav.className = "manage";
+  nav.setAttribute("aria-label", "Manage categories");
+  nav.innerHTML = "<p class=\"manage__loading\">Loading…</p>";
+
+  section.appendChild(nav);
 
   container.innerHTML = "";
   container.appendChild(section);
+
+  const onError = options.onError ?? showError;
+
+  try {
+    const householdId = options.householdId ?? (await defaultHouseholdId());
+    const load = options.loadCategories ?? fetchCategories;
+    const categories = await load(householdId);
+    renderNav(nav, categories);
+  } catch (err) {
+    onError(err);
+    nav.innerHTML = "";
+    const failure = document.createElement("p");
+    failure.className = "manage__error";
+    failure.textContent = "Unable to load categories.";
+    nav.appendChild(failure);
+  }
 }

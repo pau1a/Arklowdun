@@ -1,13 +1,13 @@
-use anyhow::{anyhow, bail, Context};
+use anyhow::{anyhow, bail};
 use include_dir::{include_dir, Dir};
 use once_cell::sync::OnceCell;
 use regex::Regex;
 use sqlx::sqlite::SqliteConnection;
-use sqlx::{Executor, Row, SqlitePool, Transaction};
+use sqlx::{Executor, Row, SqlitePool};
 use std::collections::HashSet;
 use std::time::Instant;
 
-use crate::{migration_guard, time::now_ms};
+use crate::time::now_ms;
 use tracing::{debug, error, info, warn};
 // The `log` crate macros are used via fully-qualified paths for persistence.
 
@@ -61,33 +61,52 @@ fn preview(sql: &str) -> String {
     }
 }
 
-fn load_migrations() -> anyhow::Result<Vec<(String, String, String)>> {
+struct MigrationFile {
+    name: String,
+    sql: String,
+    down: Option<String>,
+}
+
+fn load_migrations() -> anyhow::Result<Vec<MigrationFile>> {
     let mut entries = Vec::new();
     for file in MIGRATIONS_DIR.files() {
         let path = file.path();
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if !name.ends_with(".up.sql") {
-            continue;
-        }
         if name.starts_with('_') {
             continue;
         }
-        let stem = name.trim_end_matches(".up.sql");
-        let down_name = format!("{}.down.sql", stem);
-        let down_file = MIGRATIONS_DIR
-            .get_file(&down_name)
-            .ok_or_else(|| anyhow::anyhow!("missing down migration for {}", stem))?;
-        let up_sql = file
+        if name.ends_with(".down.sql") {
+            continue;
+        }
+
+        let sql = file
             .contents_utf8()
             .ok_or_else(|| anyhow::anyhow!("invalid utf8"))?
             .to_string();
-        let down_sql = down_file
-            .contents_utf8()
-            .ok_or_else(|| anyhow::anyhow!("invalid utf8"))?
-            .to_string();
-        entries.push((name.to_string(), up_sql, down_sql));
+
+        let down_sql = if name.ends_with(".up.sql") {
+            let stem = name.trim_end_matches(".up.sql");
+            let down_name = format!("{}.down.sql", stem);
+            let down_file = MIGRATIONS_DIR
+                .get_file(&down_name)
+                .ok_or_else(|| anyhow::anyhow!("missing down migration for {}", stem))?;
+            Some(
+                down_file
+                    .contents_utf8()
+                    .ok_or_else(|| anyhow::anyhow!("invalid utf8"))?
+                    .to_string(),
+            )
+        } else {
+            None
+        };
+
+        entries.push(MigrationFile {
+            name: name.to_string(),
+            sql,
+            down: down_sql,
+        });
     }
-    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(entries)
 }
 
@@ -229,38 +248,13 @@ async fn should_skip_stmt(conn: &mut SqliteConnection, stmt: &str) -> anyhow::Re
     Ok(false)
 }
 
-async fn ensure_events_utc_time_columns_clean(
-    tx: &mut Transaction<'_, sqlx::Sqlite>,
-) -> anyhow::Result<()> {
-    let missing_start_utc: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM events WHERE start_at_utc IS NULL")
-            .fetch_one(tx.as_mut())
-            .await
-            .context("precheck: count NULL start_at_utc values")?;
-
-    let missing_end_utc: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM events WHERE end_at IS NOT NULL AND end_at_utc IS NULL",
-    )
-    .fetch_one(tx.as_mut())
-    .await
-    .context("precheck: count legacy end_at rows missing end_at_utc")?;
-
-    if missing_start_utc > 0 || missing_end_utc > 0 {
-        bail!(format!(
-            "Migration 0023 blocked: {missing_start_utc} rows have NULL start_at_utc and {missing_end_utc} rows still rely on legacy end_at without end_at_utc. Run the timezone backfill before dropping start_at/end_at."
-        ));
-    }
-
-    Ok(())
-}
-
 // TXN: domain=OUT OF SCOPE tables=schema_migrations
 pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     pool.execute("PRAGMA foreign_keys=ON").await?;
     pool.execute(
         "CREATE TABLE IF NOT EXISTS schema_migrations (\
            version   TEXT PRIMARY KEY,\
-           applied_at INTEGER NOT NULL\
+           applied_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)\
          )",
     )
     .await?;
@@ -298,28 +292,81 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
         }
     }
 
+    const BASELINE_VERSION: &str = "0001_baseline.sql";
+    let baseline_recorded =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM schema_migrations WHERE version = ?")
+            .bind(BASELINE_VERSION)
+            .fetch_one(pool)
+            .await?;
+
+    if baseline_recorded == 0 {
+        let existing_domain_tables = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM sqlite_master \
+             WHERE type='table' AND name IN ('household','events','notes','files_index','files_index_meta','categories')",
+        )
+        .fetch_one(pool)
+        .await?;
+
+        if existing_domain_tables > 0 {
+            let mut tx = pool.begin().await?;
+            let result = sqlx::query(
+                "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+            )
+            .bind(BASELINE_VERSION)
+            .bind(now_ms())
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            info!(
+                target: "arklowdun",
+                event = "migration_bootstrap_baseline",
+                existing_tables = existing_domain_tables,
+                inserted = result.rows_affected() > 0
+            );
+        }
+    }
+
     let rows = sqlx::query("SELECT version FROM schema_migrations")
         .fetch_all(pool)
         .await?;
-    let applied: HashSet<String> = rows
+    let mut applied: HashSet<String> = rows
         .into_iter()
         .filter_map(|r| r.try_get("version").ok())
         .collect();
 
-    for (filename, raw_sql, _) in load_migrations()? {
-        if applied.contains(&filename) {
-            info!(target: "arklowdun", event = "migration_skip_file", file = %filename);
+    if applied.contains(BASELINE_VERSION) {
+        info!(
+            target: "arklowdun",
+            event = "migration_baseline_already_applied",
+            version = BASELINE_VERSION
+        );
+    }
+
+    for entry in load_migrations()? {
+        let MigrationFile {
+            name: file_name,
+            sql,
+            ..
+        } = entry;
+        if applied.contains(&file_name) {
+            info!(target: "arklowdun", event = "migration_skip_file", file = %file_name);
             continue;
         }
 
-        let stem = filename.trim_end_matches(".up.sql");
+        let stem = if file_name.ends_with(".up.sql") {
+            file_name.trim_end_matches(".up.sql")
+        } else if file_name.ends_with(".sql") {
+            file_name.trim_end_matches(".sql")
+        } else {
+            &file_name
+        };
         let mut parts = stem.splitn(2, '_');
         let version = parts.next().unwrap_or("");
         let name = parts.next().unwrap_or("");
 
         log::info!("starting migration {name} {version}");
 
-        let cleaned = raw_sql
+        let cleaned = sql
             .lines()
             .filter(|line| {
                 let t = line.trim_start();
@@ -333,13 +380,8 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             .execute(&mut *tx)
             .await?;
 
-        let is_events_rebuild = version == "0023" && name == "events_drop_legacy_time";
-        if is_events_rebuild {
-            ensure_events_utc_time_columns_clean(&mut tx).await?;
-        }
-
         let start = Instant::now();
-        info!(target: "arklowdun", event = "migration_tx_begin", file = %filename);
+        info!(target: "arklowdun", event = "migration_tx_begin", file = %file_name);
         for stmt in split_statements(&cleaned) {
             if should_skip_stmt(tx.as_mut(), &stmt).await? {
                 debug!(target: "arklowdun", event = "migration_stmt_skip", sql = %preview(&stmt));
@@ -404,8 +446,18 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             );
             if let Err(e) = sqlx::query(stmt_to_run.as_str()).execute(&mut *tx).await {
                 log::error!("migration failed {name} {version}: {e}");
-                error!(target: "arklowdun", event = "migration_stmt_error", file = %filename, sql = %preview(&stmt_to_run), error = %e);
-                warn!(target: "arklowdun", event = "migration_tx_rollback", file = %filename);
+                error!(
+                    target: "arklowdun",
+                    event = "migration_stmt_error",
+                    file = %file_name,
+                    sql = %preview(&stmt_to_run),
+                    error = %e
+                );
+                warn!(
+                    target: "arklowdun",
+                    event = "migration_tx_rollback",
+                    file = %file_name
+                );
                 return Err(e.into());
             }
         }
@@ -414,56 +466,54 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             .await?;
         if !fk_rows.is_empty() {
             log::error!("migration failed {name} {version}: foreign key violations");
-            warn!(target: "arklowdun", event = "migration_tx_rollback", file = %filename);
-            bail!("foreign key violations inside transaction for {}", filename);
+            warn!(
+                target: "arklowdun",
+                event = "migration_tx_rollback",
+                file = %file_name
+            );
+            bail!(
+                "foreign key violations inside transaction for {}",
+                file_name
+            );
         }
-        debug!(
-            target: "arklowdun",
-            event = "migration_stmt",
-            sql = "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)"
-        );
-        sqlx::query("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)")
-            .bind(&filename)
-            .bind(now_ms())
-            .execute(&mut *tx)
-            .await?;
+        if file_name == BASELINE_VERSION {
+            // The consolidated baseline records itself. Avoid a duplicate insert that would
+            // violate the UNIQUE(version) constraint when the SQL footer has already run.
+            debug!(
+                target: "arklowdun",
+                event = "migration_stmt_skip_record",
+                file = %file_name
+            );
+            applied.insert(file_name.clone());
+        } else {
+            debug!(
+                target: "arklowdun",
+                event = "migration_stmt",
+                sql = "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)"
+            );
+            sqlx::query("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)")
+                .bind(&file_name)
+                .bind(now_ms())
+                .execute(&mut *tx)
+                .await?;
+            applied.insert(file_name.clone());
+        }
         if let Err(e) = tx.commit().await {
             log::error!("migration failed {name} {version}: {e}");
-            warn!(target: "arklowdun", event = "migration_tx_rollback", file = %filename);
+            warn!(
+                target: "arklowdun",
+                event = "migration_tx_rollback",
+                file = %file_name
+            );
             return Err(e.into());
         }
         log::info!("migration success {name} {version}");
         info!(
             target = "arklowdun",
             event = "migration_tx_commit",
-            file = %filename,
+            file = %file_name,
             elapsed = ?start.elapsed()
         );
-
-        if is_events_rebuild {
-            let integrity = sqlx::query_scalar::<_, String>("PRAGMA integrity_check;")
-                .fetch_all(pool)
-                .await?;
-            let status = if integrity.is_empty() {
-                "no_result".to_string()
-            } else {
-                integrity.join("; ")
-            };
-            if status == "ok" {
-                info!(
-                    target: "arklowdun",
-                    event = "sqlite_integrity_check",
-                    status = "ok"
-                );
-            } else {
-                warn!(
-                    target: "arklowdun",
-                    event = "sqlite_integrity_check",
-                    status = %status
-                );
-            }
-            migration_guard::ensure_events_indexes(pool).await?;
-        }
     }
 
     if sqlx::query_scalar::<_, i64>(
@@ -518,10 +568,13 @@ pub async fn revert_last_migration(pool: &SqlitePool) -> anyhow::Result<()> {
     {
         let version: String = row.try_get("version")?;
         let migrations = load_migrations()?;
-        let (_, _, down_sql) = migrations
+        let migration = migrations
             .into_iter()
-            .find(|(v, _, _)| *v == version)
+            .find(|m| m.name == version)
             .ok_or_else(|| anyhow::anyhow!("missing migration file for {}", version))?;
+        let down_sql = migration
+            .down
+            .ok_or_else(|| anyhow::anyhow!("migration {} does not have a down script", version))?;
         let cleaned = down_sql
             .lines()
             .filter(|line| {

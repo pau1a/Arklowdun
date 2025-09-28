@@ -134,6 +134,19 @@ export interface BudgetCategory {
   deleted_at?: number;
 }
 
+export interface Category {
+  id: string;
+  name: string;
+  slug: string;
+  color: string;
+  household_id?: string;
+  position: number;
+  z: number;
+  created_at: number;
+  updated_at: number;
+  deleted_at?: number | null;
+}
+
 export interface Expense {
   id: string;
   category_id: string;

@@ -1,7 +1,4 @@
-import rawAttributionManifest from "../../../../assets/licensing/attribution.json" with {
-  type: "json",
-};
-import { settingsText } from "../../../strings/settings";
+import { settingsText } from "@strings/settings";
 
 type AttributionManifest = {
   assets?: AttributionAsset[];
@@ -34,7 +31,17 @@ type AttributionLicense = {
   url?: string;
 };
 
-const attributionAssets = extractAttributionAssets(rawAttributionManifest);
+async function loadAttributionAssets(): Promise<AttributionAsset[]> {
+  try {
+    const url = new URL("../../../../assets/licensing/attribution.json", import.meta.url);
+    const res = await fetch(url.href);
+    if (!res.ok) return [];
+    const json = await res.json();
+    return extractAttributionAssets(json);
+  } catch {
+    return [];
+  }
+}
 
 function extractAttributionAssets(manifest: unknown): AttributionAsset[] {
   if (!manifest || typeof manifest !== "object") {
@@ -75,10 +82,9 @@ function extractAttributionAssets(manifest: unknown): AttributionAsset[] {
     .filter((asset) => asset.attribution.statements.length > 0);
 }
 
-export function createAttributionSection(): HTMLElement | null {
-  if (attributionAssets.length === 0) {
-    return null;
-  }
+export async function createAttributionSectionAsync(): Promise<HTMLElement | null> {
+  const attributionAssets = await loadAttributionAssets();
+  if (attributionAssets.length === 0) return null;
 
   const section = document.createElement("section");
   section.className = "settings__attribution";
@@ -238,7 +244,7 @@ function formatLicenseForUi(license: AttributionLicense): string {
   return `${identifier}${license.name}${url}`.trim();
 }
 
-export function __test__getAttributionAssets() {
-  return attributionAssets;
+// test helper remains available but loads dynamically
+export async function __test__getAttributionAssets() {
+  return loadAttributionAssets();
 }
-

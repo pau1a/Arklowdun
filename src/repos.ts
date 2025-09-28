@@ -13,6 +13,7 @@ import type {
   ShoppingItem,
   Event,
   BudgetCategory,
+  Category,
   Expense,
 } from "./models";
 import type { Note } from "@features/notes";
@@ -97,6 +98,7 @@ export const notesRepo            = domainRepo<Note>("notes", "position, created
 export const shoppingRepo         = domainRepo<ShoppingItem>("shopping_items", "position, created_at, id");
 
 // ✅ Budget repos you need for BudgetView.ts
+export const categoriesRepo        = domainRepo<Category>("categories", "position, created_at, id");
 export const budgetCategoriesRepo = domainRepo<BudgetCategory>("budget_categories", "position, created_at, id");
 export const expensesRepo         = domainRepo<Expense>("expenses", "date DESC, created_at DESC, id");
 

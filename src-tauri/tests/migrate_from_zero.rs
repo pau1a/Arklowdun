@@ -14,9 +14,9 @@ fn migrations_dir() -> PathBuf {
     crate_dir().join("../migrations")
 }
 
-fn list_up_versions() -> Result<Vec<String>> {
+fn list_expected_versions() -> Result<Vec<String>> {
     let dir = migrations_dir();
-    let mut ups = fs::read_dir(&dir)
+    let mut files = fs::read_dir(&dir)
         .with_context(|| format!("read_dir({})", dir.display()))?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
@@ -24,13 +24,13 @@ fn list_up_versions() -> Result<Vec<String>> {
         .filter(|p| {
             p.file_name()
                 .and_then(|n| n.to_str())
-                .map(|n| n.ends_with(".up.sql") && !n.starts_with('_'))
+                .map(|n| !n.starts_with('_') && !n.ends_with(".down.sql"))
                 .unwrap_or(false)
         })
         .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
         .collect::<Vec<_>>();
-    ups.sort();
-    Ok(ups)
+    files.sort();
+    Ok(files)
 }
 
 async fn assert_table_exists(pool: &SqlitePool, name: &str) -> Result<()> {
@@ -103,7 +103,7 @@ async fn migrate_from_zero_is_correct_and_idempotent() -> Result<()> {
 
     assert_fk_and_integrity_ok(&pool).await?;
 
-    let expected = list_up_versions()?;
+    let expected = list_expected_versions()?;
     let applied: Vec<String> =
         sqlx::query("SELECT version FROM schema_migrations ORDER BY version;")
             .map(|row: sqlx::sqlite::SqliteRow| row.get::<String, _>("version"))
@@ -112,7 +112,7 @@ async fn migrate_from_zero_is_correct_and_idempotent() -> Result<()> {
     assert_eq!(applied.len(), expected.len(), "version count mismatch");
     assert_eq!(
         applied, expected,
-        "schema_migrations must exactly match on-disk *.up.sql filenames"
+        "schema_migrations must exactly match on-disk *.sql filenames"
     );
 
     arklowdun_lib::migrate::apply_migrations(&pool)

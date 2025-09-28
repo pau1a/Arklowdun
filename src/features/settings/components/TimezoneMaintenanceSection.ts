@@ -1,4 +1,4 @@
-import { defaultHouseholdId } from "../../../db/household";
+import { defaultHouseholdId } from "@db/household";
 import createButton from "@ui/Button";
 import {
   cancelBackfill,

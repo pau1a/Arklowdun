@@ -92,6 +92,7 @@ pub fn file_sha256(path: &Path) -> Result<String> {
 
 const UP_SUFFIX: &str = ".up.sql";
 const DOWN_SUFFIX: &str = ".down.sql";
+const BASELINE_SUFFIX: &str = ".sql";
 
 pub fn normalize_schema_version(version: &str) -> Cow<'_, str> {
     let lower = version.to_ascii_lowercase();
@@ -99,6 +100,8 @@ pub fn normalize_schema_version(version: &str) -> Cow<'_, str> {
         Cow::Owned(version[..version.len() - UP_SUFFIX.len()].to_string())
     } else if lower.ends_with(DOWN_SUFFIX) {
         Cow::Owned(version[..version.len() - DOWN_SUFFIX.len()].to_string())
+    } else if lower.ends_with(BASELINE_SUFFIX) {
+        Cow::Owned(version[..version.len() - BASELINE_SUFFIX.len()].to_string())
     } else {
         Cow::Borrowed(version)
     }
@@ -170,6 +173,9 @@ mod tests {
 
         let canonical_down = normalize_schema_version("20230101_add_table.DOWN.SQL");
         assert_eq!(canonical_down, "20230101_add_table");
+
+        let baseline = normalize_schema_version("0001_baseline.sql");
+        assert_eq!(baseline, "0001_baseline");
 
         let unchanged = normalize_schema_version("20230101_add_table");
         assert_eq!(unchanged, "20230101_add_table");

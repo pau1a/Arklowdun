@@ -1384,7 +1384,10 @@ pub async fn events_backfill_timezone(
             let _permit = crate::ipc::guard::ensure_db_writable(&state)?;
             let pool = state.pool_clone();
             let control = {
-                let mut guard = state.backfill.lock().unwrap();
+                let mut guard = state
+                    .backfill
+                    .lock()
+                    .map_err(|_| AppError::new("STATE/LOCK_POISONED", "Failed to access backfill coordinator"))?;
                 guard.try_start(&household_id)?
             };
             let log_dir = app.path().app_data_dir().ok();
@@ -1423,7 +1426,10 @@ pub async fn events_backfill_timezone(
 
             {
                 let state: State<AppState> = app.state();
-                let mut guard = state.backfill.lock().unwrap();
+                let mut guard = state
+                    .backfill
+                    .lock()
+                    .map_err(|_| AppError::new("STATE/LOCK_POISONED", "Failed to access backfill coordinator"))?;
                 guard.finish(control.id());
             }
 
@@ -1464,7 +1470,10 @@ pub async fn events_backfill_timezone(
 pub async fn events_backfill_timezone_cancel(app: AppHandle) -> AppResult<bool> {
     let state: State<AppState> = app.state();
     let cancelled = {
-        let mut guard = state.backfill.lock().unwrap();
+        let mut guard = state
+            .backfill
+            .lock()
+            .map_err(|_| AppError::new("STATE/LOCK_POISONED", "Failed to access backfill coordinator"))?;
         guard.cancel()
     };
     Ok(cancelled)
@@ -1479,7 +1488,10 @@ pub async fn events_backfill_timezone_status(
     let state: State<AppState> = app.state();
     let pool = state.pool_clone();
     let running = {
-        let guard = state.backfill.lock().unwrap();
+        let guard = state
+            .backfill
+            .lock()
+            .map_err(|_| AppError::new("STATE/LOCK_POISONED", "Failed to access backfill coordinator"))?;
         guard.running_household()
     };
 

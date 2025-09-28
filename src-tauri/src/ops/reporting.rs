@@ -34,9 +34,14 @@ const REPORT_SCHEMA_SOURCE: &str = include_str!(concat!(
 
 #[cfg(debug_assertions)]
 static REPORT_SCHEMA: Lazy<JSONSchema> = Lazy::new(|| {
-    let schema: Value =
-        serde_json::from_str(REPORT_SCHEMA_SOURCE).expect("report schema should remain valid JSON");
-    JSONSchema::compile(&schema).expect("report schema should compile")
+    let schema: Value = match serde_json::from_str(REPORT_SCHEMA_SOURCE) {
+        Ok(v) => v,
+        Err(e) => panic!("report schema should remain valid JSON: {e}"),
+    };
+    match JSONSchema::compile(&schema) {
+        Ok(s) => s,
+        Err(e) => panic!("report schema should compile: {e}"),
+    }
 });
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -319,8 +324,10 @@ fn is_valid_report_filename(file_name: &str, operation_prefix: &str) -> bool {
 
 #[cfg(debug_assertions)]
 fn debug_validate_against_schema(bytes: &[u8]) {
-    let value: Value =
-        serde_json::from_slice(bytes).expect("persisted reports must serialize into valid JSON");
+    let value: Value = match serde_json::from_slice(bytes) {
+        Ok(v) => v,
+        Err(e) => panic!("persisted reports must serialize into valid JSON: {e}"),
+    };
     {
         // Drop this result (and its borrowed iterator) before `value` goes out of scope.
         let res = REPORT_SCHEMA.validate(&value);
@@ -638,7 +645,7 @@ mod tests {
             elapsed_ms: (finished - started).num_milliseconds(),
             status: OperationStatus::Success,
             app_version: "0.1.0".to_string(),
-            schema_version: "0020_files_index_fks".to_string(),
+            schema_version: "0001_baseline".to_string(),
             host_tz: host_timezone_label(),
             correlation_id: None,
             details,
@@ -796,7 +803,7 @@ mod tests {
             elapsed_ms: (finished - started).num_milliseconds(),
             status: OperationStatus::Success,
             app_version: "0.1.0".to_string(),
-            schema_version: "0020_files_index_fks".to_string(),
+            schema_version: "0001_baseline".to_string(),
             host_tz: host_timezone_label(),
             correlation_id: None,
             details: json!({
@@ -844,12 +851,14 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:")
             .await
             .expect("connect in-memory db");
-        sqlx::query("CREATE TABLE schema_migrations (version TEXT NOT NULL)")
+        sqlx::query(
+            "CREATE TABLE schema_migrations (\n                version TEXT PRIMARY KEY,\n                applied_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)\n            )",
+        )
             .execute(&pool)
             .await
             .expect("create schema_migrations");
-        sqlx::query("INSERT INTO schema_migrations (version) VALUES (?1)")
-            .bind("0020_files_index_fks")
+        sqlx::query("INSERT OR IGNORE INTO schema_migrations (version) VALUES (?1)")
+            .bind("0001_baseline.sql")
             .execute(&pool)
             .await
             .expect("insert schema version");
