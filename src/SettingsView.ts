@@ -16,6 +16,7 @@ import { createEmptyState } from "./ui/EmptyState";
 import { STR } from "./ui/strings";
 import createButton from "@ui/Button";
 import { createAttributionSection } from "@features/settings/components/AttributionSection";
+import { createAmbientBackgroundSection } from "@features/settings/components/AmbientBackgroundSection";
 
 export function SettingsView(container: HTMLElement) {
   const panel = SettingsPanel();
@@ -61,7 +62,7 @@ export function SettingsView(container: HTMLElement) {
   const general = createEmptySection("settings-general", "General");
   const storage = createEmptySection("settings-storage", "Storage and permissions");
   const notifications = createEmptySection("settings-notifications", "Notifications");
-  const appearance = createEmptySection("settings-appearance", "Appearance");
+  const appearance = createAmbientBackgroundSection();
 
   const about = document.createElement("section");
   about.className = "card settings__section";

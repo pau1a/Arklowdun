@@ -1,0 +1,23 @@
+:root {
+  --blob-main:  #00C896;
+  --blob-tint:  #66E0C2;
+  --blob-shade: #008060;
+  --blob-aqua:  #00B2C8;
+  --blob-coral: #C84600;
+
+  --blob-alpha-main:  0.08;
+  --blob-alpha-tint:  0.08;
+  --blob-alpha-shade: 0.05;
+  --blob-alpha-aqua:  0.06;
+  --blob-alpha-coral: 0.04;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --blob-alpha-main:  0.06;
+    --blob-alpha-tint:  0.06;
+    --blob-alpha-shade: 0.045;
+    --blob-alpha-aqua:  0.05;
+    --blob-alpha-coral: 0.03;
+  }
+}

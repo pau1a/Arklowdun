@@ -88,10 +88,28 @@ body {
   inset: 0;
   z-index: 0;
   pointer-events: none;
+  overflow: hidden;
   /* Gradient defined using animatable custom properties */
   background: linear-gradient(var(--angle), var(--g1) 0%, var(--g2) var(--p2), var(--g3) var(--p3));
   /* Animate the gradient itself (colors/stop positions) */
   animation: app-backdrop-colors 30s ease-in-out infinite;
+}
+
+.backdrop__ambient {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  overflow: hidden;
+}
+
+.backdrop__ambient canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  display: block;
 }
 
 /* Ensure primary shell layers paint above the backdrop */
@@ -1098,6 +1116,77 @@ footer a.footer__settings {
 
 .settings__section--repair {
   margin-bottom: var(--space-4);
+}
+
+.settings__section--ambient {
+  margin-bottom: var(--space-4);
+}
+
+.ambient-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.ambient-settings__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.ambient-settings__legend {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0 0 0.25rem;
+}
+
+.ambient-settings__option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-base);
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.ambient-settings__option:hover,
+.ambient-settings__option:focus-within {
+  background-color: var(--color-accent-soft);
+}
+
+.ambient-settings__option input {
+  margin-top: 0.35rem;
+}
+
+.ambient-settings__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.ambient-settings__title {
+  font-weight: 600;
+}
+
+.ambient-settings__description {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.ambient-settings__refresh {
+  align-self: flex-start;
+}
+
+.ambient-settings__status {
+  margin: 0;
+  min-height: 1.5rem;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
 }
 
 .settings__section--import {

@@ -1,5 +1,6 @@
 export interface BackdropInstance {
   element: HTMLElement;
+  ambientHost: HTMLElement;
 }
 
 // A full-window background layer that sits behind the app shell.
@@ -9,6 +10,14 @@ export function Backdrop(): BackdropInstance {
   el.className = "backdrop";
   el.setAttribute("aria-hidden", "true");
   el.setAttribute("data-role", "app-backdrop");
-  return { element: el };
+
+  const ambientHost = document.createElement("div");
+  ambientHost.className = "backdrop__ambient";
+  ambientHost.setAttribute("data-role", "ambient-host");
+  ambientHost.setAttribute("aria-hidden", "true");
+
+  el.appendChild(ambientHost);
+
+  return { element: el, ambientHost };
 }
 
