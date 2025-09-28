@@ -122,8 +122,6 @@ export async function NotesView(container: HTMLElement) {
   runViewCleanups(container);
 
   const section = document.createElement("section");
-  const heading = document.createElement("h2");
-  heading.textContent = "Notes";
 
   const form = document.createElement("form");
   form.id = "note-form";
@@ -176,7 +174,7 @@ export async function NotesView(container: HTMLElement) {
   deadlinesList.className = "notes__deadline-list";
   deadlinesPanel.append(deadlinesHeading, deadlinesList);
 
-  section.append(heading, form, canvas);
+  section.append(form, canvas);
   section.append(deadlinesPanel);
   container.innerHTML = "";
   container.appendChild(section);

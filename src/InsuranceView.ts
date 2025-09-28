@@ -99,7 +99,6 @@ async function schedulePolicyReminders(policies: Policy[]) {
 export async function InsuranceView(container: HTMLElement) {
   const section = document.createElement("section");
   section.innerHTML = `
-    <h2>Insurance</h2>
     <ul id="policy-list"></ul>
     <form id="policy-form">
       <input id="policy-amount" type="number" step="0.01" placeholder="Amount" required />

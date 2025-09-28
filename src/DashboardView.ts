@@ -23,7 +23,6 @@ export async function DashboardView(container: HTMLElement) {
   section.innerHTML = `
       <header class="dashboard__header">
         <div>
-          <h2>Dashboard</h2>
           <p class="kicker">What needs your attention</p>
         </div>
         <div class="dashboard__actions">

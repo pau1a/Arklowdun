@@ -14,7 +14,7 @@ export async function VehiclesView(container: HTMLElement) {
   async function renderList() {
       try {
         const vehicles = await vehiclesRepo.list(hh);
-        section.innerHTML = `<h2>Vehicles</h2><ul id="veh-list"></ul>`;
+        section.innerHTML = `<ul id="veh-list"></ul>`;
         const listEl = section.querySelector<HTMLUListElement>("#veh-list");
         if (!vehicles.length) {
           const li = document.createElement("li");
@@ -61,4 +61,3 @@ export async function VehiclesView(container: HTMLElement) {
 
   await renderList();
 }
-

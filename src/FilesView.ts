@@ -81,12 +81,10 @@ export async function FilesView(container: HTMLElement) {
 
   const headerInfo = document.createElement('div');
   headerInfo.className = 'files__header-info';
-  const title = document.createElement('h2');
-  title.textContent = 'Files';
   const breadcrumbNav = document.createElement('nav');
   breadcrumbNav.className = 'breadcrumb';
   breadcrumbNav.setAttribute('aria-label', 'Current path');
-  headerInfo.append(title, breadcrumbNav);
+  headerInfo.append(breadcrumbNav);
 
   const preview = document.createElement('div');
   preview.id = 'preview';

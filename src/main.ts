@@ -37,7 +37,7 @@ import { initTheme } from "@ui/ThemeToggle";
 import { getStartupWindow } from "@lib/ipc/startup";
 import { ensureDbHealthReport, recheckDbHealth } from "./services/dbHealth";
 import { recoveryText } from "@strings/recovery";
-import { mountMacToolbar } from "@ui/AppToolbar";
+import { mountMacToolbar, setAppToolbarTitle } from "@ui/AppToolbar";
 
 // Resolve main app logo (SVG) as a URL the bundler can serve
 const appLogoUrl = new URL("./assets/logo.svg", import.meta.url).href;
@@ -307,6 +307,9 @@ async function renderApp({ route }: { route: RouteDefinition }) {
 
   if (sequence === renderSequence) {
     currentRouteId = route.id;
+    // Update toolbar page title using route display label (fallback to id)
+    const display = route.display;
+    setAppToolbarTitle(display?.label ?? route.id);
   }
 }
 
@@ -337,7 +340,9 @@ function requiredLogicalFloor(): { w: number; h: number } {
   const MIN_APP_HEIGHT = 600;
 
   const sidebarEl = document.querySelector<HTMLElement>(".sidebar");
-  const headerEl = document.querySelector<HTMLElement>("#titlebar");
+  const headerEl =
+    document.querySelector<HTMLElement>(".app-toolbar") ||
+    document.querySelector<HTMLElement>("#titlebar");
   const footerEl = document.querySelector<HTMLElement>("footer");
 
   const headerH = headerEl?.getBoundingClientRect().height ?? 0;

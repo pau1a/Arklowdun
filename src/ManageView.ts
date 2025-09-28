@@ -5,7 +5,6 @@ export function ManageView(container: HTMLElement) {
   section.className = "manage-page";
 
   section.innerHTML = `
-    <h2>Manage</h2>
     <nav class="manage" aria-label="Manage categories">
       <a id="nav-primary" href="#primary">Primary</a>
       <a id="nav-secondary" href="#secondary">Secondary</a>

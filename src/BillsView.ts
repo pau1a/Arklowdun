@@ -100,7 +100,6 @@ async function scheduleBillReminders(bills: Bill[]) {
 export async function BillsView(container: HTMLElement) {
   const section = document.createElement("section");
   section.innerHTML = `
-    <h2>Bills</h2>
     <ul id="bill-list"></ul>
     <form id="bill-form">
       <input id="bill-amount" type="number" step="0.01" placeholder="Amount" required />

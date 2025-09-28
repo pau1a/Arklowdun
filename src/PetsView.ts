@@ -74,7 +74,6 @@ export async function PetsView(container: HTMLElement) {
 
   function showList() {
     section.innerHTML = `
-      <h2>Pets</h2>
       <ul id="pet-list"></ul>
       <form id="pet-form">
         <input id="pet-name" type="text" placeholder="Name" required />

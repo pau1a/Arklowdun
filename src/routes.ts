@@ -43,8 +43,8 @@ export interface RouteDefinition {
   display?: RouteDisplayConfig;
 }
 
-function renderPlaceholder(container: HTMLElement, title: string) {
-  container.innerHTML = `<section><h2>${title}</h2></section>`;
+function renderPlaceholder(container: HTMLElement, _title: string) {
+  container.innerHTML = `<section></section>`;
 }
 
 function addImportButtonToSettings(container: HTMLElement) {
@@ -285,4 +285,3 @@ export function getFooterRoutes(): RouteDefinition[] {
 export function getAllRoutes(): RouteDefinition[] {
   return [...ROUTE_DEFINITIONS];
 }
-
