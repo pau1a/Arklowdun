@@ -1,9 +1,9 @@
-use anyhow::{anyhow, bail, Context};
+use anyhow::{anyhow, bail};
 use include_dir::{include_dir, Dir};
 use once_cell::sync::OnceCell;
 use regex::Regex;
 use sqlx::sqlite::SqliteConnection;
-use sqlx::{Executor, Row, SqlitePool, Transaction};
+use sqlx::{Executor, Row, SqlitePool};
 use std::collections::HashSet;
 use std::time::Instant;
 

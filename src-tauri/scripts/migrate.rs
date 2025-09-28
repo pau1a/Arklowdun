@@ -5,7 +5,7 @@ use arklowdun_lib::migration_guard::{self, GuardError};
 use clap::{Parser, Subcommand};
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
-    ConnectOptions, Row, SqliteConnection, SqlitePool,
+    ConnectOptions as _, Row as _, SqlitePool,
 };
 use std::{
     collections::HashSet,
