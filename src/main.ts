@@ -39,6 +39,20 @@ import { ensureDbHealthReport, recheckDbHealth } from "./services/dbHealth";
 import { recoveryText } from "@strings/recovery";
 import { mountMacToolbar } from "@ui/AppToolbar";
 
+// Resolve main app logo (SVG) as a URL the bundler can serve
+const appLogoUrl = new URL("./assets/logo.svg", import.meta.url).href;
+
+function ensureFavicon(url: string): void {
+  const head = document.head || document.documentElement;
+  // Remove any existing favicon links to avoid duplicates
+  Array.from(document.querySelectorAll('link[rel="icon"]')).forEach((n) => n.remove());
+  const link = document.createElement("link");
+  link.rel = "icon";
+  link.type = "image/svg+xml";
+  link.href = url;
+  head.appendChild(link);
+}
+
 const appWindow = getStartupWindow();
 
 initTheme();
@@ -404,6 +418,8 @@ async function handleRouteChange() {
 window.addEventListener("DOMContentLoaded", () => {
   const root = document.getElementById("app") ?? document.body;
   mountMacToolbar(root);
+  // Use the same SVG as the app-wide favicon/brand mark
+  ensureFavicon(appLogoUrl);
 
   log.debug("app booted");
   defaultHouseholdId().catch((e) => console.error("DB init failed:", e));
