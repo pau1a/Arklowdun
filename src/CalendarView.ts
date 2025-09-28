@@ -76,12 +76,10 @@ export async function CalendarView(container: HTMLElement) {
   const header = document.createElement("header");
   header.className = "calendar__header";
   const headerContent = document.createElement("div");
-  const title = document.createElement("h2");
-  title.textContent = "Calendar";
   const kicker = document.createElement("p");
   kicker.className = "kicker";
   kicker.textContent = "All times local";
-  headerContent.append(title, kicker);
+  headerContent.append(kicker);
   header.appendChild(headerContent);
 
   const truncationBanner = createTruncationBanner({
@@ -352,4 +350,3 @@ export async function CalendarView(container: HTMLElement) {
     form.reset();
   });
 }
-

@@ -8,7 +8,6 @@ import { STR } from "./ui/strings";
 export async function ShoppingListView(container: HTMLElement) {
   const section = document.createElement("section");
   section.innerHTML = `
-    <h2>Shopping List</h2>
     <form id="item-form">
       <input id="item-input" type="text" placeholder="New item" required />
       <button type="submit">Add</button>

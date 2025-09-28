@@ -1,6 +1,8 @@
 // src/ui/AppToolbar.ts
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
+let pageTitleEl: HTMLHeadingElement | null = null;
+
 export function mountMacToolbar(host: HTMLElement): void {
   const win = getCurrentWindow();
 
@@ -17,12 +19,16 @@ export function mountMacToolbar(host: HTMLElement): void {
       <button class="traffic__btn traffic__min" title="Minimize" data-tauri-drag-region="false"></button>
       <button class="traffic__btn traffic__max" title="Zoom" data-tauri-drag-region="false"></button>
     </div>
-    <div class="toolbar__spacer" data-tauri-drag-region="true"></div>
+    <div class="toolbar__title-area" data-tauri-drag-region="true" aria-live="polite">
+      <h2 id="toolbar-page-title" class="toolbar__page-title"></h2>
+    </div>
     <div class="toolbar-brand" data-tauri-drag-region="false" aria-label="Application">
-      <img class="brand__logo" alt="" src="${logoUrl}" />
       <span class="brand__title">Arklowdun</span>
+      <img class="brand__logo" alt="" src="${logoUrl}" />
     </div>
   `;
+
+  pageTitleEl = bar.querySelector<HTMLHeadingElement>("#toolbar-page-title");
 
   const query = (selector: string) => bar.querySelector<HTMLButtonElement>(selector)!;
 
@@ -70,4 +76,12 @@ export function mountMacToolbar(host: HTMLElement): void {
     bar.style.setProperty("--toolbar-bg-repeat", bar.style.backgroundRepeat);
   }
   // Respect the CSS variable driven height.
+}
+
+export function setAppToolbarTitle(title: string | null | undefined): void {
+  const el = pageTitleEl ?? document.querySelector<HTMLHeadingElement>("#toolbar-page-title");
+  if (!el) return;
+  const text = (title ?? "").trim();
+  el.textContent = text;
+  el.toggleAttribute("hidden", text.length === 0);
 }

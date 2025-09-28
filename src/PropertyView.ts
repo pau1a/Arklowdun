@@ -92,7 +92,6 @@ export async function PropertyView(container: HTMLElement) {
 
   const section = document.createElement("section");
   section.innerHTML = `
-    <h2>Property Documents</h2>
     <ul id="property-list"></ul>
     <form id="property-form">
       <input id="prop-desc" type="text" placeholder="Description" required />

@@ -40,7 +40,6 @@ export async function FamilyView(container: HTMLElement) {
 
   function showList() {
     section.innerHTML = `
-      <h2>Family Members</h2>
       <ul id="family-list"></ul>
       <form id="family-form">
         <input id="family-name" type="text" placeholder="Name" required />

@@ -92,8 +92,6 @@ async function renderSummary(
 export async function BudgetView(container: HTMLElement) {
   const section = document.createElement("section");
   section.innerHTML = `
-    <h2>Budget</h2>
-
     <form id="category-form">
       <h3>Add Category</h3>
       <input id="cat-name" type="text" placeholder="Category" required />

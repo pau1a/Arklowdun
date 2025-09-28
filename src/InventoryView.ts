@@ -96,7 +96,6 @@ async function scheduleInventoryReminders(items: InventoryItem[]) {
 export async function InventoryView(container: HTMLElement) {
   const section = document.createElement("section");
   section.innerHTML = `
-    <h2>Inventory</h2>
     <ul id="inv-list"></ul>
     <form id="inv-form" style="margin-top:1rem;">
       <input id="inv-name" type="text" placeholder="Item name" required />

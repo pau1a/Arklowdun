@@ -33,9 +33,6 @@ export function SettingsView(container: HTMLElement) {
     },
   });
 
-  const title = document.createElement("h2");
-  title.className = "settings__title";
-  title.textContent = "Settings";
 
   const createEmptySection = (id: string, headingText: string): HTMLElement => {
     const panel = document.createElement("section");
@@ -151,7 +148,6 @@ export function SettingsView(container: HTMLElement) {
 
   section.append(
     backButton,
-    title,
     timezoneMaintenance.element,
     backups.element,
     exportView.element,
