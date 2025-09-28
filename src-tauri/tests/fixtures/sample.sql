@@ -2,9 +2,9 @@ PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
 CREATE TABLE schema_migrations (
   version TEXT PRIMARY KEY,
-  applied_at INTEGER NOT NULL
+  applied_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
 );
-INSERT INTO schema_migrations VALUES('0001_baseline.sql',0);
+INSERT INTO schema_migrations(version) VALUES('0001_baseline.sql');
 CREATE TABLE household (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,

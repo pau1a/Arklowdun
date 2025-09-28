@@ -329,10 +329,18 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     let rows = sqlx::query("SELECT version FROM schema_migrations")
         .fetch_all(pool)
         .await?;
-    let applied: HashSet<String> = rows
+    let mut applied: HashSet<String> = rows
         .into_iter()
         .filter_map(|r| r.try_get("version").ok())
         .collect();
+
+    if applied.contains(BASELINE_VERSION) {
+        info!(
+            target: "arklowdun",
+            event = "migration_baseline_already_applied",
+            version = BASELINE_VERSION
+        );
+    }
 
     for entry in load_migrations()? {
         let MigrationFile {
@@ -468,16 +476,28 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
                 file_name
             );
         }
-        debug!(
-            target: "arklowdun",
-            event = "migration_stmt",
-            sql = "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)"
-        );
-        sqlx::query("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)")
-            .bind(&file_name)
-            .bind(now_ms())
-            .execute(&mut *tx)
-            .await?;
+        if file_name == BASELINE_VERSION {
+            // The consolidated baseline records itself. Avoid a duplicate insert that would
+            // violate the UNIQUE(version) constraint when the SQL footer has already run.
+            debug!(
+                target: "arklowdun",
+                event = "migration_stmt_skip_record",
+                file = %file_name
+            );
+            applied.insert(file_name.clone());
+        } else {
+            debug!(
+                target: "arklowdun",
+                event = "migration_stmt",
+                sql = "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)"
+            );
+            sqlx::query("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)")
+                .bind(&file_name)
+                .bind(now_ms())
+                .execute(&mut *tx)
+                .await?;
+            applied.insert(file_name.clone());
+        }
         if let Err(e) = tx.commit().await {
             log::error!("migration failed {name} {version}: {e}");
             warn!(

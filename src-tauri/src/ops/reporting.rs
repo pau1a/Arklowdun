@@ -844,11 +844,13 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:")
             .await
             .expect("connect in-memory db");
-        sqlx::query("CREATE TABLE schema_migrations (version TEXT NOT NULL)")
+        sqlx::query(
+            "CREATE TABLE schema_migrations (\n                version TEXT PRIMARY KEY,\n                applied_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)\n            )",
+        )
             .execute(&pool)
             .await
             .expect("create schema_migrations");
-        sqlx::query("INSERT INTO schema_migrations (version) VALUES (?1)")
+        sqlx::query("INSERT OR IGNORE INTO schema_migrations (version) VALUES (?1)")
             .bind("0001_baseline.sql")
             .execute(&pool)
             .await

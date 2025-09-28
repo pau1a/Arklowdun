@@ -578,7 +578,7 @@ mod tests {
         sqlx::query("DELETE FROM schema_migrations")
             .execute(&pool)
             .await?;
-        sqlx::query("INSERT INTO schema_migrations (version) VALUES (?1)")
+        sqlx::query("INSERT OR IGNORE INTO schema_migrations (version) VALUES (?1)")
             .bind(version)
             .execute(&pool)
             .await?;

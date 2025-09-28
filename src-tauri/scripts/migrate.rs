@@ -281,12 +281,19 @@ async fn up(db: &Path, dry: bool, to: Option<&str>) -> Result<()> {
         {
             anyhow::bail!("foreign key violations in {}", filename);
         }
-        sqlx::query(
-            "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, strftime('%s','now') * 1000)",
-        )
-        .bind(&filename)
-        .execute(&mut *tx)
-        .await?;
+        if filename == "0001_baseline.sql" {
+            log::debug!(
+                "skip recording {} because the baseline SQL already persisted the version",
+                filename
+            );
+        } else {
+            sqlx::query(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, strftime('%s','now') * 1000)",
+            )
+            .bind(&filename)
+            .execute(&mut *tx)
+            .await?;
+        }
         tx.commit().await?;
         log::info!("migration success {} in {:?}", filename, start.elapsed());
         if let Some(target) = to {
