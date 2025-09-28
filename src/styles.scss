@@ -49,6 +49,35 @@ body {
   position: relative;
 }
 
+/* App-wide backdrop layer: sits behind toolbar/sidebar/content/footer */
+.backdrop {
+  /* Remove from grid flow so it never shifts layout */
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  /* Default gradient; override via CSS vars for themes/animations */
+  --app-backdrop: linear-gradient(120deg, #b3e5fc, #e0f7fa 30%, #f1f5f9 70%);
+  background: var(--app-backdrop);
+  /* Optional animated gradient support */
+  background-size: 400% 400%;
+  animation: app-backdrop-shift 6s ease-in-out infinite;
+}
+
+/* Ensure primary shell layers paint above the backdrop */
+.sidebar,
+main.container,
+footer {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes app-backdrop-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
 /* Remove experimental background layer */
 .window-surface { display: none !important; }
 
@@ -84,7 +113,8 @@ main {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  background-color: var(--color-panel);
+  /* Make main panel background transparent */
+  background-color: transparent;
   /* Ensure there is no visible separator beneath the toolbar */
   border-top: none;
   box-shadow: none;
@@ -550,7 +580,8 @@ textarea:focus-visible {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  background-color: var(--color-sidebar-bg);
+  /* Make sidebar background transparent */
+  background-color: transparent;
   border-inline-end: 1px solid var(--color-sidebar-border);
   color: var(--color-text);
   /* Occupies the second grid row fully; height is handled by grid */
@@ -806,7 +837,8 @@ footer {
   flex-wrap: wrap;
   padding: 0 var(--space-3);
   min-block-size: 44px;
-  background-color: var(--color-panel);
+  /* Make footer background transparent */
+  background-color: transparent;
   border-block-start: 1px solid var(--color-sidebar-rule);
 }
 
@@ -2810,9 +2842,11 @@ mark.search-hit {
   gap: 8px;
   padding: 0 10px;
   /* Keep color separate so background-image layering works */
-  background-color: var(--color-panel, #fff);
+  /* Make toolbar background transparent */
+  background-color: transparent;
   /* Optional decorative background slice */
-  background-image: var(--toolbar-bg-image, none);
+  /* Remove any toolbar background image, even if set inline */
+  background-image: none !important;
   background-size: var(--toolbar-bg-size, auto var(--app-toolbar-height));
   background-position: var(--toolbar-bg-position, center center);
   background-repeat: var(--toolbar-bg-repeat, no-repeat);

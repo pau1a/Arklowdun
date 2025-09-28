@@ -23,11 +23,12 @@
         "titleBarStyle": "Overlay",
         "acceptFirstMouse": true, // macOS: let first click both focus and interact
         "resizable": true,
-        // Opaque window; macOS draws rounded corners with overlay title bar
-        "transparent": false,
+        // Transparent window to allow fully transparent UI surfaces
+        "transparent": true,
         "width": 800,
         "height": 600,
-        "backgroundColor": "#ffffffff"
+        // Fully transparent background (RGBA)
+        "backgroundColor": "#00000000"
       }
     ],
     "security": {
