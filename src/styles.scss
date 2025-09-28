@@ -21,12 +21,14 @@
 @property --g1 {
   syntax: '<color>';
   inherits: false;
-  initial-value: #f3f8ff;
+  /* even paler yellowish near-white (additional ~50% to white) */
+  initial-value: #fffef9;
 }
 @property --g2 {
   syntax: '<color>';
   inherits: false;
-  initial-value: #f6fefe;
+  /* extremely pale butter yellow */
+  initial-value: #fffdf4;
 }
 @property --g3 {
   syntax: '<color>';
@@ -96,11 +98,12 @@ body {
 }
 
 .backdrop__ambient {
-  position: absolute;
+  position: fixed;      /* pin to window */
   inset: 0;
-  pointer-events: none;
-  z-index: 1;
+  pointer-events: none; /* never block clicks */
+  z-index: 900;         /* above sidebar/main/footer (z:1), below toolbar/modals */
   overflow: hidden;
+  mix-blend-mode: normal; /* default to visible overlay */
 }
 
 .backdrop__ambient canvas {
@@ -110,7 +113,26 @@ body {
   height: 100%;
   pointer-events: none;
   display: block;
+  /* Ensure the canvas itself blends with underlying UI */
+  mix-blend-mode: normal;
 }
+
+/* Optional: mode-scoped blending for polish */
+:root[data-ambient="full"] .backdrop__ambient,
+:root[data-ambient="full"] .backdrop__ambient canvas {
+  mix-blend-mode: soft-light;
+}
+/* Keep Eco more direct/visible */
+:root[data-ambient="eco"] .backdrop__ambient,
+:root[data-ambient="eco"] .backdrop__ambient canvas {
+  mix-blend-mode: normal;
+}
+
+/* Apply the same blending to the dedicated overlay host if present */
+/* Default to normal blend for clear visibility in both modes */
+#ambient-overlay canvas { mix-blend-mode: normal; }
+/* If you want softer look later, re-enable soft-light for Full */
+/* :root[data-ambient="full"] #ambient-overlay canvas { mix-blend-mode: soft-light; } */
 
 /* Ensure primary shell layers paint above the backdrop */
 .sidebar,
@@ -130,8 +152,8 @@ footer {
 @keyframes app-backdrop-colors {
   0% {
     --angle: 120deg;
-    --g1: #f3f8ff; /* near-white blue */
-    --g2: #f6fefe; /* near-white aqua */
+    --g1: #fffef9; /* ultra pale soft yellow */
+    --g2: #fffdf4; /* ultra pale butter */
     --g3: #ffffff; /* white */
     --p2: 32%;
     --p3: 73%;
@@ -139,16 +161,16 @@ footer {
   50% {
     /* subtle motion: whites with slight tint shifts */
     --angle: 125deg;
-    --g1: #eef5ff;
-    --g2: #f7fffe;
+    --g1: #fffef6; /* near-white pastel yellow */
+    --g2: #fffcf0; /* near-white cream */
     --g3: #ffffff;
     --p2: 33.5%;
     --p3: 74%;
   }
   100% {
     --angle: 120deg;
-    --g1: #f3f8ff;
-    --g2: #f6fefe;
+    --g1: #fffef9;
+    --g2: #fffdf4;
     --g3: #ffffff;
     --p2: 32%;
     --p3: 73%;

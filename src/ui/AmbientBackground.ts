@@ -39,9 +39,13 @@ class AmbientBackgroundManager implements AmbientBackgroundController {
   constructor(private readonly host: HTMLElement) {}
 
   async init(): Promise<void> {
+    this.enforceHostStyles();
     this.rotation = await getRotationMode();
     this.mode = await getAmbientMode();
     this.seed = await getBlobSeedForPeriod(this.rotation);
+    try {
+      document.documentElement.setAttribute("data-ambient", this.mode);
+    } catch {}
     this.applyRenderer();
     this.attachListeners();
     log.debug("ambient:init", { mode: this.mode, rotation: this.rotation, seed: this.seed });
@@ -50,6 +54,10 @@ class AmbientBackgroundManager implements AmbientBackgroundController {
   private attachListeners(): void {
     this.unlistenAmbient = onAmbientModeChange(async (mode) => {
       this.mode = mode;
+      try {
+        document.documentElement.setAttribute("data-ambient", this.mode);
+      } catch {}
+      this.enforceHostStyles();
       this.applyRenderer();
       log.debug("ambient:mode", { mode });
     });
@@ -72,10 +80,26 @@ class AmbientBackgroundManager implements AmbientBackgroundController {
     }).catch(() => {});
 
     void listen("tauri://blur", () => {
-      this.renderer?.setPaused(true);
+      // Do not pause immediately on blur; allow renderer to manage grace period
+      // (kept for future hooks if needed)
     }).then((unlisten) => {
       this.unlistenBlur = unlisten;
     }).catch(() => {});
+  }
+
+  private enforceHostStyles(): void {
+    const hs = this.host.style;
+    hs.position = "fixed";
+    hs.top = "0";
+    hs.left = "0";
+    hs.right = "0";
+    hs.bottom = "0";
+    hs.pointerEvents = "none";
+    // Between backdrop (z:0) and panels (z:1)
+    hs.zIndex = "0";
+    try {
+      document.body.appendChild(this.host); // keep as last child
+    } catch {}
   }
 
   private teardownRenderer(): void {
@@ -92,11 +116,11 @@ class AmbientBackgroundManager implements AmbientBackgroundController {
     if (this.mode === "full") {
       const options: BlobFieldEcoOptions = {
         seed,
-        count: 10,
+        count: 4, // Full mode: 4 blobs
         maxFps: 30,
         idleFps: 12,
         idleMs: 12000,
-        renderScale: 0.7,
+        renderScale: 1.0,
         edgeBias: 0.55,
       };
       this.renderer = mountBlobFieldEco(this.host, options);
@@ -104,11 +128,12 @@ class AmbientBackgroundManager implements AmbientBackgroundController {
       const soloOptions: SoloBlobEcoOptions = {
         seed,
         mode: "teal",
+        // Eco mode: two blobs
         secondMode: this.mode === "eco" ? "aqua" : null,
         activeFps: 20,
         idleFps: 8,
         idleMs: 10000,
-        renderScale: 0.75,
+        renderScale: 1.0,
         edgeBias: 0.75,
         paused: this.mode === "off",
       };
@@ -119,6 +144,8 @@ class AmbientBackgroundManager implements AmbientBackgroundController {
       }
       this.renderer = solo;
     }
+
+    // debug overlay pulse removed after verification
   }
 
   private applySeed(seed: number): void {

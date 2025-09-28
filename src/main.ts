@@ -84,8 +84,23 @@ let ambientInit: Promise<void> | null = null;
 
 function ensureAmbientBackground(): void {
   if (ambientInit) return;
-  const host = document.querySelector<HTMLElement>("[data-role='ambient-host']");
-  if (!host) return;
+  // Prefer a dedicated overlay container to avoid any stacking quirks
+  let host = document.getElementById("ambient-overlay") as HTMLElement | null;
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "ambient-overlay";
+    (host.style as any).inset = "0";
+    host.style.position = "fixed";
+    host.style.top = "0";
+    host.style.right = "0";
+    host.style.bottom = "0";
+    host.style.left = "0";
+    host.style.pointerEvents = "none";
+    // Place ambient between backdrop (z:0) and UI (z:1)
+    host.style.zIndex = "0";
+    document.body.appendChild(host);
+    log.debug("ambient:overlay-mounted");
+  }
   ambientInit = initAmbientBackground(host)
     .then((controller) => {
       ambientController = controller;
@@ -467,6 +482,8 @@ window.addEventListener("DOMContentLoaded", () => {
       console.log("Runtime window label:", appWindow.label);
       setupDynamicMinSize();
     });
+
+    // ambient debug probe removed; overlay verified
   })();
 });
 

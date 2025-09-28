@@ -17,8 +17,12 @@ const TONES: Record<BlobTone, ToneDefinition> = {
 
 export interface BlobState {
   tone: BlobTone;
+  color: string;
   sprite: HTMLCanvasElement;
   alpha: number;
+  shapeSeed: number;
+  shapeSpeed: number;
+  morphPhase: number;
   radiusFactor: number;
   freqX: number;
   freqY: number;
@@ -92,31 +96,253 @@ function toRgb(color: string): [number, number, number] {
 }
 
 const spriteCache = new Map<string, HTMLCanvasElement>();
+const SHAPE_BUCKETS = 240; // higher bucket count for smoother morphing
 
 function quantizeAlpha(alpha: number, step = 0.02): number {
   const quantized = Math.round(alpha / step) * step;
   return Math.max(0, Math.min(1, quantized));
 }
 
-function makeSprite(tone: BlobTone, color: string, alpha: number): HTMLCanvasElement {
+// Draw an irregular, haikei-style blob directly to the target context.
+function drawIrregularBlob(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  radius: number,
+  color: string,
+  alpha: number,
+  shapeSeed: number,
+  phase: number,
+): void {
+  const [r0, g0, b0] = toRgb(color);
+  // Lighten color towards white by a configurable factor (default 0.5)
+  const lighten = Math.max(0, Math.min(1, parseAlpha("--blob-lighten") || 0.5));
+  const r = Math.round(r0 + (255 - r0) * lighten);
+  const g = Math.round(g0 + (255 - g0) * lighten);
+  const b = Math.round(b0 + (255 - b0) * lighten);
+  const edgeHard = Math.max(0, Math.min(1, parseAlpha("--blob-edge-hardness") || 0.95));
+  const innerScale = 0.72 + 0.15 * edgeHard;
+  const midScale = innerScale + (1 - innerScale) * 0.45;
+  const outerScale = 1.0;
+  const twoPi = Math.PI * 2;
+  const points = 160; // higher resolution outline to avoid aliasing/jitter
+  const rng = mulberry32(((shapeSeed * 1_000_003) ^ 0x9e3779b9) >>> 0);
+  const f1 = 1 + Math.floor(rng() * 3);
+  const f2 = 2 + Math.floor(rng() * 4);
+  const f3 = 3 + Math.floor(rng() * 5);
+  const p1 = rng() * twoPi;
+  const p2 = rng() * twoPi;
+  const p3 = rng() * twoPi;
+  const morph = (phase % 1) * twoPi;
+  const a1 = 0.18 + rng() * 0.08;
+  const a2 = 0.10 + rng() * 0.06;
+  const a3 = 0.06 + rng() * 0.04;
+
+  const build = (scale: number) => {
+    ctx.beginPath();
+    for (let i = 0; i <= points; i += 1) {
+      const t = (i % points) / points;
+      const ang = t * twoPi;
+      const noise = (a1 * (0.85 + 0.15 * Math.sin(morph))) * Math.sin(f1 * ang + p1 + morph * 0.6)
+        + (a2 * (0.85 + 0.15 * Math.cos(morph * 1.2))) * Math.sin(f2 * ang + p2 + morph * 1.1)
+        + (a3 * (0.85 + 0.15 * Math.sin(morph * 0.8))) * Math.sin(f3 * ang + p3 - morph * 0.9);
+      const rad = Math.max(1, radius * scale * (1 + noise));
+      const x = cx + Math.cos(ang) * rad;
+      const y = cy + Math.sin(ang) * rad;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+  };
+
+  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  build(innerScale);
+  ctx.fill();
+
+  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.45})`;
+  build(midScale);
+  ctx.fill();
+
+  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.18})`;
+  build(outerScale);
+  ctx.fill();
+}
+
+// Compute per-angle radii for a phase (used for temporal smoothing)
+function computeRadii(
+  baseRadius: number,
+  shapeSeed: number,
+  phase: number,
+  points: number,
+): Float32Array {
+  const twoPi = Math.PI * 2;
+  const rng = mulberry32(((shapeSeed * 1_000_003) ^ 0x9e3779b9) >>> 0);
+  const f1 = 1 + Math.floor(rng() * 3);
+  const f2 = 2 + Math.floor(rng() * 4);
+  const f3 = 3 + Math.floor(rng() * 5);
+  const p1 = rng() * twoPi;
+  const p2 = rng() * twoPi;
+  const p3 = rng() * twoPi;
+  const morph = (phase % 1) * twoPi;
+  const a1 = 0.18 + rng() * 0.08;
+  const a2 = 0.10 + rng() * 0.06;
+  const a3 = 0.06 + rng() * 0.04;
+  const out = new Float32Array(points);
+  for (let i = 0; i < points; i += 1) {
+    const t = i / points;
+    const ang = t * twoPi;
+    const noise = (a1 * (0.85 + 0.15 * Math.sin(morph))) * Math.sin(f1 * ang + p1 + morph * 0.6)
+      + (a2 * (0.85 + 0.15 * Math.cos(morph * 1.2))) * Math.sin(f2 * ang + p2 + morph * 1.1)
+      + (a3 * (0.85 + 0.15 * Math.sin(morph * 0.8))) * Math.sin(f3 * ang + p3 - morph * 0.9);
+    out[i] = Math.max(1, baseRadius * (1 + noise));
+  }
+  return out;
+}
+
+// Fill a blob from a precomputed radii array (three feathered layers)
+function fillFromRadii(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  radii: Float32Array,
+  color: string,
+  alpha: number,
+): void {
+  const [r0, g0, b0] = toRgb(color);
+  const lighten = Math.max(0, Math.min(1, parseAlpha("--blob-lighten") || 0.5));
+  const r = Math.round(r0 + (255 - r0) * lighten);
+  const g = Math.round(g0 + (255 - g0) * lighten);
+  const b = Math.round(b0 + (255 - b0) * lighten);
+  const edgeHard = Math.max(0, Math.min(1, parseAlpha("--blob-edge-hardness") || 0.95));
+  const innerScale = 0.72 + 0.15 * edgeHard;
+  const twoPi = Math.PI * 2;
+  const points = radii.length;
+
+  // Crisp, non-glowing edge: fill only the inner body and skip any outer rings
+  ctx.beginPath();
+  for (let i = 0; i <= points; i += 1) {
+    const idx = i % points;
+    const ang = (idx / points) * twoPi;
+    const rad = Math.max(1, radii[idx] * innerScale);
+    const x = cx + Math.cos(ang) * rad;
+    const y = cy + Math.sin(ang) * rad;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  ctx.fill();
+}
+
+function pathFromRadii(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  radii: Float32Array,
+  scale: number,
+): void {
+  const twoPi = Math.PI * 2;
+  const points = radii.length;
+  ctx.beginPath();
+  for (let i = 0; i <= points; i += 1) {
+    const idx = i % points;
+    const ang = (idx / points) * twoPi;
+    const rad = Math.max(1, radii[idx] * scale);
+    const x = cx + Math.cos(ang) * rad;
+    const y = cy + Math.sin(ang) * rad;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+}
+
+function makeSprite(
+  tone: BlobTone,
+  color: string,
+  alpha: number,
+  size = 512,
+  shapeSeed = 0.5,
+  shapePhase = 0,
+): HTMLCanvasElement {
   const qa = quantizeAlpha(alpha);
-  const key = `${tone}:${color}:${qa.toFixed(2)}`;
+  // Quantize size to reduce cache churn
+  const qSize = Math.max(128, Math.min(2048, Math.ceil(size / 64) * 64));
+  const shapeKey = Math.round(shapeSeed * 1000); // quantize shape
+  const phaseBucket = Math.round(shapePhase * SHAPE_BUCKETS);
+  const key = `${tone}:${color}:${qa.toFixed(2)}:${qSize}:s${shapeKey}:p${phaseBucket}`;
   const cached = spriteCache.get(key);
   if (cached) return cached;
 
-  const size = 256;
   const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
+  canvas.width = qSize;
+  canvas.height = qSize;
   const ctx = canvas.getContext("2d");
   if (ctx) {
-    ctx.clearRect(0, 0, size, size);
-    const gradient = ctx.createRadialGradient(size / 2, size / 2, size * 0.15, size / 2, size / 2, size / 2);
+    ctx.clearRect(0, 0, qSize, qSize);
     const [r, g, b] = toRgb(color);
-    gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${qa})`);
-    gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, size, size);
+    const centerX = qSize / 2;
+    const centerY = qSize / 2;
+    // Leave generous padding so shapes never touch canvas edges
+    const baseR = qSize * 0.40;
+    const edgeHard = Math.max(0, Math.min(1, parseAlpha("--blob-edge-hardness") || 0.95));
+
+    // Build irregular outline using band-limited noise from summed sines
+    const srng = mulberry32((shapeKey ^ 0x9e3779b9) >>> 0);
+    const points = 80;
+    const twoPi = Math.PI * 2;
+    const f1 = 1 + Math.floor(srng() * 3); // 1..3
+    const f2 = 2 + Math.floor(srng() * 4); // 2..5
+    const f3 = 3 + Math.floor(srng() * 5); // 3..7
+    const p1 = srng() * twoPi;
+    const p2 = srng() * twoPi;
+    const p3 = srng() * twoPi;
+    // Morph the outline by slowly modulating phases/amplitudes over time
+    const morph = shapePhase * twoPi;
+    const a1 = 0.18 + srng() * 0.08;
+    const a2 = 0.10 + srng() * 0.06;
+    const a3 = 0.06 + srng() * 0.04;
+
+    const buildPath = (scale: number) => {
+      ctx.beginPath();
+      for (let i = 0; i <= points; i += 1) {
+        const t = (i % points) / points;
+        const ang = t * twoPi;
+        const noise = (a1 * (0.85 + 0.15 * Math.sin(morph))) * Math.sin(f1 * ang + p1 + morph * 0.6)
+          + (a2 * (0.85 + 0.15 * Math.cos(morph * 1.2))) * Math.sin(f2 * ang + p2 + morph * 1.1)
+          + (a3 * (0.85 + 0.15 * Math.sin(morph * 0.8))) * Math.sin(f3 * ang + p3 - morph * 0.9);
+        // Clamp radius so outline never hits the canvas edge
+        const maxR = qSize * 0.46;
+        const radius = Math.min(baseR * scale * (1 + noise), maxR);
+        const x = centerX + Math.cos(ang) * radius;
+        const y = centerY + Math.sin(ang) * radius;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+    };
+
+    // Layered fills to create a feathered edge on irregular shapes
+    const innerScale = 0.72 + 0.15 * edgeHard; // ~0.86 at 0.95
+    const midScale = innerScale + (1 - innerScale) * 0.45;
+    const outerScale = 1.0;
+
+    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${qa})`;
+    buildPath(innerScale);
+    ctx.fill();
+
+    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${qa * 0.45})`;
+    buildPath(midScale);
+    ctx.fill();
+
+    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${qa * 0.18})`;
+    buildPath(outerScale);
+    ctx.fill();
+
+    // Safety fade near the outermost 4% to guarantee no hard edges
+    const mask = ctx.createRadialGradient(centerX, centerY, qSize * 0.30, centerX, centerY, qSize * 0.50);
+    mask.addColorStop(0, 'rgba(0,0,0,1)');
+    mask.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.fillStyle = mask as unknown as string;
+    ctx.fillRect(0, 0, qSize, qSize);
+    ctx.globalCompositeOperation = 'source-over';
   }
   spriteCache.set(key, canvas);
   return canvas;
@@ -162,6 +388,8 @@ export abstract class AmbientBlobCanvas {
   private pausedManually: boolean;
   private reduceMotion = false;
   private isHidden = false;
+  private reducedSince: number | null = null;
+  private hiddenSince: number | null = null;
   private lastInteraction = performance.now();
   private lastRender = 0;
   private hasFrame = false;
@@ -196,6 +424,8 @@ export abstract class AmbientBlobCanvas {
     }
     host.appendChild(canvas);
 
+    // Canvas background remains transparent in production
+
     this.resizeObserver = typeof ResizeObserver !== "undefined"
       ? new ResizeObserver(() => this.handleResize())
       : null;
@@ -214,10 +444,14 @@ export abstract class AmbientBlobCanvas {
       const handler = (event: MediaQueryListEvent) => {
         this.reduceMotion = event.matches;
         if (this.reduceMotion) {
-          this.stop();
+          // Start grace period; don't stop immediately
+          this.reducedSince = performance.now();
           this.renderOnce();
-        } else if (!this.pausedManually && !this.isHidden) {
-          this.start();
+        } else {
+          this.reducedSince = null;
+          if (!this.pausedManually && !this.isHidden) {
+            this.start();
+          }
         }
       };
       this.onMotionChangeBound = handler;
@@ -231,9 +465,13 @@ export abstract class AmbientBlobCanvas {
     this.onVisibilityChangeBound = () => {
       this.isHidden = document.hidden;
       if (this.isHidden) {
-        this.stop();
-      } else if (!this.pausedManually && !this.reduceMotion) {
-        this.start();
+        // Start grace period; don't stop immediately
+        this.hiddenSince = performance.now();
+      } else {
+        this.hiddenSince = null;
+        if (!this.pausedManually && !this.reduceMotion) {
+          this.start();
+        }
       }
     };
     document.addEventListener("visibilitychange", this.onVisibilityChangeBound);
@@ -271,30 +509,49 @@ export abstract class AmbientBlobCanvas {
     const def = TONES[tone] ?? TONES.teal;
     const color = readCssVar(def.colorVar, "#00C896");
     const baseAlpha = parseAlpha(def.alphaVar);
-    const alpha = Math.max(0, Math.min(1, baseAlpha * (0.8 + rng() * 0.4) * emphasis));
-    const sprite = makeSprite(tone, color, alpha);
+    // Narrow opacity range: keep min (0.8x) but lower max to 1.0x (was 1.2x)
+    const alpha = Math.max(0, Math.min(1, baseAlpha * (0.8 + rng() * 0.2) * emphasis));
+    // Start with a reasonably large sprite; upscale avoided below
+    const shapeSeed = rng();
+    // Narrow morph-speed range and lower the maximum; keep the minimum
+    const shapeSpeed = 0.03 + rng() * 0.015; // was 0.03..0.06, now 0.03..0.045
+    const sprite = makeSprite(tone, color, alpha, 512, shapeSeed, 0);
 
-    const radiusFactor = 0.25 + rng() * 0.2;
-    const freqX = (Math.PI * 2) / (20 + rng() * 20);
-    const freqY = (Math.PI * 2) / (20 + rng() * 20);
-    const freqX2 = freqX * (0.4 + rng() * 0.6);
-    const freqY2 = freqY * (0.4 + rng() * 0.6);
-    const amplitudeX = 0.22 + rng() * 0.2;
-    const amplitudeY = 0.18 + rng() * 0.2;
-    const altAmplitudeX = amplitudeX * (0.3 + rng() * 0.4);
-    const altAmplitudeY = amplitudeY * (0.3 + rng() * 0.4);
+    // Make blobs larger overall (~24%–48% of min viewport side)
+    const radiusFactor = 0.24 + rng() * 0.24;
+    // Slow down motion by another half (~25% of original)
+    const speed = 0.25;
+    // Narrow travel-speed range and lower the maximum; keep the minimum
+    // Denominator controls speed: higher denominator => slower.
+    // Old: 20..40  => faster range. New: 32..40  => slower, narrower range.
+    let freqX = (Math.PI * 2) / (32 + rng() * 8);
+    let freqY = (Math.PI * 2) / (32 + rng() * 8);
+    freqX *= speed;
+    freqY *= speed;
+    // Secondary modulation range narrowed to reduce fast outliers (min held)
+    const freqX2 = freqX * (0.2 + rng() * 0.6);
+    const freqY2 = freqY * (0.2 + rng() * 0.6);
+    // Wider amplitude variation for more organic paths
+    const amplitudeX = 0.20 + rng() * 0.28;
+    const amplitudeY = 0.16 + rng() * 0.26;
+    const altAmplitudeX = amplitudeX * (0.25 + rng() * 0.6);
+    const altAmplitudeY = amplitudeY * (0.25 + rng() * 0.6);
     const offsetX = (rng() - 0.5) * 0.6 * this.edgeBias;
     const offsetY = (rng() - 0.5) * 0.6 * this.edgeBias;
     const phaseX = rng() * Math.PI * 2;
     const phaseY = rng() * Math.PI * 2;
     const phaseX2 = rng() * Math.PI * 2;
     const phaseY2 = rng() * Math.PI * 2;
-    const timeOffset = rng() * 40;
+    const timeOffset = rng() * 120;
 
     return {
       tone,
+      color,
+      shapeSeed,
       sprite,
       alpha,
+      shapeSpeed,
+      morphPhase: rng(),
       radiusFactor,
       freqX,
       freqY,
@@ -315,12 +572,24 @@ export abstract class AmbientBlobCanvas {
   }
 
   private handleResize(): void {
-    const width = this.host.clientWidth;
-    const height = this.host.clientHeight;
+    // Prefer client sizes, but fixed/absolute hosts can sometimes report 0.
+    let width = this.host.clientWidth;
+    let height = this.host.clientHeight;
+    if (width === 0 || height === 0) {
+      const rect = this.host.getBoundingClientRect();
+      width = Math.max(width, Math.floor(rect.width));
+      height = Math.max(height, Math.floor(rect.height));
+    }
+    if ((width === 0 || height === 0) && typeof window !== "undefined") {
+      width = Math.max(width, window.innerWidth || 0);
+      height = Math.max(height, window.innerHeight || 0);
+    }
     this.cssWidth = width;
     this.cssHeight = height;
     if (width === 0 || height === 0) return;
-    const dpr = typeof window !== "undefined" ? Math.min(window.devicePixelRatio || 1, 1) : 1;
+    // Respect device pixel ratio up to 2x for crisper rendering without overkill
+    // Use device pixel ratio up to 2x for crispness
+    const dpr = typeof window !== "undefined" ? Math.min(window.devicePixelRatio || 1, 3) : 1;
     const scaledWidth = Math.max(1, Math.floor(width * dpr * this.renderScale));
     const scaledHeight = Math.max(1, Math.floor(height * dpr * this.renderScale));
     if (this.element.width !== scaledWidth || this.element.height !== scaledHeight) {
@@ -359,6 +628,15 @@ export abstract class AmbientBlobCanvas {
   }
 
   private computeFps(now: number): number {
+    const GRACE_MS = 3600 * 1000; // 1 hour
+    if (this.pausedManually) return 0;
+    // After grace, honor reduced-motion/hidden by stopping
+    if (this.reduceMotion && this.reducedSince && (now - this.reducedSince) > GRACE_MS) {
+      return 0;
+    }
+    if (this.isHidden && this.hiddenSince && (now - this.hiddenSince) > GRACE_MS) {
+      return 0;
+    }
     if (this.activeFps <= 0) return 0;
     if (now - this.lastInteraction > this.idleMs) {
       return this.idleFps;
@@ -373,18 +651,65 @@ export abstract class AmbientBlobCanvas {
     if (width === 0 || height === 0) return;
     this.ctx.clearRect(0, 0, width, height);
     const elapsed = (now - this.startTime) / 1000;
+    // Limit dt so morph never jumps on frame hitches
+    const dt = Math.min(1 / 60, Math.max(0, (now - (this as any)._lastMorphUpdate || 0) / 1000)) || 1 / 60;
+    (this as any)._lastMorphUpdate = now;
     const minSize = Math.min(width, height);
+    const alphaMult = Math.max(0, Math.min(1, parseAlpha("--blob-alpha-mult") || 1));
+    // Draw without image smoothing to avoid extra blur when scaling
+    this.ctx.imageSmoothingEnabled = false;
     for (const blob of this.blobs) {
       const t = elapsed + blob.timeOffset;
-      const x = width * (0.5 + blob.offsetX + blob.amplitudeX * Math.sin(blob.freqX * t + blob.phaseX)
+      const crossX = 0.035 * Math.sin(blob.freqY * t * 0.5 + blob.phaseY2);
+      const crossY = 0.035 * Math.cos(blob.freqX * t * 0.5 + blob.phaseX2);
+      const x = width * (0.5 + blob.offsetX + crossX + blob.amplitudeX * Math.sin(blob.freqX * t + blob.phaseX)
         + blob.altAmplitudeX * Math.sin(blob.freqX2 * t + blob.phaseX2));
-      const y = height * (0.5 + blob.offsetY + blob.amplitudeY * Math.cos(blob.freqY * t + blob.phaseY)
+      const y = height * (0.5 + blob.offsetY + crossY + blob.amplitudeY * Math.cos(blob.freqY * t + blob.phaseY)
         + blob.altAmplitudeY * Math.cos(blob.freqY2 * t + blob.phaseY2));
       const radius = minSize * blob.radiusFactor;
-      this.ctx.globalAlpha = blob.alpha;
-      this.ctx.drawImage(blob.sprite, x - radius, y - radius, radius * 2, radius * 2);
+      // Advance morph phase using elapsed time for continuity across FPS changes
+      blob.morphPhase = (blob.morphPhase + blob.shapeSpeed * dt) % 1;
+      // Temporal smoothing of shape radii to eliminate any perceptible snap
+      const POINTS = 180;
+      const newR = computeRadii(radius, blob.shapeSeed, blob.morphPhase, POINTS);
+      const k = Math.min(1, (dt || 0.016) / 0.12); // ~120ms smoothing window
+      const prev = (blob as any).prevR as Float32Array | undefined;
+      let smoothed: Float32Array;
+      if (!prev || prev.length !== POINTS) {
+        smoothed = newR;
+      } else {
+        smoothed = new Float32Array(POINTS);
+        for (let i = 0; i < POINTS; i += 1) {
+          smoothed[i] = prev[i]! + (newR[i]! - prev[i]!) * k;
+        }
+      }
+      (blob as any).prevR = smoothed;
+      const effectiveAlpha = Math.max(0, Math.min(1, blob.alpha * alphaMult));
+      // Non-additive compositing: clear exactly the inner fill region,
+      // then fill it at the target alpha (avoids any cleared "ring").
+      const edgeHard = Math.max(0, Math.min(1, parseAlpha("--blob-edge-hardness") || 0.95));
+      const innerScale = 0.72 + 0.15 * edgeHard;
+      this.ctx.save();
+      this.ctx.globalCompositeOperation = 'destination-out';
+      this.ctx.fillStyle = 'rgba(0,0,0,1)';
+      pathFromRadii(this.ctx, x, y, smoothed, innerScale);
+      this.ctx.fill();
+      this.ctx.restore();
+      // Draw the blob
+      fillFromRadii(this.ctx, x, y, smoothed, blob.color, effectiveAlpha);
     }
     this.ctx.globalAlpha = 1;
+    this.ctx.imageSmoothingEnabled = true;
+
+    // Optional debugging aid: overlay solid tint when enabled via CSS var
+    // Enable at runtime: document.documentElement.style.setProperty('--ambient-debug-overlay', '0.15')
+    const debugAlpha = parseAlpha("--ambient-debug-overlay");
+    if (debugAlpha > 0) {
+      this.ctx.globalAlpha = Math.min(1, debugAlpha);
+      this.ctx.fillStyle = "#ff00aa";
+      this.ctx.fillRect(0, 0, width, height);
+      this.ctx.globalAlpha = 1;
+    }
   }
 
   renderOnce(): void {
