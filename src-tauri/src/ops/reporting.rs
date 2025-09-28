@@ -638,7 +638,7 @@ mod tests {
             elapsed_ms: (finished - started).num_milliseconds(),
             status: OperationStatus::Success,
             app_version: "0.1.0".to_string(),
-            schema_version: "0020_files_index_fks".to_string(),
+            schema_version: "0001_baseline".to_string(),
             host_tz: host_timezone_label(),
             correlation_id: None,
             details,
@@ -796,7 +796,7 @@ mod tests {
             elapsed_ms: (finished - started).num_milliseconds(),
             status: OperationStatus::Success,
             app_version: "0.1.0".to_string(),
-            schema_version: "0020_files_index_fks".to_string(),
+            schema_version: "0001_baseline".to_string(),
             host_tz: host_timezone_label(),
             correlation_id: None,
             details: json!({
@@ -849,7 +849,7 @@ mod tests {
             .await
             .expect("create schema_migrations");
         sqlx::query("INSERT INTO schema_migrations (version) VALUES (?1)")
-            .bind("0020_files_index_fks")
+            .bind("0001_baseline.sql")
             .execute(&pool)
             .await
             .expect("insert schema version");

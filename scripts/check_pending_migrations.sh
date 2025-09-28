@@ -7,6 +7,11 @@ echo "Checking pending migrations against DB: $DB"
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 MIG_DIR="$SCRIPT_DIR/../migrations"
 
+if ls "$MIG_DIR"/*.down.sql >/dev/null 2>&1; then
+  echo "ERROR: down migrations are not supported; remove *.down.sql files" >&2
+  exit 1
+fi
+
 if ! command -v sqlite3 >/dev/null 2>&1; then
   echo "ERROR: sqlite3 not found" >&2
   exit 1
@@ -17,7 +22,7 @@ if [ ! -f "$DB" ]; then
   exit 1
 fi
 
-set -- "$MIG_DIR"/[0-9]*.up.sql
+set -- "$MIG_DIR"/[0-9]*.sql "$MIG_DIR"/[0-9]*.up.sql
 if [ ! -e "$1" ]; then
   echo "OK: No migrations found"
   exit 0
@@ -29,8 +34,21 @@ if ! applied=$(sqlite3 "$DB" "SELECT version FROM schema_migrations ORDER BY ver
 fi
 
 pending=""
-for f in "$MIG_DIR"/[0-9]*.up.sql; do
-  token=$(basename "$f")
+for f in "$MIG_DIR"/[0-9]*.sql "$MIG_DIR"/[0-9]*.up.sql; do
+  [ -f "$f" ] || continue
+  token=""
+  case "$f" in
+    *.down.sql)
+      continue
+      ;;
+    *)
+      base=$(basename "$f")
+      token="$base"
+      ;;
+  esac
+  if [ -z "$token" ]; then
+    continue
+  fi
   if ! printf "%s\n" "$applied" | grep -Fxq "$token"; then
     pending="${pending}${pending:+ }$token"
   fi

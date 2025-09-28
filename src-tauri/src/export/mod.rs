@@ -671,7 +671,7 @@ mod tests {
 
     #[tokio::test]
     async fn manifest_records_canonical_schema_version() {
-        let version = "0023_events_drop_legacy_time";
+        let version = "0001_baseline.sql";
         let db_dir = TempDir::new().expect("create db dir");
         let pool = setup_pool(&db_dir, version)
             .await
@@ -705,7 +705,10 @@ mod tests {
         .await
         .expect("fetch schema version");
 
-        assert_eq!(manifest.schema_version, db_version);
+        assert_eq!(
+            manifest.schema_version,
+            db_manifest::normalize_schema_version_owned(db_version)
+        );
         assert!(!manifest
             .schema_version
             .to_ascii_lowercase()

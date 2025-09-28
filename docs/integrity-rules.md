@@ -50,10 +50,11 @@ This prevents orphaned rows and keeps cleanup simple.
 The first migration to apply these rules will be:
 
 ```
-migrations/0008_explicit_fk_actions.up.sql
+migrations/0001_baseline.sql
 ```
 
-Future schema changes should conform to the guidance above.
+Future schema changes should conform to the guidance above and preserve the
+baseline guarantees when altering or extending tables.
 
 ## Household Scoping
 
@@ -84,7 +85,8 @@ surface a selection flow so the user can choose a household explicitly.
 
 Notes and shopping items must use soft deletion. Rows are never removed;
 instead `deleted_at` is set to the current timestamp. Queries and UI must
-exclude rows where `deleted_at` is not `NULL`. The `notes_live` and
-`shopping_live` views expose only active rows. Use the repository helpers
-`set_deleted_at`, `clear_deleted_at`, and `renumber_positions` to handle
-delete and restore flows while keeping positions dense.
+exclude rows where `deleted_at` is not `NULL`. The `shopping_live` view
+exposes only active rows for shopping items; note queries should filter on
+`deleted_at IS NULL` directly. Use the repository helpers `set_deleted_at`,
+`clear_deleted_at`, and `renumber_positions` to handle delete and restore
+flows while keeping positions dense.

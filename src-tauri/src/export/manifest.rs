@@ -56,9 +56,9 @@ mod tests {
 
     #[test]
     fn export_manifest_defaults() {
-        let m = ExportManifest::new("1.0.0", "0020_files_index_fks");
+        let m = ExportManifest::new("1.0.0", "0001_baseline");
         assert_eq!(m.app_version, "1.0.0");
-        assert_eq!(m.schema_version, "0020_files_index_fks");
+        assert_eq!(m.schema_version, "0001_baseline");
         assert!(m.created_at.contains('T'));
         assert!(m.tables.is_empty());
         assert_eq!(m.attachments.total_count, 0);

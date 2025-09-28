@@ -1,2 +1,0 @@
--- checksum: d61d383d2cd25ab17ff87ad238d47622f9e034f980c4590b34fc3d9bd3266868
-ALTER TABLE household ADD COLUMN tz TEXT;
