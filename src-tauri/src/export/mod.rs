@@ -570,7 +570,7 @@ mod tests {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS schema_migrations (
                 version TEXT PRIMARY KEY,
-                applied_at TEXT DEFAULT CURRENT_TIMESTAMP
+                applied_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
             )",
         )
         .execute(&pool)

@@ -282,7 +282,7 @@ async fn up(db: &Path, dry: bool, to: Option<&str>) -> Result<()> {
             anyhow::bail!("foreign key violations in {}", filename);
         }
         sqlx::query(
-            "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, strftime('%s','now'))",
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, strftime('%s','now') * 1000)",
         )
         .bind(&filename)
         .execute(&mut *tx)

@@ -254,7 +254,7 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     pool.execute(
         "CREATE TABLE IF NOT EXISTS schema_migrations (\
            version   TEXT PRIMARY KEY,\
-           applied_at INTEGER NOT NULL\
+           applied_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)\
          )",
     )
     .await?;

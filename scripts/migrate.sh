@@ -40,7 +40,7 @@ PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version TEXT PRIMARY KEY,
-  applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+  applied_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
 );
 SQL
 }
