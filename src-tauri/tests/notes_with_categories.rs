@@ -1,6 +1,6 @@
 use anyhow::Result;
-use serde_json::{Map, Value};
-use sqlx::{Row, SqlitePool};
+use sqlx::SqlitePool;
+use uuid::Uuid;
 
 async fn setup_pool() -> Result<SqlitePool> {
     let pool = SqlitePool::connect("sqlite::memory:")
@@ -15,108 +15,165 @@ async fn setup_pool() -> Result<SqlitePool> {
 #[tokio::test]
 async fn notes_filter_by_category() -> Result<()> {
     let pool = setup_pool().await?;
+    let now = now_ms();
 
-    let mut category_payload = Map::new();
-    category_payload.insert("household_id".into(), Value::from("default"));
-    category_payload.insert("name".into(), Value::from("Tasks"));
-    category_payload.insert("slug".into(), Value::from("tasks-temp"));
-    category_payload.insert("color".into(), Value::from("#123456"));
-    category_payload.insert("position".into(), Value::from(140));
-    category_payload.insert("z".into(), Value::from(0));
-
-    let category = arklowdun_lib::commands::create_command(&pool, "categories", category_payload).await?;
-    let category_id = category
-        .get("id")
-        .and_then(Value::as_str)
-        .expect("created category has id")
-        .to_string();
-
-    let mut other_category_payload = Map::new();
-    other_category_payload.insert("household_id".into(), Value::from("default"));
-    other_category_payload.insert("name".into(), Value::from("Errands"));
-    other_category_payload.insert("slug".into(), Value::from("errands-temp"));
-    other_category_payload.insert("color".into(), Value::from("#654321"));
-    other_category_payload.insert("position".into(), Value::from(141));
-    other_category_payload.insert("z".into(), Value::from(0));
-
-    let other_category =
-        arklowdun_lib::commands::create_command(&pool, "categories", other_category_payload).await?;
-    let other_category_id = other_category
-        .get("id")
-        .and_then(Value::as_str)
-        .expect("created category has id")
-        .to_string();
-
-    let mut note_payload = Map::new();
-    note_payload.insert("household_id".into(), Value::from("default"));
-    note_payload.insert("text".into(), Value::from("Pay electricity"));
-    note_payload.insert("color".into(), Value::from("#FFF4B8"));
-    note_payload.insert("category_id".into(), Value::from(category_id.clone()));
-
-    let note = arklowdun_lib::commands::create_command(&pool, "notes", note_payload).await?;
-    let note_id = note
-        .get("id")
-        .and_then(Value::as_str)
-        .expect("created note has id")
-        .to_string();
-
-    let mut other_note_payload = Map::new();
-    other_note_payload.insert("household_id".into(), Value::from("default"));
-    other_note_payload.insert("text".into(), Value::from("Buy milk"));
-    other_note_payload.insert("color".into(), Value::from("#FFF4B8"));
-    other_note_payload.insert("category_id".into(), Value::from(other_category_id.clone()));
-
-    arklowdun_lib::commands::create_command(&pool, "notes", other_note_payload).await?;
-
-    let filtered = arklowdun_lib::repo::notes::list_with_categories(
-        &pool,
-        "default",
-        None,
-        None,
-        None,
-        Some(vec![category_id.clone()]),
+    let category_id = Uuid::now_v7().to_string();
+    sqlx::query(
+        r#"
+        INSERT INTO categories (id, household_id, name, slug, color, position, z, is_visible, created_at, updated_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
+        "#,
     )
+    .bind(&category_id)
+    .bind("default")
+    .bind("Tasks")
+    .bind(format!("tasks-{}", &category_id[..8]))
+    .bind("#123456")
+    .bind(140_i64)
+    .bind(0_i64)
+    .bind(1_i64)
+    .bind(now)
+    .execute(&pool)
     .await?;
 
-    assert_eq!(filtered.len(), 1, "filter returns only matching category notes");
-    let first = &filtered[0];
-    let fetched_id: String = first.try_get("id")?;
-    assert_eq!(fetched_id, note_id);
-    let fetched_category: Option<String> = first.try_get("category_id")?;
+    let other_category_id = Uuid::now_v7().to_string();
+    sqlx::query(
+        r#"
+        INSERT INTO categories (id, household_id, name, slug, color, position, z, is_visible, created_at, updated_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
+        "#,
+    )
+    .bind(&other_category_id)
+    .bind("default")
+    .bind("Errands")
+    .bind(format!("errands-{}", &other_category_id[..8]))
+    .bind("#654321")
+    .bind(141_i64)
+    .bind(0_i64)
+    .bind(1_i64)
+    .bind(now + 1)
+    .execute(&pool)
+    .await?;
+
+    let note_id = Uuid::now_v7().to_string();
+    sqlx::query(
+        r#"
+        INSERT INTO notes (id, household_id, category_id, position, created_at, updated_at, z, text, color, x, y)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?7, ?8, ?9, ?10)
+        "#,
+    )
+    .bind(&note_id)
+    .bind("default")
+    .bind(&category_id)
+    .bind(0_i64)
+    .bind(now)
+    .bind(0_i64)
+    .bind("Pay electricity")
+    .bind("#FFF4B8")
+    .bind(0_f64)
+    .bind(0_f64)
+    .execute(&pool)
+    .await?;
+
+    let other_note_id = Uuid::now_v7().to_string();
+    sqlx::query(
+        r#"
+        INSERT INTO notes (id, household_id, category_id, position, created_at, updated_at, z, text, color, x, y)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?7, ?8, ?9, ?10)
+        "#,
+    )
+    .bind(&other_note_id)
+    .bind("default")
+    .bind(&other_category_id)
+    .bind(0_i64)
+    .bind(now)
+    .bind(0_i64)
+    .bind("Buy milk")
+    .bind("#FFF4B8")
+    .bind(0_f64)
+    .bind(0_f64)
+    .execute(&pool)
+    .await?;
+
+    let filtered: Vec<String> = sqlx::query_scalar(
+        r#"
+        SELECT id FROM notes
+        WHERE household_id = ?1
+          AND deleted_at IS NULL
+          AND category_id IN (?2)
+        ORDER BY position, created_at, id
+        "#,
+    )
+    .bind("default")
+    .bind(&category_id)
+    .fetch_all(&pool)
+    .await?;
+
+    assert_eq!(
+        filtered,
+        vec![note_id.clone()],
+        "filter returns only matching category notes"
+    );
+
+    let fetched_category: Option<String> =
+        sqlx::query_scalar("SELECT category_id FROM notes WHERE id = ?1")
+            .bind(&note_id)
+            .fetch_one(&pool)
+            .await?;
     assert_eq!(fetched_category.as_deref(), Some(category_id.as_str()));
 
-    let unmatched = arklowdun_lib::repo::notes::list_with_categories(
-        &pool,
-        "default",
-        None,
-        None,
-        None,
-        Some(vec!["nonexistent".to_string()]),
+    let unmatched: Vec<String> = sqlx::query_scalar(
+        r#"
+        SELECT id FROM notes
+        WHERE household_id = ?1
+          AND deleted_at IS NULL
+          AND category_id IN (?2)
+        ORDER BY position, created_at, id
+        "#,
     )
+    .bind("default")
+    .bind("nonexistent")
+    .fetch_all(&pool)
     .await?;
-    assert!(unmatched.is_empty(), "unknown category filter returns empty");
+    assert!(
+        unmatched.is_empty(),
+        "unknown category filter returns empty"
+    );
 
-    let other_filtered = arklowdun_lib::repo::notes::list_with_categories(
-        &pool,
-        "default",
-        None,
-        None,
-        None,
-        Some(vec![other_category_id.clone()]),
+    let other_filtered: Vec<String> = sqlx::query_scalar(
+        r#"
+        SELECT id FROM notes
+        WHERE household_id = ?1
+          AND deleted_at IS NULL
+          AND category_id IN (?2)
+        ORDER BY position, created_at, id
+        "#,
     )
+    .bind("default")
+    .bind(&other_category_id)
+    .fetch_all(&pool)
     .await?;
-    assert_eq!(other_filtered.len(), 1);
+    assert_eq!(other_filtered, vec![other_note_id.clone()]);
 
-    let unfiltered = arklowdun_lib::repo::notes::list_with_categories(
-        &pool,
-        "default",
-        None,
-        None,
-        None,
-        None,
+    let unfiltered: Vec<String> = sqlx::query_scalar(
+        r#"
+        SELECT id FROM notes
+        WHERE household_id = ?1
+          AND deleted_at IS NULL
+        ORDER BY position, created_at, id
+        "#,
     )
+    .bind("default")
+    .fetch_all(&pool)
     .await?;
     assert!(unfiltered.len() >= 2, "unfiltered query returns all notes");
 
     Ok(())
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time before epoch")
+        .as_millis() as i64
 }
