@@ -477,20 +477,40 @@ mod tests {
     #[tokio::test]
     async fn notes_quick_capture_defaults() {
         let pool = setup_pool().await;
-        let category_id = Uuid::now_v7().to_string();
 
-        sqlx::query(
+        // Reuse an existing primary category for the default household when present
+        // to avoid violating the unique (household_id, slug) constraint.
+        let existing: Option<String> = sqlx::query_scalar(
             r#"
-            INSERT INTO categories
-              (id, household_id, name, slug, color, position, z, is_visible, created_at, updated_at, deleted_at)
-            VALUES
-              (?, 'default', 'Primary', 'primary', '#4F46E5', 0, 0, 1, strftime('%s','now')*1000, strftime('%s','now')*1000, NULL)
+            SELECT id
+              FROM categories
+             WHERE household_id = 'default'
+               AND slug = 'primary'
+               AND deleted_at IS NULL
             "#,
         )
-        .bind(&category_id)
-        .execute(&pool)
+        .fetch_optional(&pool)
         .await
-        .expect("seed primary category");
+        .expect("query primary category");
+
+        let category_id = if let Some(id) = existing {
+            id
+        } else {
+            let id = Uuid::now_v7().to_string();
+            sqlx::query(
+                r#"
+                INSERT INTO categories
+                  (id, household_id, name, slug, color, position, z, is_visible, created_at, updated_at, deleted_at)
+                VALUES
+                  (?, 'default', 'Primary', 'primary', '#4F46E5', 0, 0, 1, strftime('%s','now')*1000, strftime('%s','now')*1000, NULL)
+                "#,
+            )
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .expect("seed primary category");
+            id
+        };
 
         let mut payload = Map::new();
         payload.insert("household_id".into(), Value::String("default".into()));
