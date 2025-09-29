@@ -45,6 +45,7 @@ anyhow = "1"
 ts-rs = { version = "10", features = ["no-serde-warnings"] }
 paste = "1.0"
 regex = "1"
+base64 = "0.22"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json", "time"] }
 tracing-appender = "0.2"

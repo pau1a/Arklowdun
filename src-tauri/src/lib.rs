@@ -118,10 +118,10 @@ mod id;
 pub mod import;
 mod importer;
 pub mod ipc;
-mod notes;
 pub mod logging;
 pub mod migrate;
 pub mod migration_guard;
+mod notes;
 pub mod ops;
 mod repo;
 pub mod security;
@@ -132,15 +132,17 @@ pub mod time_invariants;
 pub mod time_shadow;
 pub mod util;
 
-pub use error::{AppError, AppResult, ErrorDto};
 use categories::{
     categories_create, categories_delete, categories_get, categories_list, categories_restore,
     categories_update,
 };
+pub use error::{AppError, AppResult, ErrorDto};
 use events_tz_backfill::{
     events_backfill_timezone, events_backfill_timezone_cancel, events_backfill_timezone_status,
 };
-use notes::{notes_create, notes_delete, notes_get, notes_list, notes_restore, notes_update};
+use notes::{
+    notes_create, notes_delete, notes_get, notes_list_cursor, notes_restore, notes_update,
+};
 use security::{error_map::UiError, fs_policy, fs_policy::RootKey, hash_path};
 use util::{dispatch_app_result, dispatch_async_app_result};
 
@@ -1390,7 +1392,12 @@ async fn db_get_health_report(state: State<'_, AppState>) -> AppResult<DbHealthR
     let report = state
         .db_health
         .lock()
-        .map_err(|_| AppError::new("STATE/LOCK_POISONED", "Failed to access database health cache"))?
+        .map_err(|_| {
+            AppError::new(
+                "STATE/LOCK_POISONED",
+                "Failed to access database health cache",
+            )
+        })?
         .clone();
     Ok(report)
 }
@@ -1410,9 +1417,12 @@ async fn db_recheck(state: State<'_, AppState>) -> AppResult<DbHealthReport> {
                 .await
                 .map_err(|err| AppError::from(err).with_context("operation", "db_recheck"))?;
             log_db_health(&report);
-            let mut guard = cache
-                .lock()
-                .map_err(|_| AppError::new("STATE/LOCK_POISONED", "Failed to update database health cache"))?;
+            let mut guard = cache.lock().map_err(|_| {
+                AppError::new(
+                    "STATE/LOCK_POISONED",
+                    "Failed to update database health cache",
+                )
+            })?;
             *guard = report.clone();
             Ok(report)
         }
@@ -2211,9 +2221,7 @@ async fn db_hard_repair_run(state: State<'_, AppState>) -> AppResult<HardRepairO
                     AppError::from(err).with_context("operation", "reopen_pool_after_hard_repair")
                 })?;
             {
-                let mut guard = pool_handle
-                    .write()
-                    .unwrap_or_else(|e| e.into_inner());
+                let mut guard = pool_handle.write().unwrap_or_else(|e| e.into_inner());
                 *guard = new_pool.clone();
             }
             let health = crate::db::health::run_health_checks(&new_pool, &db_path)
@@ -2222,9 +2230,12 @@ async fn db_hard_repair_run(state: State<'_, AppState>) -> AppResult<HardRepairO
                     AppError::from(err).with_context("operation", "hard_repair_post_health")
                 })?;
             {
-                let mut guard = cache
-                    .lock()
-                    .map_err(|_| AppError::new("STATE/LOCK_POISONED", "Failed to update database health cache"))?;
+                let mut guard = cache.lock().map_err(|_| {
+                    AppError::new(
+                        "STATE/LOCK_POISONED",
+                        "Failed to update database health cache",
+                    )
+                })?;
                 *guard = health;
             }
             pool_closed.store(false, Ordering::SeqCst);
@@ -2371,7 +2382,7 @@ macro_rules! app_commands {
             expenses_update,
             expenses_delete,
             expenses_restore,
-            notes_list,
+            notes_list_cursor,
             notes_get,
             notes_create,
             notes_update,

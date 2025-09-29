@@ -19,11 +19,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn pool_clone(&self) -> SqlitePool {
-        self
-            .pool
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
+        self.pool.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub fn replace_pool(&self, new_pool: SqlitePool) {

@@ -374,7 +374,11 @@ async fn import_table_rows(
                     physical_table,
                     &value,
                     tx_ref,
-                    if let Some(ins) = inserter.as_ref() { ins } else { unreachable!("inserter initialized on first row") },
+                    if let Some(ins) = inserter.as_ref() {
+                        ins
+                    } else {
+                        unreachable!("inserter initialized on first row")
+                    },
                     &mut summary,
                 )
                 .await?;
