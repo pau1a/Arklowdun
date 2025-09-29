@@ -41,6 +41,60 @@ const baseCategory = (overrides: Partial<Category> = {}): Category => ({
   deleted_at: overrides.deleted_at ?? null,
 });
 
+const createSettingsOptions = () => ({
+  householdId: "default",
+  diagnostics: {
+    fetchAboutMetadata: async () => ({
+      appVersion: "1.0.0",
+      commitHash: "deadbeefdeadbeef",
+    }),
+    fetchDiagnosticsSummary: async () => ({
+      platform: "test",
+      arch: "x64",
+      appVersion: "1.0.0",
+      commitHash: "deadbeefdeadbeef",
+      rustLog: undefined,
+      rustLogSource: undefined,
+      logPath: "",
+      logAvailable: false,
+      logTail: [],
+      logTruncated: false,
+      logLinesReturned: 0,
+    }),
+    openDiagnosticsDoc: async () => {},
+  },
+  components: {
+    createTimezoneMaintenanceSection: () => ({
+      element: document.createElement("section"),
+      destroy: () => {},
+    }),
+    createBackupView: () => ({
+      element: document.createElement("section"),
+      refresh: async () => {},
+      destroy: () => {},
+    }),
+    createRepairView: () => ({
+      element: document.createElement("section"),
+      destroy: () => {},
+    }),
+    createExportView: () => ({
+      element: document.createElement("section"),
+      destroy: () => {},
+    }),
+    createImportView: () => ({
+      element: document.createElement("section"),
+      destroy: () => {},
+    }),
+    createHardRepairView: () => ({
+      element: document.createElement("section"),
+      destroy: () => {},
+    }),
+    createAmbientBackgroundSection: () => document.createElement("section"),
+    createAttributionSectionAsync: async () => null,
+  },
+  useSettingsHook: async () => ({ data: null, error: null, isLoading: false }),
+});
+
 test("ManageView renders categories from the loader", async () => {
   const container = document.createElement("div");
   const categories = [
@@ -85,6 +139,61 @@ test("ManageView hides categories that are not visible", async () => {
   ).map((link) => ({ id: link.id, href: link.getAttribute("href"), text: link.textContent }));
 
   assert.deepEqual(links, [{ id: "nav-secondary", href: "#secondary", text: "Secondary" }]);
+});
+
+test("ManageView reveals hidden categories when requested", async () => {
+  const container = document.createElement("div");
+  const categories = [
+    baseCategory({ id: "cat_visible", name: "Active", slug: "active", position: 0 }),
+    baseCategory({ id: "cat_hidden", name: "Archived", slug: "archived", position: 1, is_visible: false }),
+  ];
+
+  const toastModule = await import("../src/ui/Toast.ts");
+  const toastMock = mock.method(toastModule.toast, "show", () => {});
+
+  try {
+    const { ManageView } = await import("../src/ManageView.ts");
+    await ManageView(container, {
+      householdId: "default",
+      loadCategories: async () => categories,
+    });
+    await flush();
+
+    const toggle = container.querySelector<HTMLButtonElement>(".manage__hidden-toggle");
+    assert.ok(toggle, "toggle control renders");
+    assert.equal(toggle?.textContent, "Show hidden categories");
+    assert.equal(toggle?.getAttribute("aria-expanded"), "false");
+
+    assert.equal(
+      container.querySelectorAll<HTMLButtonElement>(".manage__tile--hidden").length,
+      0,
+      "hidden tiles are not shown by default",
+    );
+
+    toggle?.click();
+
+    const hiddenTiles = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(".manage__tile--hidden"),
+    );
+    assert.equal(hiddenTiles.length, 1, "hidden tile is displayed after toggle");
+    assert.equal(hiddenTiles[0]?.textContent, "Archived");
+    assert.equal(toggle?.textContent, "Hide hidden categories");
+    assert.equal(toggle?.getAttribute("aria-expanded"), "true");
+
+    hiddenTiles[0]?.click();
+    assert.equal(toastMock.mock.calls.length, 1, "clicking hidden tile surfaces guidance");
+
+    toggle?.click();
+    assert.equal(toggle?.textContent, "Show hidden categories");
+    assert.equal(toggle?.getAttribute("aria-expanded"), "false");
+    assert.equal(
+      container.querySelectorAll<HTMLButtonElement>(".manage__tile--hidden").length,
+      0,
+      "hidden tiles collapse when toggled again",
+    );
+  } finally {
+    toastMock.mock.restore();
+  }
 });
 
 test("ManageView shows a fallback when no categories exist", async () => {
@@ -175,64 +284,16 @@ test("Settings toggles update ManageView visibility", async () => {
     await ManageView(manageContainer, { householdId: "default" });
     await flush();
 
+    assert.equal(listMock.mock.calls.length, 1);
+    const [listArgs] = listMock.mock.calls[0].arguments;
+    assert.equal(listArgs.includeHidden, true, "ManageView requests hidden categories");
+
     let navLinks = Array.from(
       manageContainer.querySelectorAll<HTMLAnchorElement>("nav.manage a"),
     ).map((link) => link.textContent);
     assert.deepEqual(navLinks, ["Primary", "Tasks"]);
 
-    SettingsView(settingsContainer, {
-      householdId: "default",
-      diagnostics: {
-        fetchAboutMetadata: async () => ({
-          appVersion: "1.0.0",
-          commitHash: "deadbeefdeadbeef",
-        }),
-        fetchDiagnosticsSummary: async () => ({
-          platform: "test",
-          arch: "x64",
-          appVersion: "1.0.0",
-          commitHash: "deadbeefdeadbeef",
-          rustLog: undefined,
-          rustLogSource: undefined,
-          logPath: "",
-          logAvailable: false,
-          logTail: [],
-          logTruncated: false,
-          logLinesReturned: 0,
-        }),
-        openDiagnosticsDoc: async () => {},
-      },
-      components: {
-        createTimezoneMaintenanceSection: () => ({
-          element: document.createElement("section"),
-          destroy: () => {},
-        }),
-        createBackupView: () => ({
-          element: document.createElement("section"),
-          refresh: async () => {},
-          destroy: () => {},
-        }),
-        createRepairView: () => ({
-          element: document.createElement("section"),
-          destroy: () => {},
-        }),
-        createExportView: () => ({
-          element: document.createElement("section"),
-          destroy: () => {},
-        }),
-        createImportView: () => ({
-          element: document.createElement("section"),
-          destroy: () => {},
-        }),
-        createHardRepairView: () => ({
-          element: document.createElement("section"),
-          destroy: () => {},
-        }),
-        createAmbientBackgroundSection: () => document.createElement("section"),
-        createAttributionSectionAsync: async () => null,
-      },
-      useSettingsHook: async () => ({ data: null, error: null, isLoading: false }),
-    });
+    SettingsView(settingsContainer, createSettingsOptions());
     await flush();
     await flush();
 
@@ -253,6 +314,12 @@ test("Settings toggles update ManageView visibility", async () => {
     ).map((link) => link.textContent);
     assert.deepEqual(navLinks, ["Tasks"], "ManageView reflects toggle state");
 
+    const hiddenGroup = settingsContainer.querySelector<HTMLDivElement>(
+      ".settings__categories-group--hidden",
+    );
+    assert.ok(hiddenGroup, "hidden group renders");
+    assert.equal(hiddenGroup?.hidden, false, "hidden group remains accessible");
+
     assert.equal(updateMock.mock.calls.length, 1);
     const [householdId, categoryId, update] = updateMock.mock.calls[0].arguments;
     assert.equal(householdId, "default");
@@ -261,5 +328,42 @@ test("Settings toggles update ManageView visibility", async () => {
   } finally {
     listMock.mock.restore();
     updateMock.mock.restore();
+  }
+});
+
+test("SettingsView surfaces hidden-only state", async () => {
+  const settingsContainer = document.createElement("div");
+  const categories = [
+    baseCategory({ is_visible: false }),
+    baseCategory({ id: "cat_tasks", name: "Tasks", slug: "tasks", position: 1, is_visible: false }),
+  ];
+
+  const categoriesModule = await import("../src/repos.ts");
+  const listMock = mock.method(categoriesModule.categoriesRepo, "list", async () => categories);
+
+  try {
+    const { SettingsView } = await import("../src/SettingsView.ts");
+    SettingsView(settingsContainer, createSettingsOptions());
+    await flush();
+    await flush();
+
+    assert.equal(listMock.mock.calls.length, 1);
+    const [opts] = listMock.mock.calls[0].arguments;
+    assert.equal(opts.includeHidden, true, "SettingsView requests hidden categories");
+
+    const message = settingsContainer.querySelector(".settings__categories-message");
+    assert.equal(
+      message?.textContent,
+      "All categories hidden — re-enable below.",
+      "hidden-only message is shown",
+    );
+
+    const hiddenGroup = settingsContainer.querySelector<HTMLDivElement>(
+      ".settings__categories-group--hidden",
+    );
+    assert.ok(hiddenGroup, "hidden categories group exists");
+    assert.equal(hiddenGroup?.hidden, false, "hidden categories remain listed");
+  } finally {
+    listMock.mock.restore();
   }
 });

@@ -122,6 +122,31 @@ export function SettingsView(
 
     const list = document.createElement("div");
     list.className = "settings__categories";
+
+    const visibleGroup = document.createElement("div");
+    visibleGroup.className = "settings__categories-group settings__categories-group--visible";
+    const visibleHeading = document.createElement("h4");
+    visibleHeading.className = "settings__categories-heading";
+    visibleHeading.textContent = "Visible categories";
+    const visibleList = document.createElement("div");
+    visibleList.className = "settings__categories-list";
+    visibleGroup.append(visibleHeading, visibleList);
+
+    const hiddenGroup = document.createElement("div");
+    hiddenGroup.className = "settings__categories-group settings__categories-group--hidden";
+    const hiddenHeading = document.createElement("h4");
+    hiddenHeading.className = "settings__categories-heading";
+    hiddenHeading.textContent = "Hidden categories";
+    const hiddenList = document.createElement("div");
+    hiddenList.className = "settings__categories-list";
+    hiddenGroup.append(hiddenHeading, hiddenList);
+
+    const emptyMessage = document.createElement("p");
+    emptyMessage.className = "settings__empty";
+    emptyMessage.textContent = "No categories available.";
+    emptyMessage.hidden = true;
+
+    list.append(visibleGroup, hiddenGroup, emptyMessage);
     body.appendChild(list);
 
     panel.append(heading, body);
@@ -141,67 +166,98 @@ export function SettingsView(
       };
     })();
 
-    const loadCategories =
-      options.loadCategories ??
-      ((householdId: string) =>
-        categoriesRepo.list({
-          householdId,
-          orderBy: "position, created_at, id",
-        }));
+    const renderToggle = (category: StoreCategory): HTMLLabelElement => {
+      const item = document.createElement("label");
+      item.className = "settings__category-toggle";
+      if (!category.isVisible) {
+        item.classList.add("settings__category-toggle--hidden");
+      }
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = category.isVisible;
+      checkbox.setAttribute("aria-label", `Toggle ${category.name}`);
+
+      checkbox.addEventListener("change", () => {
+        const nextChecked = checkbox.checked;
+        checkbox.disabled = true;
+        void (async () => {
+          try {
+            const householdId = await ensureHouseholdId();
+            await toggleCategory(householdId, category.id);
+          } catch (err) {
+            checkbox.checked = !nextChecked;
+            showError(err);
+          } finally {
+            checkbox.disabled = false;
+          }
+        })();
+      });
+
+      const swatch = document.createElement("span");
+      swatch.className = "settings__category-swatch";
+      swatch.style.backgroundColor = category.color;
+      swatch.setAttribute("aria-hidden", "true");
+
+      const name = document.createElement("span");
+      name.className = "settings__category-name";
+      name.textContent = category.name;
+
+      item.append(checkbox, swatch, name);
+      return item;
+    };
 
     const render = (categories: StoreCategory[]) => {
-      list.innerHTML = "";
+      visibleList.innerHTML = "";
+      hiddenList.innerHTML = "";
+
       if (categories.length === 0) {
-        const empty = document.createElement("p");
-        empty.className = "settings__empty";
-        empty.textContent = "No categories available.";
-        list.appendChild(empty);
+        visibleGroup.hidden = true;
+        hiddenGroup.hidden = true;
+        emptyMessage.hidden = false;
         return;
       }
+
+      emptyMessage.hidden = true;
+      visibleGroup.hidden = false;
 
       const sorted = [...categories].sort((a, b) => {
         if (a.position === b.position) return a.name.localeCompare(b.name);
         return a.position - b.position;
       });
 
-      sorted.forEach((category) => {
-        const item = document.createElement("label");
-        item.className = "settings__category-toggle";
+      const visible = sorted.filter((category) => category.isVisible);
+      const hidden = sorted.filter((category) => !category.isVisible);
 
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.checked = category.isVisible;
-        checkbox.setAttribute("aria-label", `Toggle ${category.name}`);
-
-        checkbox.addEventListener("change", () => {
-          const nextChecked = checkbox.checked;
-          checkbox.disabled = true;
-          void (async () => {
-            try {
-              const householdId = await ensureHouseholdId();
-              await toggleCategory(householdId, category.id);
-            } catch (err) {
-              checkbox.checked = !nextChecked;
-              showError(err);
-            } finally {
-              checkbox.disabled = false;
-            }
-          })();
+      if (visible.length === 0 && hidden.length > 0) {
+        const message = document.createElement("p");
+        message.className = "settings__categories-message";
+        message.textContent = "All categories hidden — re-enable below.";
+        visibleList.appendChild(message);
+      } else {
+        visible.forEach((category) => {
+          visibleList.appendChild(renderToggle(category));
         });
+      }
 
-        const swatch = document.createElement("span");
-        swatch.className = "settings__category-swatch";
-        swatch.style.backgroundColor = category.color;
-        swatch.setAttribute("aria-hidden", "true");
-
-        const name = document.createElement("span");
-        name.className = "settings__category-name";
-        name.textContent = category.name;
-
-        item.append(checkbox, swatch, name);
-        list.appendChild(item);
-      });
+      if (hidden.length > 0) {
+        hiddenGroup.hidden = false;
+        hidden.forEach((category) => {
+          hiddenList.appendChild(renderToggle(category));
+        });
+      } else {
+        hiddenGroup.hidden = true;
+      }
     };
+
+    const loadCategories =
+      options.loadCategories ??
+      ((householdId: string) =>
+        categoriesRepo.list({
+          householdId,
+          orderBy: "position, created_at, id",
+          includeHidden: true,
+        }));
 
     const unsubscribe = subscribeToCategories(render);
     registerViewCleanup(container, unsubscribe);
