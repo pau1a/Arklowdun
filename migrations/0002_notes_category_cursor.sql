@@ -1,8 +1,6 @@
 -- PR-03 Notes Refactor backfill and indexes
 -- Ensure every existing note has a category_id and add supporting indexes
 
-BEGIN TRANSACTION;
-
 -- Backfill missing or invalid category references to the household "primary" category.
 WITH primary_categories AS (
     SELECT household_id, id
@@ -42,4 +40,3 @@ CREATE INDEX IF NOT EXISTS notes_created_cursor_idx
 CREATE INDEX IF NOT EXISTS notes_scope_z_idx
     ON notes(household_id, deleted_at, z, position);
 
-COMMIT;
