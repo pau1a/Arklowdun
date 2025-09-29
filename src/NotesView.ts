@@ -1,6 +1,4 @@
 // src/NotesView.ts
-import { openDb } from "./db/open";
-import { newUuidV7 } from "./db/id";
 import { defaultHouseholdId } from "./db/household";
 import { showError } from "./ui/errors";
 import { NotesList, useNotes, type Note } from "@features/notes";
@@ -13,10 +11,23 @@ import {
 } from "./store/index";
 import { emit, on } from "./store/events";
 import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
-import { getActiveCategoryIds, subscribeActiveCategoryIds } from "./store/categories";
+import {
+  getActiveCategoryIds,
+  getCategories,
+  subscribeActiveCategoryIds,
+  type StoreCategory,
+} from "./store/categories";
 import createButton from "@ui/Button";
 import createInput from "@ui/Input";
+import createSelect from "@ui/Select";
 import createTimezoneBadge from "@ui/TimezoneBadge";
+import { createModal } from "@ui/Modal";
+import toast from "@ui/Toast";
+import {
+  notesRepo,
+  type NotesCreateInput,
+  type NotesUpdateInput,
+} from "./repos/notesRepo";
 
 const NOTE_PALETTE: Record<string, { base: string; text: string }> = {
   "#FFFF88": { base: "#FFF4B8", text: "#2b2b2b" },
@@ -28,111 +39,77 @@ const NOTE_PALETTE: Record<string, { base: string; text: string }> = {
   "#F6EBDC": { base: "#F6EBDC", text: "#1f2937" },
 };
 
+const PAGE_SIZE = 20;
+const DEFAULT_NOTE_COLOR = "#FFF4B8";
+
 type NewNoteDraft = {
   text: string;
   color: string;
   x: number;
   y: number;
   category_id?: string | null;
+  position?: number;
+  z?: number;
+  deadline?: number | null;
+  deadline_tz?: string | null;
 };
 
 export interface NotesViewOptions {
   householdId?: string;
   loadNotes?: typeof useNotes;
+  createNote?: (
+    householdId: string,
+    input: NotesCreateInput,
+  ) => Promise<Note>;
+  updateNote?: (
+    householdId: string,
+    id: string,
+    patch: NotesUpdateInput,
+  ) => Promise<Note>;
+  deleteNote?: (householdId: string, id: string) => Promise<void>;
+  restoreNote?: (householdId: string, id: string) => Promise<Note>;
 }
 
 async function insertNote(
   householdId: string,
   draft: NewNoteDraft,
+  create: (
+    householdId: string,
+    input: NotesCreateInput,
+  ) => Promise<Note>,
 ): Promise<Note> {
-  const db = await openDb();
-
-  // Compute next free position and z in SQL to avoid unique collisions
-  const nextPosRow = await db.select<{ next_pos: number }[]>(
-    `SELECT COALESCE(MAX(position), -1) + 1 AS next_pos
-       FROM notes
-      WHERE household_id = ? AND deleted_at IS NULL`,
-    [householdId]
-  );
-  const nextPos = nextPosRow[0]?.next_pos ?? 0;
-
-  const nextZRow = await db.select<{ maxz: number }[]>(
-    `SELECT COALESCE(MAX(z), 0) AS maxz
-       FROM notes
-      WHERE household_id = ? AND deleted_at IS NULL`,
-    [householdId]
-  );
-  const z = (nextZRow[0]?.maxz ?? 0) + 1;
-
-  const id = newUuidV7();
-  const now = Date.now();
-
-  await db.execute(
-    `INSERT INTO notes
-       (id, household_id, category_id, position, created_at, updated_at, deleted_at,
-        z, text, color, x, y)
-     VALUES
-       (?,  ?,            ?,          ?,        ?,          ?,          ?,
-        ?, ?,    ?,     ?, ?)`,
-    [
-      id,
-      householdId,
-      draft.category_id ?? null,
-      nextPos,
-      now,
-      now,
-      null,
-      z,
-      draft.text,
-      draft.color,
-      draft.x,
-      draft.y,
-    ]
-  );
-
-  return {
-    id,
+  const created = await create(householdId, {
     text: draft.text,
     color: draft.color,
     x: draft.x,
     y: draft.y,
-    z,
-    position: nextPos,
-    household_id: householdId,
     category_id: draft.category_id ?? null,
-    created_at: now,
-    updated_at: now,
-    deleted_at: null,
-  };
+    position: draft.position,
+    z: draft.z,
+    deadline: draft.deadline ?? null,
+    deadline_tz: draft.deadline_tz ?? null,
+  });
+  if (created.z === undefined || created.z === null) {
+    created.z = 0;
+  }
+  return created;
 }
 
 async function updateNote(
   householdId: string,
   id: string,
-  patch: Partial<Note>
-): Promise<void> {
-  const db = await openDb();
-  const now = Date.now();
-
-  const sets: string[] = [];
-  const args: any[] = [];
-
-  if (patch.text !== undefined) { sets.push("text = ?"); args.push(patch.text); }
-  if (patch.color !== undefined) { sets.push("color = ?"); args.push(patch.color); }
-  if (patch.x !== undefined) { sets.push("x = ?"); args.push(patch.x); }
-  if (patch.y !== undefined) { sets.push("y = ?"); args.push(patch.y); }
-  if (patch.z !== undefined) { sets.push("z = ?"); args.push(patch.z); }
-  if (patch.deleted_at !== undefined) { sets.push("deleted_at = ?"); args.push(patch.deleted_at); }
-
-  sets.push("updated_at = ?");
-  args.push(now);
-
-  args.push(householdId, id);
-
-  await db.execute(
-    `UPDATE notes SET ${sets.join(", ")} WHERE household_id = ? AND id = ?`,
-    args
-  );
+  patch: NotesUpdateInput,
+  update: (
+    householdId: string,
+    id: string,
+    patch: NotesUpdateInput,
+  ) => Promise<Note>,
+): Promise<Note> {
+  const updated = await update(householdId, id, patch);
+  if (updated.z === undefined || updated.z === null) {
+    updated.z = 0;
+  }
+  return updated;
 }
 
 export async function NotesView(
@@ -166,7 +143,7 @@ export async function NotesView(
   const colorInput = createInput({
     id: "note-color",
     type: "color",
-    value: "#FFF4B8",
+    value: DEFAULT_NOTE_COLOR,
     ariaLabel: "Note color",
   });
 
@@ -181,6 +158,16 @@ export async function NotesView(
   const notesBoard = NotesList();
   const canvas = notesBoard.element;
 
+  const pagination = document.createElement("div");
+  pagination.className = "notes__pagination";
+  const loadMoreButton = createButton({
+    label: "Load more",
+    variant: "secondary",
+    type: "button",
+  });
+  pagination.appendChild(loadMoreButton);
+  pagination.hidden = true;
+
   const deadlinesPanel = document.createElement("section");
   deadlinesPanel.className = "notes__deadline-panel";
   deadlinesPanel.setAttribute("aria-labelledby", "notes-deadlines-heading");
@@ -194,26 +181,165 @@ export async function NotesView(
   deadlinesList.className = "notes__deadline-list";
   deadlinesPanel.append(deadlinesHeading, deadlinesList);
 
-  section.append(form, canvas);
+  section.append(form, canvas, pagination);
   section.append(deadlinesPanel);
   container.innerHTML = "";
   container.appendChild(section);
 
+  const quickTextInput = createInput({
+    id: "quick-capture-text",
+    type: "text",
+    ariaLabel: "Quick capture note text",
+    required: true,
+    placeholder: "Add a note",
+  });
+
+  const quickCategorySelect = createSelect({
+    id: "quick-capture-category",
+    ariaLabel: "Note category",
+  });
+
+  const quickDeadlineInput = createInput({
+    id: "quick-capture-deadline",
+    type: "datetime-local",
+    ariaLabel: "Note deadline",
+  });
+
+  const quickCaptureModal = createModal({
+    open: false,
+    onOpenChange: (open) => {
+      if (!open) {
+        quickCaptureModal.setOpen(false);
+      }
+    },
+    titleId: "quick-capture-title",
+    initialFocus: () => quickTextInput,
+  });
+  const quickDialog = quickCaptureModal.dialog;
+  quickDialog.classList.add("notes__quick-capture-dialog");
+  const quickTitle = document.createElement("h2");
+  quickTitle.id = "quick-capture-title";
+  quickTitle.textContent = "Quick capture note";
+
+  const quickForm = document.createElement("form");
+  quickForm.className = "notes__quick-capture-form";
+
+  const quickTextLabel = document.createElement("label");
+  quickTextLabel.htmlFor = "quick-capture-text";
+  quickTextLabel.textContent = "Note";
+
+  const quickCategoryLabel = document.createElement("label");
+  quickCategoryLabel.htmlFor = "quick-capture-category";
+  quickCategoryLabel.textContent = "Category";
+
+  const quickDeadlineLabel = document.createElement("label");
+  quickDeadlineLabel.htmlFor = "quick-capture-deadline";
+  quickDeadlineLabel.textContent = "Deadline";
+
+  const quickSubmit = createButton({
+    label: "Capture",
+    variant: "primary",
+    type: "submit",
+  });
+
+  quickForm.append(
+    quickTextLabel,
+    quickTextInput,
+    quickCategoryLabel,
+    quickCategorySelect,
+    quickDeadlineLabel,
+    quickDeadlineInput,
+    quickSubmit,
+  );
+
+  quickDialog.append(quickTitle, quickForm);
+
+  registerViewCleanup(container, () => {
+    if (quickCaptureModal.isOpen()) quickCaptureModal.setOpen(false);
+    if (quickCaptureModal.root.parentElement) {
+      quickCaptureModal.root.remove();
+    }
+  });
+
   const useNotesFn = options.loadNotes ?? useNotes;
+  const createNoteFn = options.createNote ?? notesRepo.create;
+  const updateNoteFn = options.updateNote ?? notesRepo.update;
+  const deleteNoteFn = options.deleteNote ?? notesRepo.delete;
+  const restoreNoteFn = options.restoreNote ?? notesRepo.restore;
 
   let householdId =
     options.householdId ??
     (await defaultHouseholdId().catch(() => "default"));
   let activeCategoryIds = getActiveCategoryIds();
   let lastCategorySignature = activeCategoryIds.join("|");
+  let categoriesLoaded = getCategories().length > 0;
+  let nextCursor: string | null = null;
+  let isLoading = false;
 
   const cloneNotes = (items: Note[]): Note[] => items.map((note) => ({ ...note }));
+  const mergeNotes = (current: Note[], incoming: Note[]): Note[] => {
+    const map = new Map<string, Note>();
+    current.forEach((note) => map.set(note.id, { ...note }));
+    incoming.forEach((note) => map.set(note.id, { ...note }));
+    return Array.from(map.values());
+  };
   let notesLocal: Note[] = cloneNotes(selectors.notes.items(getState()));
   const appTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
 
+  const filterVisibleNotes = (notes: Note[]): Note[] => {
+    const base = notes.filter((note) => !note.deleted_at);
+    if (!categoriesLoaded) {
+      return base;
+    }
+    if (activeCategoryIds.length === 0) {
+      return [];
+    }
+    const allowed = new Set(activeCategoryIds);
+    return base.filter((note) => note.category_id && allowed.has(note.category_id));
+  };
+
+  const computeNextPosition = (): number => {
+    if (notesLocal.length === 0) return 0;
+    return (
+      Math.max(
+        0,
+        ...notesLocal
+          .filter((note) => !note.deleted_at)
+          .map((note) => Number(note.position) || 0),
+      ) + 1
+    );
+  };
+
+  const computeNextZ = (): number => {
+    return (
+      Math.max(0, ...notesLocal.filter((n) => !n.deleted_at).map((n) => n.z ?? 0)) + 1
+    );
+  };
+
+  const updateLoadMoreState = () => {
+    const hasMore = Boolean(nextCursor);
+    pagination.hidden = !hasMore;
+    loadMoreButton.disabled = !hasMore || isLoading;
+  };
+
+  const refreshQuickCaptureCategories = () => {
+    const categories = getCategories();
+    categoriesLoaded = categories.length > 0;
+    const options = categories.map((category: StoreCategory) => ({
+      value: category.id,
+      label: category.isVisible ? category.name : `${category.name} (hidden)`,
+    }));
+    if (options.length === 0) {
+      options.push({ value: "", label: "Primary" });
+    }
+    quickCategorySelect.update({ options });
+    const preferred = activeCategoryIds[0] ?? options[0]?.value ?? "";
+    quickCategorySelect.value = preferred ?? "";
+  };
+
   const renderDeadlines = (notes: Note[]): void => {
-    const upcoming = notes
-      .filter((note) => note.deadline !== undefined && note.deadline !== null && !note.deleted_at)
+    const upcoming = filterVisibleNotes(notes)
+      .filter((note) => note.deadline !== undefined && note.deadline !== null)
       .sort((a, b) => (a.deadline ?? 0) - (b.deadline ?? 0));
 
     deadlinesList.innerHTML = "";
@@ -290,23 +416,78 @@ export async function NotesView(
   };
 
   async function reload(source: string): Promise<void> {
+    if (categoriesLoaded && activeCategoryIds.length === 0) {
+      notesLocal = [];
+      nextCursor = null;
+      commitSnapshot(source, true, true);
+      render();
+      updateLoadMoreState();
+      return;
+    }
+
     try {
-      const categoryIds = activeCategoryIds.length > 0 ? [...activeCategoryIds] : undefined;
-      const result = await useNotesFn({ householdId, categoryIds });
+      isLoading = true;
+      updateLoadMoreState();
+      const categoryIds = categoriesLoaded && activeCategoryIds.length > 0
+        ? [...activeCategoryIds]
+        : undefined;
+      const result = await useNotesFn({
+        householdId,
+        categoryIds,
+        limit: PAGE_SIZE,
+      });
       if (result.error) throw result.error;
-      const loaded = result.data ?? [];
-      notesLocal = cloneNotes(loaded);
+      const page = result.data;
+      notesLocal = cloneNotes(page?.notes ?? []);
+      nextCursor = page?.next_cursor ?? null;
       commitSnapshot(source, true, true);
       render();
     } catch (err) {
       showError(err);
+    } finally {
+      isLoading = false;
+      updateLoadMoreState();
     }
   }
 
+  async function loadMore(): Promise<void> {
+    if (!nextCursor) return;
+    try {
+      isLoading = true;
+      updateLoadMoreState();
+      const categoryIds = categoriesLoaded && activeCategoryIds.length > 0
+        ? [...activeCategoryIds]
+        : undefined;
+      const result = await useNotesFn({
+        householdId,
+        categoryIds,
+        afterCursor: nextCursor,
+        limit: PAGE_SIZE,
+      });
+      if (result.error) throw result.error;
+      const page = result.data;
+      const incoming = page?.notes ?? [];
+      notesLocal = mergeNotes(notesLocal, incoming);
+      nextCursor = page?.next_cursor ?? null;
+      commitSnapshot("notes:load-more", true, true);
+      render();
+    } catch (err) {
+      showError(err);
+    } finally {
+      isLoading = false;
+      updateLoadMoreState();
+    }
+  }
+
+  loadMoreButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    void loadMore();
+  });
+
   function render() {
     notesBoard.clear();
-    notesLocal
-      .filter((n) => !n.deleted_at)
+    const visible = filterVisibleNotes(notesLocal);
+    visible
       .sort((a, b) =>
         (b.z ?? 0) - (a.z ?? 0) ||
         a.position - b.position ||
@@ -331,12 +512,42 @@ export async function NotesView(
           commitSnapshot("notes:text-change", false, true);
           saveSoon(async () => {
             try {
-              await updateNote(householdId, note.id, { text: note.text });
+              const saved = await updateNote(
+                householdId,
+                note.id,
+                { text: note.text },
+                updateNoteFn,
+              );
+              Object.assign(note, saved);
               commitSnapshot("notes:text-change", true, true);
             } catch {}
           });
         });
         el.appendChild(textarea);
+
+        if (note.deadline !== undefined && note.deadline !== null) {
+          const deadlineWrapper = document.createElement("div");
+          deadlineWrapper.className = "note__deadline-inline";
+          const dueMs = Number(note.deadline);
+          if (Number.isFinite(dueMs)) {
+            const zone = note.deadline_tz ?? appTimezone ?? "UTC";
+            const formatted = new Intl.DateTimeFormat(undefined, {
+              dateStyle: "medium",
+              timeStyle: "short",
+              timeZone: zone,
+            }).format(new Date(dueMs));
+            const label = document.createElement("span");
+            label.textContent = `Due ${formatted}`;
+            deadlineWrapper.appendChild(label);
+            const badge = createTimezoneBadge({
+              eventTimezone: note.deadline_tz,
+              appTimezone,
+              tooltipId: `note-inline-deadline-${note.id}`,
+            });
+            if (!badge.hidden) deadlineWrapper.appendChild(badge);
+            el.appendChild(deadlineWrapper);
+          }
+        }
 
         const deleteButton = createButton({
           type: "button",
@@ -349,7 +560,7 @@ export async function NotesView(
             event.preventDefault();
             note.deleted_at = Date.now();
             try {
-              await updateNote(householdId, note.id, { deleted_at: note.deleted_at });
+              await deleteNoteFn(householdId, note.id);
               notesLocal = notesLocal.filter((n) => n.id !== note.id);
               commitSnapshot("notes:delete", true, true);
               render();
@@ -373,7 +584,13 @@ export async function NotesView(
             note.z = maxZ + 1;
             commitSnapshot("notes:bring", false, true);
             try {
-              await updateNote(householdId, note.id, { z: note.z });
+              const saved = await updateNote(
+                householdId,
+                note.id,
+                { z: note.z },
+                updateNoteFn,
+              );
+              Object.assign(note, saved);
               commitSnapshot("notes:bring", true, true);
               render();
             } catch (err: any) {
@@ -396,7 +613,13 @@ export async function NotesView(
           commitSnapshot("notes:drag", false, true);
           saveSoon(async () => {
             try {
-              await updateNote(householdId, note.id, { z: note.z });
+              const saved = await updateNote(
+                householdId,
+                note.id,
+                { z: note.z },
+                updateNoteFn,
+              );
+              Object.assign(note, saved);
               commitSnapshot("notes:drag", true, true);
             } catch {}
           });
@@ -415,7 +638,13 @@ export async function NotesView(
             el.removeEventListener("pointerup", onUp);
             el.classList.remove("dragging");
             try {
-              await updateNote(householdId, note.id, { x: note.x, y: note.y });
+              const saved = await updateNote(
+                householdId,
+                note.id,
+                { x: note.x, y: note.y },
+                updateNoteFn,
+              );
+              Object.assign(note, saved);
               commitSnapshot("notes:drag", true, true);
             } catch {}
           }
@@ -423,7 +652,7 @@ export async function NotesView(
           el.addEventListener("pointerup", onUp);
         });
 
-    canvas.appendChild(el);
+        canvas.appendChild(el);
       });
 
     renderDeadlines(notesLocal);
@@ -442,6 +671,7 @@ export async function NotesView(
 
   const stopHousehold = on("household:changed", async ({ householdId: next }) => {
     householdId = next;
+    refreshQuickCaptureCategories();
     await reload("notes:household");
   });
   registerViewCleanup(container, stopHousehold);
@@ -451,6 +681,7 @@ export async function NotesView(
     if (signature === lastCategorySignature) return;
     activeCategoryIds = [...ids];
     lastCategorySignature = signature;
+    refreshQuickCaptureCategories();
     void reload("notes:categories");
   });
   registerViewCleanup(container, stopCategorySubscription);
@@ -470,20 +701,99 @@ export async function NotesView(
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     try {
-      const created = await insertNote(householdId, {
-        text: textInput.value,
-        color: colorInput.value,
-        x: 10,
-        y: 10,
-        category_id: activeCategoryIds[0] ?? null,
-      });
-      notesLocal.push(created);
+      const created = await insertNote(
+        householdId,
+        {
+          text: textInput.value,
+          color: colorInput.value,
+          x: 10,
+          y: 10,
+          category_id: activeCategoryIds[0] ?? null,
+          position: computeNextPosition(),
+          z: computeNextZ(),
+        },
+        createNoteFn,
+      );
+      notesLocal = mergeNotes(notesLocal, [created]);
       commitSnapshot("notes:create", true, true);
       render();
       form.reset();
-      colorInput.value = "#FFF4B8";
+      colorInput.value = DEFAULT_NOTE_COLOR;
     } catch (err: any) {
       showError(err);
     }
   });
+
+  quickForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const text = quickTextInput.value.trim();
+    if (!text) {
+      quickTextInput.focus();
+      return;
+    }
+    const categoryId = quickCategorySelect.value?.trim() || null;
+    const position = computeNextPosition();
+    const z = computeNextZ();
+    let deadline: number | null = null;
+    let deadlineTz: string | null = null;
+    const deadlineValue = quickDeadlineInput.value;
+    if (deadlineValue) {
+      const parsed = new Date(deadlineValue);
+      if (Number.isFinite(parsed.getTime())) {
+        deadline = parsed.getTime();
+        deadlineTz = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
+      }
+    }
+
+    try {
+      const created = await insertNote(
+        householdId,
+        {
+          text,
+          color: DEFAULT_NOTE_COLOR,
+          x: 10,
+          y: 10,
+          category_id: categoryId,
+          position,
+          z,
+          deadline,
+          deadline_tz: deadlineTz,
+        },
+        createNoteFn,
+      );
+      notesLocal = mergeNotes(notesLocal, [created]);
+      commitSnapshot("notes:quick-create", true, true);
+      render();
+      quickForm.reset();
+      quickCaptureModal.setOpen(false);
+      toast.show({ kind: "success", message: "Note captured." });
+    } catch (err) {
+      showError(err);
+    }
+  });
+
+  const openQuickCapture = () => {
+    refreshQuickCaptureCategories();
+    quickTextInput.value = "";
+    quickDeadlineInput.value = "";
+    quickCaptureModal.setOpen(true);
+  };
+
+  const handleShortcut = (event: KeyboardEvent) => {
+    const key = event.key.toLowerCase();
+    if (key !== "k" || !event.shiftKey) return;
+    const platform = navigator?.platform ?? "";
+    const isMac = platform.toLowerCase().includes("mac");
+    const modifier = isMac ? event.metaKey : event.ctrlKey;
+    if (!modifier) return;
+    event.preventDefault();
+    openQuickCapture();
+  };
+
+  window.addEventListener("keydown", handleShortcut);
+  registerViewCleanup(container, () => {
+    window.removeEventListener("keydown", handleShortcut);
+  });
+
+  refreshQuickCaptureCategories();
 }

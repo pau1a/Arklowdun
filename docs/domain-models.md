@@ -32,6 +32,22 @@ timestamp which is `NULL` when the record is active.
 - `updated_at` `INTEGER`.
 - `deleted_at` `INTEGER?`.
 
+## notes
+- `id` `TEXT`
+- `household_id` `TEXT` – foreign key to `household(id)`.
+- `category_id` `TEXT?` – references `categories(id)`; legacy rows may be null prior to migration.
+- `position` `INTEGER` – board ordering hint.
+- `created_at` `INTEGER`
+- `updated_at` `INTEGER`
+- `deleted_at` `INTEGER?`
+- `text` `TEXT`
+- `color` `TEXT`
+- `x` `REAL`
+- `y` `REAL`
+- `z` `INTEGER?` – stacking order, defaults to zero.
+- `deadline` `INTEGER?` – optional due date in epoch milliseconds.
+- `deadline_tz` `TEXT?` – timezone identifier for the deadline display.
+
 ## bills
 - `id` `TEXT`
 - `amount` `INTEGER` – minor currency units

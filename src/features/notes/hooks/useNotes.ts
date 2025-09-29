@@ -1,8 +1,8 @@
 import { fetchNotes, type FetchNotesOptions } from "../api/notesApi";
-import type { Note } from "../model/Note";
+import type { NotesPage } from "@bindings/NotesPage";
 
 export interface UseNotesResult {
-  data: Note[] | null;
+  data: NotesPage | null;
   error: unknown;
   isLoading: boolean;
 }

@@ -300,11 +300,10 @@ CREATE UNIQUE INDEX inventory_items_household_file_idx ON inventory_items(househ
 CREATE UNIQUE INDEX inventory_items_household_position_idx ON inventory_items(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX inventory_items_household_updated_idx ON inventory_items(household_id, updated_at);
 CREATE UNIQUE INDEX notes_household_position_idx ON notes(household_id, position) WHERE deleted_at IS NULL;
-CREATE INDEX notes_scope_idx ON notes(household_id, deleted_at, position);
 CREATE INDEX notes_scope_z_idx ON notes(household_id, deleted_at, z, position);
 CREATE INDEX notes_deadline_idx ON notes(household_id, deadline) WHERE deadline IS NOT NULL AND deleted_at IS NULL;
-CREATE INDEX notes_household_category_idx
-  ON notes(household_id, category_id) WHERE deleted_at IS NULL;
+CREATE INDEX notes_household_category_deleted_idx ON notes(household_id, category_id, deleted_at);
+CREATE INDEX notes_created_cursor_idx ON notes(household_id, created_at, id);
 CREATE UNIQUE INDEX pet_medical_household_file_idx ON pet_medical(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
 CREATE INDEX pet_medical_household_updated_idx ON pet_medical(household_id, updated_at);
 CREATE INDEX pet_medical_pet_date_idx ON pet_medical(pet_id, date);

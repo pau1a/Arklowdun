@@ -13,18 +13,16 @@ const { window: bootstrapWindow } = bootstrapDom;
 (globalThis as any).document = bootstrapWindow.document;
 (globalThis as any).HTMLElement = bootstrapWindow.HTMLElement;
 (globalThis as any).Node = bootstrapWindow.Node;
+(globalThis as any).navigator = bootstrapWindow.navigator;
 
-function setupDom() {
+test.beforeEach(() => {
   const dom = new JSDOM("<!doctype html><html><body></body></html>");
   const { window } = dom;
   (globalThis as any).window = window as unknown as typeof globalThis & Window;
   (globalThis as any).document = window.document;
   (globalThis as any).HTMLElement = window.HTMLElement;
   (globalThis as any).Node = window.Node;
-}
-
-test.beforeEach(() => {
-  setupDom();
+  (globalThis as any).navigator = window.navigator;
   __resetCategories();
   __resetStore();
 });
@@ -45,96 +43,211 @@ const baseCategory = (overrides: Partial<Category> = {}): Category => ({
   deleted_at: overrides.deleted_at ?? null,
 });
 
-test("NotesView fetches notes with active category filters", async () => {
+const makeNote = (overrides: Partial<Note> = {}): Note => ({
+  id: overrides.id ?? `note-${Math.random().toString(16).slice(2)}`,
+  text: overrides.text ?? "Sample",
+  color: overrides.color ?? "#FFF4B8",
+  x: overrides.x ?? 0,
+  y: overrides.y ?? 0,
+  z: overrides.z ?? 0,
+  position: overrides.position ?? 0,
+  household_id: overrides.household_id ?? "default",
+  category_id: overrides.category_id ?? "cat_primary",
+  created_at: overrides.created_at ?? Date.now(),
+  updated_at: overrides.updated_at ?? Date.now(),
+  deleted_at: overrides.deleted_at ?? null,
+  deadline: overrides.deadline ?? null,
+  deadline_tz: overrides.deadline_tz ?? null,
+});
+
+test("NotesView renders text, color, and deadline", async () => {
+  setCategories([baseCategory()]);
+  const note = makeNote({
+    text: "Render me",
+    color: "#CFF7E3",
+    deadline: Date.UTC(2024, 0, 1, 12, 0),
+    deadline_tz: "UTC",
+  });
+  const loadNotes = async () => ({
+    data: { notes: [note], next_cursor: null },
+    error: null,
+    isLoading: false,
+  });
+
+  const { NotesView } = await import("../src/NotesView.ts");
+  const container = document.createElement("div");
+  await NotesView(container, { householdId: "default", loadNotes });
+  await flush();
+
+  const textarea = container.querySelector("textarea");
+  assert.ok(textarea, "note textarea rendered");
+  assert.equal(textarea?.value, "Render me");
+
+  const noteEl = container.querySelector<HTMLDivElement>(".note");
+  assert.ok(noteEl, "note element present");
+  assert.equal(noteEl?.style.getPropertyValue("--note-color"), "#CFF7E3");
+
+  const deadlineEl = container.querySelector(".note__deadline-inline span");
+  assert.ok(deadlineEl, "deadline text rendered");
+  assert.ok(deadlineEl?.textContent?.includes("Due"));
+});
+
+test("NotesView load more fetches subsequent cursor", async () => {
+  setCategories([baseCategory()]);
   const calls: Array<Record<string, unknown>> = [];
-  let invocation = 0;
+  const pageOne = [makeNote({ id: "note-1", text: "First" })];
+  const pageTwo = [makeNote({ id: "note-2", text: "Second", position: 1 })];
   const loadNotes = async (options: Record<string, unknown> = {}) => {
-    invocation += 1;
-    const categoryIds = Array.isArray(options.categoryIds)
-      ? (options.categoryIds as string[])
-      : [];
-    const note: Note = {
-      id: `note-${invocation}`,
-      text: "Mock",
-      color: "#FFF4B8",
-      x: 0,
-      y: 0,
-      z: 0,
-      position: invocation - 1,
-      household_id: "default",
-      created_at: 0,
-      updated_at: 0,
-      deleted_at: null,
-      category_id: categoryIds[0] ?? null,
-    };
     calls.push({ ...options });
-    return { data: [note], error: null, isLoading: false };
+    if (!options.afterCursor) {
+      return {
+        data: { notes: pageOne, next_cursor: "cursor-1" },
+        error: null,
+        isLoading: false,
+      };
+    }
+    return {
+      data: { notes: pageTwo, next_cursor: null },
+      error: null,
+      isLoading: false,
+    };
   };
 
-  try {
-    setCategories([
-      baseCategory(),
-      baseCategory({
-        id: "cat_tasks",
-        name: "Tasks",
-        slug: "tasks",
-        position: 1,
-        is_visible: false,
-      }),
-    ]);
+  const { NotesView } = await import("../src/NotesView.ts");
+  const container = document.createElement("div");
+  await NotesView(container, { householdId: "default", loadNotes });
+  await flush();
 
-    const { NotesView } = await import("../src/NotesView.ts");
-    const container = document.createElement("div");
-    await NotesView(container, { householdId: "default", loadNotes });
-    await flush();
+  const button = container.querySelector<HTMLButtonElement>(".notes__pagination button");
+  assert.ok(button, "load more button rendered");
 
-    assert.equal(calls.length, 1);
-    assert.deepEqual(calls[0], {
-      householdId: "default",
-      categoryIds: ["cat_primary"],
+  button?.click();
+  await flush();
+
+  assert.equal(calls.length, 2);
+  assert.equal((calls[1] as any).afterCursor, "cursor-1");
+
+  const notes = container.querySelectorAll(".note");
+  assert.equal(notes.length, 2, "both pages rendered");
+});
+
+test("Hidden categories hide notes", async () => {
+  setCategories([
+    baseCategory({ id: "cat_primary", name: "Primary" }),
+    baseCategory({ id: "cat_secondary", name: "Secondary", slug: "secondary", position: 1 }),
+  ]);
+  const calls: Array<Record<string, unknown>> = [];
+  const loadNotes = async (options: Record<string, unknown> = {}) => {
+    calls.push({ ...options });
+    return {
+      data: {
+        notes: [
+          makeNote({ id: "note-1", text: "Primary note", category_id: "cat_primary" }),
+          makeNote({ id: "note-2", text: "Secondary note", category_id: "cat_secondary", position: 1 }),
+        ],
+        next_cursor: null,
+      },
+      error: null,
+      isLoading: false,
+    };
+  };
+
+  const { NotesView } = await import("../src/NotesView.ts");
+  const container = document.createElement("div");
+  await NotesView(container, { householdId: "default", loadNotes });
+  await flush();
+
+  let rendered = container.querySelectorAll(".note");
+  assert.equal(rendered.length, 2, "all notes visible when categories active");
+
+  setCategories([
+    baseCategory({ id: "cat_primary", name: "Primary", is_visible: true }),
+    baseCategory({ id: "cat_secondary", name: "Secondary", slug: "secondary", position: 1, is_visible: false }),
+  ]);
+  await flush();
+  await flush();
+
+  rendered = container.querySelectorAll(".note");
+  assert.equal(rendered.length, 1, "hidden category notes removed");
+  const visibleTextarea = container.querySelector("textarea");
+  assert.equal(visibleTextarea?.value, "Primary note");
+
+  setCategories([
+    baseCategory({ id: "cat_primary", name: "Primary", is_visible: false }),
+    baseCategory({ id: "cat_secondary", name: "Secondary", slug: "secondary", position: 1, is_visible: false }),
+  ]);
+  await flush();
+  await flush();
+
+  rendered = container.querySelectorAll(".note");
+  assert.equal(rendered.length, 0, "no notes when all categories hidden");
+  assert.ok(calls.length >= 2, "reload invoked on category changes");
+});
+
+test("Quick capture shortcut creates note and closes modal", async () => {
+  setCategories([baseCategory()]);
+  const createdPayloads: Array<Record<string, unknown>> = [];
+  const loadNotes = async () => ({
+    data: { notes: [], next_cursor: null },
+    error: null,
+    isLoading: false,
+  });
+  const createNote = async (_householdId: string, input: Record<string, unknown>) => {
+    createdPayloads.push({ ...input });
+    return makeNote({
+      id: "note-captured",
+      text: String(input.text ?? ""),
+      category_id: (input.category_id as string | null) ?? "cat_primary",
+      deadline: (input.deadline as number | null) ?? null,
+      deadline_tz: (input.deadline_tz as string | null) ?? null,
+      position: Number(input.position ?? 0),
     });
+  };
 
-    setCategories([
-      baseCategory({ is_visible: false }),
-      baseCategory({
-        id: "cat_tasks",
-        name: "Tasks",
-        slug: "tasks",
-        position: 1,
-        is_visible: true,
-      }),
-    ]);
-    await flush();
-    await flush();
+  const { NotesView } = await import("../src/NotesView.ts");
+  const container = document.createElement("div");
+  await NotesView(container, { householdId: "default", loadNotes, createNote });
+  await flush();
 
-    assert.equal(calls.length, 2);
-    assert.deepEqual(calls[1], {
-      householdId: "default",
-      categoryIds: ["cat_tasks"],
-    });
+  const event = new window.KeyboardEvent("keydown", {
+    key: "k",
+    shiftKey: true,
+    metaKey: true,
+    ctrlKey: true,
+    bubbles: true,
+  });
+  window.dispatchEvent(event);
+  await flush();
+  await flush();
 
-    setCategories([
-      baseCategory({ is_visible: false }),
-      baseCategory({
-        id: "cat_tasks",
-        name: "Tasks",
-        slug: "tasks",
-        position: 1,
-        is_visible: false,
-      }),
-    ]);
-    await flush();
-    await flush();
+  const textInput = document.getElementById("quick-capture-text") as HTMLInputElement | null;
+  assert.ok(textInput, "quick capture text input present");
+  textInput!.value = "Captured via shortcut";
 
-    assert.equal(calls.length, 3);
-    const thirdCall = calls[2];
-    assert.equal(thirdCall.householdId, "default");
-    assert.ok(
-      !("categoryIds" in thirdCall) ||
-        thirdCall.categoryIds === undefined ||
-        (Array.isArray(thirdCall.categoryIds) && thirdCall.categoryIds.length === 0),
-      "empty filters omit categoryIds",
-    );
-  } finally {
-  }
+  const deadlineInput = document.getElementById("quick-capture-deadline") as HTMLInputElement | null;
+  assert.ok(deadlineInput, "deadline input present");
+  deadlineInput!.value = "2024-01-01T12:00";
+
+  const form = document.querySelector(".notes__quick-capture-form") as HTMLFormElement | null;
+  assert.ok(form, "quick capture form present");
+  form!.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+  await flush();
+
+  assert.equal(createdPayloads.length, 1, "create note invoked once");
+  const payload = createdPayloads[0];
+  assert.equal(payload.text, "Captured via shortcut");
+  assert.equal(payload.category_id, "cat_primary");
+  assert.ok(typeof payload.deadline === "number");
+
+  const modalDialog = document.querySelector(".notes__quick-capture-dialog");
+  assert.equal(modalDialog, null, "modal closed after capture");
+
+  const toastRegion = document.getElementById("ui-toast-region");
+  assert.ok(toastRegion, "toast region created");
+  assert.ok(toastRegion?.textContent?.includes("Note captured."));
+
+  const notes = container.querySelectorAll(".note");
+  assert.equal(notes.length, 1, "captured note rendered");
+  const textarea = container.querySelector("textarea");
+  assert.equal(textarea?.value, "Captured via shortcut");
 });

@@ -8,8 +8,8 @@ import type {
   InventoryItem,
   ShoppingItem,
 } from "../models";
-import type { Note } from "@features/notes";
 import type { Event } from "../bindings/Event";
+import { notesRepo as typedNotesRepo } from "./notesRepo";
 
 export const billsRepo = createCrudRepo<Bill, NewRow<Bill>, PatchRow<Bill>>("bills");
 export const policiesRepo = createCrudRepo<Policy, NewRow<Policy>, PatchRow<Policy>>("policies");
@@ -29,7 +29,7 @@ export const inventoryItemsRepo = createCrudRepo<
   NewRow<InventoryItem>,
   PatchRow<InventoryItem>
 >("inventory_items");
-export const notesRepo = createCrudRepo<Note, NewRow<Note>, PatchRow<Note>>("notes");
+export const notesRepo = typedNotesRepo;
 export const shoppingItemsRepo = createCrudRepo<
   ShoppingItem,
   NewRow<ShoppingItem>,

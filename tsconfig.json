@@ -22,7 +22,8 @@
       "@utils/*": ["utils/*"],
       "@strings/*": ["strings/*"],
       "@db/*": ["db/*"],
-      "@files/*": ["files/*"]
+      "@files/*": ["files/*"],
+      "@repos/*": ["repos/*"]
     },
     "isolatedModules": true,
     "noEmit": true,
