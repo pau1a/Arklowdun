@@ -477,8 +477,22 @@ mod tests {
     #[tokio::test]
     async fn notes_quick_capture_defaults() {
         let pool = setup_pool().await;
-        let mut payload = Map::new();
         let category_id = Uuid::now_v7().to_string();
+
+        sqlx::query(
+            r#"
+            INSERT INTO categories
+              (id, household_id, name, slug, color, position, z, is_visible, created_at, updated_at, deleted_at)
+            VALUES
+              (?, 'default', 'Primary', 'primary', '#4F46E5', 0, 0, 1, strftime('%s','now')*1000, strftime('%s','now')*1000, NULL)
+            "#,
+        )
+        .bind(&category_id)
+        .execute(&pool)
+        .await
+        .expect("seed primary category");
+
+        let mut payload = Map::new();
         payload.insert("household_id".into(), Value::String("default".into()));
         payload.insert("category_id".into(), Value::String(category_id.clone()));
         payload.insert("text".into(), Value::String("Quick capture".into()));
