@@ -48,8 +48,6 @@ type NewNoteDraft = {
   x: number;
   y: number;
   category_id?: string | null;
-  position?: number;
-  z?: number;
   deadline?: number | null;
   deadline_tz?: string | null;
 };
@@ -84,8 +82,6 @@ async function insertNote(
     x: draft.x,
     y: draft.y,
     category_id: draft.category_id ?? null,
-    position: draft.position,
-    z: draft.z,
     deadline: draft.deadline ?? null,
     deadline_tz: draft.deadline_tz ?? null,
   });
@@ -296,24 +292,6 @@ export async function NotesView(
     }
     const allowed = new Set(activeCategoryIds);
     return base.filter((note) => note.category_id && allowed.has(note.category_id));
-  };
-
-  const computeNextPosition = (): number => {
-    if (notesLocal.length === 0) return 0;
-    return (
-      Math.max(
-        0,
-        ...notesLocal
-          .filter((note) => !note.deleted_at)
-          .map((note) => Number(note.position) || 0),
-      ) + 1
-    );
-  };
-
-  const computeNextZ = (): number => {
-    return (
-      Math.max(0, ...notesLocal.filter((n) => !n.deleted_at).map((n) => n.z ?? 0)) + 1
-    );
   };
 
   const updateLoadMoreState = () => {
@@ -709,8 +687,6 @@ export async function NotesView(
           x: 10,
           y: 10,
           category_id: activeCategoryIds[0] ?? null,
-          position: computeNextPosition(),
-          z: computeNextZ(),
         },
         createNoteFn,
       );
@@ -732,8 +708,6 @@ export async function NotesView(
       return;
     }
     const categoryId = quickCategorySelect.value?.trim() || null;
-    const position = computeNextPosition();
-    const z = computeNextZ();
     let deadline: number | null = null;
     let deadlineTz: string | null = null;
     const deadlineValue = quickDeadlineInput.value;
@@ -754,8 +728,6 @@ export async function NotesView(
           x: 10,
           y: 10,
           category_id: categoryId,
-          position,
-          z,
           deadline,
           deadline_tz: deadlineTz,
         },

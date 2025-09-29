@@ -30,6 +30,7 @@ export type NotesUpdateInput = Partial<Omit<NotesCreateInput, "category_id">> & 
 export const notesRepo = {
   async listCursor(options: NotesListCursorOptions): Promise<NotesPage> {
     const payload: Record<string, unknown> = {
+      householdId: options.householdId,
       household_id: options.householdId,
     };
     if (options.afterCursor) payload.after_cursor = options.afterCursor;
@@ -69,16 +70,25 @@ export const notesRepo = {
     return call<Note>("notes_update", {
       id,
       data,
+      householdId,
       household_id: householdId,
     });
   },
 
   async delete(householdId: string, id: string): Promise<void> {
-    await call<null>("notes_delete", { household_id: householdId, id });
+    await call<null>("notes_delete", {
+      householdId,
+      household_id: householdId,
+      id,
+    });
   },
 
   async restore(householdId: string, id: string): Promise<Note> {
-    return call<Note>("notes_restore", { household_id: householdId, id });
+    return call<Note>("notes_restore", {
+      householdId,
+      household_id: householdId,
+      id,
+    });
   },
 };
 

@@ -259,8 +259,44 @@ pub async fn notes_create(state: State<'_, AppState>, data: Map<String, Value>) 
     let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool_clone();
     dispatch_async_app_result(move || {
-        let data = data.clone();
+        let mut data = data.clone();
         async move {
+            let household_id = data
+                .get("household_id")
+                .and_then(|value| value.as_str())
+                .ok_or_else(|| AppError::new("NOTES/CREATE", "household_id is required"))?
+                .to_owned();
+
+            let position_missing = match data.get("position") {
+                Some(Value::Number(number)) if number.as_i64().is_some() => false,
+                _ => true,
+            };
+            if position_missing {
+                let next_position: i64 = sqlx::query_scalar(
+                    "SELECT COALESCE(MAX(position), -1) + 1 FROM notes WHERE household_id = ?1 AND deleted_at IS NULL",
+                )
+                .bind(&household_id)
+                .fetch_one(&pool)
+                .await
+                .map_err(AppError::from)?;
+                data.insert("position".into(), Value::from(next_position));
+            }
+
+            let z_missing = match data.get("z") {
+                Some(Value::Number(number)) if number.as_i64().is_some() => false,
+                _ => true,
+            };
+            if z_missing {
+                let next_z: i64 = sqlx::query_scalar(
+                    "SELECT COALESCE(MAX(z), 0) + 1 FROM notes WHERE household_id = ?1 AND deleted_at IS NULL",
+                )
+                .bind(&household_id)
+                .fetch_one(&pool)
+                .await
+                .map_err(AppError::from)?;
+                data.insert("z".into(), Value::from(next_z));
+            }
+
             let value = commands::create_command(&pool, "notes", data).await?;
             let mut note: Note = serde_json::from_value(value).map_err(|err| {
                 AppError::new("NOTES/DECODE", "Failed to decode note")
@@ -393,7 +429,10 @@ mod tests {
 
         let ids_one: Vec<_> = page_one.notes.iter().map(|n| n.id.clone()).collect();
         let ids_two: Vec<_> = page_two.notes.iter().map(|n| n.id.clone()).collect();
-        assert!(ids_one.iter().all(|id| !ids_two.contains(id)), "no duplicates");
+        assert!(
+            ids_one.iter().all(|id| !ids_two.contains(id)),
+            "no duplicates"
+        );
 
         let raw_page_three = list_page(
             &pool,
@@ -406,7 +445,11 @@ mod tests {
         .await
         .expect("list third page");
         let page_three = paginate(raw_page_three, 10);
-        assert_eq!(page_three.notes.len(), 5, "final page has remaining results");
+        assert_eq!(
+            page_three.notes.len(),
+            5,
+            "final page has remaining results"
+        );
     }
 
     #[tokio::test]
