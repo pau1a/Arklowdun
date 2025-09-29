@@ -13,7 +13,17 @@ const { window: bootstrapWindow } = bootstrapDom;
 (globalThis as any).document = bootstrapWindow.document;
 (globalThis as any).HTMLElement = bootstrapWindow.HTMLElement;
 (globalThis as any).Node = bootstrapWindow.Node;
-(globalThis as any).navigator = bootstrapWindow.navigator;
+try {
+  // Delete any existing non-configurable navigator accessor before redefining below.
+  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- test bootstrap shim
+  delete (globalThis as any).navigator;
+} catch {
+  // ignore if deletion is disallowed; defineProperty below will overwrite when possible
+}
+Object.defineProperty(globalThis, "navigator", {
+  value: bootstrapWindow.navigator,
+  configurable: true,
+});
 
 test.beforeEach(() => {
   const dom = new JSDOM("<!doctype html><html><body></body></html>");
@@ -22,7 +32,16 @@ test.beforeEach(() => {
   (globalThis as any).document = window.document;
   (globalThis as any).HTMLElement = window.HTMLElement;
   (globalThis as any).Node = window.Node;
-  (globalThis as any).navigator = window.navigator;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- test bootstrap shim
+    delete (globalThis as any).navigator;
+  } catch {
+    // ignore if not deletable
+  }
+  Object.defineProperty(globalThis, "navigator", {
+    value: window.navigator,
+    configurable: true,
+  });
   __resetCategories();
   __resetStore();
 });
