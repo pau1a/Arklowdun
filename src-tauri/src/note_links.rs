@@ -312,7 +312,7 @@ async fn create_link_with_tx(
         "SELECT id,
                 household_id,
                 note_id,
-                entity_type as \"entity_type: NoteLinkEntityType\",
+                entity_type,
                 entity_id,
                 relation,
                 created_at,
@@ -372,7 +372,7 @@ pub async fn create_link(
 pub async fn delete_link(pool: &SqlitePool, household_id: &str, link_id: &str) -> AppResult<()> {
     let existing: Option<(String, NoteLinkEntityType, String)> = sqlx::query_as(
         "SELECT note_id,
-                entity_type as \"entity_type: NoteLinkEntityType\",
+                entity_type,
                 entity_id
            FROM note_links
           WHERE id = ?1 AND household_id = ?2",
