@@ -55,7 +55,7 @@ impl sqlx::Type<Sqlite> for NoteLinkEntityType {
 }
 
 impl<'q> sqlx::Encode<'q, Sqlite> for NoteLinkEntityType {
-    fn encode_by_ref(&self, buf: &mut SqliteArgumentValue<'q>) -> Result<IsNull, BoxDynError> {
+    fn encode_by_ref(&self, buf: &mut Vec<SqliteArgumentValue<'q>>) -> Result<IsNull, BoxDynError> {
         <&str as sqlx::Encode<'q, Sqlite>>::encode_by_ref(&self.as_str(), buf)
     }
 }
@@ -233,8 +233,8 @@ pub async fn ensure_same_household(
     entity_type: NoteLinkEntityType,
     entity_id: &str,
 ) -> AppResult<()> {
-    ensure_note_in_household(&pool, household_id, note_id).await?;
-    ensure_entity_in_household(&pool, household_id, entity_type, entity_id).await?;
+    ensure_note_in_household(pool, household_id, note_id).await?;
+    ensure_entity_in_household(pool, household_id, entity_type, entity_id).await?;
     Ok(())
 }
 
@@ -245,8 +245,8 @@ async fn ensure_same_household_tx(
     entity_type: NoteLinkEntityType,
     entity_id: &str,
 ) -> AppResult<()> {
-    ensure_note_in_household(&mut *tx, household_id, note_id).await?;
-    ensure_entity_in_household(&mut *tx, household_id, entity_type, entity_id).await?;
+    ensure_note_in_household(tx.as_mut(), household_id, note_id).await?;
+    ensure_entity_in_household(tx.as_mut(), household_id, entity_type, entity_id).await?;
     Ok(())
 }
 
@@ -256,7 +256,7 @@ async fn ensure_entity_exists_tx(
     entity_type: NoteLinkEntityType,
     entity_id: &str,
 ) -> AppResult<()> {
-    ensure_entity_in_household(&mut *tx, household_id, entity_type, entity_id).await
+    ensure_entity_in_household(tx.as_mut(), household_id, entity_type, entity_id).await
 }
 
 async fn create_link_with_tx(
@@ -284,7 +284,7 @@ async fn create_link_with_tx(
     .bind(entity_id)
     .bind(relation)
     .bind(now)
-    .execute(&mut *tx)
+    .execute(tx.as_mut())
     .await;
 
     if let Err(err) = insert_result {
@@ -321,7 +321,7 @@ async fn create_link_with_tx(
           WHERE id = ?1",
     )
     .bind(&id)
-    .fetch_one(&mut *tx)
+    .fetch_one(tx.as_mut())
     .await
     .map_err(|err| {
         AppError::from(err)
@@ -592,7 +592,7 @@ async fn create_note_for_entity(
         "SELECT COALESCE(MAX(position), -1) + 1 FROM notes WHERE household_id = ?1 AND deleted_at IS NULL",
     )
     .bind(household_id)
-    .fetch_one(&mut *tx)
+    .fetch_one(tx.as_mut())
     .await
     .map_err(|err| {
         AppError::from(err)
@@ -604,7 +604,7 @@ async fn create_note_for_entity(
         "SELECT COALESCE(MAX(z), 0) + 1 FROM notes WHERE household_id = ?1 AND deleted_at IS NULL",
     )
     .bind(household_id)
-    .fetch_one(&mut *tx)
+    .fetch_one(tx.as_mut())
     .await
     .map_err(|err| {
         AppError::from(err)
@@ -640,7 +640,7 @@ async fn create_note_for_entity(
     .bind(z_value)
     .bind(text)
     .bind(&color)
-    .execute(&mut *tx)
+    .execute(tx.as_mut())
     .await
     .map_err(|err| {
         AppError::from(err)
@@ -667,7 +667,7 @@ async fn create_note_for_entity(
           WHERE id = ?1",
     )
     .bind(&note_id)
-    .fetch_one(&mut *tx)
+    .fetch_one(tx.as_mut())
     .await
     .map_err(|err| {
         AppError::from(err)
