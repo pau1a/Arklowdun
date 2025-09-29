@@ -65,6 +65,7 @@ export type NotesSnapshot = {
   items: Note[];
   ts: number;
   source?: string;
+  activeCategoryIds?: string[];
 };
 
 export interface AppState {
@@ -245,7 +246,13 @@ function withEventsSnapshot(snapshot: EventsSnapshot | null): AppState {
 
 function withNotesSnapshot(snapshot: NotesSnapshot | null): AppState {
   const cloned = snapshot
-    ? { ...snapshot, items: cloneNotes(snapshot.items) }
+    ? {
+        ...snapshot,
+        items: cloneNotes(snapshot.items),
+        activeCategoryIds: snapshot.activeCategoryIds
+          ? [...snapshot.activeCategoryIds]
+          : undefined,
+      }
     : null;
   return {
     ...state,
@@ -328,7 +335,8 @@ export const actions = {
       setState(() => withNotesSnapshot(snapshot));
       const count = snapshot?.items.length ?? 0;
       const ts = snapshot?.ts ?? Date.now();
-      return { count, ts };
+      const activeCategoryIds = snapshot?.activeCategoryIds ?? [];
+      return { count, ts, activeCategoryIds };
     },
   },
   db: {

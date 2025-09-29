@@ -1,5 +1,6 @@
 export interface Note {
   id: string;
+  category_id?: string | null;
   text: string;
   color: string;
   x: number;

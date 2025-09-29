@@ -71,6 +71,71 @@ pub(crate) fn row_to_json(row: SqliteRow) -> Value {
     Value::Object(map)
 }
 
+pub mod notes {
+    use super::*;
+
+    pub async fn list_with_categories(
+        pool: &SqlitePool,
+        household_id: &str,
+        order_by: Option<&str>,
+        limit: Option<i64>,
+        offset: Option<i64>,
+        category_ids: Option<Vec<String>>,
+    ) -> anyhow::Result<Vec<SqliteRow>> {
+        ensure_table("notes")?;
+        let household_id = require_household(household_id)?.to_string();
+
+        let default_order = "z DESC, position, created_at, id";
+        let order = order_by
+            .filter(|ob| ALLOWED_ORDERS.contains(ob))
+            .unwrap_or(default_order);
+
+        let (category_ids, filter_active) = match category_ids {
+            Some(ids) if ids.is_empty() => return Ok(Vec::new()),
+            Some(ids) => (ids, true),
+            None => (Vec::new(), false),
+        };
+
+        let mut sql =
+            String::from("SELECT * FROM notes WHERE deleted_at IS NULL AND household_id = ?");
+
+        if filter_active {
+            let placeholders = vec!["?"; category_ids.len()].join(",");
+            sql.push_str(" AND category_id IN (");
+            sql.push_str(&placeholders);
+            sql.push(')');
+        }
+
+        sql.push_str(" ORDER BY ");
+        sql.push_str(order);
+
+        if limit.is_some() {
+            sql.push_str(" LIMIT ?");
+        }
+        if offset.is_some() {
+            sql.push_str(" OFFSET ?");
+        }
+
+        let mut query = sqlx::query(&sql).bind(&household_id);
+
+        if filter_active {
+            for id in &category_ids {
+                query = query.bind(id);
+            }
+        }
+
+        if let Some(l) = limit {
+            query = query.bind(l);
+        }
+        if let Some(o) = offset {
+            query = query.bind(o);
+        }
+
+        let rows = query.fetch_all(pool).await?;
+        Ok(rows)
+    }
+}
+
 pub(crate) fn ensure_table(table: &str) -> anyhow::Result<()> {
     if DOMAIN_TABLES.contains(&table) {
         Ok(())

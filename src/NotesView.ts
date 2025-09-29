@@ -10,9 +10,10 @@ import {
   subscribe,
   getState,
   type NotesSnapshot,
-} from "./store";
+} from "./store/index";
 import { emit, on } from "./store/events";
 import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
+import { getActiveCategoryIds, subscribeActiveCategoryIds } from "./store/categories";
 import createButton from "@ui/Button";
 import createInput from "@ui/Input";
 import createTimezoneBadge from "@ui/TimezoneBadge";
@@ -27,9 +28,22 @@ const NOTE_PALETTE: Record<string, { base: string; text: string }> = {
   "#F6EBDC": { base: "#F6EBDC", text: "#1f2937" },
 };
 
+type NewNoteDraft = {
+  text: string;
+  color: string;
+  x: number;
+  y: number;
+  category_id?: string | null;
+};
+
+export interface NotesViewOptions {
+  householdId?: string;
+  loadNotes?: typeof useNotes;
+}
+
 async function insertNote(
   householdId: string,
-  draft: Omit<Note, "id" | "position">
+  draft: NewNoteDraft,
 ): Promise<Note> {
   const db = await openDb();
 
@@ -55,17 +69,19 @@ async function insertNote(
 
   await db.execute(
     `INSERT INTO notes
-       (id, household_id, position, created_at, updated_at, deleted_at,
+       (id, household_id, category_id, position, created_at, updated_at, deleted_at,
         z, text, color, x, y)
      VALUES
-       (?,  ?,            ?,        ?,          ?,          NULL,
+       (?,  ?,            ?,          ?,        ?,          ?,          ?,
         ?, ?,    ?,     ?, ?)`,
     [
       id,
       householdId,
+      draft.category_id ?? null,
       nextPos,
       now,
       now,
+      null,
       z,
       draft.text,
       draft.color,
@@ -83,6 +99,7 @@ async function insertNote(
     z,
     position: nextPos,
     household_id: householdId,
+    category_id: draft.category_id ?? null,
     created_at: now,
     updated_at: now,
     deleted_at: null,
@@ -118,7 +135,10 @@ async function updateNote(
   );
 }
 
-export async function NotesView(container: HTMLElement) {
+export async function NotesView(
+  container: HTMLElement,
+  options: NotesViewOptions = {},
+) {
   runViewCleanups(container);
 
   const section = document.createElement("section");
@@ -179,7 +199,13 @@ export async function NotesView(container: HTMLElement) {
   container.innerHTML = "";
   container.appendChild(section);
 
-  let householdId = await defaultHouseholdId();
+  const useNotesFn = options.loadNotes ?? useNotes;
+
+  let householdId =
+    options.householdId ??
+    (await defaultHouseholdId().catch(() => "default"));
+  let activeCategoryIds = getActiveCategoryIds();
+  let lastCategorySignature = activeCategoryIds.join("|");
 
   const cloneNotes = (items: Note[]): Note[] => items.map((note) => ({ ...note }));
   let notesLocal: Note[] = cloneNotes(selectors.notes.items(getState()));
@@ -257,6 +283,7 @@ export async function NotesView(container: HTMLElement) {
       items: cloneNotes(notesLocal),
       ts: Date.now(),
       source,
+      activeCategoryIds: [...activeCategoryIds],
     });
     if (emitEvent) emit("notes:updated", payload);
     renderDeadlines(notesLocal);
@@ -264,7 +291,8 @@ export async function NotesView(container: HTMLElement) {
 
   async function reload(source: string): Promise<void> {
     try {
-      const result = await useNotes({ householdId });
+      const categoryIds = activeCategoryIds.length > 0 ? [...activeCategoryIds] : undefined;
+      const result = await useNotesFn({ householdId, categoryIds });
       if (result.error) throw result.error;
       const loaded = result.data ?? [];
       notesLocal = cloneNotes(loaded);
@@ -418,8 +446,21 @@ export async function NotesView(container: HTMLElement) {
   });
   registerViewCleanup(container, stopHousehold);
 
+  const stopCategorySubscription = subscribeActiveCategoryIds((ids) => {
+    const signature = ids.join("|");
+    if (signature === lastCategorySignature) return;
+    activeCategoryIds = [...ids];
+    lastCategorySignature = signature;
+    void reload("notes:categories");
+  });
+  registerViewCleanup(container, stopCategorySubscription);
+
   const initialSnapshot: NotesSnapshot | null = selectors.notes.snapshot(getState());
-  if (initialSnapshot) {
+  const snapshotCategories = initialSnapshot?.activeCategoryIds ?? [];
+  const matchesActiveCategories =
+    snapshotCategories.length === activeCategoryIds.length &&
+    snapshotCategories.every((id, index) => id === activeCategoryIds[index]);
+  if (initialSnapshot && matchesActiveCategories) {
     notesLocal = cloneNotes(initialSnapshot.items);
     render();
   } else {
@@ -434,9 +475,8 @@ export async function NotesView(container: HTMLElement) {
         color: colorInput.value,
         x: 10,
         y: 10,
-        z: 0,
-        position: 0,
-      } as any);
+        category_id: activeCategoryIds[0] ?? null,
+      });
       notesLocal.push(created);
       commitSnapshot("notes:create", true, true);
       render();

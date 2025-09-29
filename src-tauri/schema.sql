@@ -14,6 +14,7 @@ CREATE TABLE categories (
   color TEXT NOT NULL,
   position INTEGER NOT NULL DEFAULT 0,
   z INTEGER NOT NULL DEFAULT 0,
+  is_visible INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER
@@ -35,6 +36,7 @@ CREATE TABLE events (
 CREATE TABLE notes (
   id TEXT PRIMARY KEY,
   household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  category_id TEXT REFERENCES categories(id) ON DELETE SET NULL,
   position INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
@@ -272,6 +274,8 @@ CREATE UNIQUE INDEX notes_household_position_idx ON notes(household_id, position
 CREATE INDEX notes_scope_idx ON notes(household_id, deleted_at, position);
 CREATE INDEX notes_scope_z_idx ON notes(household_id, deleted_at, z, position);
 CREATE INDEX notes_deadline_idx ON notes(household_id, deadline) WHERE deadline IS NOT NULL AND deleted_at IS NULL;
+CREATE INDEX notes_household_category_idx
+  ON notes(household_id, category_id) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX pet_medical_household_file_idx ON pet_medical(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
 CREATE INDEX pet_medical_household_updated_idx ON pet_medical(household_id, updated_at);
 CREATE INDEX pet_medical_pet_date_idx ON pet_medical(pet_id, date);

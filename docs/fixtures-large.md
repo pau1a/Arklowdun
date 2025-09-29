@@ -114,6 +114,8 @@ The generator enforces the following invariants:
 
 - ≥ 10,000 events with ≥ 20% all-day, ≥ 10% recurring, RRULE coverage across DAILY/WEEKLY/MONTHLY, COUNT and UNTIL variants, duplicate EXDATE handling, and at least one DST-edge recurrence.
 - ≥ 5,000 notes with ≥ 25% deadlines, ≥ 5% soft-deleted, and ≥ 2% deleted-then-restored records.
+- Household category coverage with contiguous positions per household and a representative subset of notes assigned `category_id`
+  values so Manage/Notes filtering stays exercised end to end.
 - ≥ 300 attachment-backed records mapped deterministically from a fixed corpus with both `attachments` and `appData` roots, small and medium payloads, and reuse of logical files.
 
 Household scope: all seeded rows include a valid `household_id` and all queries/examples in this document are understood to be executed per household.
