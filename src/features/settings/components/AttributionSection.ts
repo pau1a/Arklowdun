@@ -1,4 +1,5 @@
 import { settingsText } from "@strings/settings";
+import rawAttributionManifest from "../../../../assets/licensing/attribution.json" with { type: "json" };
 
 type AttributionManifest = {
   assets?: AttributionAsset[];
@@ -82,8 +83,7 @@ function extractAttributionAssets(manifest: unknown): AttributionAsset[] {
     .filter((asset) => asset.attribution.statements.length > 0);
 }
 
-export async function createAttributionSectionAsync(): Promise<HTMLElement | null> {
-  const attributionAssets = await loadAttributionAssets();
+function buildAttributionSection(attributionAssets: AttributionAsset[]): HTMLElement | null {
   if (attributionAssets.length === 0) return null;
 
   const section = document.createElement("section");
@@ -175,6 +175,16 @@ export async function createAttributionSectionAsync(): Promise<HTMLElement | nul
 
   section.append(heading, intro, list);
   return section;
+}
+
+export function createAttributionSection(manifest: unknown = rawAttributionManifest): HTMLElement | null {
+  const assets = extractAttributionAssets(manifest);
+  return buildAttributionSection(assets);
+}
+
+export async function createAttributionSectionAsync(): Promise<HTMLElement | null> {
+  const attributionAssets = await loadAttributionAssets();
+  return buildAttributionSection(attributionAssets);
 }
 
 function appendMeta(meta: HTMLDListElement, term: string, value: string) {

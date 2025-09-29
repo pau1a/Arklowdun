@@ -639,13 +639,90 @@ function generateEvents(
   return stats;
 }
 
+const CATEGORY_DEFINITIONS = [
+  { slug: "primary", name: "Primary", color: "#4F46E5" },
+  { slug: "secondary", name: "Secondary", color: "#1D4ED8" },
+  { slug: "tasks", name: "Tasks", color: "#0EA5E9" },
+  { slug: "bills", name: "Bills", color: "#F59E0B" },
+  { slug: "insurance", name: "Insurance", color: "#EA580C" },
+  { slug: "property", name: "Property", color: "#F97316" },
+  { slug: "vehicles", name: "Vehicles", color: "#22C55E" },
+  { slug: "pets", name: "Pets", color: "#16A34A" },
+  { slug: "family", name: "Family", color: "#EF4444" },
+  { slug: "inventory", name: "Inventory", color: "#C026D3" },
+  { slug: "budget", name: "Budget", color: "#A855F7" },
+  { slug: "shopping", name: "Shopping", color: "#6366F1" },
+];
+
 const NOTE_COLORS = ["#FFF4B8", "#FFFF88", "#CFF7E3", "#DDEBFF", "#FFD9D3", "#EADCF9", "#F6EBDC"];
+
+interface SeedCategory {
+  id: string;
+  slug: string;
+  position: number;
+}
+
+function generateCategories(
+  db: Database.Database,
+  households: Household[],
+): Record<string, SeedCategory[]> {
+  const insertCategory = makeInserter(
+    db,
+    "categories",
+    [
+      "id",
+      "household_id",
+      "name",
+      "slug",
+      "color",
+      "position",
+      "z",
+      "is_visible",
+      "created_at",
+      "updated_at",
+      "deleted_at",
+    ],
+  );
+
+  const categoriesByHousehold: Record<string, SeedCategory[]> = {};
+  const baseCreated = Date.UTC(2023, 0, 1);
+
+  const run = db.transaction(() => {
+    households.forEach((household) => {
+      const entries: SeedCategory[] = [];
+      CATEGORY_DEFINITIONS.forEach((definition, index) => {
+        const id = `cat_${household.id}_${definition.slug}`;
+        const createdAt = baseCreated + index * HOUR_MS;
+        insertCategory({
+          id,
+          household_id: household.id,
+          name: definition.name,
+          slug: definition.slug,
+          color: definition.color,
+          position: index,
+          z: 0,
+          is_visible: 1,
+          created_at: createdAt,
+          updated_at: createdAt,
+          deleted_at: null,
+        });
+        entries.push({ id, slug: definition.slug, position: index });
+      });
+      categoriesByHousehold[household.id] = entries;
+    });
+  });
+
+  run();
+
+  return categoriesByHousehold;
+}
 
 function generateNotes(
   db: Database.Database,
   households: Household[],
   rand: () => number,
   total: number,
+  categoriesByHousehold: Record<string, SeedCategory[]>,
 ): NoteStats {
   const insertNote = makeInserter(
     db,
@@ -653,6 +730,7 @@ function generateNotes(
     [
       "id",
       "household_id",
+      "category_id",
       "text",
       "color",
       "x",
@@ -677,9 +755,9 @@ function generateNotes(
     },
   );
 
-  const perHousehold: Record<string, { position: number; z: number }> = {};
+  const perHousehold: Record<string, { position: number; z: number; categoryCursor: number }> = {};
   households.forEach((hh) => {
-    perHousehold[hh.id] = { position: 0, z: 0 };
+    perHousehold[hh.id] = { position: 0, z: 0, categoryCursor: 0 };
   });
 
   const stats: NoteStats = {
@@ -694,6 +772,7 @@ function generateNotes(
     for (let i = 0; i < total; i++) {
       const household = households[i % households.length];
       const tracker = perHousehold[household.id];
+      const availableCategories = categoriesByHousehold[household.id] ?? [];
       const createdAt = Date.UTC(2024, 0, 1) + randomInt(rand, -120, 120) * DAY_MS;
       const updatedAt = createdAt + randomInt(rand, 0, 14) * DAY_MS + randomInt(rand, 0, 8) * HOUR_MS;
       const hasDeadline = rand() < 0.35;
@@ -705,9 +784,20 @@ function generateNotes(
         softDeleted.push({ id: noteId, restoreAt: deletedAt + randomInt(rand, 1, 5) * DAY_MS });
       }
 
+      let categoryId: string | null = null;
+      if (availableCategories.length > 0) {
+        const shouldAssign = tracker.position % 2 === 0 || rand() < 0.35;
+        if (shouldAssign) {
+          const cursor = tracker.categoryCursor % availableCategories.length;
+          categoryId = availableCategories[cursor].id;
+          tracker.categoryCursor = (cursor + 1) % availableCategories.length;
+        }
+      }
+
       insertNote({
         id: noteId,
         household_id: household.id,
+        category_id: categoryId,
         text: `Sticky note ${i + 1} for ${household.name}`,
         color: randomChoice(rand, NOTE_COLORS),
         x: randomInt(rand, 0, 600),
@@ -1191,8 +1281,9 @@ function main() {
 
   try {
     const households = generateHouseholds(db, rand, opts.households);
+    const categoryIndex = generateCategories(db, households);
     const eventStats = generateEvents(db, households, rand, opts.events);
-    const noteStats = generateNotes(db, households, rand, opts.notes);
+    const noteStats = generateNotes(db, households, rand, opts.notes, categoryIndex);
     const sources = loadAttachmentCorpus();
     const supporting = generateSupportingRecords(db, households, rand);
     const attachmentStats = generateAttachments(db, households, rand, opts, opts.attachments, sources, supporting);

@@ -105,6 +105,7 @@ impl<'a> MakeWriter<'a> for RotatingFileWriter {
 }
 
 mod attachments;
+mod categories;
 pub mod commands;
 pub mod db;
 mod diagnostics;
@@ -117,6 +118,7 @@ mod id;
 pub mod import;
 mod importer;
 pub mod ipc;
+mod notes;
 pub mod logging;
 pub mod migrate;
 pub mod migration_guard;
@@ -131,9 +133,14 @@ pub mod time_shadow;
 pub mod util;
 
 pub use error::{AppError, AppResult, ErrorDto};
+use categories::{
+    categories_create, categories_delete, categories_get, categories_list, categories_restore,
+    categories_update,
+};
 use events_tz_backfill::{
     events_backfill_timezone, events_backfill_timezone_cancel, events_backfill_timezone_status,
 };
+use notes::{notes_create, notes_delete, notes_get, notes_list, notes_restore, notes_update};
 use security::{error_map::UiError, fs_policy, fs_policy::RootKey, hash_path};
 use util::{dispatch_app_result, dispatch_async_app_result};
 
@@ -612,10 +619,8 @@ gen_domain_cmds!(
     pets,
     pet_medical,
     family_members,
-    categories,
     budget_categories,
     expenses,
-    notes,
     shopping_items,
 );
 

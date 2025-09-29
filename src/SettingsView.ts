@@ -17,8 +17,66 @@ import { STR } from "./ui/strings";
 import createButton from "@ui/Button";
 import { createAttributionSectionAsync } from "@features/settings/components/AttributionSection";
 import { createAmbientBackgroundSection } from "@features/settings/components/AmbientBackgroundSection";
+import { defaultHouseholdId } from "./db/household";
+import { categoriesRepo } from "./repos";
+import {
+  getCategories as getCategoryState,
+  setCategories as storeCategories,
+  subscribe as subscribeToCategories,
+  toggleCategory,
+  type StoreCategory,
+} from "./store/categories";
+import { showError } from "./ui/errors";
+import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
+import type { Category } from "./models";
 
-export function SettingsView(container: HTMLElement) {
+export interface SettingsViewOptions {
+  householdId?: string;
+  loadCategories?: (householdId: string) => Promise<Category[]>;
+  diagnostics?: {
+    fetchAboutMetadata?: typeof fetchAboutMetadata;
+    fetchDiagnosticsSummary?: typeof fetchDiagnosticsSummary;
+    openDiagnosticsDoc?: typeof openDiagnosticsDoc;
+  };
+  components?: {
+    createTimezoneMaintenanceSection?: typeof createTimezoneMaintenanceSection;
+    createBackupView?: typeof createBackupView;
+    createRepairView?: typeof createRepairView;
+    createExportView?: typeof createExportView;
+    createImportView?: typeof createImportView;
+    createHardRepairView?: typeof createHardRepairView;
+    createAmbientBackgroundSection?: typeof createAmbientBackgroundSection;
+    createAttributionSectionAsync?: typeof createAttributionSectionAsync;
+  };
+  useSettingsHook?: typeof useSettings;
+}
+
+export function SettingsView(
+  container: HTMLElement,
+  options: SettingsViewOptions = {},
+) {
+  runViewCleanups(container);
+
+  const diagnostics = options.diagnostics ?? {};
+  const fetchAbout = diagnostics.fetchAboutMetadata ?? fetchAboutMetadata;
+  const fetchSummary = diagnostics.fetchDiagnosticsSummary ?? fetchDiagnosticsSummary;
+  const openDiagnostics = diagnostics.openDiagnosticsDoc ?? openDiagnosticsDoc;
+
+  const components = options.components ?? {};
+  const createTimezoneSection =
+    components.createTimezoneMaintenanceSection ?? createTimezoneMaintenanceSection;
+  const createBackup = components.createBackupView ?? createBackupView;
+  const createRepair = components.createRepairView ?? createRepairView;
+  const createExport = components.createExportView ?? createExportView;
+  const createImport = components.createImportView ?? createImportView;
+  const createHardRepair = components.createHardRepairView ?? createHardRepairView;
+  const createAmbient =
+    components.createAmbientBackgroundSection ?? createAmbientBackgroundSection;
+  const createAttribution =
+    components.createAttributionSectionAsync ?? createAttributionSectionAsync;
+
+  const useSettingsFn = options.useSettingsHook ?? useSettings;
+
   const panel = SettingsPanel();
   const section = panel.element; // allow other modules to locate settings root
 
@@ -50,16 +108,137 @@ export function SettingsView(container: HTMLElement) {
     return panel;
   };
 
-  const timezoneMaintenance = createTimezoneMaintenanceSection();
-  const backups = createBackupView();
-  const exportView = createExportView();
-  const importView = createImportView();
-  const repair = createRepairView();
-  const hardRepair = createHardRepairView();
+  const manageCategoriesSection = (): HTMLElement => {
+    const panel = document.createElement("section");
+    panel.className = "card settings__section";
+    panel.setAttribute("aria-labelledby", "settings-manage-categories");
+
+    const heading = document.createElement("h3");
+    heading.id = "settings-manage-categories";
+    heading.textContent = "Manage categories";
+
+    const body = document.createElement("div");
+    body.className = "settings__body";
+
+    const list = document.createElement("div");
+    list.className = "settings__categories";
+    body.appendChild(list);
+
+    panel.append(heading, body);
+
+    const ensureHouseholdId = (() => {
+      let cached = options.householdId;
+      let promise: Promise<string> | null = cached ? Promise.resolve(cached) : null;
+      return () => {
+        if (cached) return Promise.resolve(cached);
+        if (!promise) {
+          promise = defaultHouseholdId().then((value) => {
+            cached = value;
+            return value;
+          });
+        }
+        return promise;
+      };
+    })();
+
+    const loadCategories =
+      options.loadCategories ??
+      ((householdId: string) =>
+        categoriesRepo.list({
+          householdId,
+          orderBy: "position, created_at, id",
+        }));
+
+    const render = (categories: StoreCategory[]) => {
+      list.innerHTML = "";
+      if (categories.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "settings__empty";
+        empty.textContent = "No categories available.";
+        list.appendChild(empty);
+        return;
+      }
+
+      const sorted = [...categories].sort((a, b) => {
+        if (a.position === b.position) return a.name.localeCompare(b.name);
+        return a.position - b.position;
+      });
+
+      sorted.forEach((category) => {
+        const item = document.createElement("label");
+        item.className = "settings__category-toggle";
+
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = category.isVisible;
+        checkbox.setAttribute("aria-label", `Toggle ${category.name}`);
+
+        checkbox.addEventListener("change", () => {
+          const nextChecked = checkbox.checked;
+          checkbox.disabled = true;
+          void (async () => {
+            try {
+              const householdId = await ensureHouseholdId();
+              await toggleCategory(householdId, category.id);
+            } catch (err) {
+              checkbox.checked = !nextChecked;
+              showError(err);
+            } finally {
+              checkbox.disabled = false;
+            }
+          })();
+        });
+
+        const swatch = document.createElement("span");
+        swatch.className = "settings__category-swatch";
+        swatch.style.backgroundColor = category.color;
+        swatch.setAttribute("aria-hidden", "true");
+
+        const name = document.createElement("span");
+        name.className = "settings__category-name";
+        name.textContent = category.name;
+
+        item.append(checkbox, swatch, name);
+        list.appendChild(item);
+      });
+    };
+
+    const unsubscribe = subscribeToCategories(render);
+    registerViewCleanup(container, unsubscribe);
+
+    void (async () => {
+      try {
+        const householdId = await ensureHouseholdId();
+        if (getCategoryState().length === 0) {
+          const categories = await loadCategories(householdId);
+          storeCategories(categories);
+        } else {
+          render(getCategoryState());
+        }
+      } catch (err) {
+        list.innerHTML = "";
+        const failure = document.createElement("p");
+        failure.className = "settings__error";
+        failure.textContent = "Unable to load categories.";
+        list.appendChild(failure);
+        showError(err);
+      }
+    })();
+
+    return panel;
+  };
+
+  const timezoneMaintenance = createTimezoneSection();
+  const backups = createBackup();
+  const exportView = createExport();
+  const importView = createImport();
+  const repair = createRepair();
+  const hardRepair = createHardRepair();
+  const manageCategories = manageCategoriesSection();
   const general = createEmptySection("settings-general", "General");
   const storage = createEmptySection("settings-storage", "Storage and permissions");
   const notifications = createEmptySection("settings-notifications", "Notifications");
-  const appearance = createAmbientBackgroundSection();
+  const appearance = createAmbient();
 
   const about = document.createElement("section");
   about.className = "card settings__section";
@@ -141,7 +320,7 @@ export function SettingsView(container: HTMLElement) {
 
   aboutBody.append(...bodyChildren);
   // Load attribution asynchronously to avoid deep relative imports and keep UI responsive
-  void createAttributionSectionAsync().then((attribution) => {
+  void createAttribution().then((attribution) => {
     if (attribution) {
       // Insert before actions if still present
       const anchor = aboutBody.querySelector<HTMLElement>(".settings__actions");
@@ -162,6 +341,7 @@ export function SettingsView(container: HTMLElement) {
     importView.element,
     repair.element,
     hardRepair.element,
+    manageCategories,
     general,
     storage,
     notifications,
@@ -176,8 +356,12 @@ export function SettingsView(container: HTMLElement) {
     .querySelectorAll<HTMLElement>(".settings__empty")
     .forEach((el) => el.appendChild(createEmptyState({ title: STR.empty.settingsTitle })));
 
-  void useSettings();
-  setupAboutAndDiagnostics(section);
+  void useSettingsFn();
+  setupAboutAndDiagnostics(section, {
+    fetchAbout,
+    fetchSummary,
+    openDiagnostics,
+  });
 }
 
 function describeError(error: unknown): string {
@@ -245,7 +429,16 @@ async function copyToClipboard(text: string) {
   }
 }
 
-async function setupAboutAndDiagnostics(root: HTMLElement) {
+type DiagnosticsDependencies = {
+  fetchAbout: typeof fetchAboutMetadata;
+  fetchSummary: typeof fetchDiagnosticsSummary;
+  openDiagnostics: typeof openDiagnosticsDoc;
+};
+
+async function setupAboutAndDiagnostics(
+  root: HTMLElement,
+  deps: DiagnosticsDependencies,
+) {
   const container = root.querySelector<HTMLElement>(".settings__body--about");
   if (!container) return;
 
@@ -257,7 +450,7 @@ async function setupAboutAndDiagnostics(root: HTMLElement) {
   const helpLink = container.querySelector<HTMLElement>("[data-open-diagnostics-doc]");
 
   try {
-    const meta = await fetchAboutMetadata();
+    const meta = await deps.fetchAbout();
     if (versionEl) versionEl.textContent = meta.appVersion;
     if (commitEl) {
       const shortHash = meta.commitHash === "unknown" ? meta.commitHash : meta.commitHash.slice(0, 12);
@@ -276,7 +469,7 @@ async function setupAboutAndDiagnostics(root: HTMLElement) {
     statusEl.textContent = "Collecting diagnostics summary…";
     previewEl.hidden = true;
     try {
-      const summary = await fetchDiagnosticsSummary();
+      const summary = await deps.fetchSummary();
       const text = formatSummary(summary);
       await copyToClipboard(text);
       statusEl.textContent = "Diagnostics summary copied. Review before sharing.";
@@ -294,7 +487,7 @@ async function setupAboutAndDiagnostics(root: HTMLElement) {
     if (!statusEl) return;
     statusEl.textContent = "Opening diagnostics guide…";
     try {
-      await openDiagnosticsDoc();
+      await deps.openDiagnostics();
       statusEl.textContent = "Diagnostics guide opened in your default viewer.";
     } catch (error) {
       statusEl.textContent = `Failed to open diagnostics guide: ${describeError(error)}`;

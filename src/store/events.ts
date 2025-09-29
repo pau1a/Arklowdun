@@ -6,7 +6,7 @@ export type EventsUpdatedPayload = {
   window?: { start: number; end: number };
   truncated?: boolean;
 };
-export type NotesUpdatedPayload = { count: number; ts: number };
+export type NotesUpdatedPayload = { count: number; ts: number; activeCategoryIds: string[] };
 export type HouseholdChangedPayload = { householdId: string };
 export type ErrorRaisedPayload = { id: string; message: string; code?: string };
 export type AppReadyPayload = { ts: number };
