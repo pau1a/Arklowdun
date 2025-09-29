@@ -121,6 +121,7 @@ pub mod ipc;
 pub mod logging;
 pub mod migrate;
 pub mod migration_guard;
+pub mod note_links;
 mod notes;
 pub mod ops;
 mod repo;
@@ -139,6 +140,9 @@ use categories::{
 pub use error::{AppError, AppResult, ErrorDto};
 use events_tz_backfill::{
     events_backfill_timezone, events_backfill_timezone_cancel, events_backfill_timezone_status,
+};
+use note_links::{
+    note_links_create, note_links_delete, notes_list_for_entity, notes_quick_create_for_entity,
 };
 use notes::{
     notes_create, notes_delete, notes_get, notes_list_cursor, notes_restore, notes_update,
@@ -2388,6 +2392,10 @@ macro_rules! app_commands {
             notes_update,
             notes_delete,
             notes_restore,
+            note_links_create,
+            note_links_delete,
+            notes_list_for_entity,
+            notes_quick_create_for_entity,
             shopping_items_list,
             shopping_items_get,
             shopping_items_create,
