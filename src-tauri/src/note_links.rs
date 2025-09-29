@@ -505,14 +505,14 @@ pub async fn list_notes_for_entity(
                 n.deadline_tz
            FROM note_links nl
            JOIN notes n ON n.id = nl.note_id
-          WHERE nl.household_id = ?1
-            AND nl.entity_type = ?2
-            AND nl.entity_id = ?3
+          WHERE nl.household_id = ?
+            AND nl.entity_type = ?
+            AND nl.entity_id = ?
             AND n.deleted_at IS NULL",
     );
 
     if after.is_some() {
-        sql.push_str(" AND (n.created_at > ?4 OR (n.created_at = ?4 AND n.id > ?5))");
+        sql.push_str(" AND (n.created_at > ? OR (n.created_at = ? AND n.id > ?))");
     }
 
     let mut filter_categories = Vec::new();
