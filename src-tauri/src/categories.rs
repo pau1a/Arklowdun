@@ -163,6 +163,7 @@ async fn list_categories(
     order_by: Option<String>,
     limit: Option<i64>,
     offset: Option<i64>,
+    include_hidden: bool,
 ) -> AppResult<Vec<Category>> {
     let rows = repo::list_active(
         &pool,
@@ -180,9 +181,19 @@ async fn list_categories(
             .with_context("household_id", household_id.clone())
     })?;
 
-    rows.into_iter()
+    let categories: Vec<Category> = rows
+        .into_iter()
         .map(|row| Category::from_row(row).map_err(|err| err.with_context("operation", "list")))
-        .collect()
+        .collect::<Result<_, _>>()?;
+
+    if include_hidden {
+        Ok(categories)
+    } else {
+        Ok(categories
+            .into_iter()
+            .filter(|category| category.is_visible)
+            .collect())
+    }
 }
 
 async fn get_category(
@@ -209,11 +220,23 @@ pub async fn categories_list(
     order_by: Option<String>,
     limit: Option<i64>,
     offset: Option<i64>,
+    include_hidden: Option<bool>,
 ) -> AppResult<Vec<Category>> {
     let pool = state.pool_clone();
     dispatch_async_app_result(move || {
         let household_id = household_id.clone();
-        async move { list_categories(pool, household_id, order_by, limit, offset).await }
+        let include_hidden = include_hidden.unwrap_or(false);
+        async move {
+            list_categories(
+                pool,
+                household_id,
+                order_by,
+                limit,
+                offset,
+                include_hidden,
+            )
+            .await
+        }
     })
     .await
 }

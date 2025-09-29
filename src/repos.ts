@@ -24,6 +24,7 @@ type ListOpts = {
   orderBy?: string;
   limit?: number;
   offset?: number;
+  includeHidden?: boolean;
 };
 
 const SEARCH_TABLES = new Set(["notes", "events", "vehicles", "pets"]);
@@ -37,12 +38,20 @@ function domainRepo<T extends object>(table: string, defaultOrderBy: string) {
           'Do not use domainRepo("events"). Use eventsApi.listRange(...) (events_list_range) instead.'
         );
       }
-      return await call<T[]>(`${table}_list`, {
+      const args: Record<string, unknown> = {
         householdId: opts.householdId,
         orderBy: opts.orderBy ?? defaultOrderBy,
         limit: opts.limit,
         offset: opts.offset,
-      });
+      };
+
+      if (table === "categories" && typeof opts.includeHidden === "boolean") {
+        args.includeHidden = opts.includeHidden;
+        // Some command bindings still rely on snake_case parameters; include both for safety.
+        args.include_hidden = opts.includeHidden;
+      }
+
+      return await call<T[]>(`${table}_list`, args);
     },
 
     async create(householdId: string, data: Partial<T>): Promise<T> {
