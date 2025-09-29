@@ -6,15 +6,9 @@ authors = ["you"]
 edition = "2021"
 default-run = "arklowdun"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [lib]
-# The `_lib` suffix may seem redundant but it is necessary
-# to make the lib name unique and wouldn't conflict with the bin name.
-# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "arklowdun_lib"
 path = "src/lib.rs"
-# Doctests disabled until we have runnable docs; re-enable with a desktop-runtime feature.
 doctest = false
 crate-type = ["staticlib", "cdylib", "rlib"]
 
@@ -26,16 +20,8 @@ legacy_deleted_at = []
 tauri-build = { version = "2", features = ["config-json5"] }
 
 [dependencies]
-tauri = { version = "2", features = ["test"] }
-tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri-plugin-notification = "2"
-tauri-plugin-dialog = "2"
-tauri-plugin-fs = "2"
-tauri-plugin-sql = { version = "2", features = ["sqlite"] }
-tauri-plugin-clipboard-manager = "2"
-tauri-plugin-store = "2"
 uuid = { version = "1", features = ["v7", "serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 chrono-tz = "=0.10.4"
@@ -70,11 +56,24 @@ file-rotate = "0.7"
 rusqlite = { version = "0.32", features = ["backup"] }
 fs2 = "0.4"
 
+# Tauri & plugins
+tauri = { version = "2", features = ["test"] }
+tauri-plugin-opener = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-store = "2"
+
 [dev-dependencies]
 libc = "0.2"
 assert_cmd = "2"
 tempfile = "3"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# On macOS, also enable the private API feature to match tauri.conf.json5
+tauri = { version = "2", features = ["test", "macos-private-api"] }
 
 [[bin]]
 name = "verify_schema"
