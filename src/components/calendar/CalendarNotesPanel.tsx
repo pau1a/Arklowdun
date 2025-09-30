@@ -5,10 +5,16 @@ import type { Note } from "@bindings/Note";
 import type { NoteLink } from "@bindings/NoteLink";
 import type { ContextNotesPage } from "@bindings/ContextNotesPage";
 import { contextNotesRepo } from "@repos/contextNotesRepo";
-import { getActiveCategoryIds, getCategories, subscribeActiveCategoryIds } from "@store/categories";
+import {
+  getActiveCategoryIds,
+  getCategories,
+  setCategories,
+  subscribeActiveCategoryIds,
+} from "@store/categories";
 import { on, type AppEventListener } from "@store/events";
 import createLoading from "@ui/Loading";
 import createTimezoneBadge from "@ui/TimezoneBadge";
+import { categoriesRepo } from "../../repos";
 
 const PANEL_LIMIT = 20;
 
@@ -28,8 +34,18 @@ export interface CalendarNotesPanelInstance {
   destroy(): void;
 }
 
-function resolveQuickCaptureCategory(): string | null {
-  const categories = getCategories();
+export async function resolveQuickCaptureCategory(): Promise<string | null> {
+  let categories = getCategories();
+  if (categories.length === 0) {
+    const householdId = await defaultHouseholdId();
+    const fetched = await categoriesRepo.list({
+      householdId,
+      orderBy: "position, created_at, id",
+      includeHidden: true,
+    });
+    setCategories(fetched);
+    categories = getCategories();
+  }
   if (categories.length === 0) return null;
   const firstVisible = categories.find((category) => category.isVisible);
   if (firstVisible) return firstVisible.id;
@@ -307,15 +323,17 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
     if (!currentEvent) return;
     const text = quickInput.value.trim();
     if (!text) return;
-    const categoryId = resolveQuickCaptureCategory();
-    if (!categoryId) {
-      currentError = new Error("No categories available for quick capture.");
-      syncErrorState();
-      return;
-    }
     isSubmitting = true;
     syncQuickState();
     try {
+      const categoryId = await resolveQuickCaptureCategory();
+      if (!categoryId) {
+        currentError = new Error("No categories available for quick capture.");
+        syncErrorState();
+        return;
+      }
+      currentError = null;
+      syncErrorState();
       const householdId = currentHouseholdId ?? (await defaultHouseholdId());
       currentHouseholdId = householdId;
       const note = await contextNotesRepo.quickCreate({

@@ -6,6 +6,7 @@ import {
 } from "./notification";
 import { nowMs } from "./db/time";
 import { defaultHouseholdId } from "./db/household";
+import { categoriesRepo } from "./repos";
 import {
   CalendarGrid,
   defaultCalendarWindow,
@@ -21,6 +22,7 @@ import {
   type EventsSnapshot,
 } from "./store";
 import { emit, on } from "./store/events";
+import { getCategories, setCategories } from "./store/categories";
 import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
 import createButton from "@ui/Button";
 import createInput from "@ui/Input";
@@ -66,8 +68,25 @@ async function scheduleNotifications(events: CalendarEvent[]) {
   });
 }
 
+async function ensureCategoriesLoaded(): Promise<void> {
+  if (getCategories().length > 0) return;
+  try {
+    const householdId = await defaultHouseholdId();
+    const categories = await categoriesRepo.list({
+      householdId,
+      orderBy: "position, created_at, id",
+      includeHidden: true,
+    });
+    setCategories(categories);
+  } catch (error) {
+    console.error("Failed to preload categories for calendar", error);
+  }
+}
+
 export async function CalendarView(container: HTMLElement) {
   runViewCleanups(container);
+
+  await ensureCategoriesLoaded();
 
   const section = document.createElement("section");
   section.className = "calendar";
