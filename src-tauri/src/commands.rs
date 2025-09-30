@@ -644,7 +644,12 @@ async fn get(
 }
 
 // TXN: domain=OUT OF SCOPE tables=*
-async fn create(pool: &SqlitePool, table: &str, mut data: Map<String, Value>) -> AppResult<Value> {
+async fn create(pool: &SqlitePool, table: &str, data: Map<String, Value>) -> AppResult<Value> {
+    if table == "events" {
+        return create_event(pool, data).await;
+    }
+
+    let mut data = data;
     let id = data
         .get("id")
         .and_then(|v| v.as_str())
@@ -655,11 +660,6 @@ async fn create(pool: &SqlitePool, table: &str, mut data: Map<String, Value>) ->
     data.entry(String::from("created_at"))
         .or_insert(Value::from(now));
     data.insert("updated_at".into(), Value::from(now));
-
-    if table == "events" {
-        derive_event_wall_clock_for_create(&mut data)?;
-        normalize_event_exdates_for_create(&mut data)?;
-    }
 
     let cols: Vec<String> = data.keys().cloned().collect();
     let placeholders: Vec<String> = cols.iter().map(|_| "?".into()).collect();
@@ -676,6 +676,88 @@ async fn create(pool: &SqlitePool, table: &str, mut data: Map<String, Value>) ->
         })?;
         query = bind_value(query, value);
     }
+    query.execute(pool).await.map_err(AppError::from)?;
+    Ok(Value::Object(data))
+}
+
+async fn create_event(pool: &SqlitePool, mut data: Map<String, Value>) -> AppResult<Value> {
+    let id = data
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(new_uuid_v7);
+    data.insert("id".into(), Value::String(id));
+
+    let now = now_ms();
+    data.entry(String::from("created_at"))
+        .or_insert(Value::from(now));
+    data.insert("updated_at".into(), Value::from(now));
+
+    derive_event_wall_clock_for_create(&mut data)?;
+    normalize_event_exdates_for_create(&mut data)?;
+
+    // Only insert columns that are guaranteed to exist in legacy deployments.
+    const EVENT_COLUMNS: &[&str] = &[
+        "id",
+        "household_id",
+        "title",
+        "tz",
+        "start_at_utc",
+        "end_at_utc",
+        "rrule",
+        "exdates",
+        "reminder",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+    ];
+
+    let mut cols: Vec<&str> = EVENT_COLUMNS
+        .iter()
+        .copied()
+        .filter(|key| data.contains_key(*key))
+        .collect();
+
+    if !cols.iter().any(|c| *c == "start_at_utc") {
+        return Err(AppError::new(
+            "TIME/MISSING_START_AT_UTC",
+            "Events must include a UTC start timestamp.",
+        ));
+    }
+
+    if !cols.iter().any(|c| *c == "household_id") {
+        return Err(AppError::new(
+            "EVENTS/MISSING_HOUSEHOLD",
+            "Events must include a household id.",
+        ));
+    }
+
+    if !cols.iter().any(|c| *c == "title") {
+        return Err(AppError::new(
+            "EVENTS/MISSING_TITLE",
+            "Events must include a title.",
+        ));
+    }
+
+    // Ensure deterministic column order for SQL string and binding.
+    cols.sort_unstable();
+
+    let placeholders: Vec<&str> = cols.iter().map(|_| "?").collect();
+    let sql = format!(
+        "INSERT INTO events ({}) VALUES ({}) ON CONFLICT(id) DO NOTHING",
+        cols.join(","),
+        placeholders.join(",")
+    );
+
+    let mut query = sqlx::query(&sql);
+    for &col in &cols {
+        let value = data.get(col).ok_or_else(|| {
+            AppError::new("COMMANDS/MISSING_FIELD", "Payload missing value for column")
+                .with_context("column", col.to_string())
+        })?;
+        query = bind_value(query, value);
+    }
+
     query.execute(pool).await.map_err(AppError::from)?;
     Ok(Value::Object(data))
 }
