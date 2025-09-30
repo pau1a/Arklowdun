@@ -35,7 +35,7 @@ export interface CalendarNotesPanelInstance {
   destroy(): void;
 }
 
-async function ensureEventPersisted(
+export async function ensureEventPersisted(
   event: CalendarEvent,
   householdId: string,
 ): Promise<void> {
@@ -45,7 +45,6 @@ async function ensureEventPersisted(
         id: event.id,
         title: event.title,
         start_at_utc: event.start_at_utc,
-        end_at_utc: event.end_at_utc ?? event.start_at_utc,
         tz: event.tz ?? null,
         household_id: householdId,
       },

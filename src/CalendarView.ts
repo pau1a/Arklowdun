@@ -37,8 +37,10 @@ async function saveEvent(
   >,
 ): Promise<CalendarEvent> {
   const hh = await defaultHouseholdId();
+  const safeEvent = { ...event } as Record<string, unknown>;
+  delete safeEvent.end_at_utc;
   return await call<CalendarEvent>("event_create", {
-    data: { ...event, household_id: hh },
+    data: { ...safeEvent, household_id: hh },
   });
 }
 
