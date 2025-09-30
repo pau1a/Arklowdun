@@ -8,6 +8,7 @@ import { contextNotesRepo } from "@repos/contextNotesRepo";
 import { getActiveCategoryIds, getCategories, subscribeActiveCategoryIds } from "@store/categories";
 import { on, type AppEventListener } from "@store/events";
 import createLoading from "@ui/Loading";
+import createTimezoneBadge from "@ui/TimezoneBadge";
 
 const PANEL_LIMIT = 20;
 
@@ -52,12 +53,27 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
   root.className = "calendar-notes-panel";
   root.hidden = true;
 
+  const appTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
   const header = document.createElement("div");
   header.className = "calendar-notes-panel__header";
 
-  const title = document.createElement("h3");
-  title.textContent = "Notes";
-  header.appendChild(title);
+  const eventTitle = document.createElement("h3");
+  eventTitle.className = "calendar-notes-panel__event-title";
+  eventTitle.textContent = "";
+
+  const eventMeta = document.createElement("div");
+  eventMeta.className = "calendar-notes-panel__event-meta";
+
+  const eventWhen = document.createElement("p");
+  eventWhen.className = "calendar-notes-panel__event-when";
+  eventMeta.appendChild(eventWhen);
+
+  header.append(eventTitle, eventMeta);
+
+  const notesHeading = document.createElement("p");
+  notesHeading.className = "calendar-notes-panel__notes-label";
+  notesHeading.textContent = "Notes";
 
   const quickForm = document.createElement("form");
   quickForm.className = "calendar-notes-panel__quick";
@@ -107,7 +123,7 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
   loadMoreButton.className = "calendar-notes-panel__load-more";
   loadMoreWrapper.appendChild(loadMoreButton);
 
-  root.append(header, quickForm, errorSurface, loading, emptyState, list, loadMoreWrapper);
+  root.append(header, notesHeading, quickForm, errorSurface, loading, emptyState, list, loadMoreWrapper);
 
   let currentEvent: CalendarEvent | null = null;
   let currentHouseholdId: string | null = null;
@@ -362,10 +378,35 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
     syncErrorState();
     if (!event) {
       root.hidden = true;
+      eventTitle.textContent = "";
+      eventWhen.textContent = "";
+      while (eventMeta.children.length > 1) {
+        eventMeta.removeChild(eventMeta.lastChild as ChildNode);
+      }
       syncQuickState();
       return;
     }
     root.hidden = false;
+    const displayTitle = event.title && event.title.trim().length > 0 ? event.title : "Untitled event";
+    eventTitle.textContent = displayTitle;
+    const zone = event.tz ?? appTimezone ?? "UTC";
+    const when = new Intl.DateTimeFormat(undefined, {
+      dateStyle: "full",
+      timeStyle: "short",
+      timeZone: zone,
+    }).format(new Date(event.start_at_utc));
+    eventWhen.textContent = `Starts ${when}`;
+    while (eventMeta.children.length > 1) {
+      eventMeta.removeChild(eventMeta.lastChild as ChildNode);
+    }
+    const timezoneBadge = createTimezoneBadge({
+      eventTimezone: event.tz,
+      appTimezone: appTimezone ?? undefined,
+      tooltipId: "calendar-notes-panel-timezone",
+    });
+    if (!timezoneBadge.hidden) {
+      eventMeta.appendChild(timezoneBadge);
+    }
     syncQuickState();
     void loadNotes({ append: false });
   };

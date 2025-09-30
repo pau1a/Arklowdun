@@ -2384,28 +2384,6 @@ footer a.footer__settings {
   outline-offset: 2px;
 }
 
-.calendar__event-meta {
-  display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-  align-items: center;
-  margin: var(--space-2) 0;
-}
-
-.calendar__event-modal {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-.calendar__event-modal h2 {
-  margin: 0;
-}
-
-.calendar__event-modal [data-ui="button"] {
-  align-self: flex-end;
-}
-
 .calendar__form { display: flex; gap: var(--space-2); }
 .calendar__form input { flex: 1; }
 
@@ -2419,13 +2397,34 @@ footer a.footer__settings {
 
 .calendar-notes-panel__header {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: var(--space-1);
+  align-items: flex-start;
 }
 
-.calendar-notes-panel__header h3 {
+.calendar-notes-panel__event-title {
   margin: 0;
   font-size: 1rem;
+  font-weight: 600;
+}
+
+.calendar-notes-panel__event-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+.calendar-notes-panel__event-when {
+  margin: 0;
+}
+
+.calendar-notes-panel__notes-label {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text);
 }
 
 .calendar-notes-panel__quick {
