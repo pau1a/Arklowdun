@@ -10,6 +10,7 @@ import type {
 } from "../models";
 import type { Event } from "../bindings/Event";
 import { notesRepo as typedNotesRepo } from "./notesRepo";
+export { contextNotesRepo } from "./contextNotesRepo";
 
 export const billsRepo = createCrudRepo<Bill, NewRow<Bill>, PatchRow<Bill>>("bills");
 export const policiesRepo = createCrudRepo<Policy, NewRow<Policy>, PatchRow<Policy>>("policies");

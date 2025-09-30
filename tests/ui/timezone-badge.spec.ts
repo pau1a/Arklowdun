@@ -4,7 +4,7 @@ import { createUtcEvents, seedCalendarSnapshot } from '../support/calendar';
 import { STORE_MODULE_PATH } from '../support/store';
 
 test.describe('Timezone badge integrations', () => {
-  test('shows in calendar event modal for cross-timezone events', async ({ page }) => {
+  test('shows in calendar notes panel for cross-timezone events', async ({ page }) => {
     await page.goto('/#/calendar');
 
     // Place the event near "now" so the default calendar view renders it.
@@ -37,13 +37,13 @@ test.describe('Timezone badge integrations', () => {
     await expect(eventRow).toBeVisible();
     await eventRow.click();
 
-    const modal = page.locator('.calendar__event-modal');
-    await expect(modal).toBeVisible();
-    const badge = modal.locator('[data-ui="timezone-badge"]');
+    const panel = page.locator('.calendar-notes-panel');
+    await expect(panel).toBeVisible();
+    const badge = panel.locator('.calendar-notes-panel__event-meta [data-ui="timezone-badge"]');
     await expect(badge).toBeVisible();
     await expect(badge).toContainText('America/New_York');
 
-    await page.keyboard.press('Escape');
+    await page.locator('.calendar__notes-toggle').click();
   });
 
   test('appears for note deadlines when timezone differs', async ({ page }) => {

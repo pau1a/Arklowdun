@@ -6,12 +6,14 @@ import {
 } from "./notification";
 import { nowMs } from "./db/time";
 import { defaultHouseholdId } from "./db/household";
+import { categoriesRepo } from "./repos";
 import {
   CalendarGrid,
   defaultCalendarWindow,
   type CalendarEvent,
   useCalendar,
 } from "@features/calendar";
+import CalendarNotesPanel from "./components/calendar/CalendarNotesPanel";
 import {
   actions,
   selectors,
@@ -20,11 +22,10 @@ import {
   type EventsSnapshot,
 } from "./store";
 import { emit, on } from "./store/events";
+import { getCategories, setCategories } from "./store/categories";
 import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
 import createButton from "@ui/Button";
 import createInput from "@ui/Input";
-import createModal from "@ui/Modal";
-import createTimezoneBadge from "@ui/TimezoneBadge";
 import createTruncationBanner from "@ui/TruncationBanner";
 import createErrorBanner from "@ui/ErrorBanner";
 import { describeTimekeepingError } from "@utils/timekeepingErrors";
@@ -36,8 +37,10 @@ async function saveEvent(
   >,
 ): Promise<CalendarEvent> {
   const hh = await defaultHouseholdId();
+  const safeEvent = { ...event } as Record<string, unknown>;
+  delete safeEvent.end_at_utc;
   return await call<CalendarEvent>("event_create", {
-    data: { ...event, household_id: hh },
+    data: { ...safeEvent, household_id: hh },
   });
 }
 
@@ -67,8 +70,25 @@ async function scheduleNotifications(events: CalendarEvent[]) {
   });
 }
 
+async function ensureCategoriesLoaded(): Promise<void> {
+  if (getCategories().length > 0) return;
+  try {
+    const householdId = await defaultHouseholdId();
+    const categories = await categoriesRepo.list({
+      householdId,
+      orderBy: "position, created_at, id",
+      includeHidden: true,
+    });
+    setCategories(categories);
+  } catch (error) {
+    console.error("Failed to preload categories for calendar", error);
+  }
+}
+
 export async function CalendarView(container: HTMLElement) {
   runViewCleanups(container);
+
+  await ensureCategoriesLoaded();
 
   const section = document.createElement("section");
   section.className = "calendar";
@@ -80,6 +100,17 @@ export async function CalendarView(container: HTMLElement) {
   kicker.className = "kicker";
   kicker.textContent = "All times local";
   headerContent.append(kicker);
+
+  const notesToggle = createButton({
+    label: "Show notes",
+    variant: "ghost",
+    size: "sm",
+    className: "calendar__notes-toggle",
+    type: "button",
+    ariaPressed: false,
+  });
+  notesToggle.disabled = true;
+  headerContent.append(notesToggle);
   header.appendChild(headerContent);
 
   const truncationBanner = createTruncationBanner({
@@ -91,68 +122,34 @@ export async function CalendarView(container: HTMLElement) {
     },
   });
 
-  const systemTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const appTimezone = systemTimezone;
+  const notesPanel = CalendarNotesPanel();
+  let selectedEvent: CalendarEvent | null = null;
+  let notesToggleActive = false;
 
-  const eventModal = createModal({
-    open: false,
-    titleId: "calendar-event-modal-title",
-    onOpenChange(open) {
-      if (!open) eventModal.setOpen(false);
-    },
+  const syncNotesToggle = () => {
+    const hasEvent = Boolean(selectedEvent);
+    notesToggle.disabled = !hasEvent;
+    const pressed = hasEvent && notesToggleActive;
+    notesToggle.update({
+      label: pressed ? "Hide notes" : "Show notes",
+      ariaPressed: pressed,
+    });
+    notesPanel.element.classList.toggle("calendar-notes-panel--mobile-open", pressed);
+  };
+
+  notesToggle.addEventListener("click", (event) => {
+    event.preventDefault();
+    if (!selectedEvent) return;
+    notesToggleActive = !notesToggleActive;
+    syncNotesToggle();
   });
-  eventModal.dialog.classList.add("calendar__event-modal");
+  syncNotesToggle();
 
-  const openEventModal = (event: CalendarEvent) => {
-    const dialog = eventModal.dialog;
-    dialog.innerHTML = "";
-
-    const heading = document.createElement("h2");
-    heading.id = "calendar-event-modal-title";
-    heading.textContent = event.title;
-
-    const description = document.createElement("p");
-    description.id = "calendar-event-modal-description";
-    const zone = event.tz ?? systemTimezone ?? "UTC";
-    const when = new Intl.DateTimeFormat(undefined, {
-      dateStyle: "full",
-      timeStyle: "short",
-      timeZone: zone,
-    }).format(new Date(event.start_at_utc));
-    description.textContent = `Starts ${when}`;
-
-    const meta = document.createElement("div");
-    meta.className = "calendar__event-meta";
-
-    const timezoneBadge = createTimezoneBadge({
-      eventTimezone: event.tz,
-      appTimezone,
-      tooltipId: "calendar-event-timezone",
-    });
-    if (!timezoneBadge.hidden) {
-      meta.appendChild(timezoneBadge);
-    }
-
-    const closeButton = createButton({
-      label: "Close",
-      variant: "ghost",
-      type: "button",
-      onClick: (ev) => {
-        ev.preventDefault();
-        eventModal.setOpen(false);
-      },
-    });
-
-    dialog.append(heading, description);
-    if (meta.childElementCount > 0) dialog.append(meta);
-    dialog.append(closeButton);
-
-    eventModal.update({
-      titleId: heading.id,
-      descriptionId: description.id,
-      initialFocus: closeButton,
-    });
-    eventModal.setOpen(true);
+  const handleEventSelect = (event: CalendarEvent | null) => {
+    selectedEvent = event;
+    notesPanel.setEvent(event);
+    notesToggleActive = Boolean(event);
+    syncNotesToggle();
   };
 
   const panel = document.createElement("div");
@@ -162,11 +159,18 @@ export async function CalendarView(container: HTMLElement) {
   errorRegion.setAttribute("aria-live", "polite");
   errorRegion.setAttribute("aria-atomic", "true");
   errorRegion.hidden = true;
-  const calendar = CalendarGrid({ onEventSelect: openEventModal });
-  panel.append(errorRegion, calendar.element);
+  const calendar = CalendarGrid({ onEventSelect: handleEventSelect });
+  const calendarSurface = document.createElement("div");
+  calendarSurface.className = "calendar__surface";
+  calendarSurface.append(errorRegion, calendar.element);
+
+  const layout = document.createElement("div");
+  layout.className = "calendar__layout";
+  layout.append(calendarSurface, notesPanel.element);
+
+  panel.append(layout);
   registerViewCleanup(container, () => {
-    eventModal.setOpen(false);
-    eventModal.dialog.innerHTML = "";
+    notesPanel.destroy();
   });
 
   const form = document.createElement("form");
