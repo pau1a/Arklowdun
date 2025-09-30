@@ -12,6 +12,7 @@ import {
   type CalendarEvent,
   useCalendar,
 } from "@features/calendar";
+import CalendarNotesPanel from "./components/calendar/CalendarNotesPanel";
 import {
   actions,
   selectors,
@@ -80,6 +81,17 @@ export async function CalendarView(container: HTMLElement) {
   kicker.className = "kicker";
   kicker.textContent = "All times local";
   headerContent.append(kicker);
+
+  const notesToggle = createButton({
+    label: "Show notes",
+    variant: "ghost",
+    size: "sm",
+    className: "calendar__notes-toggle",
+    type: "button",
+    ariaPressed: false,
+  });
+  notesToggle.disabled = true;
+  headerContent.append(notesToggle);
   header.appendChild(headerContent);
 
   const truncationBanner = createTruncationBanner({
@@ -94,16 +106,49 @@ export async function CalendarView(container: HTMLElement) {
   const systemTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const appTimezone = systemTimezone;
 
+  const notesPanel = CalendarNotesPanel();
+  let selectedEvent: CalendarEvent | null = null;
+  let notesToggleActive = false;
+
+  const syncNotesToggle = () => {
+    const hasEvent = Boolean(selectedEvent);
+    notesToggle.disabled = !hasEvent;
+    const pressed = hasEvent && notesToggleActive;
+    notesToggle.update({
+      label: pressed ? "Hide notes" : "Show notes",
+      ariaPressed: pressed,
+    });
+    notesPanel.element.classList.toggle("calendar-notes-panel--mobile-open", pressed);
+  };
+
+  notesToggle.addEventListener("click", (event) => {
+    event.preventDefault();
+    if (!selectedEvent) return;
+    notesToggleActive = !notesToggleActive;
+    syncNotesToggle();
+  });
+  syncNotesToggle();
+
   const eventModal = createModal({
     open: false,
     titleId: "calendar-event-modal-title",
     onOpenChange(open) {
-      if (!open) eventModal.setOpen(false);
+      if (!open) {
+        eventModal.setOpen(false);
+        selectedEvent = null;
+        notesToggleActive = false;
+        notesPanel.setEvent(null);
+        syncNotesToggle();
+      }
     },
   });
   eventModal.dialog.classList.add("calendar__event-modal");
 
   const openEventModal = (event: CalendarEvent) => {
+    selectedEvent = event;
+    notesToggleActive = true;
+    notesPanel.setEvent(event);
+    syncNotesToggle();
     const dialog = eventModal.dialog;
     dialog.innerHTML = "";
 
@@ -163,10 +208,21 @@ export async function CalendarView(container: HTMLElement) {
   errorRegion.setAttribute("aria-atomic", "true");
   errorRegion.hidden = true;
   const calendar = CalendarGrid({ onEventSelect: openEventModal });
-  panel.append(errorRegion, calendar.element);
+  const calendarSurface = document.createElement("div");
+  calendarSurface.className = "calendar__surface";
+  calendarSurface.append(errorRegion, calendar.element);
+
+  const layout = document.createElement("div");
+  layout.className = "calendar__layout";
+  layout.append(calendarSurface, notesPanel.element);
+
+  panel.append(layout);
   registerViewCleanup(container, () => {
     eventModal.setOpen(false);
     eventModal.dialog.innerHTML = "";
+  });
+  registerViewCleanup(container, () => {
+    notesPanel.destroy();
   });
 
   const form = document.createElement("form");

@@ -2284,6 +2284,43 @@ footer a.footer__settings {
   align-items: flex-start;
 }
 
+.calendar__header > div {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.calendar__notes-toggle {
+  display: none;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-radius: var(--radius-base);
+  padding: var(--space-1) var(--space-2);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.calendar__notes-toggle[aria-pressed="true"] {
+  background: var(--color-accent);
+  border-color: transparent;
+  color: var(--color-accent-text);
+}
+
+.calendar__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.calendar__surface {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
 .calendar__month-label {
   font-weight: 600;
   text-align: center;
@@ -2371,6 +2408,194 @@ footer a.footer__settings {
 
 .calendar__form { display: flex; gap: var(--space-2); }
 .calendar__form input { flex: 1; }
+
+.calendar-notes-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 300px;
+  max-width: 100%;
+}
+
+.calendar-notes-panel__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.calendar-notes-panel__header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.calendar-notes-panel__quick {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.calendar-notes-panel__input {
+  flex: 1;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-base);
+  background: var(--color-surface);
+  font: inherit;
+}
+
+.calendar-notes-panel__input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.calendar-notes-panel__submit {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-base);
+  border: none;
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.calendar-notes-panel__submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.calendar-notes-panel__error {
+  background: var(--color-error-subtle);
+  color: var(--color-error-text);
+  border-radius: var(--radius-base);
+  padding: var(--space-2);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.calendar-notes-panel__error-message {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.calendar-notes-panel__retry {
+  border: 1px solid var(--color-border);
+  background: transparent;
+  border-radius: var(--radius-base);
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+}
+
+.calendar-notes-panel__loading {
+  min-height: 96px;
+}
+
+.calendar-notes-panel__empty {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+}
+
+.calendar-notes-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.calendar-notes-panel__item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--space-2);
+  align-items: flex-start;
+  background: var(--color-surface-subtle);
+  border-radius: var(--radius-base);
+  padding: var(--space-2);
+}
+
+.calendar-notes-panel__color {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-top: 0.35rem;
+  background: var(--color-accent);
+}
+
+.calendar-notes-panel__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.calendar-notes-panel__text {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.calendar-notes-panel__deadline {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.calendar-notes-panel__unlink {
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: var(--space-1);
+}
+
+.calendar-notes-panel__unlink:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.calendar-notes-panel__pagination {
+  display: flex;
+  justify-content: center;
+}
+
+.calendar-notes-panel__load-more {
+  border: 1px solid var(--color-border);
+  background: transparent;
+  border-radius: var(--radius-base);
+  padding: var(--space-1) var(--space-3);
+  cursor: pointer;
+}
+
+.calendar-notes-panel__load-more:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 767px) {
+  .calendar__notes-toggle {
+    display: inline-flex;
+  }
+
+  .calendar__layout {
+    grid-template-columns: 1fr;
+  }
+
+  .calendar-notes-panel {
+    display: none;
+    width: 100%;
+  }
+
+  .calendar-notes-panel.calendar-notes-panel--mobile-open {
+    display: flex;
+  }
+}
 
 /* Empty state component */
 .empty-state {

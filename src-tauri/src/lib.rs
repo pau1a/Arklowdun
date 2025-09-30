@@ -142,7 +142,8 @@ use events_tz_backfill::{
     events_backfill_timezone, events_backfill_timezone_cancel, events_backfill_timezone_status,
 };
 use note_links::{
-    note_links_create, note_links_delete, notes_list_for_entity, notes_quick_create_for_entity,
+    note_links_create, note_links_delete, note_links_get_for_note, notes_list_for_entity,
+    notes_quick_create_for_entity,
 };
 use notes::{
     notes_create, notes_delete, notes_get, notes_list_cursor, notes_restore, notes_update,
@@ -2394,6 +2395,7 @@ macro_rules! app_commands {
             notes_restore,
             note_links_create,
             note_links_delete,
+            note_links_get_for_note,
             notes_list_for_entity,
             notes_quick_create_for_entity,
             shopping_items_list,

@@ -1,0 +1,97 @@
+import { call } from "@lib/ipc/call";
+import type { ContextNotesPage } from "@bindings/ContextNotesPage";
+import type { Note } from "@bindings/Note";
+import type { NoteLink } from "@bindings/NoteLink";
+import type { NoteLinkEntityType } from "@bindings/NoteLinkEntityType";
+import { log } from "@utils/logger";
+
+export interface ListContextNotesOptions {
+  householdId: string;
+  entityType: NoteLinkEntityType;
+  entityId: string;
+  categoryIds?: string[];
+  cursor?: string | null;
+  limit?: number;
+}
+
+export interface QuickCreateContextNoteOptions {
+  householdId: string;
+  entityType: NoteLinkEntityType;
+  entityId: string;
+  categoryId: string;
+  text: string;
+  color?: string;
+}
+
+export const contextNotesRepo = {
+  async listForEntity(options: ListContextNotesOptions): Promise<ContextNotesPage> {
+    log.debug("contextual-notes", {
+      action: "list",
+      entityType: options.entityType,
+      entityId: options.entityId,
+      cursor: options.cursor,
+      limit: options.limit,
+    });
+    const payload: Record<string, unknown> = {
+      household_id: options.householdId,
+      entity_type: options.entityType,
+      entity_id: options.entityId,
+    };
+    if (options.categoryIds?.length) {
+      payload.category_ids = options.categoryIds;
+    }
+    if (options.cursor) {
+      payload.cursor = options.cursor;
+    }
+    if (options.limit !== undefined) {
+      payload.limit = options.limit;
+    }
+    return call<ContextNotesPage>("notes_list_for_entity", payload);
+  },
+
+  async quickCreate(options: QuickCreateContextNoteOptions): Promise<Note> {
+    log.debug("contextual-notes", {
+      action: "quick-create",
+      entityType: options.entityType,
+      entityId: options.entityId,
+    });
+    return call<Note>("notes_quick_create_for_entity", {
+      household_id: options.householdId,
+      entity_type: options.entityType,
+      entity_id: options.entityId,
+      category_id: options.categoryId,
+      text: options.text,
+      color: options.color,
+    });
+  },
+
+  async getLinkForNote(
+    householdId: string,
+    noteId: string,
+    entityType: NoteLinkEntityType,
+    entityId: string,
+  ): Promise<NoteLink> {
+    log.debug("contextual-notes", {
+      action: "get-link",
+      entityType,
+      entityId,
+      noteId,
+    });
+    return call<NoteLink>("note_links_get_for_note", {
+      household_id: householdId,
+      note_id: noteId,
+      entity_type: entityType,
+      entity_id: entityId,
+    });
+  },
+
+  async deleteLink(householdId: string, linkId: string): Promise<void> {
+    log.debug("contextual-notes", { action: "delete-link", linkId });
+    await call<null>("note_links_delete", {
+      household_id: householdId,
+      link_id: linkId,
+    });
+  },
+};
+
+export default contextNotesRepo;

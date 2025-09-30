@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{collections::HashSet, fmt};
 
 use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
@@ -90,6 +90,7 @@ pub struct NoteLink {
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct ContextNotesPage {
     pub notes: Vec<Note>,
+    pub links: Vec<NoteLink>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub next_cursor: Option<String>,
@@ -425,6 +426,50 @@ pub async fn delete_link(pool: &SqlitePool, household_id: &str, link_id: &str) -
     Ok(())
 }
 
+pub async fn get_link_for_note(
+    pool: &SqlitePool,
+    household_id: &str,
+    note_id: &str,
+    entity_type: NoteLinkEntityType,
+    entity_id: &str,
+) -> AppResult<NoteLink> {
+    ensure_entity_in_household(pool, household_id, entity_type, entity_id).await?;
+
+    let link: Option<NoteLink> = sqlx::query_as(
+        "SELECT id,
+                household_id,
+                note_id,
+                entity_type,
+                entity_id,
+                relation,
+                created_at,
+                updated_at
+           FROM note_links
+          WHERE household_id = ?1
+            AND note_id = ?2
+            AND entity_type = ?3
+            AND entity_id = ?4",
+    )
+    .bind(household_id)
+    .bind(note_id)
+    .bind(entity_type.as_str())
+    .bind(entity_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "note_links_get_for_note")
+            .with_context("household_id", household_id.to_string())
+            .with_context("note_id", note_id.to_string())
+    })?;
+
+    link.ok_or_else(|| {
+        AppError::new("NOTE_LINK/ENTITY_NOT_FOUND", "Note link not found")
+            .with_context("household_id", household_id.to_string())
+            .with_context("note_id", note_id.to_string())
+    })
+}
+
 pub async fn quick_create_note_for_entity(
     pool: &SqlitePool,
     household_id: &str,
@@ -481,6 +526,7 @@ pub async fn list_notes_for_entity(
     if empty_category_filter(&category_ids) {
         return Ok(ContextNotesPage {
             notes: Vec::new(),
+            links: Vec::new(),
             next_cursor: None,
         });
     }
@@ -575,8 +621,42 @@ pub async fn list_notes_for_entity(
         rows.truncate(limit as usize);
     }
 
+    let note_ids: HashSet<&str> = rows.iter().map(|note| note.id.as_str()).collect();
+
+    let mut links: Vec<NoteLink> = if note_ids.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query_as(
+            "SELECT id,
+                    household_id,
+                    note_id,
+                    entity_type,
+                    entity_id,
+                    relation,
+                    created_at,
+                    updated_at
+               FROM note_links
+              WHERE household_id = ?1
+                AND entity_type = ?2
+                AND entity_id = ?3",
+        )
+        .bind(household_id)
+        .bind(entity_type.as_str())
+        .bind(entity_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|err| {
+            AppError::from(err)
+                .with_context("operation", "notes_list_for_entity_links")
+                .with_context("household_id", household_id.to_string())
+        })?
+    };
+
+    links.retain(|link| note_ids.contains(link.note_id.as_str()));
+
     Ok(ContextNotesPage {
         notes: rows,
+        links,
         next_cursor,
     })
 }
@@ -741,6 +821,32 @@ pub async fn note_links_delete(
                     .with_context("household_id", household_id.to_string())
             })?;
             delete_link(&pool, &household_id, &link_id).await
+        }
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn note_links_get_for_note(
+    state: State<'_, AppState>,
+    household_id: String,
+    note_id: String,
+    entity_type: NoteLinkEntityType,
+    entity_id: String,
+) -> AppResult<NoteLink> {
+    let pool = state.pool_clone();
+
+    dispatch_async_app_result(move || {
+        let household_id = household_id.clone();
+        let note_id = note_id.clone();
+        let entity_id = entity_id.clone();
+        async move {
+            repo::require_household(&household_id).map_err(|err| {
+                AppError::from(err)
+                    .with_context("operation", "note_links_get_for_note")
+                    .with_context("household_id", household_id.to_string())
+            })?;
+            get_link_for_note(&pool, &household_id, &note_id, entity_type, &entity_id).await
         }
     })
     .await
