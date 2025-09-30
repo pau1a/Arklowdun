@@ -45,6 +45,7 @@ async function ensureEventPersisted(
         id: event.id,
         title: event.title,
         start_at_utc: event.start_at_utc,
+        end_at_utc: event.end_at_utc ?? event.start_at_utc,
         tz: event.tz ?? null,
         household_id: householdId,
       },
@@ -76,8 +77,25 @@ export async function resolveQuickCaptureCategory(): Promise<string | null> {
     setCategories(fetched);
     categories = getCategories();
   }
-  if (categories.length === 0) return null;
-  const firstVisible = categories.find((category) => category.isVisible);
+  const isVisible = (category: any) =>
+    typeof category.isVisible === "boolean"
+      ? category.isVisible
+      : category.is_visible === true;
+
+  if (categories.length === 0) {
+    try {
+      const householdId = await defaultHouseholdId();
+      const created = await categoriesRepo.create({
+        householdId,
+        row: { name: "Primary", slug: "primary", color: "#4F46E5", is_visible: true },
+      });
+      setCategories([created]);
+      return created.id;
+    } catch {
+      return null;
+    }
+  }
+  const firstVisible = categories.find((category) => isVisible(category));
   if (firstVisible) return firstVisible.id;
   const primary = categories.find((category) => category.slug === "primary");
   return (primary ?? categories[0] ?? null)?.id ?? null;
@@ -364,7 +382,11 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
       syncErrorState();
       const householdId = currentHouseholdId ?? (await defaultHouseholdId());
       currentHouseholdId = householdId;
-      await ensureEventPersisted(currentEvent, householdId);
+      try {
+        await ensureEventPersisted(currentEvent, householdId);
+      } catch (error) {
+        console.warn("Quick-capture: proceed without event pre-persist", error);
+      }
       const note = await contextNotesRepo.quickCreate({
         householdId,
         entityType: "event",
