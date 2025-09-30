@@ -218,12 +218,14 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
     const message =
       currentError instanceof Error
         ? currentError.message
-        : (typeof currentError === "string" && currentError) || "Unable to load notes.";
+        : (typeof currentError === "string" && currentError) || "No notes available.";
     errorMessage.textContent = message;
     errorSurface.hidden = false;
   };
 
   const renderNotes = () => {
+    const previousScrollTop = list.scrollTop;
+    const previousScrollHeight = list.scrollHeight;
     list.innerHTML = "";
     if (currentNotes.length === 0) {
       emptyState.hidden = Boolean(currentError) || isLoading;
@@ -293,6 +295,9 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
     });
 
     loadMoreWrapper.hidden = !nextCursor;
+    if (previousScrollHeight > 0) {
+      list.scrollTop = previousScrollTop;
+    }
   };
 
   const loadNotes = async ({ cursor = null, append = false }: LoadOptions = {}) => {
@@ -343,6 +348,7 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
       nextCursor = page.next_cursor ?? null;
       renderNotes();
     } catch (error) {
+      console.error("Failed to load contextual notes", error);
       currentError = error;
       syncErrorState();
     } finally {
@@ -404,6 +410,7 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
         );
         linkId = link.id;
       } catch (error) {
+        console.error("Failed to resolve context note link", error);
         currentError = error;
         syncErrorState();
       }
@@ -412,6 +419,7 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
       emptyState.hidden = currentNotes.length === 0 ? false : true;
       quickInput.value = "";
     } catch (error) {
+      console.error("Quick capture failed", error);
       currentError = error;
       syncErrorState();
     } finally {
