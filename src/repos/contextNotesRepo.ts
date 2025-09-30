@@ -32,20 +32,15 @@ export const contextNotesRepo = {
       cursor: options.cursor,
       limit: options.limit,
     });
+    // notes_* commands expect camelCase keys
     const payload: Record<string, unknown> = {
       householdId: options.householdId,
       entityType: options.entityType,
       entityId: options.entityId,
     };
-    if (options.categoryIds?.length) {
-      payload.categoryIds = options.categoryIds;
-    }
-    if (options.cursor) {
-      payload.cursor = options.cursor;
-    }
-    if (options.limit !== undefined) {
-      payload.limit = options.limit;
-    }
+    if (options.categoryIds?.length) payload.categoryIds = options.categoryIds;
+    if (options.cursor) payload.cursor = options.cursor;
+    if (options.limit !== undefined) payload.limit = options.limit;
     return call<ContextNotesPage>("notes_list_for_entity", payload);
   },
 
@@ -55,6 +50,7 @@ export const contextNotesRepo = {
       entityType: options.entityType,
       entityId: options.entityId,
     });
+    // notes_* commands expect camelCase keys
     return call<Note>("notes_quick_create_for_entity", {
       householdId: options.householdId,
       entityType: options.entityType,
