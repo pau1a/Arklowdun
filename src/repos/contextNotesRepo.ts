@@ -74,18 +74,18 @@ export const contextNotesRepo = {
       noteId,
     });
     return call<NoteLink>("note_links_get_for_note", {
-      household_id: householdId,
-      note_id: noteId,
-      entity_type: entityType,
-      entity_id: entityId,
+      householdId,
+      noteId,
+      entityType,
+      entityId,
     });
   },
 
   async deleteLink(householdId: string, linkId: string): Promise<void> {
     log.debug("contextual-notes", { action: "delete-link", linkId });
     await call<null>("note_links_delete", {
-      household_id: householdId,
-      link_id: linkId,
+      householdId,
+      linkId,
     });
   },
 };
