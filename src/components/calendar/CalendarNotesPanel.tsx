@@ -35,7 +35,7 @@ export interface CalendarNotesPanelInstance {
   destroy(): void;
 }
 
-export async function ensureEventPersisted(
+async function ensureEventPersisted(
   event: CalendarEvent,
   householdId: string,
 ): Promise<void> {
@@ -58,7 +58,7 @@ export async function ensureEventPersisted(
     } else {
       text = String(error);
     }
-    if (!/UNIQUE|already exists/i.test(text)) {
+    if (!/UNIQUE|already exists|constraint/i.test(text)) {
       throw error;
     }
   }
@@ -201,9 +201,7 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
     const message =
       currentError instanceof Error
         ? currentError.message
-        : typeof currentError === "string"
-          ? currentError
-          : "Unable to load notes.";
+        : (typeof currentError === "string" && currentError) || "Unable to load notes.";
     errorMessage.textContent = message;
     errorSurface.hidden = false;
   };
