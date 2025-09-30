@@ -33,12 +33,12 @@ export const contextNotesRepo = {
       limit: options.limit,
     });
     const payload: Record<string, unknown> = {
-      household_id: options.householdId,
-      entity_type: options.entityType,
-      entity_id: options.entityId,
+      householdId: options.householdId,
+      entityType: options.entityType,
+      entityId: options.entityId,
     };
     if (options.categoryIds?.length) {
-      payload.category_ids = options.categoryIds;
+      payload.categoryIds = options.categoryIds;
     }
     if (options.cursor) {
       payload.cursor = options.cursor;
@@ -56,10 +56,10 @@ export const contextNotesRepo = {
       entityId: options.entityId,
     });
     return call<Note>("notes_quick_create_for_entity", {
-      household_id: options.householdId,
-      entity_type: options.entityType,
-      entity_id: options.entityId,
-      category_id: options.categoryId,
+      householdId: options.householdId,
+      entityType: options.entityType,
+      entityId: options.entityId,
+      categoryId: options.categoryId,
       text: options.text,
       color: options.color,
     });
