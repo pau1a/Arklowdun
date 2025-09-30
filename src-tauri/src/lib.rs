@@ -2437,6 +2437,13 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            {
+                if let Some(window) = app.get_window("main") {
+                    window.show()?;
+                    window.set_focus()?;
+                }
+            }
             let handle = app.handle();
             if let Err(err) = crate::init_file_logging(handle.clone()) {
                 tracing::warn!(

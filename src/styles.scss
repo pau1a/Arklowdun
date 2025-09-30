@@ -63,8 +63,21 @@ html,
 body {
   margin: 0;
   padding: 0;
+}
+
+html,
+body,
+#app {
   height: 100%;
-  background: transparent; /* allow rounded window with transparent corners */
+}
+
+body {
+  background: #fff !important;
+}
+
+#app {
+  min-height: 100vh;
+  background: #fff !important;
 }
 
 /* 4) Optional: avoid micro scrollbars during rapid resize */

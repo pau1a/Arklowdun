@@ -17,21 +17,24 @@
     "windows": [
       {
         "label": "main",
-        // Hide small title text beside macOS traffic lights
-        "title": " ",
+        "title": "Arklowdun",
         "decorations": true,
         "shadow": true,
-        "titleBarStyle": "Overlay",
         "acceptFirstMouse": true, // macOS: let first click both focus and interact
         "resizable": true,
-        // Transparent window to allow fully transparent UI surfaces
-        "transparent": true,
-        "width": 800,
-        "height": 600,
-        // Fully transparent background (RGBA)
-        "backgroundColor": "#00000000"
+        "transparent": false,
+        "backgroundColor": "#FFFFFFFF",
+        "visible": true,
+        "width": 1000,
+        "height": 700,
+        "minWidth": 320,
+        "minHeight": 400
       }
     ],
+    "macOS": {
+      "titleBarStyle": "Visible",
+      "hiddenTitle": false
+    },
     "security": {
       "csp": null,
       "capabilities": [
