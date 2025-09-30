@@ -248,6 +248,11 @@ ROUTE_DEFINITIONS.forEach((route) => {
 
 const DEFAULT_ROUTE = routeById.get("dashboard")!;
 
+function stripQuery(fragment: string): string {
+  const idx = fragment.indexOf("?");
+  return idx === -1 ? fragment : fragment.slice(0, idx);
+}
+
 function normaliseHash(fragment: string): string {
   const value = fragment.startsWith("#") ? fragment : `#${fragment}`;
   if (value.startsWith("#/")) return value;
@@ -259,7 +264,13 @@ export function resolveRouteFromHash(hash: string | null | undefined): RouteDefi
   const trimmed = hash.trim();
   if (!trimmed) return DEFAULT_ROUTE;
   const withHash = trimmed.startsWith("#") ? trimmed : `#${trimmed}`;
-  return routeByHash.get(withHash) ?? routeByHash.get(normaliseHash(withHash)) ?? DEFAULT_ROUTE;
+  const base = stripQuery(withHash);
+  return (
+    routeByHash.get(withHash) ??
+    routeByHash.get(base) ??
+    routeByHash.get(normaliseHash(base)) ??
+    DEFAULT_ROUTE
+  );
 }
 
 export function getRouteById(id: AppPane): RouteDefinition | undefined {

@@ -3,12 +3,13 @@ import type { CalendarEvent } from "../model/CalendarEvent";
 
 export interface CalendarGridOptions {
   getNow?: () => number;
-  onEventSelect?: (event: CalendarEvent) => void;
+  onEventSelect?: (event: CalendarEvent | null) => void;
 }
 
 export interface CalendarGridInstance {
   element: HTMLDivElement;
   setEvents(events: CalendarEvent[]): void;
+  selectEventById(id: string | null): void;
 }
 
 function renderMonth(
@@ -16,6 +17,7 @@ function renderMonth(
   events: CalendarEvent[],
   getNow: () => number,
   onEventSelect?: (event: CalendarEvent) => void,
+  selectedEventId: string | null = null,
 ): void {
   root.innerHTML = "";
   const now = new Date(getNow());
@@ -83,6 +85,10 @@ function renderMonth(
       div.textContent = ev.title;
       div.tabIndex = 0;
       div.setAttribute("role", "button");
+      div.dataset.eventId = ev.id;
+      if (selectedEventId === ev.id) {
+        div.classList.add("calendar__event--selected");
+      }
       if (onEventSelect) {
         div.addEventListener("click", (event) => {
           event.preventDefault();
@@ -107,12 +113,45 @@ export function CalendarGrid(options: CalendarGridOptions = {}): CalendarGridIns
   const element = document.createElement("div");
   element.id = "calendar";
   const getNow = options.getNow ?? nowMs;
-  const onEventSelect = options.onEventSelect;
+  const externalSelect = options.onEventSelect;
+  let eventsState: CalendarEvent[] = [];
+  let selectedEventId: string | null = null;
+
+  function notify(event: CalendarEvent | null): void {
+    if (externalSelect) {
+      externalSelect(event);
+    }
+  }
+
+  function internalSelect(event: CalendarEvent): void {
+    selectedEventId = event.id;
+    notify(event);
+    rerender();
+  }
+
+  function rerender(): void {
+    renderMonth(element, eventsState, getNow, internalSelect, selectedEventId);
+  }
 
   return {
     element,
     setEvents(events: CalendarEvent[]) {
-      renderMonth(element, events, getNow, onEventSelect);
+      eventsState = [...events];
+      rerender();
+    },
+    selectEventById(id: string | null) {
+      if (!id) {
+        selectedEventId = null;
+        notify(null);
+        rerender();
+        return;
+      }
+      selectedEventId = id;
+      const match = eventsState.find((event) => event.id === id) ?? null;
+      if (match) {
+        notify(match);
+      }
+      rerender();
     },
   };
 }

@@ -24,6 +24,7 @@ import {
 import { emit, on } from "./store/events";
 import { getCategories, setCategories } from "./store/categories";
 import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
+import { getRouteParams, subscribeRouteParams } from "./store/router";
 import createButton from "@ui/Button";
 import createInput from "@ui/Input";
 import createTruncationBanner from "@ui/TruncationBanner";
@@ -125,6 +126,7 @@ export async function CalendarView(container: HTMLElement) {
   const notesPanel = CalendarNotesPanel();
   let selectedEvent: CalendarEvent | null = null;
   let notesToggleActive = false;
+  let pendingRouteEventId = getRouteParams().eventId;
 
   const syncNotesToggle = () => {
     const hasEvent = Boolean(selectedEvent);
@@ -160,6 +162,13 @@ export async function CalendarView(container: HTMLElement) {
   errorRegion.setAttribute("aria-atomic", "true");
   errorRegion.hidden = true;
   const calendar = CalendarGrid({ onEventSelect: handleEventSelect });
+  const trySelectPendingEvent = (events: CalendarEvent[]) => {
+    if (!pendingRouteEventId) return;
+    const match = events.find((event) => event.id === pendingRouteEventId);
+    if (!match) return;
+    calendar.selectEventById(match.id);
+    pendingRouteEventId = null;
+  };
   const calendarSurface = document.createElement("div");
   calendarSurface.className = "calendar__surface";
   calendarSurface.append(errorRegion, calendar.element);
@@ -266,6 +275,7 @@ export async function CalendarView(container: HTMLElement) {
     if (snapshot?.window) currentWindow = snapshot.window;
     const items = snapshot?.items ?? [];
     calendar.setEvents(items);
+    trySelectPendingEvent(items);
     updateTruncationNotice(items.length, snapshot?.truncated ?? false, snapshot?.ts ?? null);
   });
   registerViewCleanup(container, unsubscribe);
@@ -279,6 +289,22 @@ export async function CalendarView(container: HTMLElement) {
     showInlineError(message, detail ?? undefined);
   });
   registerViewCleanup(container, stopCalendarError);
+
+  const stopRouteParams = subscribeRouteParams((params) => {
+    if (params.eventId) {
+      if (selectedEvent?.id === params.eventId) {
+        pendingRouteEventId = null;
+        return;
+      }
+      pendingRouteEventId = params.eventId;
+      const items = selectors.events.items(getState());
+      trySelectPendingEvent(items);
+    } else {
+      pendingRouteEventId = null;
+      calendar.selectEventById(null);
+    }
+  });
+  registerViewCleanup(container, stopRouteParams);
 
   async function loadEvents(source: string): Promise<void> {
     try {
@@ -314,6 +340,7 @@ export async function CalendarView(container: HTMLElement) {
   if (currentSnapshot) {
     const items = currentSnapshot.items;
     calendar.setEvents(items);
+    trySelectPendingEvent(items);
     updateTruncationNotice(
       items.length,
       currentSnapshot.truncated ?? false,

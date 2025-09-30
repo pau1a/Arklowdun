@@ -2,6 +2,9 @@
 import { defaultHouseholdId } from "./db/household";
 import { showError } from "./ui/errors";
 import { NotesList, useNotes, type Note } from "@features/notes";
+import { fetchCalendarEvents, type CalendarEvent } from "@features/calendar";
+import type { NoteLink } from "@bindings/NoteLink";
+import type { Event } from "@bindings/Event";
 import {
   actions,
   selectors,
@@ -10,6 +13,7 @@ import {
   type NotesSnapshot,
 } from "./store/index";
 import { emit, on } from "./store/events";
+import { getRouteParams, subscribeRouteParams } from "./store/router";
 import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
 import {
   getActiveCategoryIds,
@@ -18,6 +22,7 @@ import {
   type StoreCategory,
 } from "./store/categories";
 import createButton from "@ui/Button";
+import createCheckbox from "@ui/Checkbox";
 import createInput from "@ui/Input";
 import createSelect from "@ui/Select";
 import createTimezoneBadge from "@ui/TimezoneBadge";
@@ -28,6 +33,8 @@ import {
   type NotesCreateInput,
   type NotesUpdateInput,
 } from "./repos/notesRepo";
+import { contextNotesRepo, eventsRepo } from "./repos";
+import { ensureEventPersisted } from "./components/calendar/CalendarNotesPanel";
 
 const NOTE_PALETTE: Record<string, { base: string; text: string }> = {
   "#FFFF88": { base: "#FFF4B8", text: "#2b2b2b" },
@@ -177,10 +184,38 @@ export async function NotesView(
   deadlinesList.className = "notes__deadline-list";
   deadlinesPanel.append(deadlinesHeading, deadlinesList);
 
-  section.append(form, canvas, pagination);
+  const filters = document.createElement("div");
+  filters.className = "notes__filters";
+  const linkedLabel = document.createElement("label");
+  linkedLabel.className = "notes__filters-option";
+  const linkedCheckbox = createCheckbox({
+    className: "notes__filters-checkbox",
+    ariaLabel: "Show only notes linked to events",
+  });
+  const linkedText = document.createElement("span");
+  linkedText.textContent = "Show only notes linked to events";
+  linkedLabel.append(linkedCheckbox, linkedText);
+  filters.appendChild(linkedLabel);
+
+  section.append(form, filters, canvas, pagination);
   section.append(deadlinesPanel);
   container.innerHTML = "";
   container.appendChild(section);
+
+  linkedCheckbox.addEventListener("change", async () => {
+    if (linkedCheckbox.checked) {
+      linkedCheckbox.disabled = true;
+      try {
+        await hydrateLinksForNotes(notesLocal);
+        filterLinkedOnly = true;
+      } finally {
+        linkedCheckbox.disabled = false;
+      }
+    } else {
+      filterLinkedOnly = false;
+    }
+    render();
+  });
 
   const quickTextInput = createInput({
     id: "quick-capture-text",
@@ -281,6 +316,12 @@ export async function NotesView(
   };
   let notesLocal: Note[] = cloneNotes(selectors.notes.items(getState()));
   const appTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
+  const noteLinkCache = new Map<string, NoteLink[]>();
+  const linkFetches = new Map<string, Promise<NoteLink[]>>();
+  const eventCache = new Map<string, Event | null>();
+  let filterLinkedOnly = false;
+  let highlightedNoteId = getRouteParams().noteId;
+  let pendingScrollNoteId = highlightedNoteId;
 
   const filterVisibleNotes = (notes: Note[]): Note[] => {
     const base = notes.filter((note) => !note.deleted_at);
@@ -291,13 +332,318 @@ export async function NotesView(
       return [];
     }
     const allowed = new Set(activeCategoryIds);
-    return base.filter((note) => note.category_id && allowed.has(note.category_id));
+    const categoryFiltered = base.filter((note) => {
+      if (!note.category_id) return false;
+      return allowed.has(note.category_id);
+    });
+    if (!filterLinkedOnly) return categoryFiltered;
+    return categoryFiltered.filter((note) => {
+      const links = noteLinkCache.get(note.id);
+      if (!links) return false;
+      return links.some((link) => link.entity_id && link.entity_type === "event");
+    });
   };
 
   const updateLoadMoreState = () => {
     const hasMore = Boolean(nextCursor);
     pagination.hidden = !hasMore;
     loadMoreButton.disabled = !hasMore || isLoading;
+  };
+
+  const getEventLinkForNote = (noteId: string): NoteLink | null => {
+    const links = noteLinkCache.get(noteId);
+    if (!links) return null;
+    return links.find((link) => link.entity_type === "event") ?? null;
+  };
+
+  const EVENT_LOOKBACK_MS = 2 * 24 * 60 * 60 * 1000;
+  const EVENT_LOOKAHEAD_MS = 14 * 24 * 60 * 60 * 1000;
+  let cachedLinkableEvents: CalendarEvent[] | null = null;
+
+  const ensureLinksForNote = async (noteId: string): Promise<NoteLink[]> => {
+    if (noteLinkCache.has(noteId)) {
+      return noteLinkCache.get(noteId)!;
+    }
+    const existing = linkFetches.get(noteId);
+    if (existing) return existing;
+    const promise = (async () => {
+      try {
+        const links = await contextNotesRepo.listLinksForNote(householdId, noteId);
+        noteLinkCache.set(noteId, links);
+        return links;
+      } catch (error) {
+        console.error("Failed to load note links", { noteId, error });
+        noteLinkCache.set(noteId, []);
+        return [];
+      } finally {
+        linkFetches.delete(noteId);
+      }
+    })();
+    linkFetches.set(noteId, promise);
+    return promise;
+  };
+
+  const hydrateLinksForNotes = async (notes: Note[]): Promise<void> => {
+    await Promise.all(notes.map((note) => ensureLinksForNote(note.id)));
+  };
+
+  const loadEventMetadata = async (eventId: string): Promise<Event | null> => {
+    if (eventCache.has(eventId)) {
+      return eventCache.get(eventId) ?? null;
+    }
+    try {
+      const event = await eventsRepo.get(householdId, eventId);
+      eventCache.set(eventId, event);
+      return event;
+    } catch (error) {
+      console.error("Failed to load event", { eventId, error });
+      eventCache.set(eventId, null);
+      return null;
+    }
+  };
+
+  const formatEventStart = (event: Event): string => {
+    const formatter = new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: appTimezone,
+    });
+    return formatter.format(new Date(event.start_at_utc));
+  };
+
+  const navigateToCalendar = (eventId: string): void => {
+    window.location.hash = `#/calendar?eventId=${encodeURIComponent(eventId)}`;
+  };
+
+  const loadLinkableEvents = async (): Promise<CalendarEvent[]> => {
+    if (cachedLinkableEvents) return cachedLinkableEvents;
+    try {
+      const now = Date.now();
+      const range = {
+        start: now - EVENT_LOOKBACK_MS,
+        end: now + EVENT_LOOKAHEAD_MS,
+      };
+      const { items } = await fetchCalendarEvents(range);
+      const sorted = [...items].sort((a, b) => a.start_at_utc - b.start_at_utc);
+      cachedLinkableEvents = sorted;
+      sorted.forEach((event) => {
+        eventCache.set(event.id, event);
+      });
+      return sorted;
+    } catch (error) {
+      console.error("Failed to load events for linking", error);
+      toast.show({
+        kind: "error",
+        message: "Unable to load events. Try again shortly.",
+      });
+      return [];
+    }
+  };
+
+  const openEventPicker = async (note: Note): Promise<void> => {
+    const overlay = document.createElement("div");
+    overlay.className = "note-linker";
+    const panel = document.createElement("div");
+    panel.className = "note-linker__panel";
+    overlay.appendChild(panel);
+
+    const title = document.createElement("h3");
+    title.className = "note-linker__title";
+    title.textContent = "Link note to event";
+    panel.appendChild(title);
+
+    const description = document.createElement("p");
+    description.className = "note-linker__description";
+    description.textContent = "Select a recent or upcoming event to link this note.";
+    panel.appendChild(description);
+
+    const searchInput = createInput({
+      type: "search",
+      placeholder: "Search events",
+      ariaLabel: "Search events",
+      className: "note-linker__search", // apply custom style
+    });
+    panel.appendChild(searchInput);
+
+    const list = document.createElement("ul");
+    list.className = "note-linker__list";
+    panel.appendChild(list);
+
+    const footer = document.createElement("div");
+    footer.className = "note-linker__footer";
+    const cancelButton = createButton({ label: "Cancel", variant: "ghost", type: "button" });
+    const confirmButton = createButton({ label: "Link", variant: "primary", type: "button" });
+    confirmButton.disabled = true;
+    footer.append(cancelButton, confirmButton);
+    panel.appendChild(footer);
+
+    document.body.appendChild(overlay);
+
+    const events = await loadLinkableEvents();
+    let filteredEvents = [...events];
+    let selectedEventId = getEventLinkForNote(note.id)?.entity_id ?? null;
+    if (selectedEventId) {
+      confirmButton.disabled = false;
+    }
+
+    const renderList = () => {
+      list.innerHTML = "";
+      if (filteredEvents.length === 0) {
+        const empty = document.createElement("li");
+        empty.className = "note-linker__empty";
+        empty.textContent = "No events match your search.";
+        list.appendChild(empty);
+        return;
+      }
+      filteredEvents.forEach((event) => {
+        const item = document.createElement("li");
+        item.className = "note-linker__item";
+        const optionId = `note-linker-${note.id}-${event.id}`;
+
+        const radio = createInput({
+          type: "radio",
+          name: `note-linker-${note.id}`,
+          id: optionId,
+          className: "note-linker__radio",
+        });
+        radio.value = event.id;
+        radio.checked = selectedEventId === event.id;
+        radio.addEventListener("change", () => {
+          selectedEventId = event.id;
+          confirmButton.disabled = false;
+        });
+
+        const label = document.createElement("label");
+        label.className = "note-linker__option";
+        label.htmlFor = optionId;
+
+        const title = document.createElement("span");
+        title.className = "note-linker__option-title";
+        title.textContent = event.title?.trim() || "Untitled event";
+
+        const meta = document.createElement("span");
+        meta.className = "note-linker__option-meta";
+        meta.textContent = formatEventStart(event);
+
+        const badge = createTimezoneBadge({
+          eventTimezone: event.tz,
+          appTimezone,
+          tooltipId: `note-linker-${event.id}-tz`,
+          className: "note-linker__option-badge",
+        });
+        if (!badge.hidden) {
+          meta.appendChild(badge);
+        }
+
+        label.append(title, meta);
+        item.append(radio, label);
+        list.appendChild(item);
+      });
+    };
+
+    const filterEvents = (query: string) => {
+      const q = query.trim().toLowerCase();
+      if (!q) {
+        filteredEvents = [...events];
+      } else {
+        filteredEvents = events.filter((event) =>
+          (event.title ?? "").toLowerCase().includes(q),
+        );
+      }
+      if (selectedEventId && !filteredEvents.some((event) => event.id === selectedEventId)) {
+        selectedEventId = null;
+        confirmButton.disabled = true;
+      }
+      renderList();
+    };
+
+    renderList();
+
+    const close = () => {
+      overlay.remove();
+    };
+
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) {
+        close();
+      }
+    });
+
+    overlay.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+      }
+    });
+
+    cancelButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      close();
+    });
+
+    confirmButton.addEventListener("click", async (event) => {
+      event.preventDefault();
+      if (!selectedEventId) return;
+      confirmButton.disabled = true;
+      confirmButton.update({ label: "Linking…" });
+      try {
+        const target = events.find((candidate) => candidate.id === selectedEventId);
+        if (!target) {
+          throw new Error("Selected event not found");
+        }
+        try {
+          await ensureEventPersisted(target, householdId);
+        } catch (err) {
+          console.warn("Failed to ensure event persisted before linking", err);
+        }
+        const link = await contextNotesRepo.createLink(
+          householdId,
+          note.id,
+          "event",
+          target.id,
+        );
+        const existing = noteLinkCache.get(note.id) ?? [];
+        const nextLinks = [link, ...existing.filter((entry) => entry.id !== link.id)];
+        noteLinkCache.set(note.id, nextLinks);
+        eventCache.set(target.id, target);
+        render();
+        close();
+      } catch (error) {
+        console.error("Failed to link note to event", error);
+        toast.show({ kind: "error", message: "Link failed. Try again." });
+        confirmButton.disabled = false;
+        confirmButton.update({ label: "Link" });
+      }
+    });
+
+    searchInput.addEventListener("input", (event) => {
+      filterEvents((event.target as HTMLInputElement).value ?? "");
+    });
+
+    requestAnimationFrame(() => {
+      searchInput.focus();
+    });
+  };
+
+  const unlinkEvent = async (
+    note: Note,
+    link: NoteLink,
+    button: HTMLButtonElement,
+  ): Promise<void> => {
+    button.disabled = true;
+    try {
+      await contextNotesRepo.deleteLink(householdId, link.id);
+      const existing = noteLinkCache.get(note.id) ?? [];
+      noteLinkCache.set(
+        note.id,
+        existing.filter((entry) => entry.id !== link.id),
+      );
+      render();
+    } catch (error) {
+      console.error("Failed to unlink event", error);
+      toast.show({ kind: "error", message: "Unlink failed. Try again." });
+      button.disabled = false;
+    }
   };
 
   const refreshQuickCaptureCategories = () => {
@@ -417,6 +763,7 @@ export async function NotesView(
       if (result.error) throw result.error;
       const page = result.data;
       notesLocal = cloneNotes(page?.notes ?? []);
+      await hydrateLinksForNotes(notesLocal);
       nextCursor = page?.next_cursor ?? null;
       commitSnapshot(source, true, true);
       render();
@@ -445,6 +792,7 @@ export async function NotesView(
       if (result.error) throw result.error;
       const page = result.data;
       const incoming = page?.notes ?? [];
+      await hydrateLinksForNotes(incoming);
       notesLocal = mergeNotes(notesLocal, incoming);
       nextCursor = page?.next_cursor ?? null;
       commitSnapshot("notes:load-more", true, true);
@@ -474,6 +822,7 @@ export async function NotesView(
       .forEach((note) => {
         const el = document.createElement("div");
         el.className = "note";
+        el.dataset.noteId = note.id;
         const palette = NOTE_PALETTE[note.color.toUpperCase()];
         const baseColor = palette?.base ?? note.color;
         const textColor = palette?.text ?? "#1f2937";
@@ -482,6 +831,22 @@ export async function NotesView(
         el.style.left = note.x + "px";
         el.style.top = note.y + "px";
         el.style.zIndex = String(note.z ?? 0);
+
+        if (highlightedNoteId === note.id) {
+          el.classList.add("note--highlight");
+          if (pendingScrollNoteId === note.id) {
+            requestAnimationFrame(() => {
+              el.scrollIntoView({ behavior: "smooth", block: "center" });
+              pendingScrollNoteId = null;
+            });
+          }
+        }
+
+        if (!noteLinkCache.has(note.id) && !linkFetches.has(note.id)) {
+          void ensureLinksForNote(note.id).then(() => render());
+        }
+
+        const eventLink = getEventLinkForNote(note.id);
 
         const textarea = document.createElement("textarea");
         textarea.value = note.text;
@@ -526,6 +891,102 @@ export async function NotesView(
             el.appendChild(deadlineWrapper);
           }
         }
+
+        if (eventLink) {
+          const linkRow = document.createElement("div");
+          linkRow.className = "note__link-row";
+
+          const chip = createButton({
+            type: "button",
+            variant: "ghost",
+            size: "sm",
+            className: "note__event-chip",
+            label: "Linked event",
+          });
+          chip.disabled = true;
+
+          const tooltip = document.createElement("div");
+          tooltip.className = "note__event-tooltip";
+          tooltip.hidden = true;
+
+          const tooltipText = document.createElement("span");
+          tooltipText.className = "note__event-tooltip-text";
+          tooltip.appendChild(tooltipText);
+
+          const badge = createTimezoneBadge({
+            eventTimezone: null,
+            appTimezone,
+            tooltipId: `note-${note.id}-event-tz`,
+            className: "note__event-tooltip-badge",
+          });
+          tooltip.appendChild(badge);
+
+          const showTooltip = () => {
+            if (tooltip.hidden) tooltip.hidden = false;
+          };
+          const hideTooltip = () => {
+            if (!tooltip.hidden) tooltip.hidden = true;
+          };
+          chip.addEventListener("mouseenter", showTooltip);
+          chip.addEventListener("mouseleave", hideTooltip);
+          chip.addEventListener("focus", showTooltip);
+          chip.addEventListener("blur", hideTooltip);
+
+          linkRow.append(chip, tooltip);
+          el.appendChild(linkRow);
+
+          void (async () => {
+            const event = await loadEventMetadata(eventLink.entity_id);
+            if (!event || event.deleted_at) {
+              chip.update({ label: "(deleted)" });
+              chip.disabled = true;
+              chip.classList.add("note__event-chip--deleted");
+              tooltip.hidden = true;
+              return;
+            }
+            chip.disabled = false;
+            chip.update({ label: event.title?.trim() || "Untitled event" });
+            chip.addEventListener("click", (evt) => {
+              evt.preventDefault();
+              navigateToCalendar(event.id);
+            });
+            tooltipText.textContent = formatEventStart(event);
+            badge.update({ eventTimezone: event.tz, appTimezone });
+          })();
+        }
+
+        const linkActions = document.createElement("div");
+        linkActions.className = "note__link-actions";
+        const linkButton = createButton({
+          type: "button",
+          variant: "ghost",
+          size: "sm",
+          label: "Link to event…",
+        });
+        linkButton.addEventListener("click", (event) => {
+          event.preventDefault();
+          linkButton.disabled = true;
+          void openEventPicker(note).finally(() => {
+            linkButton.disabled = false;
+          });
+        });
+        linkActions.appendChild(linkButton);
+
+        if (eventLink) {
+          const unlinkButton = createButton({
+            type: "button",
+            variant: "ghost",
+            size: "sm",
+            label: "Unlink from event",
+          });
+          unlinkButton.addEventListener("click", (event) => {
+            event.preventDefault();
+            void unlinkEvent(note, eventLink, unlinkButton);
+          });
+          linkActions.appendChild(unlinkButton);
+        }
+
+        el.appendChild(linkActions);
 
         const deleteButton = createButton({
           type: "button",
@@ -643,12 +1104,28 @@ export async function NotesView(
     }
     const items = snapshot?.items ?? [];
     notesLocal = cloneNotes(items);
+    void hydrateLinksForNotes(notesLocal);
     render();
   });
   registerViewCleanup(container, unsubscribe);
 
+  const stopRouteParams = subscribeRouteParams((params) => {
+    const nextHighlight = params.noteId;
+    if (highlightedNoteId === nextHighlight) return;
+    highlightedNoteId = nextHighlight;
+    pendingScrollNoteId = nextHighlight;
+    render();
+  });
+  registerViewCleanup(container, stopRouteParams);
+
   const stopHousehold = on("household:changed", async ({ householdId: next }) => {
     householdId = next;
+    noteLinkCache.clear();
+    linkFetches.clear();
+    eventCache.clear();
+    cachedLinkableEvents = null;
+    filterLinkedOnly = false;
+    linkedCheckbox.checked = false;
     refreshQuickCaptureCategories();
     await reload("notes:household");
   });
@@ -671,6 +1148,7 @@ export async function NotesView(
     snapshotCategories.every((id, index) => id === activeCategoryIds[index]);
   if (initialSnapshot && matchesActiveCategories) {
     notesLocal = cloneNotes(initialSnapshot.items);
+    await hydrateLinksForNotes(notesLocal);
     render();
   } else {
     await reload("notes:init");

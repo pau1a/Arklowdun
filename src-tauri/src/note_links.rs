@@ -270,9 +270,61 @@ async fn create_link_with_tx(
 ) -> AppResult<NoteLink> {
     ensure_same_household_tx(tx, household_id, note_id, entity_type, entity_id).await?;
 
-    let id = new_uuid_v7();
+    let relation_override = relation;
     let relation = relation.unwrap_or(DEFAULT_RELATION);
     let now = now_ms();
+
+    if let Some(mut existing) = sqlx::query_as::<_, NoteLink>(
+        "SELECT id,
+                household_id,
+                note_id,
+                entity_type,
+                entity_id,
+                relation,
+                created_at,
+                updated_at
+           FROM note_links
+          WHERE household_id = ?1
+            AND note_id = ?2
+            AND entity_type = ?3
+            AND entity_id = ?4",
+    )
+    .bind(household_id)
+    .bind(note_id)
+    .bind(entity_type.as_str())
+    .bind(entity_id)
+    .fetch_optional(tx.as_mut())
+    .await
+    .map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "note_links_create_lookup")
+            .with_context("note_id", note_id.to_string())
+            .with_context("entity_type", entity_type.to_string())
+            .with_context("entity_id", entity_id.to_string())
+    })? {
+        if let Some(explicit_relation) = relation_override {
+            if existing.relation != explicit_relation {
+                sqlx::query(
+                    "UPDATE note_links SET relation = ?1, updated_at = ?2 WHERE id = ?3",
+                )
+                .bind(explicit_relation)
+                .bind(now)
+                .bind(&existing.id)
+                .execute(tx.as_mut())
+                .await
+                .map_err(|err| {
+                    AppError::from(err)
+                        .with_context("operation", "note_links_create_update")
+                        .with_context("link_id", existing.id.clone())
+                })?;
+                existing.relation = explicit_relation.to_string();
+                existing.updated_at = now;
+            }
+        }
+        return Ok(existing);
+    }
+
+    let id = new_uuid_v7();
 
     let insert_result = sqlx::query(
         "INSERT INTO note_links (id, household_id, note_id, entity_type, entity_id, relation, created_at, updated_at)
@@ -424,6 +476,47 @@ pub async fn delete_link(pool: &SqlitePool, household_id: &str, link_id: &str) -
     );
 
     Ok(())
+}
+
+pub async fn list_links_for_note(
+    pool: &SqlitePool,
+    household_id: &str,
+    note_id: &str,
+) -> AppResult<Vec<NoteLink>> {
+    ensure_note_in_household(pool, household_id, note_id).await?;
+
+    let mut links: Vec<NoteLink> = sqlx::query_as(
+        "SELECT id,
+                household_id,
+                note_id,
+                entity_type,
+                entity_id,
+                relation,
+                created_at,
+                updated_at
+           FROM note_links
+          WHERE household_id = ?1
+            AND note_id = ?2
+          ORDER BY created_at, id",
+    )
+    .bind(household_id)
+    .bind(note_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "note_links_list_for_note")
+            .with_context("household_id", household_id.to_string())
+            .with_context("note_id", note_id.to_string())
+    })?;
+
+    for link in &mut links {
+        if link.relation.is_empty() {
+            link.relation = DEFAULT_RELATION.to_string();
+        }
+    }
+
+    Ok(links)
 }
 
 pub async fn get_link_for_note(
@@ -821,6 +914,29 @@ pub async fn note_links_delete(
                     .with_context("household_id", household_id.to_string())
             })?;
             delete_link(&pool, &household_id, &link_id).await
+        }
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn note_links_list_for_note(
+    state: State<'_, AppState>,
+    household_id: String,
+    note_id: String,
+) -> AppResult<Vec<NoteLink>> {
+    let pool = state.pool_clone();
+
+    dispatch_async_app_result(move || {
+        let household_id = household_id.clone();
+        let note_id = note_id.clone();
+        async move {
+            repo::require_household(&household_id).map_err(|err| {
+                AppError::from(err)
+                    .with_context("operation", "note_links_list_for_note")
+                    .with_context("household_id", household_id.to_string())
+            })?;
+            list_links_for_note(&pool, &household_id, &note_id).await
         }
     })
     .await

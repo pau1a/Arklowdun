@@ -265,6 +265,12 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
         }
       }
 
+      const viewOnBoard = document.createElement("a");
+      viewOnBoard.className = "calendar-notes-panel__view-link";
+      viewOnBoard.href = `#/notes?noteId=${encodeURIComponent(entry.note.id)}`;
+      viewOnBoard.textContent = "View on Notes board";
+      body.appendChild(viewOnBoard);
+
       const unlink = document.createElement("button");
       unlink.type = "button";
       unlink.className = "calendar-notes-panel__unlink";

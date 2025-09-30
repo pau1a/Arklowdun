@@ -40,6 +40,7 @@ import { ensureDbHealthReport, recheckDbHealth } from "./services/dbHealth";
 import { recoveryText } from "@strings/recovery";
 import { mountMacToolbar, setAppToolbarTitle } from "@ui/AppToolbar";
 import { initAmbientBackground, type AmbientBackgroundController } from "@ui/AmbientBackground";
+import { setRouteParamsFromHash } from "./store/router";
 
 // Resolve main app logo (SVG) as a URL the bundler can serve
 const appLogoUrl = new URL("./assets/logo.svg", import.meta.url).href;
@@ -310,8 +311,22 @@ function ensureLayout(): LayoutContext {
 }
 
 function ensureCanonicalHash(route: RouteDefinition) {
-  if (window.location.hash === route.hash) return;
-  history.replaceState(null, "", route.hash);
+  const current = window.location.hash;
+  if (!current) {
+    history.replaceState(null, "", route.hash);
+    return;
+  }
+  if (current === route.hash || current.startsWith(`${route.hash}?`)) {
+    return;
+  }
+  const resolved = resolveRouteFromHash(current);
+  if (resolved.id !== route.id) {
+    history.replaceState(null, "", route.hash);
+    return;
+  }
+  const queryIndex = current.indexOf("?");
+  const query = queryIndex === -1 ? "" : current.slice(queryIndex);
+  history.replaceState(null, "", `${route.hash}${query}`);
 }
 
 async function renderApp({ route }: { route: RouteDefinition }) {
@@ -449,7 +464,9 @@ function setupDynamicMinSize() {
 }
 
 async function handleRouteChange() {
-  const route = resolveRouteFromHash(window.location.hash);
+  const hash = window.location.hash;
+  setRouteParamsFromHash(hash);
+  const route = resolveRouteFromHash(hash);
   try {
     await renderApp({ route });
   } catch (error) {

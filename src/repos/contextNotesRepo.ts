@@ -2,6 +2,7 @@ import { call } from "@lib/ipc/call";
 import type { ContextNotesPage } from "@bindings/ContextNotesPage";
 import type { Note } from "@bindings/Note";
 import type { NoteLink } from "@bindings/NoteLink";
+import type { NoteLinksForNote } from "@bindings/NoteLinksForNote";
 import type { NoteLinkEntityType } from "@bindings/NoteLinkEntityType";
 import { log } from "@utils/logger";
 
@@ -74,6 +75,34 @@ export const contextNotesRepo = {
       noteId,
     });
     return call<NoteLink>("note_links_get_for_note", {
+      householdId,
+      noteId,
+      entityType,
+      entityId,
+    });
+  },
+
+  async listLinksForNote(householdId: string, noteId: string): Promise<NoteLinksForNote> {
+    log.debug("contextual-notes", { action: "list-links", noteId });
+    return call<NoteLinksForNote>("note_links_list_for_note", {
+      householdId,
+      noteId,
+    });
+  },
+
+  async createLink(
+    householdId: string,
+    noteId: string,
+    entityType: NoteLinkEntityType,
+    entityId: string,
+  ): Promise<NoteLink> {
+    log.debug("contextual-notes", {
+      action: "create-link",
+      noteId,
+      entityType,
+      entityId,
+    });
+    return call<NoteLink>("note_links_create", {
       householdId,
       noteId,
       entityType,
