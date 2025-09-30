@@ -1,3 +1,4 @@
+import { call } from "@lib/ipc/call";
 import type { CalendarEvent } from "@features/calendar";
 import { useContextNotes } from "@features/calendar";
 import { defaultHouseholdId } from "@db/household";
@@ -32,6 +33,35 @@ export interface CalendarNotesPanelInstance {
   element: HTMLElement;
   setEvent(event: CalendarEvent | null): void;
   destroy(): void;
+}
+
+export async function ensureEventPersisted(
+  event: CalendarEvent,
+  householdId: string,
+): Promise<void> {
+  try {
+    await call("event_create", {
+      data: {
+        id: event.id,
+        title: event.title,
+        start_at_utc: event.start_at_utc,
+        tz: event.tz ?? null,
+        household_id: householdId,
+      },
+    });
+  } catch (error) {
+    let text: string;
+    if (error && typeof (error as { message?: unknown }).message === "string") {
+      text = String((error as { message: string }).message);
+    } else if (typeof (error as { toString?: () => string } | undefined)?.toString === "function") {
+      text = String((error as { toString: () => string }).toString());
+    } else {
+      text = String(error);
+    }
+    if (!/UNIQUE|already exists/i.test(text)) {
+      throw error;
+    }
+  }
 }
 
 export async function resolveQuickCaptureCategory(): Promise<string | null> {
@@ -336,6 +366,7 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
       syncErrorState();
       const householdId = currentHouseholdId ?? (await defaultHouseholdId());
       currentHouseholdId = householdId;
+      await ensureEventPersisted(currentEvent, householdId);
       const note = await contextNotesRepo.quickCreate({
         householdId,
         entityType: "event",
@@ -401,6 +432,7 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
       while (eventMeta.children.length > 1) {
         eventMeta.removeChild(eventMeta.lastChild as ChildNode);
       }
+      syncLoadingState(false);
       syncQuickState();
       return;
     }
@@ -426,7 +458,22 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
       eventMeta.appendChild(timezoneBadge);
     }
     syncQuickState();
-    void loadNotes({ append: false });
+    syncLoadingState(true);
+    const token = fetchToken;
+    void (async () => {
+      try {
+        const householdId = currentHouseholdId ?? (await defaultHouseholdId());
+        currentHouseholdId = householdId;
+        await ensureEventPersisted(event, householdId);
+      } catch (error) {
+        currentError = error;
+        syncErrorState();
+        syncLoadingState(false);
+        return;
+      }
+      if (token !== fetchToken) return;
+      void loadNotes({ append: false });
+    })();
   };
 
   const destroy = () => {
