@@ -626,12 +626,13 @@ export async function CalendarView(
     const snapshot = selectors.events.snapshot(getState());
     const baseItems = snapshot?.items ?? [];
     const nextItems = [...baseItems, ev];
-    const window = snapshot?.window ?? currentWindow ?? calendarWindowAround(focusDate.getTime());
-    currentWindow = window;
+    const windowRange =
+      snapshot?.window ?? currentWindow ?? calendarWindowAround(focusDate.getTime());
+    currentWindow = windowRange;
     const payload = actions.events.updateSnapshot({
       items: nextItems,
       ts: Date.now(),
-      window,
+      window: windowRange,
       source: "create",
       truncated: snapshot?.truncated ?? false,
     });
