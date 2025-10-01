@@ -1,7 +1,8 @@
 use arklowdun_lib::{
     migrate,
     note_links::{
-        create_link, list_notes_for_entity, quick_create_note_for_entity, NoteLinkEntityType,
+        create_link, get_link_for_note, list_notes_for_entity, quick_create_note_for_entity,
+        NoteLinkEntityType,
     },
 };
 use sqlx::SqlitePool;
@@ -292,6 +293,98 @@ async fn quick_create_is_atomic() {
         .await
         .expect("count notes");
     assert_eq!(note_count, 0, "no notes inserted on failure");
+}
+
+#[tokio::test]
+async fn recurring_series_parent_notes_visible_to_instances() {
+    let pool = setup_pool().await;
+    let event_id = insert_event(&pool, "default", "Weekly sync", 1).await;
+    let note_id = insert_note(&pool, "default", "cat_primary", 0, 1, "Agenda").await;
+
+    create_link(
+        &pool,
+        "default",
+        &note_id,
+        NoteLinkEntityType::Event,
+        &event_id,
+        None,
+    )
+    .await
+    .expect("link parent event");
+
+    let instance_id = format!("{event_id}::{}", 1_700_000_000_000i64);
+    let page = list_notes_for_entity(
+        &pool,
+        "default",
+        NoteLinkEntityType::Event,
+        &instance_id,
+        None,
+        None,
+        Some(10),
+    )
+    .await
+    .expect("list instance notes");
+
+    assert_eq!(page.notes.len(), 1, "instance inherits parent notes");
+    assert_eq!(page.links.len(), 1, "instance returns matching link");
+    assert_eq!(page.links[0].entity_id, event_id, "link anchored to parent");
+}
+
+#[tokio::test]
+async fn recurring_instance_link_normalises_to_parent() {
+    let pool = setup_pool().await;
+    let event_id = insert_event(&pool, "default", "Daily standup", 1).await;
+    let note_id = insert_note(&pool, "default", "cat_primary", 0, 1, "Talking points").await;
+
+    let instance_id = format!("{event_id}::{}", 1_700_123_456_789i64);
+    let link = create_link(
+        &pool,
+        "default",
+        &note_id,
+        NoteLinkEntityType::Event,
+        &instance_id,
+        None,
+    )
+    .await
+    .expect("link recurring instance");
+
+    assert_eq!(link.entity_id, event_id, "returned link uses parent id");
+
+    let stored_entity_id: String =
+        sqlx::query_scalar("SELECT entity_id FROM note_links WHERE id = ?1")
+            .bind(&link.id)
+            .fetch_one(&pool)
+            .await
+            .expect("fetch stored entity id");
+    assert_eq!(stored_entity_id, event_id, "link stored with parent id");
+
+    let other_instance = format!("{event_id}::{}", 1_700_987_654_321i64);
+    let page = list_notes_for_entity(
+        &pool,
+        "default",
+        NoteLinkEntityType::Event,
+        &other_instance,
+        None,
+        None,
+        Some(10),
+    )
+    .await
+    .expect("list other instance notes");
+
+    assert_eq!(page.notes.len(), 1, "other instance sees shared note");
+    let fetched_link = get_link_for_note(
+        &pool,
+        "default",
+        &note_id,
+        NoteLinkEntityType::Event,
+        &other_instance,
+    )
+    .await
+    .expect("retrieve link by instance");
+    assert_eq!(
+        fetched_link.entity_id, event_id,
+        "link lookup resolves to parent"
+    );
 }
 
 #[tokio::test]

@@ -36,7 +36,7 @@ function formatCount(count: number): string {
 
 function bannerCopy(count: number): string {
   const normalized = normalizeCount(count);
-  const formatted = normalized.toLocaleString();
+  const formatted = formatCount(normalized);
   const suffix = normalized === 1 ? "event" : "events";
   return `Only showing the first ${formatted} ${suffix} — refine filters to see more.`;
 }
