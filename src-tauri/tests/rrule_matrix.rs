@@ -103,8 +103,8 @@ async fn run_scenario(scenario: &Scenario) -> Result<()> {
     let pool = setup_pool().await?;
     seed_event(&pool, scenario).await?;
 
-    let range_start = parse_utc(scenario.range_start_utc)?;
-    let range_end = parse_utc(scenario.range_end_utc)?;
+    let range_start = parse_utc(&scenario.range_start_utc)?;
+    let range_end = parse_utc(&scenario.range_end_utc)?;
 
     let household_id = scenario.household_id();
     let first = commands::events_list_range_command(&pool, &household_id, range_start, range_end)

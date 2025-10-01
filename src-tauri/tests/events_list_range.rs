@@ -4,7 +4,7 @@ use arklowdun_lib::{
     },
     time_shadow,
 };
-use chrono::{DateTime, Datelike, NaiveDateTime, TimeZone, Utc, Weekday};
+use chrono::{DateTime, Datelike, NaiveDateTime, Offset, TimeZone, Utc, Weekday};
 use chrono_tz::Tz;
 use std::collections::HashSet;
 use once_cell::sync::Lazy;
@@ -628,7 +628,7 @@ proptest! {
                 assert!(inst.start_at_utc >= range_start && inst.start_at_utc <= range_end);
                 assert!(seen.insert(inst.start_at_utc));
             }
-            let mut starts: Vec<_> = res.items.iter().map(|inst| inst.start_at_utc).collect();
+            let starts: Vec<_> = res.items.iter().map(|inst| inst.start_at_utc).collect();
             let mut sorted = starts.clone();
             sorted.sort();
             assert_eq!(starts, sorted);

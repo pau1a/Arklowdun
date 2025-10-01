@@ -74,6 +74,7 @@ pub(crate) fn row_to_json(row: SqliteRow) -> Value {
 pub mod notes {
     use super::*;
 
+    #[allow(dead_code)]
     pub async fn list_with_categories(
         pool: &SqlitePool,
         household_id: &str,
