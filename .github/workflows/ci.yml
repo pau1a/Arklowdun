@@ -239,6 +239,63 @@ jobs:
       - name: Ensure evidence bundle is current
         run: git diff --exit-code docs/evidence/drop-legacy
 
+  check_ts_bindings:
+    name: check/ts-bindings
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run check:models
+
+  gate_recurrence_perf_budget:
+    name: gate/recurrence-perf-budget
+    runs-on: ubuntu-latest
+    needs: [lint, unit, check_ts_bindings]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            python3 \
+            make \
+            g++ \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            sqlite3
+      - run: npm ci
+      - name: Enforce recurrence performance budget
+        run: npm run gate:recurrence-perf
+      - name: Upload recurrence perf summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recurrence-perf-budget
+          path: test-results/recurrence-perf-budget.json
+
   lint:
     runs-on: ubuntu-latest
     steps:

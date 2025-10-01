@@ -15,6 +15,7 @@ import {
 import { on, type AppEventListener } from "@store/events";
 import createLoading from "@ui/Loading";
 import createTimezoneBadge from "@ui/TimezoneBadge";
+import { noteAnchorId } from "@utils/noteAnchorId";
 import { categoriesRepo } from "../../repos";
 
 const PANEL_LIMIT = 20;
@@ -39,10 +40,11 @@ export async function ensureEventPersisted(
   event: CalendarEvent,
   householdId: string,
 ): Promise<void> {
+  const anchorId = noteAnchorId(event);
   try {
     await call("event_create", {
       data: {
-        id: event.id,
+        id: anchorId,
         title: event.title,
         start_at_utc: event.start_at_utc,
         tz: event.tz ?? null,
@@ -197,6 +199,7 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
   let nextCursor: string | null = null;
   let fetchToken = 0;
   let currentError: unknown = null;
+  let currentAnchorId: string | null = null;
 
   const syncQuickState = () => {
     const disabled = !currentEvent || isSubmitting;
@@ -322,8 +325,9 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
         return;
       }
       const filterIds = categoriesLoaded ? [...activeCategoryIds] : undefined;
+      const anchorId = currentAnchorId ?? noteAnchorId(currentEvent);
       const { data, error } = await useContextNotes({
-        eventId: currentEvent.id,
+        eventId: anchorId,
         householdId,
         categoryIds: filterIds,
         cursor,
@@ -392,10 +396,11 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
       } catch (error) {
         console.warn("Quick-capture: proceed without event pre-persist", error);
       }
+      const anchorId = currentAnchorId ?? noteAnchorId(currentEvent);
       const note = await contextNotesRepo.quickCreate({
         householdId,
         entityType: "event",
-        entityId: currentEvent.id,
+        entityId: anchorId,
         categoryId,
         text,
         color: "#FFF4B8",
@@ -406,7 +411,7 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
           householdId,
           note.id,
           "event",
-          currentEvent.id,
+          anchorId,
         );
         linkId = link.id;
       } catch (error) {
@@ -445,6 +450,7 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
 
   const setEvent = (event: CalendarEvent | null) => {
     currentEvent = event;
+    currentAnchorId = event ? noteAnchorId(event) : null;
     currentNotes = [];
     nextCursor = null;
     currentError = null;

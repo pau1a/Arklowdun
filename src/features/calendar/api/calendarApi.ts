@@ -7,6 +7,7 @@ export interface CalendarQuery {
   items: CalendarEvent[];
   window: CalendarWindowRange;
   truncated: boolean;
+  limit: number;
 }
 
 const WINDOW_SPAN_MS = 365 * 24 * 60 * 60 * 1000;
@@ -20,10 +21,10 @@ export async function fetchCalendarEvents(
   windowRange: CalendarWindowRange = defaultCalendarWindow(),
 ): Promise<CalendarQuery> {
   const householdId = await defaultHouseholdId();
-  const { items, truncated } = await call<EventsListRangeResponse>("events_list_range", {
+  const { items, truncated, limit } = await call<EventsListRangeResponse>("events_list_range", {
     householdId,
     start: windowRange.start,
     end: windowRange.end,
   });
-  return { items, window: windowRange, truncated };
+  return { items, window: windowRange, truncated, limit };
 }

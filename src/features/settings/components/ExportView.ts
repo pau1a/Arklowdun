@@ -1,7 +1,7 @@
 import createButton from "@ui/Button";
 import { toast } from "@ui/Toast";
 import { runExport } from "../api/export";
-import { revealPath } from "@lib/ipc/opener";
+import { openPath } from "../api/opener";
 import { openDirectoryDialog } from "../api/dialog";
 import { recoveryText } from "@strings/recovery";
 
@@ -69,7 +69,7 @@ export function createExportView(): ExportViewInstance {
         const action = {
           label: recoveryText("db.common.reveal"),
           onSelect: async () => {
-            const ok = await revealPath(entry.manifestPath);
+            const ok = await openPath(entry.manifestPath);
             if (!ok) {
               try { await navigator?.clipboard?.writeText?.(entry.directory); } catch {}
             }

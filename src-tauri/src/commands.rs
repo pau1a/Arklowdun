@@ -14,6 +14,9 @@ use chrono::{DateTime, Duration, Utc};
 use chrono_tz::Tz as ChronoTz;
 use rrule::{RRule, RRuleSet, Tz, Unvalidated};
 
+pub const EVENTS_LIST_RANGE_PER_SERIES_LIMIT: usize = 500;
+pub const EVENTS_LIST_RANGE_TOTAL_LIMIT: usize = 10_000;
+
 #[allow(clippy::result_large_err)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct EventRow {
@@ -960,6 +963,15 @@ pub async fn events_list_range_command(
     start: i64,
     end: i64,
 ) -> AppResult<EventsListRangeResponse> {
+    if start >= end {
+        return Err(TimeErrorCode::RangeInvalid
+            .into_error()
+            .with_context("operation", "events_list_range")
+            .with_context("household_id", household_id.to_string())
+            .with_context("start", start.to_string())
+            .with_context("end", end.to_string()));
+    }
+
     let hh = repo::require_household(household_id)
         .map_err(|err| AppError::from(err).with_context("operation", "events_list_range"))?;
     let has_legacy_start = sqlx::query_scalar::<_, i64>(
@@ -998,8 +1010,6 @@ pub async fn events_list_range_command(
 
     let mut shadow_audit = ShadowAudit::new();
 
-    const PER_SERIES_LIMIT: usize = 500;
-    const TOTAL_LIMIT: usize = 10_000;
     let range_start_utc = DateTime::<Utc>::from_timestamp_millis(start).ok_or_else(|| {
         AppError::new("TIME/INVALID_TIMESTAMP", "Invalid range start timestamp")
             .with_context("operation", "events_list_range")
@@ -1067,13 +1077,13 @@ pub async fn events_list_range_command(
                         rule = %rrule_str.chars().take(80).collect::<String>(),
                         error = %err
                     );
-                    return Err(TimeErrorCode::RruleUnsupportedField
+                    return Err(TimeErrorCode::RruleParse
                         .into_error()
                         .with_context("operation", "events_list_range")
                         .with_context("household_id", household_id.to_string())
                         .with_context("event_id", event_id.clone())
                         .with_context("rrule", rrule_str.clone())
-                        .with_context("detail", err.to_string()));
+                        .with_context("error", err.to_string()));
                 }
             };
 
@@ -1100,15 +1110,40 @@ pub async fn events_list_range_command(
 
             let mut set = RRuleSet::new(start_local).rrule(rrule);
             if let Some(exdates_str) = &row.exdates {
-                for ex_s in exdates_str.split(',') {
-                    let ex_s = ex_s.trim();
-                    if ex_s.is_empty() {
+                let mut normalized: Vec<DateTime<Utc>> = Vec::new();
+                let mut malformed_tokens: Vec<String> = Vec::new();
+                for raw in exdates_str.split(',') {
+                    let token = raw.trim();
+                    if token.is_empty() {
                         continue;
                     }
-                    if let Ok(ex_utc) = DateTime::parse_from_rfc3339(ex_s) {
-                        let ex_local = ex_utc.with_timezone(&Utc).with_timezone(&tz);
-                        set = set.exdate(ex_local);
+                    match DateTime::parse_from_rfc3339(token) {
+                        Ok(ex_utc) => normalized.push(ex_utc.with_timezone(&Utc)),
+                        Err(err) => {
+                            malformed_tokens.push(format!("{token} ({err})"));
+                        }
                     }
+                }
+                normalized.sort();
+                normalized.dedup();
+                for ex_utc in normalized {
+                    let ex_local = ex_utc.with_timezone(&tz);
+                    set = set.exdate(ex_local);
+                }
+                if !malformed_tokens.is_empty() {
+                    let sample: Vec<&str> = malformed_tokens
+                        .iter()
+                        .take(5)
+                        .map(String::as_str)
+                        .collect();
+                    tracing::warn!(
+                        target: "arklowdun",
+                        event = "events.exdate_invalid",
+                        event_id = %event_id,
+                        token_count = malformed_tokens.len(),
+                        sample = ?sample,
+                        "ignoring malformed EXDATE tokens"
+                    );
                 }
             }
 
@@ -1116,17 +1151,17 @@ pub async fn events_list_range_command(
             let before = range_end_utc.with_timezone(&tz);
             set = set.after(after).before(before);
 
-            let occurrences = set.all((PER_SERIES_LIMIT + 1) as u16);
+            let occurrences = set.all((EVENTS_LIST_RANGE_PER_SERIES_LIMIT + 1) as u16);
             let mut dates = occurrences.dates;
-            let series_over_limit = dates.len() > PER_SERIES_LIMIT;
+            let series_over_limit = dates.len() > EVENTS_LIST_RANGE_PER_SERIES_LIMIT;
             if series_over_limit {
                 truncated = true;
-                dates.truncate(PER_SERIES_LIMIT);
+                dates.truncate(EVENTS_LIST_RANGE_PER_SERIES_LIMIT);
             }
             let series_len = dates.len();
 
             for (occ_index, occ) in dates.into_iter().enumerate() {
-                if out.len() >= TOTAL_LIMIT {
+                if out.len() >= EVENTS_LIST_RANGE_TOTAL_LIMIT {
                     truncated = true;
                     break 'rows;
                 }
@@ -1154,7 +1189,7 @@ pub async fn events_list_range_command(
                     series_parent_id: Some(row.id.clone()),
                 };
                 out.push(inst);
-                if out.len() >= TOTAL_LIMIT {
+                if out.len() >= EVENTS_LIST_RANGE_TOTAL_LIMIT {
                     if series_over_limit || occ_index + 1 < series_len || row_index + 1 < row_count
                     {
                         truncated = true;
@@ -1166,12 +1201,12 @@ pub async fn events_list_range_command(
             let start_utc = row.start_at_utc;
             let end_utc = row.end_at_utc.unwrap_or(row.start_at_utc);
             if end_utc >= start && start_utc <= end {
-                if out.len() >= TOTAL_LIMIT {
+                if out.len() >= EVENTS_LIST_RANGE_TOTAL_LIMIT {
                     truncated = true;
                     break;
                 }
                 out.push(Event::from(&row));
-                if out.len() >= TOTAL_LIMIT {
+                if out.len() >= EVENTS_LIST_RANGE_TOTAL_LIMIT {
                     if row_index + 1 < row_count {
                         truncated = true;
                     }
@@ -1190,8 +1225,21 @@ pub async fn events_list_range_command(
             .then(a.id.cmp(&b.id))
     });
 
+    if truncated {
+        tracing::debug!(
+            target: "arklowdun",
+            event = "timekeeping.truncated",
+            household_id = household_id,
+            limit = EVENTS_LIST_RANGE_TOTAL_LIMIT,
+            item_count = out.len(),
+            range_start = start,
+            range_end = end
+        );
+    }
+
     Ok(EventsListRangeResponse {
         items: out,
         truncated,
+        limit: EVENTS_LIST_RANGE_TOTAL_LIMIT,
     })
 }

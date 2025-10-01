@@ -59,6 +59,7 @@ export type EventsSnapshot = {
   window?: { start: number; end: number };
   source?: string;
   truncated?: boolean;
+  limit?: number;
 };
 
 export type NotesSnapshot = {
@@ -327,7 +328,7 @@ export const actions = {
       const count = snapshot?.items.length ?? 0;
       const ts = snapshot?.ts ?? Date.now();
       const truncated = snapshot?.truncated ?? false;
-      return { count, ts, window: snapshot?.window, truncated };
+      return { count, ts, window: snapshot?.window, truncated, limit: snapshot?.limit };
     },
   },
   notes: {

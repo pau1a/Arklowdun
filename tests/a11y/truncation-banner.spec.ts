@@ -29,12 +29,14 @@ test.describe('Truncation banner accessibility', () => {
       ts: truncatedSnapshot.ts,
       window: calendarWindow,
       source: 'playwright-truncation-a11y',
+      limit: truncatedSnapshot.events.length,
     });
 
     const banner = page.locator('[data-ui="truncation-banner"]');
     await expect(banner).toBeVisible();
     await expect(banner).toHaveAttribute('role', 'status');
     await expect(banner).toHaveAttribute('aria-live', 'polite');
+    await expect(banner).toHaveAttribute('aria-atomic', 'true');
 
     const results = await new AxeBuilder({ page })
       .exclude('.sidebar a.active > span')

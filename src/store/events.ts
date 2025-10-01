@@ -5,6 +5,7 @@ export type EventsUpdatedPayload = {
   ts: number;
   window?: { start: number; end: number };
   truncated?: boolean;
+  limit?: number;
 };
 export type NotesUpdatedPayload = { count: number; ts: number; activeCategoryIds: string[] };
 export type HouseholdChangedPayload = { householdId: string };

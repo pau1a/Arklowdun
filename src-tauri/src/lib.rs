@@ -780,7 +780,7 @@ async fn vehicles_restore(
     .await
 }
 
-#[derive(Serialize, Deserialize, Clone, TS)]
+#[derive(Serialize, Deserialize, Clone, TS, Debug)]
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct Event {
     #[serde(default)]
@@ -820,13 +820,14 @@ pub struct Event {
     pub series_parent_id: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, TS)]
+#[derive(Serialize, Deserialize, Clone, TS, Debug)]
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct EventsListRangeResponse {
     #[serde(default)]
     pub items: Vec<Event>,
     #[serde(default)]
     pub truncated: bool,
+    pub limit: usize,
 }
 
 #[tauri::command]
