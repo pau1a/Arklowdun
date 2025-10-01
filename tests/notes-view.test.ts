@@ -15,7 +15,6 @@ const { window: bootstrapWindow } = bootstrapDom;
 (globalThis as any).Node = bootstrapWindow.Node;
 try {
   // Delete any existing non-configurable navigator accessor before redefining below.
-  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- test bootstrap shim
   delete (globalThis as any).navigator;
 } catch {
   // ignore if deletion is disallowed; defineProperty below will overwrite when possible
@@ -33,7 +32,6 @@ test.beforeEach(() => {
   (globalThis as any).HTMLElement = window.HTMLElement;
   (globalThis as any).Node = window.Node;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- test bootstrap shim
     delete (globalThis as any).navigator;
   } catch {
     // ignore if not deletable

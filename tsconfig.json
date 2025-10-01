@@ -23,7 +23,8 @@
       "@strings/*": ["strings/*"],
       "@db/*": ["db/*"],
       "@files/*": ["files/*"],
-      "@repos/*": ["repos/*"]
+      "@repos/*": ["repos/*"],
+      "@assets/*": ["../assets/*"]
     },
     "isolatedModules": true,
     "noEmit": true,

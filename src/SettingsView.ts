@@ -29,6 +29,7 @@ import {
 import { showError } from "./ui/errors";
 import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
 import type { Category } from "./models";
+import createInput from "@ui/Input";
 
 export interface SettingsViewOptions {
   householdId?: string;
@@ -173,10 +174,11 @@ export function SettingsView(
         item.classList.add("settings__category-toggle--hidden");
       }
 
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
+      const checkbox = createInput({
+        type: "checkbox",
+        ariaLabel: `Toggle ${category.name}`,
+      });
       checkbox.checked = category.isVisible;
-      checkbox.setAttribute("aria-label", `Toggle ${category.name}`);
 
       checkbox.addEventListener("change", () => {
         const nextChecked = checkbox.checked;

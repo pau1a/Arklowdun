@@ -1,5 +1,5 @@
 import { settingsText } from "@strings/settings";
-import rawAttributionManifest from "../../../../assets/licensing/attribution.json" with { type: "json" };
+import rawAttributionManifest from "@assets/licensing/attribution.json" with { type: "json" };
 
 type AttributionManifest = {
   assets?: AttributionAsset[];

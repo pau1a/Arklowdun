@@ -225,6 +225,7 @@ module.exports = {
       rules: {
         "import/no-relative-parent-imports": "off",
         "security/detect-object-injection": "off",
+        "@typescript-eslint/no-dynamic-delete": "off",
       },
     },
   ],
