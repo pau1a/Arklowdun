@@ -30,6 +30,8 @@ import createTruncationBanner from "@ui/TruncationBanner";
 import createErrorBanner from "@ui/ErrorBanner";
 import { describeTimekeepingError } from "@utils/timekeepingErrors";
 
+const FILTER_INPUT_DEBOUNCE_MS = 180;
+
 async function saveEvent(
   event: Omit<
     CalendarEvent,
@@ -99,7 +101,23 @@ export async function CalendarView(container: HTMLElement) {
   const kicker = document.createElement("p");
   kicker.className = "kicker";
   kicker.textContent = "All times local";
-  headerContent.append(kicker);
+
+  const filterLabel = document.createElement("label");
+  filterLabel.className = "sr-only";
+  filterLabel.htmlFor = "calendar-filter";
+  filterLabel.textContent = "Filter calendar events";
+
+  const filterInput = createInput({
+    id: "calendar-filter",
+    type: "search",
+    placeholder: "Filter events",
+    ariaLabel: "Filter calendar events",
+    className: "calendar__filter-input",
+  });
+
+  const filterWrapper = document.createElement("div");
+  filterWrapper.className = "calendar__filters";
+  filterWrapper.append(filterLabel, filterInput);
 
   const notesToggle = createButton({
     label: "Show notes",
@@ -110,8 +128,15 @@ export async function CalendarView(container: HTMLElement) {
     ariaPressed: false,
   });
   notesToggle.disabled = true;
-  headerContent.append(notesToggle);
+  headerContent.append(kicker, filterWrapper, notesToggle);
   header.appendChild(headerContent);
+
+  const focusFilterControls = () => {
+    filterInput.focus();
+    filterInput.select();
+  };
+
+  let lastRefineButton: HTMLButtonElement | null = null;
 
   const truncationBanner = createTruncationBanner({
     count: 0,
@@ -120,11 +145,19 @@ export async function CalendarView(container: HTMLElement) {
       truncationDismissed = true;
       truncationBanner.update({ hidden: true });
     },
+    onRefine: () => {
+      lastRefineButton = truncationBanner.refineButton;
+      focusFilterControls();
+    },
+    refineLabel: "Refine filters",
+    refineAriaLabel: "Refine calendar filters",
   });
 
   const notesPanel = CalendarNotesPanel();
   let selectedEvent: CalendarEvent | null = null;
   let notesToggleActive = false;
+  let filterValue = "";
+  let filterDebounce: number | null = null;
 
   const syncNotesToggle = () => {
     const hasEvent = Boolean(selectedEvent);
@@ -219,6 +252,35 @@ export async function CalendarView(container: HTMLElement) {
   let lastTruncationToken: number | null = null;
   let inlineError: ReturnType<typeof createErrorBanner> | null = null;
 
+  const filterEvents = (events: CalendarEvent[]): CalendarEvent[] => {
+    const query = filterValue.trim().toLowerCase();
+    if (!query) return events;
+    return events.filter((event) => event.title.toLowerCase().includes(query));
+  };
+
+  const syncTruncationBanner = (filtered: CalendarEvent[]) => {
+    const snapshot = currentSnapshot;
+    const limit = snapshot?.limit ?? null;
+    const truncated = snapshot?.truncated ?? false;
+    const token = snapshot?.ts ?? null;
+    if (!truncated) {
+      updateTruncationNotice(limit ?? filtered.length, false, null);
+      return;
+    }
+    if (limit !== null && filtered.length < limit) {
+      updateTruncationNotice(limit, false, null);
+      return;
+    }
+    updateTruncationNotice(limit ?? filtered.length, true, token);
+  };
+
+  const applyFilters = () => {
+    const items = currentSnapshot?.items ?? [];
+    const filtered = filterEvents(items);
+    calendar.setEvents(filtered);
+    syncTruncationBanner(filtered);
+  };
+
   const clearInlineError = () => {
     if (inlineError) {
       inlineError.remove();
@@ -249,9 +311,10 @@ export async function CalendarView(container: HTMLElement) {
     token: number | null,
   ) {
     if (!truncated) {
-      truncationBanner.update({ hidden: true });
+      truncationBanner.update({ count, hidden: true });
       truncationDismissed = false;
       lastTruncationToken = null;
+      lastRefineButton = null;
       return;
     }
     if (token !== null && token !== lastTruncationToken) {
@@ -259,18 +322,23 @@ export async function CalendarView(container: HTMLElement) {
       lastTruncationToken = token;
     }
     truncationBanner.update({ count, hidden: truncationDismissed });
+    if (truncationDismissed) {
+      lastRefineButton = null;
+    }
   }
 
   const unsubscribe = subscribe(selectors.events.snapshot, (snapshot) => {
     currentSnapshot = snapshot ?? null;
     if (snapshot?.window) currentWindow = snapshot.window;
-    const items = snapshot?.items ?? [];
-    calendar.setEvents(items);
-    updateTruncationNotice(items.length, snapshot?.truncated ?? false, snapshot?.ts ?? null);
+    applyFilters();
   });
   registerViewCleanup(container, unsubscribe);
 
   const stopHousehold = on("household:changed", async () => {
+    filterValue = "";
+    filterInput.value = "";
+    lastRefineButton = null;
+    applyFilters();
     await loadEvents("household-change");
   });
   registerViewCleanup(container, stopHousehold);
@@ -289,7 +357,7 @@ export async function CalendarView(container: HTMLElement) {
         return;
       }
       if (!data) return;
-      const { items, window, truncated } = data;
+      const { items, window, truncated, limit } = data;
       currentWindow = window;
       clearInlineError();
       const payload = actions.events.updateSnapshot({
@@ -298,6 +366,7 @@ export async function CalendarView(container: HTMLElement) {
         window,
         source,
         truncated,
+        limit,
       });
       emit("events:updated", payload);
       scheduleNotifications(items);
@@ -313,12 +382,7 @@ export async function CalendarView(container: HTMLElement) {
 
   if (currentSnapshot) {
     const items = currentSnapshot.items;
-    calendar.setEvents(items);
-    updateTruncationNotice(
-      items.length,
-      currentSnapshot.truncated ?? false,
-      currentSnapshot.ts,
-    );
+    applyFilters();
     if (items.length) scheduleNotifications(items);
   } else {
     await loadEvents("initial");
@@ -352,5 +416,63 @@ export async function CalendarView(container: HTMLElement) {
     emit("events:updated", payload);
     scheduleNotifications([ev]);
     form.reset();
+  });
+
+  filterInput.addEventListener("input", () => {
+    filterValue = filterInput.value;
+    lastRefineButton = null;
+    if (filterDebounce !== null) window.clearTimeout(filterDebounce);
+    filterDebounce = window.setTimeout(() => {
+      filterDebounce = null;
+      applyFilters();
+    }, FILTER_INPUT_DEBOUNCE_MS);
+  });
+
+  filterInput.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && lastRefineButton) {
+      event.preventDefault();
+      const target = lastRefineButton;
+      lastRefineButton = null;
+      window.setTimeout(() => {
+        try {
+          target.focus();
+        } catch {
+          /* ignore */
+        }
+      }, 0);
+    }
+  });
+
+  filterInput.addEventListener("blur", () => {
+    lastRefineButton = null;
+  });
+
+  const shouldIgnoreSlashShortcut = () => {
+    const active = document.activeElement as HTMLElement | null;
+    if (active) {
+      const tag = active.tagName.toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return true;
+      if (active.isContentEditable) return true;
+      const role = active.getAttribute("role");
+      if (role === "textbox" || role === "combobox") return true;
+    }
+    if (document.querySelector('[data-ui="modal"]:not([hidden])')) return true;
+    if (document.querySelector('[aria-modal="true"]')) return true;
+    return false;
+  };
+
+  const shortcutHandler = (event: KeyboardEvent) => {
+    if (event.defaultPrevented) return;
+    if (event.key === "/" && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      if (shouldIgnoreSlashShortcut()) return;
+      event.preventDefault();
+      lastRefineButton = null;
+      focusFilterControls();
+    }
+  };
+  window.addEventListener("keydown", shortcutHandler, { passive: false });
+  registerViewCleanup(container, () => {
+    window.removeEventListener("keydown", shortcutHandler);
+    if (filterDebounce !== null) window.clearTimeout(filterDebounce);
   });
 }

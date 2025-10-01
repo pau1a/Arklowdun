@@ -827,6 +827,7 @@ pub struct EventsListRangeResponse {
     pub items: Vec<Event>,
     #[serde(default)]
     pub truncated: bool,
+    pub limit: usize,
 }
 
 #[tauri::command]

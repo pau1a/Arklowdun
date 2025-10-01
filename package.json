@@ -35,6 +35,7 @@
     "gate:no-deep-relatives": "node scripts/guards/gate-no-deep-relatives.mjs",
     "gate:cross-feature-report": "node scripts/guards/gate-cross-feature-report.mjs",
     "gate:query-perf-smoke": "node scripts/ci/query-perf-smoke.mjs",
+    "gate:recurrence-perf": "node scripts/ci/recurrence-perf-budget.mjs",
     "perf:query:local": "node scripts/ci/query-perf-local.mjs",
     "gate:scan": "npm run gate:ipc-in-components && npm run gate:no-deep-relatives && npm run gate:cross-feature-report",
     "licensing:inventory": "tsx scripts/licensing/pipeline.ts",

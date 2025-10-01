@@ -11,22 +11,23 @@ These caps are enforced during expansion. Results remain sorted by UTC start tim
 
 ## Truncation Signalling
 
-Whenever either cap prevents additional instances from being returned, the IPC payload includes `truncated: true`. Clients receive the data as:
+Whenever either cap prevents additional instances from being returned, the IPC payload includes `truncated: true` and echoes the total cap via `limit`. Clients receive the data as:
 
 ```json
 {
   "items": [ /* Event[] */ ],
-  "truncated": true
+  "truncated": true,
+  "limit": 10000
 }
 ```
 
-The flag is `false` when the full result set fit within the limits. Backwards compatibility is preserved because the `items` array still contains fully hydrated `Event` objects.
+The flag is `false` when the full result set fit within the limits. `limit` is always populated so clients can cite the cap even when local filters reduce the currently rendered count. Backwards compatibility is preserved because the `items` array still contains fully hydrated `Event` objects.
 
 ## Truncation Banner UX
 
 When `truncated` is `true`, calendar and other recurrence-driven surfaces render the shared `TruncationBanner` primitive above their list content. The component:
 
-- Announces “This list was shortened to the first _N_ results.” with the list size formatted using the viewer’s locale.
+- Announces “Only showing the first _N_ events — refine filters to see more.” with the list size formatted using the viewer’s locale.
 - Exposes `role="status"` and `aria-live="polite"` so screen readers announce the banner as soon as it appears.
 - Ships with a keyboard-focusable “Close” button that hides the banner until the next truncated payload is fetched. A fresh payload (indicated by a new timestamp token) re-enables the message so the truncation state is not missed.
 - Collapses automatically when a subsequent fetch returns the full, untruncated dataset.

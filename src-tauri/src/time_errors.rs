@@ -7,12 +7,16 @@ pub enum TimeErrorCode {
     ExdateInvalidFormat,
     /// EXDATE token falls outside the recurrence window.
     ExdateOutOfRange,
+    /// RRULE string failed to parse.
+    RruleParse,
     /// RRULE contains fields or combinations that are not supported yet.
     RruleUnsupportedField,
     /// Event timezone string could not be resolved to a known IANA timezone.
     TimezoneUnknown,
     /// Stored event timestamps no longer line up with the recorded timezone offsets.
     TimezoneDriftDetected,
+    /// Requested range window has an invalid ordering.
+    RangeInvalid,
 }
 
 impl TimeErrorCode {
@@ -22,9 +26,11 @@ impl TimeErrorCode {
         match self {
             TimeErrorCode::ExdateInvalidFormat => "E_EXDATE_INVALID_FORMAT",
             TimeErrorCode::ExdateOutOfRange => "E_EXDATE_OUT_OF_RANGE",
+            TimeErrorCode::RruleParse => "E_RRULE_PARSE",
             TimeErrorCode::RruleUnsupportedField => "E_RRULE_UNSUPPORTED_FIELD",
             TimeErrorCode::TimezoneUnknown => "E_TZ_UNKNOWN",
             TimeErrorCode::TimezoneDriftDetected => "E_TZ_DRIFT_DETECTED",
+            TimeErrorCode::RangeInvalid => "E_RANGE_INVALID",
         }
     }
 
@@ -38,6 +44,9 @@ impl TimeErrorCode {
             TimeErrorCode::ExdateOutOfRange => {
                 "Excluded dates must fall within the recurrence window."
             }
+            TimeErrorCode::RruleParse => {
+                "Recurrence rule could not be parsed. Please check the syntax."
+            }
             TimeErrorCode::RruleUnsupportedField => {
                 "Recurrence rule contains fields that are not supported."
             }
@@ -46,6 +55,9 @@ impl TimeErrorCode {
             }
             TimeErrorCode::TimezoneDriftDetected => {
                 "Stored event timestamps drifted away from their timezone offsets."
+            }
+            TimeErrorCode::RangeInvalid => {
+                "The requested time range is invalid. Start must be before end."
             }
         }
     }
@@ -70,6 +82,10 @@ pub fn all_time_error_specs() -> &'static [(TimeErrorCode, &'static str)] {
             "Excluded dates must fall within the recurrence window.",
         ),
         (
+            TimeErrorCode::RruleParse,
+            "We couldn't read that repeat pattern. Please check the format.",
+        ),
+        (
             TimeErrorCode::RruleUnsupportedField,
             "This repeat pattern is not yet supported.",
         ),
@@ -80,6 +96,10 @@ pub fn all_time_error_specs() -> &'static [(TimeErrorCode, &'static str)] {
         (
             TimeErrorCode::TimezoneDriftDetected,
             "Event timestamps no longer align with their expected timezone offsets.",
+        ),
+        (
+            TimeErrorCode::RangeInvalid,
+            "Calendar queries need the start to come before the end.",
         ),
     ]
 }

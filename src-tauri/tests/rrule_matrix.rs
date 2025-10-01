@@ -14,19 +14,23 @@ use sqlx::{
     SqlitePool,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 struct Scenario {
-    name: &'static str,
-    description: &'static str,
-    timezone: &'static str,
-    local_start: &'static str,
-    local_end: &'static str,
-    rrule: &'static str,
-    range_start_utc: &'static str,
-    range_end_utc: &'static str,
+    name: String,
+    description: String,
+    timezone: String,
+    local_start: String,
+    local_end: String,
+    rrule: String,
+    range_start_utc: String,
+    range_end_utc: String,
 }
 
 impl Scenario {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
     fn tz(&self) -> Tz {
         self.timezone
             .parse()
@@ -34,17 +38,17 @@ impl Scenario {
     }
 
     fn event_id(&self) -> String {
-        format!("series-{}", self.name)
+        format!("series-{}", self.name())
     }
 
     fn household_id(&self) -> String {
-        format!("HH-{}", self.name)
+        format!("HH-{}", self.name())
     }
 
     fn snapshot_path(&self) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../tests/rrule_snapshots")
-            .join(format!("{}.json", self.name))
+            .join(format!("{}.json", self.name()))
     }
 }
 
@@ -76,55 +80,23 @@ struct InstanceRecord {
     duration_minutes: i64,
 }
 
-static SCENARIOS: &[Scenario] = &[
-    Scenario {
-        name: "daily_london_dst",
-        description: "Daily 22:15 meeting spanning the Europe/London spring DST change",
-        timezone: "Europe/London",
-        local_start: "2024-03-29T22:15",
-        local_end: "2024-03-29T23:00",
-        rrule: "FREQ=DAILY;COUNT=5",
-        range_start_utc: "2024-03-29T00:00:00Z",
-        range_end_utc: "2024-04-04T00:00:00Z",
-    },
-    Scenario {
-        name: "weekly_new_york_byday",
-        description: "Bi-weekly Sunday 01:30 event across the America/New_York fall DST transition",
-        timezone: "America/New_York",
-        local_start: "2024-10-20T01:30",
-        local_end: "2024-10-20T02:30",
-        rrule: "FREQ=WEEKLY;INTERVAL=2;BYDAY=SU;UNTIL=20241117T063000Z",
-        range_start_utc: "2024-10-01T00:00:00Z",
-        range_end_utc: "2024-11-30T00:00:00Z",
-    },
-    Scenario {
-        name: "monthly_tokyo_bymonthday",
-        description: "Monthly series on the 10th and 20th in Asia/Tokyo exercising BYMONTHDAY/BYHOUR/BYMINUTE",
-        timezone: "Asia/Tokyo",
-        local_start: "2024-01-10T09:30",
-        local_end: "2024-01-10T11:00",
-        rrule: "FREQ=MONTHLY;INTERVAL=1;COUNT=6;BYMONTHDAY=10,20;BYHOUR=9;BYMINUTE=30",
-        range_start_utc: "2023-12-31T15:00:00Z",
-        range_end_utc: "2024-03-31T23:59:59Z",
-    },
-    Scenario {
-        name: "yearly_london_leap",
-        description: "Leap day tradition anchored to 29 February using BYMONTH/BYMONTHDAY",
-        timezone: "Europe/London",
-        local_start: "2024-02-29T08:00",
-        local_end: "2024-02-29T10:00",
-        rrule: "FREQ=YEARLY;COUNT=4;BYMONTH=2;BYMONTHDAY=29",
-        range_start_utc: "2024-01-01T00:00:00Z",
-        range_end_utc: "2036-03-02T00:00:00Z",
-    },
-];
-
 #[tokio::test]
 async fn rrule_matrix_matches_snapshots() -> Result<()> {
-    for scenario in SCENARIOS {
+    let scenarios = load_scenarios()?;
+    for scenario in &scenarios {
         run_scenario(scenario).await?;
     }
     Ok(())
+}
+
+fn load_scenarios() -> Result<Vec<Scenario>> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../fixtures/time/recurrence/matrix.json");
+    let data = fs::read_to_string(&path)
+        .with_context(|| format!("read scenario fixture: {}", path.display()))?;
+    let scenarios: Vec<Scenario> = serde_json::from_str(&data)
+        .with_context(|| format!("parse scenario fixture: {}", path.display()))?;
+    Ok(scenarios)
 }
 
 async fn run_scenario(scenario: &Scenario) -> Result<()> {
@@ -137,25 +109,25 @@ async fn run_scenario(scenario: &Scenario) -> Result<()> {
     let household_id = scenario.household_id();
     let first = commands::events_list_range_command(&pool, &household_id, range_start, range_end)
         .await
-        .with_context(|| format!("expand recurrence for {}", scenario.name))?;
+        .with_context(|| format!("expand recurrence for {}", scenario.name()))?;
     let second = commands::events_list_range_command(&pool, &household_id, range_start, range_end)
         .await
-        .with_context(|| format!("second expansion for {}", scenario.name))?;
+        .with_context(|| format!("second expansion for {}", scenario.name()))?;
     assert!(
         !first.truncated,
         "scenario {} unexpectedly truncated first expansion",
-        scenario.name
+        scenario.name()
     );
     assert!(
         !second.truncated,
         "scenario {} unexpectedly truncated second expansion",
-        scenario.name
+        scenario.name()
     );
     assert_eq!(
         first.items.len(),
         second.items.len(),
         "{} count drift",
-        scenario.name
+        scenario.name()
     );
 
     let tz = scenario.tz();
@@ -164,25 +136,25 @@ async fn run_scenario(scenario: &Scenario) -> Result<()> {
     assert_eq!(
         first_records, second_records,
         "{} ordering drift",
-        scenario.name
+        scenario.name()
     );
 
     let snapshot = SnapshotData {
-        scenario: scenario.name.to_string(),
-        description: scenario.description.to_string(),
-        timezone: scenario.timezone.to_string(),
+        scenario: scenario.name().to_string(),
+        description: scenario.description.clone(),
+        timezone: scenario.timezone.clone(),
         tzdb: tzdb_label(),
-        dtstart_local: scenario.local_start.to_string(),
-        dtend_local: scenario.local_end.to_string(),
-        rrule: scenario.rrule.to_string(),
-        range_start_utc: scenario.range_start_utc.to_string(),
-        range_end_utc: scenario.range_end_utc.to_string(),
+        dtstart_local: scenario.local_start.clone(),
+        dtend_local: scenario.local_end.clone(),
+        rrule: scenario.rrule.clone(),
+        range_start_utc: scenario.range_start_utc.clone(),
+        range_end_utc: scenario.range_end_utc.clone(),
         expected_count: first_records.len(),
         instances: first_records,
     };
 
     compare_with_snapshot(&snapshot, &scenario.snapshot_path())
-        .with_context(|| format!("compare snapshot for {}", scenario.name))?;
+        .with_context(|| format!("compare snapshot for {}", scenario.name()))?;
 
     Ok(())
 }
@@ -251,8 +223,8 @@ async fn setup_pool() -> Result<SqlitePool> {
 
 async fn seed_event(pool: &SqlitePool, scenario: &Scenario) -> Result<()> {
     let tz = scenario.tz();
-    let start_local = resolve_local(&tz, parse_local_naive(scenario.local_start)?);
-    let end_local = resolve_local(&tz, parse_local_naive(scenario.local_end)?);
+    let start_local = resolve_local(&tz, parse_local_naive(&scenario.local_start)?);
+    let end_local = resolve_local(&tz, parse_local_naive(&scenario.local_end)?);
     let start_at = start_local.naive_local().and_utc().timestamp_millis();
     let end_at = end_local.naive_local().and_utc().timestamp_millis();
     let start_at_utc = start_local.with_timezone(&Utc).timestamp_millis();
@@ -262,11 +234,11 @@ async fn seed_event(pool: &SqlitePool, scenario: &Scenario) -> Result<()> {
         "INSERT INTO household (id, name, tz, created_at, updated_at, deleted_at) VALUES (?1, ?2, ?3, 0, 0, NULL)",
     )
     .bind(scenario.household_id())
-    .bind(format!("Fixture household {}", scenario.name))
-    .bind(scenario.timezone)
+    .bind(format!("Fixture household {}", scenario.name()))
+    .bind(scenario.timezone.as_str())
     .execute(pool)
     .await
-    .with_context(|| format!("insert household for {}", scenario.name))?;
+    .with_context(|| format!("insert household for {}", scenario.name()))?;
 
     let has_start = sqlx::query_scalar::<_, i64>(
         "SELECT 1 FROM pragma_table_info('events') WHERE name='start_at'",
@@ -289,13 +261,13 @@ async fn seed_event(pool: &SqlitePool, scenario: &Scenario) -> Result<()> {
             )
             .bind(scenario.event_id())
             .bind(scenario.household_id())
-            .bind(format!("Scenario {}", scenario.name))
+            .bind(format!("Scenario {}", scenario.name()))
             .bind(start_at)
             .bind(end_at)
-            .bind(scenario.timezone)
+            .bind(scenario.timezone.as_str())
             .bind(start_at_utc)
             .bind(end_at_utc)
-            .bind(scenario.rrule)
+            .bind(scenario.rrule.as_str())
             .execute(pool)
             .await
         }
@@ -306,12 +278,12 @@ async fn seed_event(pool: &SqlitePool, scenario: &Scenario) -> Result<()> {
             )
             .bind(scenario.event_id())
             .bind(scenario.household_id())
-            .bind(format!("Scenario {}", scenario.name))
+            .bind(format!("Scenario {}", scenario.name()))
             .bind(start_at)
-            .bind(scenario.timezone)
+            .bind(scenario.timezone.as_str())
             .bind(start_at_utc)
             .bind(end_at_utc)
-            .bind(scenario.rrule)
+            .bind(scenario.rrule.as_str())
             .execute(pool)
             .await
         }
@@ -322,12 +294,12 @@ async fn seed_event(pool: &SqlitePool, scenario: &Scenario) -> Result<()> {
             )
             .bind(scenario.event_id())
             .bind(scenario.household_id())
-            .bind(format!("Scenario {}", scenario.name))
+            .bind(format!("Scenario {}", scenario.name()))
             .bind(end_at)
-            .bind(scenario.timezone)
+            .bind(scenario.timezone.as_str())
             .bind(start_at_utc)
             .bind(end_at_utc)
-            .bind(scenario.rrule)
+            .bind(scenario.rrule.as_str())
             .execute(pool)
             .await
         }
@@ -338,16 +310,16 @@ async fn seed_event(pool: &SqlitePool, scenario: &Scenario) -> Result<()> {
             )
             .bind(scenario.event_id())
             .bind(scenario.household_id())
-            .bind(format!("Scenario {}", scenario.name))
-            .bind(scenario.timezone)
+            .bind(format!("Scenario {}", scenario.name()))
+            .bind(scenario.timezone.as_str())
             .bind(start_at_utc)
             .bind(end_at_utc)
-            .bind(scenario.rrule)
+            .bind(scenario.rrule.as_str())
             .execute(pool)
             .await
         }
     }
-    .with_context(|| format!("insert event for {}", scenario.name))?;
+    .with_context(|| format!("insert event for {}", scenario.name()))?;
 
     Ok(())
 }

@@ -3,7 +3,7 @@
 use std::time::Instant;
 
 use anyhow::Context;
-use arklowdun_lib::commands;
+use arklowdun_lib::commands::{self, EVENTS_LIST_RANGE_TOTAL_LIMIT};
 use clap::{Parser, ValueEnum};
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 
@@ -177,8 +177,8 @@ async fn run_query_benchmark() -> anyhow::Result<BenchmarkSample> {
     let memory_after = read_memory_stats().unwrap_or_default();
 
     anyhow::ensure!(
-        response.items.len() == 10_000,
-        "query benchmark expected 10_000 instances, saw {}",
+        response.items.len() == EVENTS_LIST_RANGE_TOTAL_LIMIT,
+        "query benchmark expected {EVENTS_LIST_RANGE_TOTAL_LIMIT} instances, saw {}",
         response.items.len()
     );
     anyhow::ensure!(

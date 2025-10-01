@@ -57,17 +57,19 @@ export interface SeedCalendarSnapshotOptions {
   ts: number;
   window: { start: number; end: number };
   source?: string;
+  limit?: number;
 }
 
 export async function seedCalendarSnapshot(
   page: Page,
-  { events, truncated, ts, window, source }: SeedCalendarSnapshotOptions,
+  { events, truncated, ts, window, source, limit }: SeedCalendarSnapshotOptions,
 ): Promise<void> {
   const snapshot = {
     items: events,
     ts,
     window,
     truncated,
+    ...(limit !== undefined ? { limit } : {}),
     ...(source !== undefined ? { source } : {}),
   };
 
