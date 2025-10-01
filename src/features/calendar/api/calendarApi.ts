@@ -12,9 +12,13 @@ export interface CalendarQuery {
 
 const WINDOW_SPAN_MS = 365 * 24 * 60 * 60 * 1000;
 
+export function calendarWindowAround(anchor: number | Date): CalendarWindowRange {
+  const center = typeof anchor === "number" ? anchor : anchor.getTime();
+  return { start: center - WINDOW_SPAN_MS, end: center + WINDOW_SPAN_MS };
+}
+
 export function defaultCalendarWindow(): CalendarWindowRange {
-  const now = Date.now();
-  return { start: now - WINDOW_SPAN_MS, end: now + WINDOW_SPAN_MS };
+  return calendarWindowAround(Date.now());
 }
 
 export async function fetchCalendarEvents(

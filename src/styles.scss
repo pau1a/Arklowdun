@@ -2280,15 +2280,31 @@ footer a.footer__settings {
 
 .calendar__header {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: var(--space-3);
 }
 
-.calendar__header > div {
+.calendar__header-primary {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   flex-wrap: wrap;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.calendar__nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.calendar__nav-button {
+  background-color: var(--color-panel);
+  color: var(--color-text);
+  border-color: var(--color-border);
 }
 
 .calendar__filters {
@@ -2336,6 +2352,7 @@ footer a.footer__settings {
 .calendar__month-label {
   font-weight: 600;
   text-align: center;
+  margin: 0;
 }
 
 .calendar__panel { padding: var(--space-4); }

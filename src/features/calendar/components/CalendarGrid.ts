@@ -9,28 +9,22 @@ export interface CalendarGridOptions {
 export interface CalendarGridInstance {
   element: HTMLDivElement;
   setEvents(events: CalendarEvent[]): void;
+  setFocusDate(date: Date): void;
+  getFocusDate(): Date;
 }
 
 function renderMonth(
   root: HTMLElement,
   events: CalendarEvent[],
-  getNow: () => number,
+  focusMs: number,
   onEventSelect?: (event: CalendarEvent) => void,
 ): void {
   root.innerHTML = "";
-  const now = new Date(getNow());
-  const year = now.getFullYear();
-  const month = now.getMonth();
+  const focusDate = new Date(focusMs);
+  const year = focusDate.getFullYear();
+  const month = focusDate.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
   const lastDate = new Date(year, month + 1, 0).getDate();
-
-  const monthLabel = document.createElement("div");
-  monthLabel.className = "calendar__month-label";
-  monthLabel.textContent = now.toLocaleString(undefined, {
-    month: "long",
-    year: "numeric",
-  });
-  root.appendChild(monthLabel);
 
   const table = document.createElement("table");
   table.className = "calendar__table";
@@ -108,13 +102,34 @@ export function CalendarGrid(options: CalendarGridOptions = {}): CalendarGridIns
   element.id = "calendar";
   const getNow = options.getNow ?? nowMs;
   const onEventSelect = options.onEventSelect;
+  let focusMs = normalizeFocusDate(new Date(getNow())).getTime();
+  let currentEvents: CalendarEvent[] = [];
+
+  const rerender = () => {
+    renderMonth(element, currentEvents, focusMs, onEventSelect);
+  };
 
   return {
     element,
     setEvents(events: CalendarEvent[]) {
-      renderMonth(element, events, getNow, onEventSelect);
+      currentEvents = [...events];
+      rerender();
+    },
+    setFocusDate(date: Date) {
+      focusMs = normalizeFocusDate(date).getTime();
+      rerender();
+    },
+    getFocusDate() {
+      return new Date(focusMs);
     },
   };
 }
 
 export default CalendarGrid;
+
+function normalizeFocusDate(date: Date): Date {
+  const normalized = new Date(date.getTime());
+  normalized.setHours(0, 0, 0, 0);
+  normalized.setDate(1);
+  return normalized;
+}
