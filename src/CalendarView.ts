@@ -99,7 +99,23 @@ export async function CalendarView(container: HTMLElement) {
   const kicker = document.createElement("p");
   kicker.className = "kicker";
   kicker.textContent = "All times local";
-  headerContent.append(kicker);
+
+  const filterLabel = document.createElement("label");
+  filterLabel.className = "sr-only";
+  filterLabel.htmlFor = "calendar-filter";
+  filterLabel.textContent = "Filter calendar events";
+
+  const filterInput = createInput({
+    id: "calendar-filter",
+    type: "search",
+    placeholder: "Filter events",
+    ariaLabel: "Filter calendar events",
+    className: "calendar__filter-input",
+  });
+
+  const filterWrapper = document.createElement("div");
+  filterWrapper.className = "calendar__filters";
+  filterWrapper.append(filterLabel, filterInput);
 
   const notesToggle = createButton({
     label: "Show notes",
@@ -110,8 +126,13 @@ export async function CalendarView(container: HTMLElement) {
     ariaPressed: false,
   });
   notesToggle.disabled = true;
-  headerContent.append(notesToggle);
+  headerContent.append(kicker, filterWrapper, notesToggle);
   header.appendChild(headerContent);
+
+  const focusFilterControls = () => {
+    filterInput.focus();
+    filterInput.select();
+  };
 
   const truncationBanner = createTruncationBanner({
     count: 0,
@@ -120,11 +141,15 @@ export async function CalendarView(container: HTMLElement) {
       truncationDismissed = true;
       truncationBanner.update({ hidden: true });
     },
+    onRefine: focusFilterControls,
+    refineLabel: "Refine filters",
+    refineAriaLabel: "Refine calendar filters",
   });
 
   const notesPanel = CalendarNotesPanel();
   let selectedEvent: CalendarEvent | null = null;
   let notesToggleActive = false;
+  let filterValue = "";
 
   const syncNotesToggle = () => {
     const hasEvent = Boolean(selectedEvent);
@@ -219,6 +244,16 @@ export async function CalendarView(container: HTMLElement) {
   let lastTruncationToken: number | null = null;
   let inlineError: ReturnType<typeof createErrorBanner> | null = null;
 
+  const filterEvents = (events: CalendarEvent[]): CalendarEvent[] => {
+    const query = filterValue.trim().toLowerCase();
+    if (!query) return events;
+    return events.filter((event) => event.title.toLowerCase().includes(query));
+  };
+
+  const renderEvents = (events: CalendarEvent[]) => {
+    calendar.setEvents(filterEvents(events));
+  };
+
   const clearInlineError = () => {
     if (inlineError) {
       inlineError.remove();
@@ -265,8 +300,8 @@ export async function CalendarView(container: HTMLElement) {
     currentSnapshot = snapshot ?? null;
     if (snapshot?.window) currentWindow = snapshot.window;
     const items = snapshot?.items ?? [];
-    calendar.setEvents(items);
     updateTruncationNotice(items.length, snapshot?.truncated ?? false, snapshot?.ts ?? null);
+    renderEvents(items);
   });
   registerViewCleanup(container, unsubscribe);
 
@@ -313,12 +348,12 @@ export async function CalendarView(container: HTMLElement) {
 
   if (currentSnapshot) {
     const items = currentSnapshot.items;
-    calendar.setEvents(items);
     updateTruncationNotice(
       items.length,
       currentSnapshot.truncated ?? false,
       currentSnapshot.ts,
     );
+    renderEvents(items);
     if (items.length) scheduleNotifications(items);
   } else {
     await loadEvents("initial");
@@ -352,5 +387,11 @@ export async function CalendarView(container: HTMLElement) {
     emit("events:updated", payload);
     scheduleNotifications([ev]);
     form.reset();
+  });
+
+  filterInput.addEventListener("input", () => {
+    filterValue = filterInput.value;
+    const items = currentSnapshot?.items ?? [];
+    renderEvents(items);
   });
 }
