@@ -9,18 +9,22 @@ import { defaultHouseholdId } from "./db/household";
 import { categoriesRepo } from "./repos";
 import {
   CalendarGrid,
-  defaultCalendarWindow,
+  calendarWindowAround,
   type CalendarEvent,
+  type CalendarGridInstance,
+  type CalendarGridOptions,
   useCalendar,
 } from "@features/calendar";
-import CalendarNotesPanel from "./components/calendar/CalendarNotesPanel";
+import CalendarNotesPanel, {
+  type CalendarNotesPanelInstance,
+} from "./components/calendar/CalendarNotesPanel";
 import {
   actions,
   selectors,
   subscribe,
   getState,
   type EventsSnapshot,
-} from "./store";
+} from "./store/index";
 import { emit, on } from "./store/events";
 import { getCategories, setCategories } from "./store/categories";
 import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
@@ -31,6 +35,23 @@ import createErrorBanner from "@ui/ErrorBanner";
 import { describeTimekeepingError } from "@utils/timekeepingErrors";
 
 const FILTER_INPUT_DEBOUNCE_MS = 180;
+
+export interface CalendarViewOptions {
+  initialFocusDate?: Date;
+  gridOptions?: CalendarGridOptions;
+  createCalendarGrid?: (options: CalendarGridOptions) => CalendarGridInstance;
+  createNotesPanel?: () => CalendarNotesPanelInstance;
+  calendarLoader?: typeof useCalendar;
+  preloadCategories?: () => Promise<void>;
+  scheduleNotifications?: (events: CalendarEvent[]) => void | Promise<void>;
+}
+
+function normalizeFocusDate(date: Date): Date {
+  const normalized = new Date(date.getTime());
+  normalized.setHours(0, 0, 0, 0);
+  normalized.setDate(1);
+  return normalized;
+}
 
 async function saveEvent(
   event: Omit<
@@ -46,7 +67,7 @@ async function saveEvent(
   });
 }
 
-async function scheduleNotifications(events: CalendarEvent[]) {
+async function scheduleNotificationsInternal(events: CalendarEvent[]) {
   let granted = await isPermissionGranted();
   if (!granted) {
     granted = (await requestPermission()) === "granted";
@@ -87,10 +108,21 @@ async function ensureCategoriesLoaded(): Promise<void> {
   }
 }
 
-export async function CalendarView(container: HTMLElement) {
+export async function CalendarView(
+  container: HTMLElement,
+  options: CalendarViewOptions = {},
+) {
   runViewCleanups(container);
 
-  await ensureCategoriesLoaded();
+  const preloadCategories = options.preloadCategories ?? ensureCategoriesLoaded;
+  await preloadCategories();
+
+  const gridFactory = options.createCalendarGrid ?? CalendarGrid;
+  const gridOptionOverrides: CalendarGridOptions = options.gridOptions ?? {};
+  const notesPanelFactory = options.createNotesPanel ?? CalendarNotesPanel;
+  const calendarLoader = options.calendarLoader ?? useCalendar;
+  const notify = options.scheduleNotifications ?? scheduleNotificationsInternal;
+  let focusDate = normalizeFocusDate(options.initialFocusDate ?? new Date());
 
   const section = document.createElement("section");
   section.className = "calendar";
@@ -98,6 +130,7 @@ export async function CalendarView(container: HTMLElement) {
   const header = document.createElement("header");
   header.className = "calendar__header";
   const headerContent = document.createElement("div");
+  headerContent.className = "calendar__header-primary";
   const kicker = document.createElement("p");
   kicker.className = "kicker";
   kicker.textContent = "All times local";
@@ -129,7 +162,31 @@ export async function CalendarView(container: HTMLElement) {
   });
   notesToggle.disabled = true;
   headerContent.append(kicker, filterWrapper, notesToggle);
-  header.appendChild(headerContent);
+
+  const nav = document.createElement("div");
+  nav.className = "calendar__nav";
+  const prevMonthButton = createButton({
+    children: "‹",
+    className: "calendar__nav-button",
+    ariaLabel: "Previous month",
+  });
+  const monthHeading = document.createElement("h2");
+  monthHeading.className = "calendar__month-label";
+  const nextMonthButton = createButton({
+    children: "›",
+    className: "calendar__nav-button",
+    ariaLabel: "Next month",
+  });
+  nav.append(prevMonthButton, monthHeading, nextMonthButton);
+  header.append(headerContent, nav);
+
+  const updateMonthHeading = () => {
+    monthHeading.textContent = focusDate.toLocaleString(undefined, {
+      month: "long",
+      year: "numeric",
+    });
+  };
+  updateMonthHeading();
 
   const focusFilterControls = () => {
     filterInput.focus();
@@ -153,7 +210,7 @@ export async function CalendarView(container: HTMLElement) {
     refineAriaLabel: "Refine calendar filters",
   });
 
-  const notesPanel = CalendarNotesPanel();
+  const notesPanel = notesPanelFactory();
   let selectedEvent: CalendarEvent | null = null;
   let notesToggleActive = false;
   let filterValue = "";
@@ -178,6 +235,16 @@ export async function CalendarView(container: HTMLElement) {
   });
   syncNotesToggle();
 
+  prevMonthButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    void changeMonth("navigate-prev");
+  });
+
+  nextMonthButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    void changeMonth("navigate-next");
+  });
+
   const handleEventSelect = (event: CalendarEvent | null) => {
     selectedEvent = event;
     notesPanel.setEvent(event);
@@ -192,7 +259,13 @@ export async function CalendarView(container: HTMLElement) {
   errorRegion.setAttribute("aria-live", "polite");
   errorRegion.setAttribute("aria-atomic", "true");
   errorRegion.hidden = true;
-  const calendar = CalendarGrid({ onEventSelect: handleEventSelect });
+  const calendarGridOptions: CalendarGridOptions = {
+    ...gridOptionOverrides,
+    onEventSelect: handleEventSelect,
+    getNow: gridOptionOverrides.getNow ?? (() => focusDate.getTime()),
+  };
+  const calendar = gridFactory(calendarGridOptions);
+  calendar.setFocusDate(focusDate);
   const calendarSurface = document.createElement("div");
   calendarSurface.className = "calendar__surface";
   calendarSurface.append(errorRegion, calendar.element);
@@ -247,7 +320,8 @@ export async function CalendarView(container: HTMLElement) {
   container.appendChild(section);
 
   let currentSnapshot: EventsSnapshot | null = selectors.events.snapshot(getState());
-  let currentWindow = currentSnapshot?.window ?? defaultCalendarWindow();
+  const initialWindow = calendarWindowAround(focusDate.getTime());
+  let currentWindow = currentSnapshot?.window ?? initialWindow;
   let truncationDismissed = false;
   let lastTruncationToken: number | null = null;
   let inlineError: ReturnType<typeof createErrorBanner> | null = null;
@@ -348,10 +422,45 @@ export async function CalendarView(container: HTMLElement) {
   });
   registerViewCleanup(container, stopCalendarError);
 
+  async function changeMonth(direction: "navigate-prev" | "navigate-next"): Promise<void> {
+    const delta = direction === "navigate-next" ? 1 : -1;
+    const next = new Date(focusDate.getTime());
+    next.setMonth(next.getMonth() + delta);
+    focusDate = normalizeFocusDate(next);
+    calendar.setFocusDate(focusDate);
+    updateMonthHeading();
+    applyFilters();
+    await loadEvents(direction);
+  }
+
+  const shouldIgnoreNavigationKey = (event: KeyboardEvent): boolean => {
+    const target = event.target as HTMLElement | null;
+    if (!target) return false;
+    if (target.isContentEditable) return true;
+    const tag = target.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+  };
+
+  const handleNavigationKey = (event: KeyboardEvent) => {
+    if (shouldIgnoreNavigationKey(event)) return;
+    if (event.key === "[" || event.code === "BracketLeft") {
+      event.preventDefault();
+      void changeMonth("navigate-prev");
+    } else if (event.key === "]" || event.code === "BracketRight") {
+      event.preventDefault();
+      void changeMonth("navigate-next");
+    }
+  };
+
+  window.addEventListener("keydown", handleNavigationKey);
+  registerViewCleanup(container, () => {
+    window.removeEventListener("keydown", handleNavigationKey);
+  });
+
   async function loadEvents(source: string): Promise<void> {
     try {
-      const range = defaultCalendarWindow();
-      const { data, error } = await useCalendar({ window: range });
+      const range = calendarWindowAround(focusDate.getTime());
+      const { data, error } = await calendarLoader({ window: range });
       if (error) {
         console.error(error);
         return;
@@ -369,7 +478,7 @@ export async function CalendarView(container: HTMLElement) {
         limit,
       });
       emit("events:updated", payload);
-      scheduleNotifications(items);
+      void notify(items);
     } catch (err) {
       const descriptor = describeTimekeepingError(err);
       console.error("Calendar load failed", descriptor.error);
@@ -383,7 +492,7 @@ export async function CalendarView(container: HTMLElement) {
   if (currentSnapshot) {
     const items = currentSnapshot.items;
     applyFilters();
-    if (items.length) scheduleNotifications(items);
+    if (items.length) void notify(items);
   } else {
     await loadEvents("initial");
   }
@@ -404,7 +513,7 @@ export async function CalendarView(container: HTMLElement) {
     const snapshot = selectors.events.snapshot(getState());
     const baseItems = snapshot?.items ?? [];
     const nextItems = [...baseItems, ev];
-    const window = snapshot?.window ?? currentWindow ?? defaultCalendarWindow();
+    const window = snapshot?.window ?? currentWindow ?? calendarWindowAround(focusDate.getTime());
     currentWindow = window;
     const payload = actions.events.updateSnapshot({
       items: nextItems,
@@ -414,7 +523,7 @@ export async function CalendarView(container: HTMLElement) {
       truncated: snapshot?.truncated ?? false,
     });
     emit("events:updated", payload);
-    scheduleNotifications([ev]);
+    void notify([ev]);
     form.reset();
   });
 

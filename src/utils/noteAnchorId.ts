@@ -1,21 +1,17 @@
 import type { CalendarEvent } from "@features/calendar";
 
+// This helper intentionally stays minimal for predictable anchoring semantics.
+
 export type NoteAnchorInput = Pick<CalendarEvent, "id"> &
   Partial<Pick<CalendarEvent, "series_parent_id">>;
 
 export function noteAnchorId(input: NoteAnchorInput): string {
-  const parentId = input.series_parent_id?.trim();
-  if (parentId) {
+  const parentId = input.series_parent_id;
+  if (typeof parentId === "string" && parentId.trim().length > 0) {
     return parentId;
   }
 
-  const id = input.id ?? "";
-  const separatorIndex = id.indexOf("::");
-  if (separatorIndex !== -1) {
-    return id.slice(0, separatorIndex);
-  }
-
-  return id;
+  return input.id ?? "";
 }
 
 export default noteAnchorId;

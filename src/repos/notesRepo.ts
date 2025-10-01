@@ -1,5 +1,10 @@
 import { call } from "@lib/ipc/call";
 import type { Note } from "@bindings/Note";
+import type { NoteLink } from "@bindings/NoteLink";
+import type {
+  NoteLinkList,
+  NoteLinkListItem,
+} from "@bindings/NoteLinkList";
 import type { NotesPage } from "@bindings/NotesPage";
 
 export interface NotesListCursorOptions {
@@ -26,6 +31,26 @@ export type NotesUpdateInput = Partial<Omit<NotesCreateInput, "category_id">> & 
   category_id?: string | null;
   deleted_at?: number | null;
 };
+
+export interface NotesListByEntityOptions {
+  householdId: string;
+  entityType: "event" | "file";
+  entityId: string;
+  limit?: number;
+  offset?: number;
+  orderBy?: string;
+  categoryIds?: string[];
+}
+
+export type NotesListByEntityItem = NoteLinkListItem;
+export type NotesListByEntityResult = NoteLinkList;
+
+export interface NotesLinkInput {
+  householdId: string;
+  noteId: string;
+  entityType: "event" | "file";
+  entityId: string;
+}
 
 export const notesRepo = {
   async listCursor(options: NotesListCursorOptions): Promise<NotesPage> {
@@ -88,6 +113,52 @@ export const notesRepo = {
       householdId,
       household_id: householdId,
       id,
+    });
+  },
+
+  async listByEntity(options: NotesListByEntityOptions): Promise<NotesListByEntityResult> {
+    const payload: Record<string, unknown> = {
+      householdId: options.householdId,
+      household_id: options.householdId,
+      entityType: options.entityType,
+      entity_type: options.entityType,
+      entityId: options.entityId,
+      entity_id: options.entityId,
+    };
+    if (options.limit !== undefined) payload.limit = options.limit;
+    if (options.offset !== undefined) payload.offset = options.offset;
+    if (options.orderBy) payload.orderBy = options.orderBy;
+    if (options.orderBy) payload.order_by = options.orderBy;
+    if (options.categoryIds?.length) {
+      payload.categoryIds = options.categoryIds;
+      payload.category_ids = options.categoryIds;
+    }
+    return call<NotesListByEntityResult>("note_links_list_by_entity", payload);
+  },
+
+  async link(options: NotesLinkInput): Promise<NoteLink> {
+    return call<NoteLink>("note_links_create", {
+      householdId: options.householdId,
+      household_id: options.householdId,
+      noteId: options.noteId,
+      note_id: options.noteId,
+      entityType: options.entityType,
+      entity_type: options.entityType,
+      entityId: options.entityId,
+      entity_id: options.entityId,
+    });
+  },
+
+  async unlink(options: NotesLinkInput): Promise<void> {
+    await call<null>("note_links_unlink_entity", {
+      householdId: options.householdId,
+      household_id: options.householdId,
+      noteId: options.noteId,
+      note_id: options.noteId,
+      entityType: options.entityType,
+      entity_type: options.entityType,
+      entityId: options.entityId,
+      entity_id: options.entityId,
     });
   },
 };
