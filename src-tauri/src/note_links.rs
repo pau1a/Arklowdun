@@ -211,28 +211,35 @@ where
         );
     }
 
-    let base_candidate = trimmed
+    let normalized_id = trimmed
         .split_once("::")
         .map(|(prefix, _)| prefix.trim())
         .filter(|candidate| !candidate.is_empty())
-        .unwrap_or(trimmed);
+        .unwrap_or(trimmed)
+        .to_string();
 
-    let row: Option<(String, Option<String>, String)> = sqlx::query_as(
-        "SELECT household_id, series_parent_id, id
+    tracing::debug!(
+        target = "note-links",
+        raw_id = %trimmed,
+        normalized_id = %normalized_id,
+        entity_type = "event",
+        "note_links list anchor"
+    );
+
+    let row: Option<(String, String)> = sqlx::query_as(
+        "SELECT household_id, id
            FROM events
           WHERE deleted_at IS NULL
-            AND (id = ?1 OR id = ?2)
-          ORDER BY CASE WHEN id = ?1 THEN 0 ELSE 1 END
+            AND id = ?1
           LIMIT 1",
     )
-    .bind(trimmed)
-    .bind(base_candidate)
+    .bind(&normalized_id)
     .fetch_optional(executor)
     .await
     .map_err(AppError::from)?;
 
     match row {
-        Some((entity_hh, series_parent_id, row_id)) => {
+        Some((entity_hh, row_id)) => {
             if entity_hh != household_id {
                 return Err(AppError::new(
                     "NOTE_LINK/CROSS_HOUSEHOLD",
@@ -242,13 +249,7 @@ where
                 .with_context("entity_id", entity_id.to_string())
                 .with_context("household_id", household_id.to_string()));
             }
-            let anchor = series_parent_id
-                .as_deref()
-                .map(str::trim)
-                .filter(|candidate| !candidate.is_empty())
-                .unwrap_or_else(|| row_id.as_str())
-                .to_string();
-            Ok(anchor)
+            Ok(row_id)
         }
         None => Err(
             AppError::new("NOTE_LINK/ENTITY_NOT_FOUND", "event not found")
@@ -740,7 +741,7 @@ pub async fn list_notes_for_entity(
 
     let mut query = sqlx::query_as::<_, Note>(&sql)
         .bind(entity_type.as_str())
-        .bind(entity_id)
+        .bind(&canonical_entity_id)
         .bind(household_id)
         .bind(household_id)
         .bind(household_id);
@@ -839,7 +840,9 @@ pub async fn list_notes_for_entity_page(
     order_by: Option<String>,
     category_ids: Option<Vec<String>>,
 ) -> AppResult<NoteLinkList> {
-    ensure_entity_in_household(pool, household_id, entity_type, entity_id).await?;
+    let requested_entity_id = entity_id.to_string();
+    let canonical_entity_id =
+        ensure_entity_in_household(pool, household_id, entity_type, entity_id).await?;
 
     if empty_category_filter(&category_ids) {
         return Ok(NoteLinkList { items: Vec::new() });
@@ -911,7 +914,7 @@ pub async fn list_notes_for_entity_page(
 
     let mut query = sqlx::query(&sql)
         .bind(entity_type.as_str())
-        .bind(entity_id)
+        .bind(&canonical_entity_id)
         .bind(household_id)
         .bind(household_id)
         .bind(household_id);
@@ -922,14 +925,14 @@ pub async fn list_notes_for_entity_page(
 
     query = query.bind(limit).bind(offset);
 
-    let rows = query
-        .fetch_all(pool)
-        .await
-        .map_err(|err| {
-            AppError::from(err)
-                .with_context("operation", "note_links_list_by_entity")
-                .with_context("household_id", household_id.to_string())
-        })?;
+    let rows = query.fetch_all(pool).await.map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "note_links_list_by_entity")
+            .with_context("household_id", household_id.to_string())
+            .with_context("entity_type", entity_type.to_string())
+            .with_context("entity_id", canonical_entity_id.clone())
+            .with_context("entity_id_requested", requested_entity_id.clone())
+    })?;
 
     let mut items = Vec::with_capacity(rows.len());
     for row in rows {
@@ -1168,14 +1171,7 @@ pub async fn note_links_unlink_entity(
                     .with_context("operation", "note_links_unlink_entity")
                     .with_context("household_id", household_id.to_string())
             })?;
-            unlink_note_from_entity(
-                &pool,
-                &household_id,
-                &note_id,
-                entity_type,
-                &entity_id,
-            )
-            .await
+            unlink_note_from_entity(&pool, &household_id, &note_id, entity_type, &entity_id).await
         }
     })
     .await
