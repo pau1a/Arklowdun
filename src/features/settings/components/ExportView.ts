@@ -1,7 +1,7 @@
 import createButton from "@ui/Button";
 import { toast } from "@ui/Toast";
 import { runExport } from "../api/export";
-import { openPath } from "../../api/opener";
+import { openPath } from "../api/opener";
 import { openDirectoryDialog } from "../api/dialog";
 import { recoveryText } from "@strings/recovery";
 
