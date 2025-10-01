@@ -10,6 +10,9 @@ export interface CalendarQuery {
   limit: number;
 }
 
+// Span the window by +/- 45 days around the anchor.
+const WINDOW_SPAN_MS = 45 * 24 * 60 * 60 * 1000;
+
 function endOfDayMs(date: Date): number {
   const end = new Date(date);
   end.setHours(23, 59, 59, 999);
