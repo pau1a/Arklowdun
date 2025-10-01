@@ -6,7 +6,7 @@ use sqlx::{
     encode::IsNull,
     error::BoxDynError,
     sqlite::{SqliteArgumentValue, SqliteTypeInfo, SqliteValueRef},
-    Executor, Sqlite, SqlitePool, Transaction,
+    Executor, Row, Sqlite, SqlitePool, Transaction,
 };
 use tauri::State;
 use ts_rs::TS;
@@ -94,6 +94,17 @@ pub struct ContextNotesPage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct NoteLinkListItem {
+    pub note: Note,
+    pub link: NoteLink,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct NoteLinkList {
+    pub items: Vec<NoteLinkListItem>,
 }
 
 fn decode_cursor(cursor: Option<String>) -> AppResult<Option<(i64, String)>> {
@@ -456,6 +467,8 @@ pub async fn delete_link(pool: &SqlitePool, household_id: &str, link_id: &str) -
         );
     };
 
+    ensure_entity_in_household(pool, household_id, existing.1, &existing.2).await?;
+
     let rows = sqlx::query("DELETE FROM note_links WHERE id = ?1 AND household_id = ?2")
         .bind(link_id)
         .bind(household_id)
@@ -481,6 +494,78 @@ pub async fn delete_link(pool: &SqlitePool, household_id: &str, link_id: &str) -
         note_id = %existing.0,
         entity_type = %existing.1,
         entity_id = %existing.2,
+        household_id = %household_id
+    );
+
+    Ok(())
+}
+
+pub async fn unlink_note_from_entity(
+    pool: &SqlitePool,
+    household_id: &str,
+    note_id: &str,
+    entity_type: NoteLinkEntityType,
+    entity_id: &str,
+) -> AppResult<()> {
+    ensure_entity_in_household(pool, household_id, entity_type, entity_id).await?;
+
+    let note_in_household: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM notes WHERE id = ?1 AND household_id = ?2 AND deleted_at IS NULL",
+    )
+    .bind(note_id)
+    .bind(household_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "note_links_unlink_entity")
+            .with_context("note_id", note_id.to_string())
+            .with_context("household_id", household_id.to_string())
+    })?;
+
+    if note_in_household.is_none() {
+        return Err(
+            AppError::new("NOTE/HOUSEHOLD_MISMATCH", "Note not in household")
+                .with_context("note_id", note_id.to_string())
+                .with_context("household_id", household_id.to_string()),
+        );
+    }
+
+    let rows = sqlx::query(
+        "DELETE FROM note_links
+          WHERE household_id = ?1
+            AND note_id = ?2
+            AND entity_type = ?3
+            AND entity_id = ?4",
+    )
+    .bind(household_id)
+    .bind(note_id)
+    .bind(entity_type.as_str())
+    .bind(entity_id)
+    .execute(pool)
+    .await
+    .map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "note_links_unlink_entity")
+            .with_context("household_id", household_id.to_string())
+            .with_context("note_id", note_id.to_string())
+    })?;
+
+    if rows.rows_affected() == 0 {
+        return Err(
+            AppError::new("NOTE_LINK/ENTITY_NOT_FOUND", "Note link not found")
+                .with_context("note_id", note_id.to_string())
+                .with_context("entity_type", entity_type.to_string())
+                .with_context("entity_id", entity_id.to_string()),
+        );
+    }
+
+    tracing::debug!(
+        target = "contextual-notes",
+        action = "unlink_entity",
+        note_id = %note_id,
+        entity_type = %entity_type,
+        entity_id = %entity_id,
         household_id = %household_id
     );
 
@@ -622,9 +707,12 @@ pub async fn list_notes_for_entity(
                 n.deadline_tz
            FROM note_links nl
            JOIN notes n ON n.id = nl.note_id
-          WHERE nl.household_id = ?
-            AND nl.entity_type = ?
+           JOIN events e ON e.id = nl.entity_id
+          WHERE nl.entity_type = ?
             AND nl.entity_id = ?
+            AND e.household_id = ?
+            AND nl.household_id = ?
+            AND n.household_id = ?
             AND n.deleted_at IS NULL",
     );
 
@@ -651,9 +739,11 @@ pub async fn list_notes_for_entity(
     sql.push_str(" ORDER BY n.created_at, n.id LIMIT ?");
 
     let mut query = sqlx::query_as::<_, Note>(&sql)
-        .bind(household_id)
         .bind(entity_type.as_str())
-        .bind(&canonical_entity_id);
+        .bind(entity_id)
+        .bind(household_id)
+        .bind(household_id)
+        .bind(household_id);
 
     if let Some((created_at, id)) = &after {
         query = query
@@ -737,6 +827,159 @@ pub async fn list_notes_for_entity(
         links,
         next_cursor,
     })
+}
+
+pub async fn list_notes_for_entity_page(
+    pool: &SqlitePool,
+    household_id: &str,
+    entity_type: NoteLinkEntityType,
+    entity_id: &str,
+    limit: Option<i64>,
+    offset: Option<i64>,
+    order_by: Option<String>,
+    category_ids: Option<Vec<String>>,
+) -> AppResult<NoteLinkList> {
+    ensure_entity_in_household(pool, household_id, entity_type, entity_id).await?;
+
+    if empty_category_filter(&category_ids) {
+        return Ok(NoteLinkList { items: Vec::new() });
+    }
+
+    let limit = normalise_limit(limit);
+    let offset = offset.unwrap_or(0).max(0);
+    let order_clause = match order_by.as_deref() {
+        Some(value) if value.trim().eq_ignore_ascii_case("created_at asc, id asc") => {
+            "n.created_at ASC, n.id ASC"
+        }
+        _ => "n.created_at ASC, n.id ASC",
+    };
+
+    let mut sql = format!(
+        "SELECT
+             n.id AS note_id,
+             n.household_id AS note_household_id,
+             n.category_id AS note_category_id,
+             n.position AS note_position,
+             n.created_at AS note_created_at,
+             n.updated_at AS note_updated_at,
+             n.deleted_at AS note_deleted_at,
+             n.text AS note_text,
+             n.color AS note_color,
+             n.x AS note_x,
+             n.y AS note_y,
+             n.z AS note_z,
+             n.deadline AS note_deadline,
+             n.deadline_tz AS note_deadline_tz,
+             nl.id AS link_id,
+             nl.household_id AS link_household_id,
+             nl.note_id AS link_note_id,
+             nl.entity_type AS link_entity_type,
+             nl.entity_id AS link_entity_id,
+             nl.relation AS link_relation,
+             nl.created_at AS link_created_at,
+             nl.updated_at AS link_updated_at
+         FROM note_links nl
+         JOIN notes n ON n.id = nl.note_id
+         JOIN events e ON e.id = nl.entity_id
+        WHERE nl.entity_type = ?
+          AND nl.entity_id = ?
+          AND e.household_id = ?
+          AND nl.household_id = ?
+          AND n.household_id = ?
+          AND n.deleted_at IS NULL",
+    );
+
+    let mut filter_categories = Vec::new();
+    if let Some(ids) = category_ids {
+        let filtered: Vec<String> = ids
+            .into_iter()
+            .map(|id| id.trim().to_string())
+            .filter(|id| !id.is_empty())
+            .collect();
+        if !filtered.is_empty() {
+            let placeholders = vec!["?"; filtered.len()].join(",");
+            sql.push_str(" AND n.category_id IN (");
+            sql.push_str(&placeholders);
+            sql.push(')');
+        }
+        filter_categories = filtered;
+    }
+
+    sql.push_str(" ORDER BY ");
+    sql.push_str(order_clause);
+    sql.push_str(" LIMIT ? OFFSET ?");
+
+    let mut query = sqlx::query(&sql)
+        .bind(entity_type.as_str())
+        .bind(entity_id)
+        .bind(household_id)
+        .bind(household_id)
+        .bind(household_id);
+
+    for category in &filter_categories {
+        query = query.bind(category);
+    }
+
+    query = query.bind(limit).bind(offset);
+
+    let rows = query
+        .fetch_all(pool)
+        .await
+        .map_err(|err| {
+            AppError::from(err)
+                .with_context("operation", "note_links_list_by_entity")
+                .with_context("household_id", household_id.to_string())
+        })?;
+
+    let mut items = Vec::with_capacity(rows.len());
+    for row in rows {
+        let mut note = Note {
+            id: row.try_get("note_id")?,
+            household_id: row.try_get("note_household_id")?,
+            category_id: row.try_get("note_category_id")?,
+            position: row.try_get("note_position")?,
+            created_at: row.try_get("note_created_at")?,
+            updated_at: row.try_get("note_updated_at")?,
+            deleted_at: row.try_get("note_deleted_at")?,
+            text: row.try_get("note_text")?,
+            color: row.try_get("note_color")?,
+            x: row.try_get("note_x")?,
+            y: row.try_get("note_y")?,
+            z: row.try_get("note_z")?,
+            deadline: row.try_get("note_deadline")?,
+            deadline_tz: row.try_get("note_deadline_tz")?,
+        };
+        if note.z.is_none() {
+            note.z = Some(0);
+        }
+
+        let entity_type_raw: String = row.try_get("link_entity_type")?;
+        let entity_type = match entity_type_raw.as_str() {
+            "event" => NoteLinkEntityType::Event,
+            "file" => NoteLinkEntityType::File,
+            other => {
+                return Err(AppError::new(
+                    "NOTE_LINK/INVALID_ENTITY_TYPE",
+                    format!("invalid note link entity type: {other}"),
+                ))
+            }
+        };
+
+        let link = NoteLink {
+            id: row.try_get("link_id")?,
+            household_id: row.try_get("link_household_id")?,
+            note_id: row.try_get("link_note_id")?,
+            entity_type,
+            entity_id: row.try_get("link_entity_id")?,
+            relation: row.try_get("link_relation")?,
+            created_at: row.try_get("link_created_at")?,
+            updated_at: row.try_get("link_updated_at")?,
+        };
+
+        items.push(NoteLinkListItem { note, link });
+    }
+
+    Ok(NoteLinkList { items })
 }
 
 async fn create_note_for_entity(
@@ -905,6 +1148,40 @@ pub async fn note_links_delete(
 }
 
 #[tauri::command]
+pub async fn note_links_unlink_entity(
+    state: State<'_, AppState>,
+    household_id: String,
+    note_id: String,
+    entity_type: NoteLinkEntityType,
+    entity_id: String,
+) -> AppResult<()> {
+    let _permit = guard::ensure_db_writable(&state)?;
+    let pool = state.pool_clone();
+
+    dispatch_async_app_result(move || {
+        let household_id = household_id.clone();
+        let note_id = note_id.clone();
+        let entity_id = entity_id.clone();
+        async move {
+            repo::require_household(&household_id).map_err(|err| {
+                AppError::from(err)
+                    .with_context("operation", "note_links_unlink_entity")
+                    .with_context("household_id", household_id.to_string())
+            })?;
+            unlink_note_from_entity(
+                &pool,
+                &household_id,
+                &note_id,
+                entity_type,
+                &entity_id,
+            )
+            .await
+        }
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn note_links_get_for_note(
     state: State<'_, AppState>,
     household_id: String,
@@ -925,6 +1202,45 @@ pub async fn note_links_get_for_note(
                     .with_context("household_id", household_id.to_string())
             })?;
             get_link_for_note(&pool, &household_id, &note_id, entity_type, &entity_id).await
+        }
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn note_links_list_by_entity(
+    state: State<'_, AppState>,
+    household_id: String,
+    entity_type: NoteLinkEntityType,
+    entity_id: String,
+    limit: Option<i64>,
+    offset: Option<i64>,
+    order_by: Option<String>,
+    category_ids: Option<Vec<String>>,
+) -> AppResult<NoteLinkList> {
+    let pool = state.pool_clone();
+
+    dispatch_async_app_result(move || {
+        let household_id = household_id.clone();
+        let entity_id = entity_id.clone();
+        let category_ids = category_ids.clone();
+        async move {
+            repo::require_household(&household_id).map_err(|err| {
+                AppError::from(err)
+                    .with_context("operation", "note_links_list_by_entity")
+                    .with_context("household_id", household_id.to_string())
+            })?;
+            list_notes_for_entity_page(
+                &pool,
+                &household_id,
+                entity_type,
+                &entity_id,
+                limit,
+                offset,
+                order_by,
+                category_ids,
+            )
+            .await
         }
     })
     .await

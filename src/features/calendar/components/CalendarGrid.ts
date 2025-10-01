@@ -10,17 +10,18 @@ export interface CalendarGridOptions {
 export interface CalendarGridInstance {
   element: HTMLDivElement;
   setEvents(events: CalendarEvent[]): void;
-  setFocus(focus: number | Date): void;
+  setFocusDate(date: Date): void;
+  getFocusDate(): Date;
 }
 
 function renderMonth(
   root: HTMLElement,
   events: CalendarEvent[],
-  focusTime: number,
+  focusMs: number,
   onEventSelect?: (event: CalendarEvent) => void,
 ): void {
   root.innerHTML = "";
-  const focusDate = new Date(focusTime);
+  const focusDate = new Date(focusMs);
   const year = focusDate.getFullYear();
   const month = focusDate.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
@@ -102,26 +103,34 @@ export function CalendarGrid(options: CalendarGridOptions = {}): CalendarGridIns
   element.id = "calendar";
   const getNow = options.getNow ?? nowMs;
   const onEventSelect = options.onEventSelect;
-  let focus = options.initialFocus ?? getNow();
+  let focusMs = normalizeFocusDate(new Date(getNow())).getTime();
   let currentEvents: CalendarEvent[] = [];
 
-  const render = () => {
-    renderMonth(element, currentEvents, focus, onEventSelect);
+  const rerender = () => {
+    renderMonth(element, currentEvents, focusMs, onEventSelect);
   };
 
   return {
     element,
     setEvents(events: CalendarEvent[]) {
-      currentEvents = events;
-      render();
+      currentEvents = [...events];
+      rerender();
     },
-    setFocus(next: number | Date) {
-      const value = typeof next === "number" ? next : next.getTime();
-      if (!Number.isFinite(value)) return;
-      focus = value;
-      render();
+    setFocusDate(date: Date) {
+      focusMs = normalizeFocusDate(date).getTime();
+      rerender();
+    },
+    getFocusDate() {
+      return new Date(focusMs);
     },
   };
 }
 
 export default CalendarGrid;
+
+function normalizeFocusDate(date: Date): Date {
+  const normalized = new Date(date.getTime());
+  normalized.setHours(0, 0, 0, 0);
+  normalized.setDate(1);
+  return normalized;
+}

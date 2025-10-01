@@ -1,11 +1,8 @@
 import { call } from "@lib/ipc/call";
 import type { CalendarEvent } from "@features/calendar";
-import { useContextNotes } from "@features/calendar";
 import { defaultHouseholdId } from "@db/household";
 import type { Note } from "@bindings/Note";
-import type { NoteLink } from "@bindings/NoteLink";
-import type { ContextNotesPage } from "@bindings/ContextNotesPage";
-import { contextNotesRepo } from "@repos/contextNotesRepo";
+import { notesRepo, type NotesListByEntityItem } from "@repos/notesRepo";
 import {
   getActiveCategoryIds,
   getCategories,
@@ -26,7 +23,6 @@ type PanelNote = {
 };
 
 interface LoadOptions {
-  cursor?: string | null;
   append?: boolean;
 }
 
@@ -102,17 +98,6 @@ export async function resolveQuickCaptureCategory(): Promise<string | null> {
   if (firstVisible) return firstVisible.id;
   const primary = categories.find((category) => category.slug === "primary");
   return (primary ?? categories[0] ?? null)?.id ?? null;
-}
-
-function mapPageToNotes(page: ContextNotesPage): PanelNote[] {
-  const linksByNote = new Map<string, NoteLink>();
-  page.links.forEach((link) => {
-    linksByNote.set(link.note_id, link);
-  });
-  return page.notes.map((note) => ({
-    note,
-    linkId: linksByNote.get(note.id)?.id ?? null,
-  }));
 }
 
 export function CalendarNotesPanel(): CalendarNotesPanelInstance {
@@ -198,7 +183,8 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
   let isSubmitting = false;
   let isLoading = false;
   let currentNotes: PanelNote[] = [];
-  let nextCursor: string | null = null;
+  let currentOffset = 0;
+  let hasMore = false;
   let fetchToken = 0;
   let currentError: unknown = null;
   let currentAnchorId: string | null = null;
@@ -212,7 +198,7 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
   const syncLoadingState = (value: boolean) => {
     isLoading = value;
     loading.hidden = !value;
-    loadMoreButton.disabled = value || !nextCursor;
+    loadMoreButton.disabled = value || !hasMore;
   };
 
   const syncErrorState = () => {
@@ -279,15 +265,21 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
 
       unlink.addEventListener("click", async (event) => {
         event.preventDefault();
-        if (!entry.linkId || !currentHouseholdId) return;
+        if (!currentHouseholdId) return;
+        const anchorId = currentAnchorId ?? (currentEvent ? noteAnchorId(currentEvent) : null);
+        if (!anchorId) return;
         unlink.disabled = true;
         try {
-          await contextNotesRepo.deleteLink(currentHouseholdId, entry.linkId);
+          await notesRepo.unlink({
+            householdId: currentHouseholdId,
+            noteId: entry.note.id,
+            entityType: "event",
+            entityId: anchorId,
+          });
           currentNotes = currentNotes.filter((candidate) => candidate.note.id !== entry.note.id);
+          currentOffset = currentNotes.length;
           renderNotes();
-          if (currentNotes.length === 0) {
-            emptyState.hidden = false;
-          }
+          emptyState.hidden = currentNotes.length > 0;
         } catch (error) {
           unlink.disabled = false;
           currentError = error;
@@ -299,13 +291,13 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
       list.appendChild(item);
     });
 
-    loadMoreWrapper.hidden = !nextCursor;
+    loadMoreWrapper.hidden = !hasMore;
     if (previousScrollHeight > 0) {
       list.scrollTop = previousScrollTop;
     }
   };
 
-  const loadNotes = async ({ cursor = null, append = false }: LoadOptions = {}) => {
+  const loadNotes = async ({ append = false }: LoadOptions = {}) => {
     if (!currentEvent) return;
     const token = ++fetchToken;
     currentError = null;
@@ -322,23 +314,28 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
       const categoriesLoaded = categories.length > 0;
       if (categoriesLoaded && activeCategoryIds.length === 0) {
         currentNotes = [];
-        nextCursor = null;
+        currentOffset = 0;
+        hasMore = false;
         renderNotes();
         return;
       }
       const filterIds = categoriesLoaded ? [...activeCategoryIds] : undefined;
       const anchorId = currentAnchorId ?? noteAnchorId(currentEvent);
-      const { data, error } = await useContextNotes({
-        eventId: anchorId,
+      const offset = append ? currentOffset : 0;
+      const response = await notesRepo.listByEntity({
         householdId,
-        categoryIds: filterIds,
-        cursor,
+        entityType: "event",
+        entityId: anchorId,
         limit: PANEL_LIMIT,
+        offset,
+        orderBy: "created_at ASC, id ASC",
+        categoryIds: filterIds,
       });
       if (token !== fetchToken) return;
-      if (error) throw error;
-      const page = data ?? { notes: [], links: [], next_cursor: null };
-      const mapped = mapPageToNotes(page as ContextNotesPage);
+      const mapped: PanelNote[] = (response.items ?? []).map((item: NotesListByEntityItem) => ({
+        note: item.note,
+        linkId: item.link?.id ?? null,
+      }));
       if (append) {
         const existingIds = new Set(currentNotes.map((entry) => entry.note.id));
         const merged = currentNotes.slice();
@@ -351,7 +348,8 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
       } else {
         currentNotes = mapped;
       }
-      nextCursor = page.next_cursor ?? null;
+      currentOffset = currentNotes.length;
+      hasMore = mapped.length === PANEL_LIMIT;
       renderNotes();
     } catch (error) {
       console.error("Failed to load contextual notes", error);
@@ -371,8 +369,8 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
 
   loadMoreButton.addEventListener("click", (event) => {
     event.preventDefault();
-    if (!nextCursor) return;
-    void loadNotes({ cursor: nextCursor, append: true });
+    if (!hasMore) return;
+    void loadNotes({ append: true });
   });
 
   quickForm.addEventListener("submit", async (event) => {
@@ -399,31 +397,31 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
         console.warn("Quick-capture: proceed without event pre-persist", error);
       }
       const anchorId = currentAnchorId ?? noteAnchorId(currentEvent);
-      const note = await contextNotesRepo.quickCreate({
-        householdId,
-        entityType: "event",
-        entityId: anchorId,
-        categoryId,
+      const note = await notesRepo.create(householdId, {
         text,
         color: "#FFF4B8",
+        x: 0,
+        y: 0,
+        category_id: categoryId,
       });
-      let linkId: string | null = null;
-      try {
-        const link = await contextNotesRepo.getLinkForNote(
-          householdId,
-          note.id,
-          "event",
-          anchorId,
-        );
-        linkId = link.id;
-      } catch (error) {
-        console.error("Failed to resolve context note link", error);
-        currentError = error;
-        syncErrorState();
-      }
-      currentNotes = [{ note, linkId }, ...currentNotes];
+      const link = await notesRepo.link({
+        householdId,
+        noteId: note.id,
+        entityType: "event",
+        entityId: anchorId,
+      });
+      const nextEntries = currentNotes
+        .concat({ note, linkId: link.id })
+        .sort((a, b) => {
+          if (a.note.created_at === b.note.created_at) {
+            return a.note.id.localeCompare(b.note.id);
+          }
+          return a.note.created_at - b.note.created_at;
+        });
+      currentNotes = nextEntries;
+      currentOffset = currentNotes.length;
       renderNotes();
-      emptyState.hidden = currentNotes.length === 0 ? false : true;
+      emptyState.hidden = currentNotes.length === 0;
       quickInput.value = "";
     } catch (error) {
       console.error("Quick capture failed", error);
@@ -454,7 +452,8 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
     currentEvent = event;
     currentAnchorId = event ? noteAnchorId(event) : null;
     currentNotes = [];
-    nextCursor = null;
+    currentOffset = 0;
+    hasMore = false;
     currentError = null;
     fetchToken += 1;
     list.innerHTML = "";

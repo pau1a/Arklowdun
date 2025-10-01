@@ -116,11 +116,22 @@ async fn open_pool(db: &Path, create: bool) -> Result<SqlitePool> {
 }
 
 fn migrations_dir() -> Result<PathBuf> {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let primary = crate_dir.join("migrations");
+    if primary.is_dir() {
+        return Ok(primary);
+    }
+
+    let root = crate_dir
         .parent()
-        .unwrap()
+        .ok_or_else(|| anyhow!("unable to resolve workspace root from manifest"))?
         .to_path_buf();
-    Ok(root.join("migrations"))
+    let fallback = root.join("migrations");
+    if fallback.is_dir() {
+        return Ok(fallback);
+    }
+
+    Err(anyhow!("migrations directory not found"))
 }
 
 struct CliMigration {

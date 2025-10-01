@@ -23,8 +23,13 @@ export function monthWindowAround(focusMs: number): CalendarWindowRange {
   return { start: start.getTime(), end: endOfDayMs(end) };
 }
 
+export function calendarWindowAround(anchor: number | Date): CalendarWindowRange {
+  const center = typeof anchor === "number" ? anchor : anchor.getTime();
+  return { start: center - WINDOW_SPAN_MS, end: center + WINDOW_SPAN_MS };
+}
+
 export function defaultCalendarWindow(): CalendarWindowRange {
-  return monthWindowAround(Date.now());
+  return calendarWindowAround(Date.now());
 }
 
 export async function fetchCalendarEvents(
