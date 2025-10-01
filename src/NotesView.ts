@@ -65,7 +65,6 @@ export interface NotesViewOptions {
     patch: NotesUpdateInput,
   ) => Promise<Note>;
   deleteNote?: (householdId: string, id: string) => Promise<void>;
-  restoreNote?: (householdId: string, id: string) => Promise<Note>;
 }
 
 async function insertNote(
@@ -158,7 +157,7 @@ export async function NotesView(
   pagination.className = "notes__pagination";
   const loadMoreButton = createButton({
     label: "Load more",
-    variant: "secondary",
+    variant: "ghost",
     type: "button",
   });
   pagination.appendChild(loadMoreButton);
@@ -261,7 +260,6 @@ export async function NotesView(
   const createNoteFn = options.createNote ?? notesRepo.create;
   const updateNoteFn = options.updateNote ?? notesRepo.update;
   const deleteNoteFn = options.deleteNote ?? notesRepo.delete;
-  const restoreNoteFn = options.restoreNote ?? notesRepo.restore;
 
   let householdId =
     options.householdId ??

@@ -194,47 +194,105 @@ where
     }
 }
 
+async fn resolve_event_anchor<'e, E>(
+    executor: E,
+    household_id: &str,
+    entity_id: &str,
+) -> AppResult<String>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let trimmed = entity_id.trim();
+    if trimmed.is_empty() {
+        return Err(
+            AppError::new("NOTE_LINK/ENTITY_NOT_FOUND", "event not found")
+                .with_context("entity_type", NoteLinkEntityType::Event.to_string())
+                .with_context("entity_id", entity_id.to_string()),
+        );
+    }
+
+    let base_candidate = trimmed
+        .split_once("::")
+        .map(|(prefix, _)| prefix.trim())
+        .filter(|candidate| !candidate.is_empty())
+        .unwrap_or(trimmed);
+
+    let row: Option<(String, Option<String>, String)> = sqlx::query_as(
+        "SELECT household_id, series_parent_id, id
+           FROM events
+          WHERE deleted_at IS NULL
+            AND (id = ?1 OR id = ?2)
+          ORDER BY CASE WHEN id = ?1 THEN 0 ELSE 1 END
+          LIMIT 1",
+    )
+    .bind(trimmed)
+    .bind(base_candidate)
+    .fetch_optional(executor)
+    .await
+    .map_err(AppError::from)?;
+
+    match row {
+        Some((entity_hh, series_parent_id, row_id)) => {
+            if entity_hh != household_id {
+                return Err(AppError::new(
+                    "NOTE_LINK/CROSS_HOUSEHOLD",
+                    "Entity belongs to a different household",
+                )
+                .with_context("entity_type", NoteLinkEntityType::Event.to_string())
+                .with_context("entity_id", entity_id.to_string())
+                .with_context("household_id", household_id.to_string()));
+            }
+            let anchor = series_parent_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|candidate| !candidate.is_empty())
+                .unwrap_or_else(|| row_id.as_str())
+                .to_string();
+            Ok(anchor)
+        }
+        None => Err(
+            AppError::new("NOTE_LINK/ENTITY_NOT_FOUND", "event not found")
+                .with_context("entity_type", NoteLinkEntityType::Event.to_string())
+                .with_context("entity_id", entity_id.to_string()),
+        ),
+    }
+}
+
 async fn ensure_entity_in_household<'e, E>(
     executor: E,
     household_id: &str,
     entity_type: NoteLinkEntityType,
     entity_id: &str,
-) -> AppResult<()>
+) -> AppResult<String>
 where
     E: Executor<'e, Database = Sqlite>,
 {
-    let (sql, not_found_label) = match entity_type {
-        NoteLinkEntityType::Event => (
-            "SELECT household_id FROM events WHERE id = ? AND deleted_at IS NULL",
-            "event",
-        ),
-        NoteLinkEntityType::File => (
-            "SELECT household_id FROM files_index WHERE file_id = ?",
-            "file",
-        ),
-    };
+    match entity_type {
+        NoteLinkEntityType::Event => resolve_event_anchor(executor, household_id, entity_id).await,
+        NoteLinkEntityType::File => {
+            let entity_hh: Option<String> =
+                sqlx::query_scalar("SELECT household_id FROM files_index WHERE file_id = ?")
+                    .bind(entity_id)
+                    .fetch_optional(executor)
+                    .await
+                    .map_err(AppError::from)?;
 
-    let entity_hh: Option<String> = sqlx::query_scalar(sql)
-        .bind(entity_id)
-        .fetch_optional(executor)
-        .await
-        .map_err(AppError::from)?;
-
-    match entity_hh {
-        Some(ref hh) if hh == household_id => Ok(()),
-        Some(_) => Err(AppError::new(
-            "NOTE_LINK/CROSS_HOUSEHOLD",
-            "Entity belongs to a different household",
-        )
-        .with_context("entity_type", entity_type.to_string())
-        .with_context("entity_id", entity_id.to_string())
-        .with_context("household_id", household_id.to_string())),
-        None => Err(AppError::new(
-            "NOTE_LINK/ENTITY_NOT_FOUND",
-            format!("{} not found", not_found_label),
-        )
-        .with_context("entity_type", entity_type.to_string())
-        .with_context("entity_id", entity_id.to_string())),
+            match entity_hh {
+                Some(ref hh) if hh == household_id => Ok(entity_id.to_string()),
+                Some(_) => Err(AppError::new(
+                    "NOTE_LINK/CROSS_HOUSEHOLD",
+                    "Entity belongs to a different household",
+                )
+                .with_context("entity_type", entity_type.to_string())
+                .with_context("entity_id", entity_id.to_string())
+                .with_context("household_id", household_id.to_string())),
+                None => Err(
+                    AppError::new("NOTE_LINK/ENTITY_NOT_FOUND", "file not found")
+                        .with_context("entity_type", entity_type.to_string())
+                        .with_context("entity_id", entity_id.to_string()),
+                ),
+            }
+        }
     }
 }
 
@@ -244,10 +302,9 @@ pub async fn ensure_same_household(
     note_id: &str,
     entity_type: NoteLinkEntityType,
     entity_id: &str,
-) -> AppResult<()> {
+) -> AppResult<String> {
     ensure_note_in_household(pool, household_id, note_id).await?;
-    ensure_entity_in_household(pool, household_id, entity_type, entity_id).await?;
-    Ok(())
+    ensure_entity_in_household(pool, household_id, entity_type, entity_id).await
 }
 
 async fn ensure_same_household_tx(
@@ -256,10 +313,9 @@ async fn ensure_same_household_tx(
     note_id: &str,
     entity_type: NoteLinkEntityType,
     entity_id: &str,
-) -> AppResult<()> {
+) -> AppResult<String> {
     ensure_note_in_household(tx.as_mut(), household_id, note_id).await?;
-    ensure_entity_in_household(tx.as_mut(), household_id, entity_type, entity_id).await?;
-    Ok(())
+    ensure_entity_in_household(tx.as_mut(), household_id, entity_type, entity_id).await
 }
 
 async fn ensure_entity_exists_tx(
@@ -267,7 +323,7 @@ async fn ensure_entity_exists_tx(
     household_id: &str,
     entity_type: NoteLinkEntityType,
     entity_id: &str,
-) -> AppResult<()> {
+) -> AppResult<String> {
     ensure_entity_in_household(tx.as_mut(), household_id, entity_type, entity_id).await
 }
 
@@ -279,7 +335,9 @@ async fn create_link_with_tx(
     entity_id: &str,
     relation: Option<&str>,
 ) -> AppResult<NoteLink> {
-    ensure_same_household_tx(tx, household_id, note_id, entity_type, entity_id).await?;
+    let requested_entity_id = entity_id.to_string();
+    let canonical_entity_id =
+        ensure_same_household_tx(tx, household_id, note_id, entity_type, entity_id).await?;
 
     let id = new_uuid_v7();
     let relation = relation.unwrap_or(DEFAULT_RELATION);
@@ -293,7 +351,7 @@ async fn create_link_with_tx(
     .bind(household_id)
     .bind(note_id)
     .bind(entity_type.as_str())
-    .bind(entity_id)
+    .bind(&canonical_entity_id)
     .bind(relation)
     .bind(now)
     .execute(tx.as_mut())
@@ -310,14 +368,16 @@ async fn create_link_with_tx(
                 )
                 .with_context("note_id", note_id.to_string())
                 .with_context("entity_type", entity_type.to_string())
-                .with_context("entity_id", entity_id.to_string()));
+                .with_context("entity_id", canonical_entity_id.clone())
+                .with_context("entity_id_requested", requested_entity_id.clone()));
             }
         }
         return Err(AppError::from(err)
             .with_context("operation", "note_links_create")
             .with_context("note_id", note_id.to_string())
             .with_context("entity_type", entity_type.to_string())
-            .with_context("entity_id", entity_id.to_string()));
+            .with_context("entity_id", canonical_entity_id.clone())
+            .with_context("entity_id_requested", requested_entity_id.clone()));
     }
 
     let mut link: NoteLink = sqlx::query_as(
@@ -374,7 +434,8 @@ pub async fn create_link(
         link_id = %link.id,
         note_id = %note_id,
         entity_type = %entity_type,
-        entity_id = %entity_id,
+        entity_id = %link.entity_id,
+        entity_id_requested = %entity_id,
         household_id = %household_id,
         relation = %link.relation
     );
@@ -518,7 +579,9 @@ pub async fn get_link_for_note(
     entity_type: NoteLinkEntityType,
     entity_id: &str,
 ) -> AppResult<NoteLink> {
-    ensure_entity_in_household(pool, household_id, entity_type, entity_id).await?;
+    let requested_entity_id = entity_id.to_string();
+    let canonical_entity_id =
+        ensure_entity_in_household(pool, household_id, entity_type, entity_id).await?;
 
     let link: Option<NoteLink> = sqlx::query_as(
         "SELECT id,
@@ -538,7 +601,7 @@ pub async fn get_link_for_note(
     .bind(household_id)
     .bind(note_id)
     .bind(entity_type.as_str())
-    .bind(entity_id)
+    .bind(&canonical_entity_id)
     .fetch_optional(pool)
     .await
     .map_err(|err| {
@@ -546,12 +609,16 @@ pub async fn get_link_for_note(
             .with_context("operation", "note_links_get_for_note")
             .with_context("household_id", household_id.to_string())
             .with_context("note_id", note_id.to_string())
+            .with_context("entity_id", canonical_entity_id.clone())
+            .with_context("entity_id_requested", requested_entity_id.clone())
     })?;
 
     link.ok_or_else(|| {
         AppError::new("NOTE_LINK/ENTITY_NOT_FOUND", "Note link not found")
             .with_context("household_id", household_id.to_string())
             .with_context("note_id", note_id.to_string())
+            .with_context("entity_id", canonical_entity_id.clone())
+            .with_context("entity_id_requested", requested_entity_id.clone())
     })
 }
 
@@ -568,7 +635,8 @@ pub async fn quick_create_note_for_entity(
         AppError::from(err).with_context("operation", "notes_quick_create_for_entity_tx")
     })?;
 
-    ensure_entity_exists_tx(&mut tx, household_id, entity_type, entity_id).await?;
+    let requested_entity_id = entity_id.to_string();
+    let _ = ensure_entity_exists_tx(&mut tx, household_id, entity_type, entity_id).await?;
     let note = create_note_for_entity(&mut tx, household_id, category_id, text, color).await?;
     let link = create_link_with_tx(
         &mut tx,
@@ -589,7 +657,8 @@ pub async fn quick_create_note_for_entity(
         link_id = %link.id,
         note_id = %note.id,
         entity_type = %entity_type,
-        entity_id = %entity_id,
+        entity_id = %link.entity_id,
+        entity_id_requested = %requested_entity_id,
         household_id = %household_id,
         relation = %link.relation
     );
@@ -606,7 +675,9 @@ pub async fn list_notes_for_entity(
     cursor: Option<String>,
     limit: Option<i64>,
 ) -> AppResult<ContextNotesPage> {
-    ensure_entity_in_household(pool, household_id, entity_type, entity_id).await?;
+    let requested_entity_id = entity_id.to_string();
+    let canonical_entity_id =
+        ensure_entity_in_household(pool, household_id, entity_type, entity_id).await?;
 
     if empty_category_filter(&category_ids) {
         return Ok(ContextNotesPage {
@@ -687,10 +758,14 @@ pub async fn list_notes_for_entity(
 
     query = query.bind(limit + 1);
 
-    let mut rows = query
-        .fetch_all(pool)
-        .await
-        .map_err(|err| AppError::from(err).with_context("operation", "notes_list_for_entity"))?;
+    let mut rows = query.fetch_all(pool).await.map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "notes_list_for_entity")
+            .with_context("household_id", household_id.to_string())
+            .with_context("entity_type", entity_type.to_string())
+            .with_context("entity_id", canonical_entity_id.clone())
+            .with_context("entity_id_requested", requested_entity_id.clone())
+    })?;
 
     for note in &mut rows {
         if note.z.is_none() {
@@ -732,13 +807,16 @@ pub async fn list_notes_for_entity(
         )
         .bind(household_id)
         .bind(entity_type.as_str())
-        .bind(entity_id)
+        .bind(&canonical_entity_id)
         .fetch_all(pool)
         .await
         .map_err(|err| {
             AppError::from(err)
                 .with_context("operation", "notes_list_for_entity_links")
                 .with_context("household_id", household_id.to_string())
+                .with_context("entity_type", entity_type.to_string())
+                .with_context("entity_id", canonical_entity_id.clone())
+                .with_context("entity_id_requested", requested_entity_id.clone())
         })?
     };
 

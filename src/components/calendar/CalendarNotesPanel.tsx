@@ -82,9 +82,11 @@ export async function resolveQuickCaptureCategory(): Promise<string | null> {
   if (categories.length === 0) {
     try {
       const householdId = await defaultHouseholdId();
-      const created = await categoriesRepo.create({
-        householdId,
-        row: { name: "Primary", slug: "primary", color: "#4F46E5", is_visible: true },
+      const created = await categoriesRepo.create(householdId, {
+        name: "Primary",
+        slug: "primary",
+        color: "#4F46E5",
+        is_visible: true,
       });
       setCategories([created]);
       return created.id;
@@ -159,7 +161,7 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
 
   const emptyState = document.createElement("p");
   emptyState.className = "calendar-notes-panel__empty";
-  emptyState.textContent = "No notes linked to this event.";
+  emptyState.textContent = "No notes yet";
   emptyState.hidden = true;
 
   const list = document.createElement("ul");

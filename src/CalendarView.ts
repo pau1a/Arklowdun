@@ -124,11 +124,44 @@ export async function CalendarView(
   const notify = options.scheduleNotifications ?? scheduleNotificationsInternal;
   let focusDate = normalizeFocusDate(options.initialFocusDate ?? new Date());
 
+  let currentSnapshot: EventsSnapshot | null = selectors.events.snapshot(getState());
+  let focusDate = currentSnapshot?.window
+    ? focusFromWindow(currentSnapshot.window)
+    : startOfMonth(new Date());
+  let currentWindow = currentSnapshot?.window ?? monthWindowAround(focusDate.getTime());
+
   const section = document.createElement("section");
   section.className = "calendar";
 
   const header = document.createElement("header");
   header.className = "calendar__header";
+  const navControls = document.createElement("div");
+  navControls.className = "calendar__nav";
+
+  const prevMonthButton = createButton({
+    ariaLabel: "Go to previous month",
+    className: "calendar__nav-button",
+    type: "button",
+    children: "‹",
+  });
+
+  const monthHeading = document.createElement("h2");
+  monthHeading.className = "calendar__month-heading";
+  const monthFormatter = new Intl.DateTimeFormat(undefined, {
+    month: "long",
+    year: "numeric",
+  });
+  monthHeading.textContent = monthFormatter.format(focusDate);
+
+  const nextMonthButton = createButton({
+    ariaLabel: "Go to next month",
+    className: "calendar__nav-button",
+    type: "button",
+    children: "›",
+  });
+
+  navControls.append(prevMonthButton, monthHeading, nextMonthButton);
+
   const headerContent = document.createElement("div");
   headerContent.className = "calendar__header-primary";
   const kicker = document.createElement("p");
@@ -270,6 +303,28 @@ export async function CalendarView(
   calendarSurface.className = "calendar__surface";
   calendarSurface.append(errorRegion, calendar.element);
 
+  const requestFocusReload = (source: string) => {
+    calendar.setFocus(focusDate.getTime());
+    updateMonthHeading();
+    void loadEvents(source);
+  };
+
+  const changeMonth = (offset: number, source: string) => {
+    focusDate = new Date(focusDate.getFullYear(), focusDate.getMonth() + offset, 1);
+    currentWindow = monthWindowAround(focusDate.getTime());
+    requestFocusReload(source);
+  };
+
+  prevMonthButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    changeMonth(-1, "navigate-prev");
+  });
+
+  nextMonthButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    changeMonth(1, "navigate-next");
+  });
+
   const layout = document.createElement("div");
   layout.className = "calendar__layout";
   layout.append(calendarSurface, notesPanel.element);
@@ -403,7 +458,16 @@ export async function CalendarView(
 
   const unsubscribe = subscribe(selectors.events.snapshot, (snapshot) => {
     currentSnapshot = snapshot ?? null;
-    if (snapshot?.window) currentWindow = snapshot.window;
+    if (snapshot?.window) {
+      currentWindow = snapshot.window;
+      const nextFocus = focusFromWindow(snapshot.window);
+      const nextFocusTime = nextFocus.getTime();
+      if (nextFocusTime !== focusDate.getTime()) {
+        focusDate = nextFocus;
+        calendar.setFocus(nextFocusTime);
+        updateMonthHeading();
+      }
+    }
     applyFilters();
   });
   registerViewCleanup(container, unsubscribe);
@@ -556,7 +620,7 @@ export async function CalendarView(
     lastRefineButton = null;
   });
 
-  const shouldIgnoreSlashShortcut = () => {
+  const shouldIgnoreCalendarShortcut = () => {
     const active = document.activeElement as HTMLElement | null;
     if (active) {
       const tag = active.tagName.toLowerCase();
@@ -573,10 +637,24 @@ export async function CalendarView(
   const shortcutHandler = (event: KeyboardEvent) => {
     if (event.defaultPrevented) return;
     if (event.key === "/" && !event.altKey && !event.ctrlKey && !event.metaKey) {
-      if (shouldIgnoreSlashShortcut()) return;
+      if (shouldIgnoreCalendarShortcut()) return;
       event.preventDefault();
       lastRefineButton = null;
       focusFilterControls();
+    }
+    if (
+      (event.key === "[" || event.key === "]") &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey
+    ) {
+      if (shouldIgnoreCalendarShortcut()) return;
+      event.preventDefault();
+      if (event.key === "[") {
+        changeMonth(-1, "shortcut-prev");
+      } else {
+        changeMonth(1, "shortcut-next");
+      }
     }
   };
   window.addEventListener("keydown", shortcutHandler, { passive: false });

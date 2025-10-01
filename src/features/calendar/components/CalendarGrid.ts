@@ -3,6 +3,7 @@ import type { CalendarEvent } from "../model/CalendarEvent";
 
 export interface CalendarGridOptions {
   getNow?: () => number;
+  initialFocus?: number;
   onEventSelect?: (event: CalendarEvent) => void;
 }
 
