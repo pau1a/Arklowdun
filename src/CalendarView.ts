@@ -573,13 +573,13 @@ export async function CalendarView(
         return;
       }
       if (!data) return;
-      const { items, window, truncated, limit } = data;
-      currentWindow = window;
+      const { items, window: windowRange, truncated, limit } = data;
+      currentWindow = windowRange;
       clearInlineError();
       const payload = actions.events.updateSnapshot({
         items,
         ts: Date.now(),
-        window,
+        window: windowRange,
         source,
         truncated,
         limit,
@@ -590,7 +590,7 @@ export async function CalendarView(
         window.clearTimeout(notesDebounce);
         notesDebounce = null;
       }
-      void loadDeadlineNotes(source, window);
+      void loadDeadlineNotes(source, windowRange);
     } catch (err) {
       const descriptor = describeTimekeepingError(err);
       console.error("Calendar load failed", descriptor.error);
