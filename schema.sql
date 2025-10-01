@@ -21,7 +21,7 @@ CREATE INDEX idx_vehicles_household_updated ON vehicles(household_id, updated_at
 CREATE UNIQUE INDEX inventory_items_household_file_idx ON inventory_items(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
 CREATE UNIQUE INDEX inventory_items_household_position_idx ON inventory_items(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX inventory_items_household_updated_idx ON inventory_items(household_id, updated_at);
-CREATE INDEX notes_deadline_idx ON notes(household_id, deadline) WHERE deadline IS NOT NULL AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS notes_deadline_idx ON notes(household_id, deadline);
 CREATE INDEX notes_household_category_idx ON notes(household_id, category_id) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX notes_household_position_idx ON notes(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX notes_scope_idx ON notes(household_id, deleted_at, position);

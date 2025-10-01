@@ -3,12 +3,17 @@ export type { CalendarGridInstance, CalendarGridOptions } from "./components/Cal
 
 export {
   fetchCalendarEvents,
+  fetchCalendarDeadlineNotes,
   defaultCalendarWindow,
   calendarWindowAround,
 } from "./api/calendarApi";
-export type { CalendarQuery } from "./api/calendarApi";
+export type { CalendarQuery, FetchCalendarDeadlineNotesOptions } from "./api/calendarApi";
 
-export type { CalendarEvent, CalendarWindowRange } from "./model/CalendarEvent";
+export type {
+  CalendarEvent,
+  CalendarWindowRange,
+  CalendarDeadlineNote,
+} from "./model/CalendarEvent";
 
 export { useCalendar } from "./hooks/useCalendar";
 export type { UseCalendarOptions, UseCalendarResult } from "./hooks/useCalendar";

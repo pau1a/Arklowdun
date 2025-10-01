@@ -1,6 +1,8 @@
 use std::cmp::Ordering;
 
 use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine as _};
+use chrono::{DateTime, Datelike, Duration, LocalResult, NaiveDateTime, TimeZone, Utc};
+use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sqlx::SqlitePool;
@@ -16,6 +18,10 @@ const DEFAULT_PAGE_SIZE: i64 = 20;
 const MAX_PAGE_SIZE: i64 = 100;
 const NOTE_SELECT_FIELDS: &str =
     "id, household_id, category_id, position, created_at, updated_at, deleted_at, text, color, x, y, z, deadline, deadline_tz";
+const DAY_MS: i64 = 86_400_000;
+const DEADLINE_DEFAULT_LIMIT: i64 = 200;
+const DEADLINE_MAX_LIMIT: i64 = 500;
+const DEADLINE_PADDING_MS: i64 = DAY_MS * 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS, sqlx::FromRow)]
 #[ts(export, export_to = "../../src/bindings/")]
@@ -56,6 +62,16 @@ pub struct NotesPage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct NotesDeadlineRangePage {
+    #[serde(default)]
+    pub items: Vec<Note>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cursor: Option<String>,
 }
 
 fn decode_cursor(cursor: Option<String>) -> AppResult<Option<(i64, String)>> {
@@ -119,6 +135,50 @@ fn normalise_limit(limit: Option<i64>) -> i64 {
     limit
         .map(|value| value.clamp(1, MAX_PAGE_SIZE))
         .unwrap_or(DEFAULT_PAGE_SIZE)
+}
+
+fn normalise_deadline_limit(limit: Option<i64>) -> i64 {
+    limit
+        .map(|value| value.clamp(1, DEADLINE_MAX_LIMIT))
+        .unwrap_or(DEADLINE_DEFAULT_LIMIT)
+}
+
+fn parse_timezone(value: Option<&str>) -> Option<Tz> {
+    value
+        .and_then(|name| {
+            let trimmed = name.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                trimmed.parse::<Tz>().ok()
+            }
+        })
+}
+
+fn ms_to_utc_datetime(ms: i64) -> Option<DateTime<Utc>> {
+    let secs = ms.div_euclid(1000);
+    let nanos = (ms.rem_euclid(1000) * 1_000_000) as u32;
+    NaiveDateTime::from_timestamp_opt(secs, nanos).map(|naive| DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc))
+}
+
+fn day_start_utc(deadline_ms: i64, tz: Tz) -> Option<i64> {
+    let deadline = ms_to_utc_datetime(deadline_ms)?;
+    let local = deadline.with_timezone(&tz);
+    let date = local.date_naive();
+    let start_local = match tz.with_ymd_and_hms(date.year(), date.month(), date.day(), 0, 0, 0) {
+        LocalResult::None => return None,
+        LocalResult::Single(dt) => dt,
+        LocalResult::Ambiguous(dt1, dt2) => dt1.min(dt2),
+    };
+    Some(start_local.with_timezone(&Utc).timestamp_millis())
+}
+
+fn window_start_bound(start: i64) -> i64 {
+    start.saturating_sub(DEADLINE_PADDING_MS)
+}
+
+fn window_end_bound(end: i64) -> i64 {
+    end.saturating_add(DEADLINE_PADDING_MS)
 }
 
 async fn list_page(
@@ -188,6 +248,172 @@ async fn list_page(
     Ok(rows)
 }
 
+async fn list_deadline_candidates(
+    pool: &SqlitePool,
+    household_id: &str,
+    after: Option<(i64, String)>,
+    limit: i64,
+    category_ids: &[String],
+    start: i64,
+    end: i64,
+) -> AppResult<Vec<Note>> {
+    let mut sql = format!(
+        "SELECT {NOTE_SELECT_FIELDS} FROM notes WHERE household_id = ? AND deleted_at IS NULL AND deadline IS NOT NULL AND deadline >= ? AND deadline <= ?"
+    );
+    if after.is_some() {
+        sql.push_str(" AND (deadline > ? OR (deadline = ? AND id > ?))");
+    }
+    if !category_ids.is_empty() {
+        let placeholders = vec!["?"; category_ids.len()].join(",");
+        sql.push_str(" AND category_id IN (");
+        sql.push_str(&placeholders);
+        sql.push(')');
+    }
+    sql.push_str(" ORDER BY deadline, id LIMIT ?");
+
+    let mut query = sqlx::query_as::<_, Note>(&sql)
+        .bind(household_id)
+        .bind(start)
+        .bind(end);
+
+    if let Some((deadline, id)) = &after {
+        query = query.bind(deadline).bind(deadline).bind(id);
+    }
+
+    for category in category_ids {
+        query = query.bind(category);
+    }
+
+    query = query.bind(limit);
+
+    let mut rows = query.fetch_all(pool).await.map_err(AppError::from)?;
+    for note in &mut rows {
+        if note.z.is_none() {
+            note.z = Some(0);
+        }
+    }
+    Ok(rows)
+}
+
+async fn list_deadline_range_page(
+    pool: &SqlitePool,
+    household_id: &str,
+    start_utc: i64,
+    end_utc: i64,
+    category_ids: Option<Vec<String>>,
+    cursor: Option<String>,
+    limit: Option<i64>,
+    viewer_tz: Option<String>,
+) -> AppResult<NotesDeadlineRangePage> {
+    repo::require_household(household_id).map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "notes_list_by_deadline_range")
+            .with_context("table", "notes".to_string())
+    })?;
+
+    if end_utc < start_utc {
+        return Ok(NotesDeadlineRangePage { items: Vec::new(), cursor: None });
+    }
+
+    let (filter_categories, had_filter) = match category_ids {
+        Some(ids) => {
+            let filtered = ids
+                .into_iter()
+                .map(|id| id.trim().to_string())
+                .filter(|id| !id.is_empty())
+                .collect::<Vec<_>>();
+            (filtered, true)
+        }
+        None => (Vec::new(), false),
+    };
+
+    if had_filter && filter_categories.is_empty() {
+        return Ok(NotesDeadlineRangePage { items: Vec::new(), cursor: None });
+    }
+
+    let limit = normalise_deadline_limit(limit);
+    let fetch_limit = limit.saturating_add(1);
+    let after = decode_cursor(cursor)?;
+    let viewer_zone = parse_timezone(viewer_tz.as_deref()).unwrap_or(Tz::UTC);
+    let mut collected: Vec<(Note, i64)> = Vec::new();
+    let mut next_after = after;
+    let mut needs_cursor = false;
+    let start_bound = window_start_bound(start_utc);
+    let end_bound = window_end_bound(end_utc);
+
+    loop {
+        let candidates = list_deadline_candidates(
+            pool,
+            household_id,
+            next_after.clone(),
+            fetch_limit,
+            &filter_categories,
+            start_bound,
+            end_bound,
+        )
+        .await?;
+
+        if candidates.is_empty() {
+            break;
+        }
+
+        let mut progressed = false;
+
+        for mut note in candidates {
+            let deadline_ms = match note.deadline {
+                Some(value) => value,
+                None => continue,
+            };
+            let cursor_key = (deadline_ms, note.id.clone());
+            next_after = Some(cursor_key);
+            progressed = true;
+
+            let tz = parse_timezone(note.deadline_tz.as_deref()).unwrap_or(viewer_zone);
+            if let Some(day_start) = day_start_utc(deadline_ms, tz) {
+                if day_start < start_utc || day_start > end_utc {
+                    continue;
+                }
+                if note.z.is_none() {
+                    note.z = Some(0);
+                }
+                collected.push((note, deadline_ms));
+                if collected.len() as i64 > limit {
+                    needs_cursor = true;
+                    break;
+                }
+            }
+        }
+
+        if needs_cursor || !progressed {
+            break;
+        }
+
+        if (candidates.len() as i64) < fetch_limit {
+            break;
+        }
+
+        if let Some((deadline, _)) = next_after {
+            if deadline > end_bound {
+                break;
+            }
+        }
+    }
+
+    let mut cursor_token = None;
+    if collected.len() as i64 > limit {
+        if let Some((cursor_note, cursor_deadline)) = collected.get(limit as usize - 1) {
+            cursor_token = Some(encode_cursor(*cursor_deadline, &cursor_note.id));
+        }
+        collected.truncate(limit as usize);
+    }
+
+    let items = collected.into_iter().map(|(note, _)| note).collect();
+    Ok(NotesDeadlineRangePage {
+        items,
+        cursor: cursor_token,
+    })
+}
+
 fn paginate(mut notes: Vec<Note>, limit: i64) -> NotesPage {
     let mut next_cursor = None;
     if notes.len() as i64 > limit {
@@ -238,6 +464,42 @@ pub async fn notes_list_cursor(
     })
     .await
 }
+
+#[tauri::command]
+pub async fn notes_list_by_deadline_range(
+    state: State<'_, AppState>,
+    household_id: String,
+    start_utc: i64,
+    end_utc: i64,
+    category_ids: Option<Vec<String>>,
+    cursor: Option<String>,
+    limit: Option<i64>,
+    viewer_tz: Option<String>,
+) -> AppResult<NotesDeadlineRangePage> {
+    let pool = state.pool_clone();
+    dispatch_async_app_result(move || {
+        let pool = pool.clone();
+        let household_id = household_id.clone();
+        let category_ids = category_ids.clone();
+        let cursor = cursor.clone();
+        let viewer_tz = viewer_tz.clone();
+        async move {
+            list_deadline_range_page(
+                &pool,
+                &household_id,
+                start_utc,
+                end_utc,
+                category_ids,
+                cursor,
+                limit,
+                viewer_tz,
+            )
+            .await
+        }
+    })
+    .await
+}
+
 
 #[tauri::command]
 pub async fn notes_get(
@@ -375,6 +637,7 @@ pub async fn notes_restore(
 mod tests {
     use super::*;
     use crate::{commands, migrate};
+    use chrono::TimeZone;
     use serde_json::{json, Map, Value};
     use sqlx::SqlitePool;
     use uuid::Uuid;
@@ -399,6 +662,42 @@ mod tests {
         data.insert("y".into(), json!(0.0));
         data.insert("position".into(), Value::from(position));
         data
+    }
+
+    async fn insert_deadline_note(
+        pool: &SqlitePool,
+        household_id: &str,
+        position: i64,
+        id: &str,
+        text: &str,
+        deadline_ms: i64,
+        deadline_tz: Option<&str>,
+        category_id: Option<&str>,
+    ) -> String {
+        let mut payload = Map::new();
+        payload.insert("id".into(), Value::String(id.into()));
+        payload.insert("household_id".into(), Value::String(household_id.into()));
+        match category_id {
+            Some(value) => payload.insert("category_id".into(), Value::String(value.into())),
+            None => payload.insert("category_id".into(), Value::Null),
+        };
+        payload.insert("text".into(), Value::String(text.into()));
+        payload.insert("color".into(), Value::String("#FFF4B8".into()));
+        payload.insert("x".into(), json!(0.0));
+        payload.insert("y".into(), json!(0.0));
+        payload.insert("position".into(), Value::from(position));
+        payload.insert("deadline".into(), Value::from(deadline_ms));
+        if let Some(tz) = deadline_tz {
+            payload.insert("deadline_tz".into(), Value::String(tz.into()));
+        }
+
+        commands::create_command(pool, "notes", payload)
+            .await
+            .expect("create deadline note")
+            .get("id")
+            .and_then(|value| value.as_str())
+            .map(|s| s.to_string())
+            .expect("note id")
     }
 
     #[tokio::test]
@@ -541,5 +840,232 @@ mod tests {
         assert_eq!(fetched.deadline, Some(1_700_100_000_000));
         assert_eq!(fetched.deadline_tz.as_deref(), Some("Europe/Dublin"));
         assert_eq!(fetched.z.unwrap_or_default(), 0);
+    }
+
+    #[tokio::test]
+    async fn notes_deadline_range_filters_by_household() {
+        let pool = setup_pool().await;
+        let start = 1_700_000_000_000_i64 - DAY_MS;
+        let end = 1_700_000_000_000_i64 + DAY_MS;
+
+        let default_note_id = insert_deadline_note(
+            &pool,
+            "default",
+            0,
+            "note-default",
+            "Default household note",
+            1_700_000_000_000,
+            Some("UTC"),
+            None,
+        )
+        .await;
+
+        sqlx::query(
+            "INSERT INTO household (id, name, tz, created_at, updated_at, deleted_at) VALUES (?1, ?2, ?3, ?4, ?5, NULL)",
+        )
+        .bind("other")
+        .bind("Other Household")
+        .bind("UTC")
+        .bind(1_672_531_200_000_i64)
+        .bind(1_672_531_200_000_i64)
+        .execute(&pool)
+        .await
+        .expect("insert household");
+
+        let other_note_id = insert_deadline_note(
+            &pool,
+            "other",
+            0,
+            "note-other",
+            "Other household note",
+            1_700_000_500_000,
+            Some("UTC"),
+            None,
+        )
+        .await;
+
+        let default_page = list_deadline_range_page(
+            &pool,
+            "default",
+            start,
+            end,
+            None,
+            None,
+            Some(10),
+            Some("UTC".into()),
+        )
+        .await
+        .expect("fetch default household notes");
+        assert_eq!(default_page.items.len(), 1);
+        assert_eq!(default_page.items[0].id, default_note_id);
+
+        let other_page = list_deadline_range_page(
+            &pool,
+            "other",
+            start,
+            end,
+            None,
+            None,
+            Some(10),
+            Some("UTC".into()),
+        )
+        .await
+        .expect("fetch other household notes");
+        assert_eq!(other_page.items.len(), 1);
+        assert_eq!(other_page.items[0].id, other_note_id);
+    }
+
+    #[tokio::test]
+    async fn notes_deadline_range_respects_category_filter() {
+        let pool = setup_pool().await;
+        let base_deadline = 1_700_100_000_000_i64;
+        insert_deadline_note(
+            &pool,
+            "default",
+            1,
+            "note-primary",
+            "Primary",
+            base_deadline,
+            Some("UTC"),
+            Some("cat_primary"),
+        )
+        .await;
+        insert_deadline_note(
+            &pool,
+            "default",
+            2,
+            "note-secondary",
+            "Secondary",
+            base_deadline + 60_000,
+            Some("UTC"),
+            Some("cat_secondary"),
+        )
+        .await;
+
+        let page = list_deadline_range_page(
+            &pool,
+            "default",
+            base_deadline - DAY_MS,
+            base_deadline + DAY_MS,
+            Some(vec!["cat_primary".to_string()]),
+            None,
+            Some(10),
+            Some("UTC".into()),
+        )
+        .await
+        .expect("fetch filtered notes");
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].id, "note-primary");
+    }
+
+    #[tokio::test]
+    async fn notes_deadline_range_handles_dst_midnight() {
+        let pool = setup_pool().await;
+        let london_tz = parse_timezone(Some("Europe/London")).expect("parse tz");
+        let local = london_tz
+            .with_ymd_and_hms(2025, 3, 30, 0, 0, 0)
+            .single()
+            .expect("construct local time");
+        let deadline_ms = local.timestamp_millis();
+        insert_deadline_note(
+            &pool,
+            "default",
+            3,
+            "note-dst",
+            "DST note",
+            deadline_ms,
+            Some("Europe/London"),
+            None,
+        )
+        .await;
+
+        let day_start = day_start_utc(deadline_ms, london_tz).expect("day start");
+        let page = list_deadline_range_page(
+            &pool,
+            "default",
+            day_start - DAY_MS,
+            day_start + DAY_MS,
+            None,
+            None,
+            Some(5),
+            Some("America/New_York".into()),
+        )
+        .await
+        .expect("fetch dst note");
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].id, "note-dst");
+    }
+
+    #[tokio::test]
+    async fn notes_deadline_range_paginates_by_deadline_then_id() {
+        let pool = setup_pool().await;
+        let deadline_ms = 1_700_200_000_000_i64;
+        insert_deadline_note(
+            &pool,
+            "default",
+            0,
+            "note-a",
+            "A",
+            deadline_ms,
+            Some("UTC"),
+            None,
+        )
+        .await;
+        insert_deadline_note(
+            &pool,
+            "default",
+            1,
+            "note-b",
+            "B",
+            deadline_ms,
+            Some("UTC"),
+            None,
+        )
+        .await;
+        insert_deadline_note(
+            &pool,
+            "default",
+            2,
+            "note-c",
+            "C",
+            deadline_ms + 60_000,
+            Some("UTC"),
+            None,
+        )
+        .await;
+
+        let first_page = list_deadline_range_page(
+            &pool,
+            "default",
+            deadline_ms - DAY_MS,
+            deadline_ms + DAY_MS,
+            None,
+            None,
+            Some(2),
+            Some("UTC".into()),
+        )
+        .await
+        .expect("fetch first page");
+        assert_eq!(first_page.items.len(), 2);
+        assert_eq!(first_page.items[0].id, "note-a");
+        assert_eq!(first_page.items[1].id, "note-b");
+        let cursor = first_page.cursor.clone().expect("cursor present");
+        let decoded = decode_cursor(Some(cursor.clone())).expect("decode cursor");
+        assert!(decoded.is_some(), "cursor decodes");
+
+        let second_page = list_deadline_range_page(
+            &pool,
+            "default",
+            deadline_ms - DAY_MS,
+            deadline_ms + DAY_MS,
+            None,
+            Some(cursor),
+            Some(2),
+            Some("UTC".into()),
+        )
+        .await
+        .expect("fetch second page");
+        assert_eq!(second_page.items.len(), 1);
+        assert_eq!(second_page.items[0].id, "note-c");
     }
 }

@@ -296,7 +296,7 @@ CREATE UNIQUE INDEX bills_household_file_idx ON bills(household_id, root_key, re
 CREATE INDEX idx_bills_household_due ON bills(household_id, due_date);
 CREATE INDEX policies_household_updated_idx ON policies(household_id, updated_at);
 CREATE UNIQUE INDEX policies_household_position_idx ON policies(household_id, position) WHERE deleted_at IS NULL;
-CREATE INDEX notes_deadline_idx ON notes(household_id, deadline) WHERE deadline IS NOT NULL AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS notes_deadline_idx ON notes(household_id, deadline);
 CREATE UNIQUE INDEX policies_household_file_idx ON policies(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
 CREATE INDEX property_documents_household_updated_idx ON property_documents(household_id, updated_at);
 CREATE UNIQUE INDEX property_documents_household_position_idx ON property_documents(household_id, position) WHERE deleted_at IS NULL;

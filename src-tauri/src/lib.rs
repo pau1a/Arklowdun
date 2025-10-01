@@ -147,7 +147,8 @@ use note_links::{
     notes_quick_create_for_entity,
 };
 use notes::{
-    notes_create, notes_delete, notes_get, notes_list_cursor, notes_restore, notes_update,
+    notes_create, notes_delete, notes_get, notes_list_by_deadline_range, notes_list_cursor,
+    notes_restore, notes_update,
 };
 use security::{error_map::UiError, fs_policy, fs_policy::RootKey, hash_path};
 use util::{dispatch_app_result, dispatch_async_app_result};
@@ -2390,6 +2391,7 @@ macro_rules! app_commands {
             expenses_delete,
             expenses_restore,
             notes_list_cursor,
+            notes_list_by_deadline_range,
             notes_get,
             notes_create,
             notes_update,

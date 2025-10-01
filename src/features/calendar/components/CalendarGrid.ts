@@ -1,31 +1,70 @@
 import { nowMs } from "../../../db/time";
-import type { CalendarEvent } from "../model/CalendarEvent";
+import type {
+  CalendarDeadlineNote,
+  CalendarEvent,
+} from "../model/CalendarEvent";
+
+const NOTE_DISPLAY_LIMIT = 5;
 
 export interface CalendarGridOptions {
   getNow?: () => number;
   initialFocus?: number;
   onEventSelect?: (event: CalendarEvent) => void;
+  onNoteSelect?: (note: CalendarDeadlineNote) => void;
+  noteDisplayLimit?: number;
 }
 
 export interface CalendarGridInstance {
   element: HTMLDivElement;
   setEvents(events: CalendarEvent[]): void;
+  setDeadlineNotes(notes: CalendarDeadlineNote[]): void;
   setFocusDate(date: Date): void;
   getFocusDate(): Date;
+}
+
+type PopoverHandle = {
+  dispose: () => void;
+};
+
+function noteDayKey(year: number, month: number, day: number): string {
+  return `${year}-${month}-${day}`;
+}
+
+function firstLine(text: string): string {
+  const trimmed = text ?? "";
+  const [line] = trimmed.split(/\r?\n/);
+  const normalised = line?.trim() ?? "";
+  return normalised.length > 0 ? normalised : trimmed.trim();
 }
 
 function renderMonth(
   root: HTMLElement,
   events: CalendarEvent[],
+  deadlineNotes: CalendarDeadlineNote[],
   focusMs: number,
-  onEventSelect?: (event: CalendarEvent) => void,
+  noteLimit: number,
+  onEventSelect: ((event: CalendarEvent) => void) | undefined,
+  onNoteSelect: ((note: CalendarDeadlineNote) => void) | undefined,
+  openPopover: (cell: HTMLTableCellElement, notes: CalendarDeadlineNote[]) => void,
+  closePopover: () => void,
 ): void {
+  closePopover();
   root.innerHTML = "";
   const focusDate = new Date(focusMs);
   const year = focusDate.getFullYear();
   const month = focusDate.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
   const lastDate = new Date(year, month + 1, 0).getDate();
+
+  const notesByDay = new Map<string, CalendarDeadlineNote[]>();
+  deadlineNotes.forEach((entry) => {
+    const key = noteDayKey(entry.displayYear, entry.displayMonth, entry.displayDay);
+    const bucket = notesByDay.get(key);
+    if (bucket) bucket.push(entry);
+    else notesByDay.set(key, [entry]);
+  });
+
+  const defaultZone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
 
   const table = document.createElement("table");
   table.className = "calendar__table";
@@ -46,6 +85,7 @@ function renderMonth(
     }
     const cell = document.createElement("td");
     cell.tabIndex = 0;
+    cell.classList.add("calendar__cell");
     const cellDate = new Date(year, month, day);
     const dateDiv = document.createElement("div");
     dateDiv.className = "calendar__date";
@@ -59,10 +99,10 @@ function renderMonth(
       dateDiv.classList.add("calendar__date--today");
     }
     cell.appendChild(dateDiv);
-    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
     const dayEvents = events.filter((event) => {
       const fmt = new Intl.DateTimeFormat("en-CA", {
-        timeZone: event.tz || timeZone,
+        timeZone: event.tz || defaultZone,
       });
       const parts = fmt.format(new Date(event.start_at_utc));
       const [y, m, d] = parts.split("-").map(Number);
@@ -92,6 +132,54 @@ function renderMonth(
       }
       cell.appendChild(div);
     });
+
+    const key = noteDayKey(cellDate.getFullYear(), cellDate.getMonth(), cellDate.getDate());
+    const dayNotes = notesByDay.get(key) ?? [];
+    const limit = Math.max(1, noteLimit);
+    if (dayNotes.length > 0) {
+      const visible = dayNotes.slice(0, limit);
+      visible.forEach((entry) => {
+        const chip = document.createElement("div");
+        chip.className = "calendar__note";
+        const label = firstLine(entry.note.text ?? "");
+        chip.textContent = label || "Untitled note";
+        if (entry.note.text) chip.title = entry.note.text.trim();
+        chip.tabIndex = 0;
+        chip.setAttribute("role", "button");
+        if (onNoteSelect) {
+          chip.addEventListener("click", (event) => {
+            event.preventDefault();
+            closePopover();
+            onNoteSelect(entry);
+          });
+          chip.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " " || event.key === "Spacebar") {
+              event.preventDefault();
+              closePopover();
+              onNoteSelect(entry);
+            }
+          });
+        }
+        cell.appendChild(chip);
+      });
+      if (dayNotes.length > limit) {
+        const moreButton = document.createElement("button");
+        moreButton.type = "button";
+        moreButton.className = "calendar__note calendar__note-more";
+        moreButton.textContent = `+${dayNotes.length - limit} more`;
+        moreButton.addEventListener("click", (event) => {
+          event.preventDefault();
+          openPopover(cell, dayNotes);
+        });
+        moreButton.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " " || event.key === "Spacebar") {
+            event.preventDefault();
+            openPopover(cell, dayNotes);
+          }
+        });
+        cell.appendChild(moreButton);
+      }
+    }
     row.appendChild(cell);
   }
   table.appendChild(row);
@@ -103,17 +191,97 @@ export function CalendarGrid(options: CalendarGridOptions = {}): CalendarGridIns
   element.id = "calendar";
   const getNow = options.getNow ?? nowMs;
   const onEventSelect = options.onEventSelect;
+  const onNoteSelect = options.onNoteSelect;
+  const noteLimit = options.noteDisplayLimit ?? NOTE_DISPLAY_LIMIT;
   let focusMs = normalizeFocusDate(new Date(getNow())).getTime();
   let currentEvents: CalendarEvent[] = [];
+  let currentDeadlineNotes: CalendarDeadlineNote[] = [];
+  let activePopover: PopoverHandle | null = null;
+
+  const closePopover = () => {
+    if (activePopover) {
+      activePopover.dispose();
+      activePopover = null;
+    }
+  };
+
+  const openPopover = (cell: HTMLTableCellElement, notes: CalendarDeadlineNote[]) => {
+    if (notes.length === 0) return;
+    closePopover();
+    const popover = document.createElement("div");
+    popover.className = "calendar__note-popover";
+    popover.setAttribute("role", "dialog");
+    popover.setAttribute("aria-label", "Deadline notes");
+    popover.tabIndex = -1;
+    const list = document.createElement("ul");
+    list.className = "calendar__note-popover-list";
+    notes.forEach((entry) => {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "calendar__note-popover-item";
+      const label = firstLine(entry.note.text ?? "");
+      button.textContent = label || "Untitled note";
+      if (entry.note.text) button.title = entry.note.text.trim();
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        closePopover();
+        onNoteSelect?.(entry);
+      });
+      item.appendChild(button);
+      list.appendChild(item);
+    });
+    popover.appendChild(list);
+    cell.style.position = "relative";
+    cell.appendChild(popover);
+    popover.focus();
+
+    const handleOutside = (event: MouseEvent) => {
+      if (!popover.contains(event.target as Node)) {
+        closePopover();
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closePopover();
+      }
+    };
+
+    document.addEventListener("mousedown", handleOutside);
+    document.addEventListener("keydown", handleEscape);
+
+    activePopover = {
+      dispose: () => {
+        document.removeEventListener("mousedown", handleOutside);
+        document.removeEventListener("keydown", handleEscape);
+        popover.remove();
+      },
+    };
+  };
 
   const rerender = () => {
-    renderMonth(element, currentEvents, focusMs, onEventSelect);
+    renderMonth(
+      element,
+      currentEvents,
+      currentDeadlineNotes,
+      focusMs,
+      noteLimit,
+      onEventSelect,
+      onNoteSelect,
+      openPopover,
+      closePopover,
+    );
   };
 
   return {
     element,
     setEvents(events: CalendarEvent[]) {
       currentEvents = [...events];
+      rerender();
+    },
+    setDeadlineNotes(notes: CalendarDeadlineNote[]) {
+      currentDeadlineNotes = [...notes];
       rerender();
     },
     setFocusDate(date: Date) {

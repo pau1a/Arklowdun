@@ -52,5 +52,5 @@ the mirrored `src-tauri/schema.sql`. Update the hash whenever the schema shape
 changes. The current canonical hash is:
 
 ```
-6c2c64bf0ed5dbf7f1f0636ef5bddba9a8a86e8996b3fe8f5492d0b0dfee6e77
+5782592e346bc92f518bc3e386bbc3199e4b46dd99f47425df5b1f5e93c6a3f3
 ```

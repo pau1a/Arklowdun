@@ -10,6 +10,8 @@ import { categoriesRepo } from "./repos";
 import {
   CalendarGrid,
   calendarWindowAround,
+  fetchCalendarDeadlineNotes,
+  type CalendarDeadlineNote,
   type CalendarEvent,
   type CalendarGridInstance,
   type CalendarGridOptions,
@@ -26,7 +28,12 @@ import {
   type EventsSnapshot,
 } from "./store/index";
 import { emit, on } from "./store/events";
-import { getCategories, setCategories } from "./store/categories";
+import {
+  getActiveCategoryIds,
+  getCategories,
+  setCategories,
+  subscribeActiveCategoryIds,
+} from "./store/categories";
 import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
 import createButton from "@ui/Button";
 import createInput from "@ui/Input";
@@ -35,6 +42,7 @@ import createErrorBanner from "@ui/ErrorBanner";
 import { describeTimekeepingError } from "@utils/timekeepingErrors";
 
 const FILTER_INPUT_DEBOUNCE_MS = 180;
+const DEADLINE_FETCH_DEBOUNCE_MS = 160;
 
 export interface CalendarViewOptions {
   initialFocusDate?: Date;
@@ -123,6 +131,7 @@ export async function CalendarView(
   const calendarLoader = options.calendarLoader ?? useCalendar;
   const notify = options.scheduleNotifications ?? scheduleNotificationsInternal;
   let focusDate = normalizeFocusDate(options.initialFocusDate ?? new Date());
+  const viewerTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
 
   // Helper to compute a normalized focus date from a window range
   type CalendarWindowRange = { start: number; end: number };
@@ -224,6 +233,11 @@ export async function CalendarView(
   let notesToggleActive = false;
   let filterValue = "";
   let filterDebounce: number | null = null;
+  let deadlineNotes: CalendarDeadlineNote[] = [];
+  let notesFetchToken = 0;
+  let notesDebounce: number | null = null;
+  let activeCategoryIds = getActiveCategoryIds();
+  let lastCategorySignature = activeCategoryIds.join("|");
 
   const syncNotesToggle = () => {
     const hasEvent = Boolean(selectedEvent);
@@ -261,6 +275,11 @@ export async function CalendarView(
     syncNotesToggle();
   };
 
+  const handleNoteSelect = (entry: CalendarDeadlineNote) => {
+    if (!entry?.note?.id) return;
+    window.location.hash = `#/notes?noteId=${entry.note.id}`;
+  };
+
   const panel = document.createElement("div");
   panel.className = "card calendar__panel";
   const errorRegion = document.createElement("div");
@@ -271,10 +290,12 @@ export async function CalendarView(
   const calendarGridOptions: CalendarGridOptions = {
     ...gridOptionOverrides,
     onEventSelect: handleEventSelect,
+    onNoteSelect: handleNoteSelect,
     getNow: gridOptionOverrides.getNow ?? (() => focusDate.getTime()),
   };
   const calendar = gridFactory(calendarGridOptions);
   calendar.setFocusDate(focusDate);
+  calendar.setDeadlineNotes(deadlineNotes);
   const calendarSurface = document.createElement("div");
   calendarSurface.className = "calendar__surface";
   calendarSurface.append(errorRegion, calendar.element);
@@ -288,6 +309,12 @@ export async function CalendarView(
   panel.append(layout);
   registerViewCleanup(container, () => {
     notesPanel.destroy();
+  });
+  registerViewCleanup(container, () => {
+    if (notesDebounce !== null) {
+      window.clearTimeout(notesDebounce);
+      notesDebounce = null;
+    }
   });
 
   const form = document.createElement("form");
@@ -337,6 +364,46 @@ export async function CalendarView(
   let lastTruncationToken: number | null = null;
   let inlineError: ReturnType<typeof createErrorBanner> | null = null;
 
+  const applyDeadlineNotes = (notes: CalendarDeadlineNote[]) => {
+    deadlineNotes = [...notes];
+    calendar.setDeadlineNotes(deadlineNotes);
+  };
+
+  const loadDeadlineNotes = async (
+    source: string,
+    rangeOverride?: CalendarWindowRange,
+  ): Promise<void> => {
+    const windowRange = rangeOverride ?? currentWindow ?? calendarWindowAround(focusDate.getTime());
+    const token = ++notesFetchToken;
+    if (activeCategoryIds.length === 0) {
+      applyDeadlineNotes([]);
+      return;
+    }
+    try {
+      const notes = await fetchCalendarDeadlineNotes({
+        windowRange,
+        categoryIds: [...activeCategoryIds],
+        viewerTz: viewerTimezone,
+      });
+      if (token !== notesFetchToken) return;
+      applyDeadlineNotes(notes);
+    } catch (error) {
+      console.error("Failed to load calendar deadline notes", error);
+    }
+  };
+
+  const scheduleDeadlineRefresh = (
+    source: string,
+    rangeOverride?: CalendarWindowRange,
+  ) => {
+    if (notesDebounce !== null) window.clearTimeout(notesDebounce);
+    const targetRange = rangeOverride ?? currentWindow ?? calendarWindowAround(focusDate.getTime());
+    notesDebounce = window.setTimeout(() => {
+      notesDebounce = null;
+      void loadDeadlineNotes(source, targetRange);
+    }, DEADLINE_FETCH_DEBOUNCE_MS);
+  };
+
   const filterEvents = (events: CalendarEvent[]): CalendarEvent[] => {
     const query = filterValue.trim().toLowerCase();
     if (!query) return events;
@@ -363,6 +430,7 @@ export async function CalendarView(
     const items = currentSnapshot?.items ?? [];
     const filtered = filterEvents(items);
     calendar.setEvents(filtered);
+    calendar.setDeadlineNotes(deadlineNotes);
     syncTruncationBanner(filtered);
   };
 
@@ -415,6 +483,7 @@ export async function CalendarView(
   const unsubscribe = subscribe(selectors.events.snapshot, (snapshot) => {
     currentSnapshot = snapshot ?? null;
     if (snapshot?.window) {
+      const previousWindow = currentWindow;
       currentWindow = snapshot.window;
       const nextFocus = focusFromWindow(snapshot.window);
       const nextFocusTime = nextFocus.getTime();
@@ -422,6 +491,13 @@ export async function CalendarView(
         focusDate = nextFocus;
         calendar.setFocusDate(nextFocus);
         updateMonthHeading();
+      }
+      if (
+        !previousWindow ||
+        previousWindow.start !== snapshot.window.start ||
+        previousWindow.end !== snapshot.window.end
+      ) {
+        scheduleDeadlineRefresh("window-update", snapshot.window);
       }
     }
     applyFilters();
@@ -437,6 +513,15 @@ export async function CalendarView(
   });
   registerViewCleanup(container, stopHousehold);
 
+  const stopCategorySubscription = subscribeActiveCategoryIds((ids) => {
+    const signature = ids.join("|");
+    if (signature === lastCategorySignature) return;
+    activeCategoryIds = [...ids];
+    lastCategorySignature = signature;
+    scheduleDeadlineRefresh("category-change");
+  });
+  registerViewCleanup(container, stopCategorySubscription);
+
   const stopCalendarError = on("calendar:load-error", ({ message, detail }) => {
     showInlineError(message, detail ?? undefined);
   });
@@ -450,6 +535,8 @@ export async function CalendarView(
     calendar.setFocusDate(focusDate);
     updateMonthHeading();
     applyFilters();
+    const upcomingWindow = calendarWindowAround(focusDate.getTime());
+    scheduleDeadlineRefresh(direction, upcomingWindow);
     await loadEvents(direction);
   }
 
@@ -499,6 +586,11 @@ export async function CalendarView(
       });
       emit("events:updated", payload);
       void notify(items);
+      if (notesDebounce !== null) {
+        window.clearTimeout(notesDebounce);
+        notesDebounce = null;
+      }
+      void loadDeadlineNotes(source, window);
     } catch (err) {
       const descriptor = describeTimekeepingError(err);
       console.error("Calendar load failed", descriptor.error);
@@ -513,6 +605,7 @@ export async function CalendarView(
     const items = currentSnapshot.items;
     applyFilters();
     if (items.length) void notify(items);
+    void loadDeadlineNotes("snapshot", currentWindow ?? calendarWindowAround(focusDate.getTime()));
   } else {
     await loadEvents("initial");
   }
