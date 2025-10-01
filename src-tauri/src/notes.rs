@@ -358,6 +358,7 @@ async fn list_deadline_range_page(
         }
 
         let mut progressed = false;
+        let candidates_len = candidates.len();
 
         for mut note in candidates {
             let deadline_ms = match note.deadline {
@@ -388,7 +389,7 @@ async fn list_deadline_range_page(
             break;
         }
 
-        if (candidates.len() as i64) < fetch_limit {
+        if (candidates_len as i64) < fetch_limit {
             break;
         }
 
