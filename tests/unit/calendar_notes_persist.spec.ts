@@ -160,30 +160,29 @@ test("CalendarNotesPanel persists events before loading and quick capture using 
         return null;
       case "get_default_household_id":
         return "hh-test";
-      case "notes_list_for_entity":
+      case "note_links_list_by_entity":
         assert.equal(args.entityId, "evt-series");
-        return { notes: [], links: [], next_cursor: null };
-      case "notes_quick_create_for_entity":
-        assert.equal(args.entityId, "evt-series");
+        return { items: [] };
+      case "notes_create":
         return {
           id: "note-test",
           household_id: args.household_id,
-          category_id: args.category_id,
+          category_id: args.data?.category_id,
           position: 0,
           created_at: noteTimestamp,
           updated_at: noteTimestamp,
-          text: args.text,
-          color: args.color ?? "#FFF4B8",
+          text: args.data?.text,
+          color: args.data?.color ?? "#FFF4B8",
           x: 0,
           y: 0,
         };
-      case "note_links_get_for_note":
+      case "note_links_create":
         assert.equal(args.entityId, "evt-series");
         return {
           id: "link-test",
           household_id: args.household_id,
           note_id: args.note_id,
-          entity_type: "event",
+          entity_type: args.entity_type,
           entity_id: args.entity_id,
           relation: "primary",
           created_at: noteTimestamp,
@@ -240,13 +239,13 @@ test("CalendarNotesPanel persists events before loading and quick capture using 
     const eventCreateCallsAfterQuick = invocations.filter(([command]) => command === "event_create").length;
     assert.equal(eventCreateCallsAfterQuick, 2);
 
-    const quickCreateCall = invocations.find(([command]) => command === "notes_quick_create_for_entity");
-    assert.ok(quickCreateCall, "notes_quick_create_for_entity should be invoked");
-    assert.equal(quickCreateCall?.[1]?.entityId, "evt-series");
+    const createCall = invocations.find(([command]) => command === "notes_create");
+    assert.ok(createCall, "notes_create should be invoked");
+    assert.equal(createCall?.[1]?.data?.text, "Prep notes");
 
-    const linkFetchCall = invocations.find(([command]) => command === "note_links_get_for_note");
-    assert.ok(linkFetchCall, "note_links_get_for_note should be invoked");
-    assert.equal(linkFetchCall?.[1]?.entityId, "evt-series");
+    const linkCall = invocations.find(([command]) => command === "note_links_create");
+    assert.ok(linkCall, "note_links_create should be invoked");
+    assert.equal(linkCall?.[1]?.entityId, "evt-series");
   } finally {
     cleanupTauri();
     cleanupDom();
@@ -262,36 +261,35 @@ test("CalendarNotesPanel renders linked notes for recurrence instances", async (
         return null;
       case "get_default_household_id":
         return "hh-test";
-      case "notes_list_for_entity":
+      case "note_links_list_by_entity":
         assert.equal(args.entityId, "evt-series");
         return {
-          notes: [
+          items: [
             {
-              id: "note-1",
-              household_id: "hh-test",
-              category_id: "cat-primary",
-              position: 0,
-              created_at: noteTimestamp,
-              updated_at: noteTimestamp,
-              text: "Series note",
-              color: "#FFCC00",
-              x: 0,
-              y: 0,
+              note: {
+                id: "note-1",
+                household_id: "hh-test",
+                category_id: "cat-primary",
+                position: 0,
+                created_at: noteTimestamp,
+                updated_at: noteTimestamp,
+                text: "Series note",
+                color: "#FFCC00",
+                x: 0,
+                y: 0,
+              },
+              link: {
+                id: "link-1",
+                household_id: "hh-test",
+                note_id: "note-1",
+                entity_type: "event",
+                entity_id: "evt-series",
+                relation: "primary",
+                created_at: noteTimestamp,
+                updated_at: noteTimestamp,
+              },
             },
           ],
-          links: [
-            {
-              id: "link-1",
-              household_id: "hh-test",
-              note_id: "note-1",
-              entity_type: "event",
-              entity_id: "evt-series",
-              relation: "primary",
-              created_at: noteTimestamp,
-              updated_at: noteTimestamp,
-            },
-          ],
-          next_cursor: null,
         };
       default:
         return null;
