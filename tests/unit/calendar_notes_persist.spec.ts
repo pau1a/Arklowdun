@@ -96,7 +96,7 @@ test.afterEach(() => {
   categoriesStore.__resetCategories();
 });
 
-test("ensureEventPersisted invokes event_create", async () => {
+test("ensureEventPersisted invokes event_create with anchor id", async () => {
   const cleanupDom = withDom();
   const invocations: Array<[string, Record<string, unknown> | undefined]> = [];
   const cleanupTauri = withTauri(async (cmd, args) => {
@@ -108,13 +108,17 @@ test("ensureEventPersisted invokes event_create", async () => {
   });
 
   try {
-    const event = baseEvent({ tz: "America/New_York" });
+    const event = baseEvent({
+      tz: "America/New_York",
+      id: "evt-series::2024-02-01T10:00:00Z",
+      series_parent_id: "evt-series",
+    });
     await panelModule.ensureEventPersisted(event, "hh-test");
     assert.equal(invocations.length, 1);
     const [command, payload] = invocations[0];
     assert.equal(command, "event_create");
     assert.deepEqual(payload?.data, {
-      id: event.id,
+      id: "evt-series",
       title: event.title,
       start_at_utc: event.start_at_utc,
       tz: event.tz,
@@ -145,7 +149,7 @@ test("ensureEventPersisted swallows unique constraint errors", async () => {
   }
 });
 
-test("CalendarNotesPanel persists events before loading and quick capture", async () => {
+test("CalendarNotesPanel persists events before loading and quick capture using anchor ids", async () => {
   const cleanupDom = withDom();
   const invocations: Array<[string, Record<string, unknown> | undefined]> = [];
   const noteTimestamp = Date.now();
@@ -157,8 +161,10 @@ test("CalendarNotesPanel persists events before loading and quick capture", asyn
       case "get_default_household_id":
         return "hh-test";
       case "notes_list_for_entity":
+        assert.equal(args.entityId, "evt-series");
         return { notes: [], links: [], next_cursor: null };
       case "notes_quick_create_for_entity":
+        assert.equal(args.entityId, "evt-series");
         return {
           id: "note-test",
           household_id: args.household_id,
@@ -172,6 +178,7 @@ test("CalendarNotesPanel persists events before loading and quick capture", asyn
           y: 0,
         };
       case "note_links_get_for_note":
+        assert.equal(args.entityId, "evt-series");
         return {
           id: "link-test",
           household_id: args.household_id,
@@ -207,7 +214,10 @@ test("CalendarNotesPanel persists events before loading and quick capture", asyn
     const panel = panelModule.CalendarNotesPanel();
     document.body.appendChild(panel.element);
 
-    const event = baseEvent();
+    const event = baseEvent({
+      id: "evt-series::2024-02-01T10:00:00Z",
+      series_parent_id: "evt-series",
+    });
     panel.setEvent(event);
 
     await tick();
@@ -227,10 +237,85 @@ test("CalendarNotesPanel persists events before loading and quick capture", asyn
     await tick();
     await tick();
 
-    const eventCreateCallsAfterQuick = invocations.filter(
-      ([command]) => command === "event_create",
-    ).length;
+    const eventCreateCallsAfterQuick = invocations.filter(([command]) => command === "event_create").length;
     assert.equal(eventCreateCallsAfterQuick, 2);
+
+    const quickCreateCall = invocations.find(([command]) => command === "notes_quick_create_for_entity");
+    assert.ok(quickCreateCall, "notes_quick_create_for_entity should be invoked");
+    assert.equal(quickCreateCall?.[1]?.entityId, "evt-series");
+
+    const linkFetchCall = invocations.find(([command]) => command === "note_links_get_for_note");
+    assert.ok(linkFetchCall, "note_links_get_for_note should be invoked");
+    assert.equal(linkFetchCall?.[1]?.entityId, "evt-series");
+  } finally {
+    cleanupTauri();
+    cleanupDom();
+  }
+});
+
+test("CalendarNotesPanel renders linked notes for recurrence instances", async () => {
+  const cleanupDom = withDom();
+  const noteTimestamp = Date.now();
+  const cleanupTauri = withTauri(async (cmd, args) => {
+    switch (cmd) {
+      case "event_create":
+        return null;
+      case "get_default_household_id":
+        return "hh-test";
+      case "notes_list_for_entity":
+        assert.equal(args.entityId, "evt-series");
+        return {
+          notes: [
+            {
+              id: "note-1",
+              household_id: "hh-test",
+              category_id: "cat-primary",
+              position: 0,
+              created_at: noteTimestamp,
+              updated_at: noteTimestamp,
+              text: "Series note",
+              color: "#FFCC00",
+              x: 0,
+              y: 0,
+            },
+          ],
+          links: [
+            {
+              id: "link-1",
+              household_id: "hh-test",
+              note_id: "note-1",
+              entity_type: "event",
+              entity_id: "evt-series",
+              relation: "primary",
+              created_at: noteTimestamp,
+              updated_at: noteTimestamp,
+            },
+          ],
+          next_cursor: null,
+        };
+      default:
+        return null;
+    }
+  });
+
+  try {
+    const panel = panelModule.CalendarNotesPanel();
+    document.body.appendChild(panel.element);
+
+    const event = baseEvent({
+      id: "evt-series::2024-02-02T15:00:00Z",
+      series_parent_id: "evt-series",
+    });
+
+    panel.setEvent(event);
+
+    await tick();
+    await tick();
+
+    const items = panel.element.querySelectorAll(".calendar-notes-panel__item");
+    assert.equal(items.length, 1);
+    const text = items[0]?.querySelector(".calendar-notes-panel__text");
+    assert.equal(text?.textContent, "Series note");
   } finally {
     cleanupTauri();
     cleanupDom();
