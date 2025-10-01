@@ -9,8 +9,9 @@ import { defaultHouseholdId } from "./db/household";
 import { categoriesRepo } from "./repos";
 import {
   CalendarGrid,
-  defaultCalendarWindow,
   type CalendarEvent,
+  type CalendarWindowRange,
+  monthWindowAround,
   useCalendar,
 } from "@features/calendar";
 import CalendarNotesPanel from "./components/calendar/CalendarNotesPanel";
@@ -31,6 +32,15 @@ import createErrorBanner from "@ui/ErrorBanner";
 import { describeTimekeepingError } from "@utils/timekeepingErrors";
 
 const FILTER_INPUT_DEBOUNCE_MS = 180;
+
+function startOfMonth(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function focusFromWindow(window: CalendarWindowRange): Date {
+  const midpoint = new Date((window.start + window.end) / 2);
+  return startOfMonth(midpoint);
+}
 
 async function saveEvent(
   event: Omit<
@@ -92,11 +102,44 @@ export async function CalendarView(container: HTMLElement) {
 
   await ensureCategoriesLoaded();
 
+  let currentSnapshot: EventsSnapshot | null = selectors.events.snapshot(getState());
+  let focusDate = currentSnapshot?.window
+    ? focusFromWindow(currentSnapshot.window)
+    : startOfMonth(new Date());
+  let currentWindow = currentSnapshot?.window ?? monthWindowAround(focusDate.getTime());
+
   const section = document.createElement("section");
   section.className = "calendar";
 
   const header = document.createElement("header");
   header.className = "calendar__header";
+  const navControls = document.createElement("div");
+  navControls.className = "calendar__nav";
+
+  const prevMonthButton = createButton({
+    ariaLabel: "Go to previous month",
+    className: "calendar__nav-button",
+    type: "button",
+    children: "‹",
+  });
+
+  const monthHeading = document.createElement("h2");
+  monthHeading.className = "calendar__month-heading";
+  const monthFormatter = new Intl.DateTimeFormat(undefined, {
+    month: "long",
+    year: "numeric",
+  });
+  monthHeading.textContent = monthFormatter.format(focusDate);
+
+  const nextMonthButton = createButton({
+    ariaLabel: "Go to next month",
+    className: "calendar__nav-button",
+    type: "button",
+    children: "›",
+  });
+
+  navControls.append(prevMonthButton, monthHeading, nextMonthButton);
+
   const headerContent = document.createElement("div");
   const kicker = document.createElement("p");
   kicker.className = "kicker";
@@ -129,7 +172,11 @@ export async function CalendarView(container: HTMLElement) {
   });
   notesToggle.disabled = true;
   headerContent.append(kicker, filterWrapper, notesToggle);
-  header.appendChild(headerContent);
+  header.append(navControls, headerContent);
+
+  const updateMonthHeading = () => {
+    monthHeading.textContent = monthFormatter.format(focusDate);
+  };
 
   const focusFilterControls = () => {
     filterInput.focus();
@@ -192,10 +239,35 @@ export async function CalendarView(container: HTMLElement) {
   errorRegion.setAttribute("aria-live", "polite");
   errorRegion.setAttribute("aria-atomic", "true");
   errorRegion.hidden = true;
-  const calendar = CalendarGrid({ onEventSelect: handleEventSelect });
+  const calendar = CalendarGrid({
+    onEventSelect: handleEventSelect,
+    initialFocus: focusDate.getTime(),
+  });
   const calendarSurface = document.createElement("div");
   calendarSurface.className = "calendar__surface";
   calendarSurface.append(errorRegion, calendar.element);
+
+  const requestFocusReload = (source: string) => {
+    calendar.setFocus(focusDate.getTime());
+    updateMonthHeading();
+    void loadEvents(source);
+  };
+
+  const changeMonth = (offset: number, source: string) => {
+    focusDate = new Date(focusDate.getFullYear(), focusDate.getMonth() + offset, 1);
+    currentWindow = monthWindowAround(focusDate.getTime());
+    requestFocusReload(source);
+  };
+
+  prevMonthButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    changeMonth(-1, "navigate-prev");
+  });
+
+  nextMonthButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    changeMonth(1, "navigate-next");
+  });
 
   const layout = document.createElement("div");
   layout.className = "calendar__layout";
@@ -246,8 +318,6 @@ export async function CalendarView(container: HTMLElement) {
   container.innerHTML = "";
   container.appendChild(section);
 
-  let currentSnapshot: EventsSnapshot | null = selectors.events.snapshot(getState());
-  let currentWindow = currentSnapshot?.window ?? defaultCalendarWindow();
   let truncationDismissed = false;
   let lastTruncationToken: number | null = null;
   let inlineError: ReturnType<typeof createErrorBanner> | null = null;
@@ -329,7 +399,16 @@ export async function CalendarView(container: HTMLElement) {
 
   const unsubscribe = subscribe(selectors.events.snapshot, (snapshot) => {
     currentSnapshot = snapshot ?? null;
-    if (snapshot?.window) currentWindow = snapshot.window;
+    if (snapshot?.window) {
+      currentWindow = snapshot.window;
+      const nextFocus = focusFromWindow(snapshot.window);
+      const nextFocusTime = nextFocus.getTime();
+      if (nextFocusTime !== focusDate.getTime()) {
+        focusDate = nextFocus;
+        calendar.setFocus(nextFocusTime);
+        updateMonthHeading();
+      }
+    }
     applyFilters();
   });
   registerViewCleanup(container, unsubscribe);
@@ -350,7 +429,7 @@ export async function CalendarView(container: HTMLElement) {
 
   async function loadEvents(source: string): Promise<void> {
     try {
-      const range = defaultCalendarWindow();
+      const range = monthWindowAround(focusDate.getTime());
       const { data, error } = await useCalendar({ window: range });
       if (error) {
         console.error(error);
@@ -404,7 +483,7 @@ export async function CalendarView(container: HTMLElement) {
     const snapshot = selectors.events.snapshot(getState());
     const baseItems = snapshot?.items ?? [];
     const nextItems = [...baseItems, ev];
-    const window = snapshot?.window ?? currentWindow ?? defaultCalendarWindow();
+    const window = snapshot?.window ?? currentWindow ?? monthWindowAround(focusDate.getTime());
     currentWindow = window;
     const payload = actions.events.updateSnapshot({
       items: nextItems,
@@ -447,7 +526,7 @@ export async function CalendarView(container: HTMLElement) {
     lastRefineButton = null;
   });
 
-  const shouldIgnoreSlashShortcut = () => {
+  const shouldIgnoreCalendarShortcut = () => {
     const active = document.activeElement as HTMLElement | null;
     if (active) {
       const tag = active.tagName.toLowerCase();
@@ -464,10 +543,24 @@ export async function CalendarView(container: HTMLElement) {
   const shortcutHandler = (event: KeyboardEvent) => {
     if (event.defaultPrevented) return;
     if (event.key === "/" && !event.altKey && !event.ctrlKey && !event.metaKey) {
-      if (shouldIgnoreSlashShortcut()) return;
+      if (shouldIgnoreCalendarShortcut()) return;
       event.preventDefault();
       lastRefineButton = null;
       focusFilterControls();
+    }
+    if (
+      (event.key === "[" || event.key === "]") &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey
+    ) {
+      if (shouldIgnoreCalendarShortcut()) return;
+      event.preventDefault();
+      if (event.key === "[") {
+        changeMonth(-1, "shortcut-prev");
+      } else {
+        changeMonth(1, "shortcut-next");
+      }
     }
   };
   window.addEventListener("keydown", shortcutHandler, { passive: false });

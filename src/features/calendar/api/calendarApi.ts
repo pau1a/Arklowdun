@@ -10,11 +10,21 @@ export interface CalendarQuery {
   limit: number;
 }
 
-const WINDOW_SPAN_MS = 365 * 24 * 60 * 60 * 1000;
+function endOfDayMs(date: Date): number {
+  const end = new Date(date);
+  end.setHours(23, 59, 59, 999);
+  return end.getTime();
+}
+
+export function monthWindowAround(focusMs: number): CalendarWindowRange {
+  const focus = new Date(focusMs);
+  const start = new Date(focus.getFullYear(), focus.getMonth() - 1, 1);
+  const end = new Date(focus.getFullYear(), focus.getMonth() + 2, 0);
+  return { start: start.getTime(), end: endOfDayMs(end) };
+}
 
 export function defaultCalendarWindow(): CalendarWindowRange {
-  const now = Date.now();
-  return { start: now - WINDOW_SPAN_MS, end: now + WINDOW_SPAN_MS };
+  return monthWindowAround(Date.now());
 }
 
 export async function fetchCalendarEvents(

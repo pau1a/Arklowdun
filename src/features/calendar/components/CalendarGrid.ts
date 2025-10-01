@@ -3,34 +3,28 @@ import type { CalendarEvent } from "../model/CalendarEvent";
 
 export interface CalendarGridOptions {
   getNow?: () => number;
+  initialFocus?: number;
   onEventSelect?: (event: CalendarEvent) => void;
 }
 
 export interface CalendarGridInstance {
   element: HTMLDivElement;
   setEvents(events: CalendarEvent[]): void;
+  setFocus(focus: number | Date): void;
 }
 
 function renderMonth(
   root: HTMLElement,
   events: CalendarEvent[],
-  getNow: () => number,
+  focusTime: number,
   onEventSelect?: (event: CalendarEvent) => void,
 ): void {
   root.innerHTML = "";
-  const now = new Date(getNow());
-  const year = now.getFullYear();
-  const month = now.getMonth();
+  const focusDate = new Date(focusTime);
+  const year = focusDate.getFullYear();
+  const month = focusDate.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
   const lastDate = new Date(year, month + 1, 0).getDate();
-
-  const monthLabel = document.createElement("div");
-  monthLabel.className = "calendar__month-label";
-  monthLabel.textContent = now.toLocaleString(undefined, {
-    month: "long",
-    year: "numeric",
-  });
-  root.appendChild(monthLabel);
 
   const table = document.createElement("table");
   table.className = "calendar__table";
@@ -108,11 +102,24 @@ export function CalendarGrid(options: CalendarGridOptions = {}): CalendarGridIns
   element.id = "calendar";
   const getNow = options.getNow ?? nowMs;
   const onEventSelect = options.onEventSelect;
+  let focus = options.initialFocus ?? getNow();
+  let currentEvents: CalendarEvent[] = [];
+
+  const render = () => {
+    renderMonth(element, currentEvents, focus, onEventSelect);
+  };
 
   return {
     element,
     setEvents(events: CalendarEvent[]) {
-      renderMonth(element, events, getNow, onEventSelect);
+      currentEvents = events;
+      render();
+    },
+    setFocus(next: number | Date) {
+      const value = typeof next === "number" ? next : next.getTime();
+      if (!Number.isFinite(value)) return;
+      focus = value;
+      render();
     },
   };
 }
