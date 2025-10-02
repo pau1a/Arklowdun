@@ -2503,7 +2503,7 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle();
             let store_handle = crate::household_active::StoreHandle::tauri(
-                tauri_plugin_store::StoreBuilder::new(handle.clone(), "arklowdun.json").build()?,
+                tauri_plugin_store::StoreBuilder::new(&handle, "arklowdun.json").build()?,
             );
             if let Err(err) = crate::init_file_logging(handle.clone()) {
                 tracing::warn!(
