@@ -3518,6 +3518,28 @@ mark.search-hit {
   justify-self: start;
 }
 
+/* Responsive page title sizing: shrink at sidebar collapse and below */
+@media (max-width: 900px) {
+  .toolbar__page-title {
+    /* Smoothly scale between ~20px and ~28px down to 900px */
+    font-size: clamp(1.25rem, 1rem + 1.5vw, 1.75rem);
+  }
+}
+
+@media (max-width: 600px) {
+  .toolbar__page-title {
+    /* Scale further on small screens: ~16px–20px */
+    font-size: clamp(1rem, 0.85rem + 2vw, 1.25rem);
+  }
+}
+
+@media (max-width: 480px) {
+  .toolbar__page-title {
+    /* Keep readable on very small widths */
+    font-size: clamp(0.95rem, 0.8rem + 2vw, 1.125rem);
+  }
+}
+
 .traffic__btn {
   width: 12px;
   height: 12px;
