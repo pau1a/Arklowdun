@@ -123,7 +123,8 @@ export async function CalendarView(
   runViewCleanups(container);
 
   const preloadCategories = options.preloadCategories ?? ensureCategoriesLoaded;
-  await preloadCategories();
+  // Do not block initial render on category preload
+  void preloadCategories();
 
   const gridFactory = options.createCalendarGrid ?? CalendarGrid;
   const gridOptionOverrides: CalendarGridOptions = options.gridOptions ?? {};
@@ -607,7 +608,8 @@ export async function CalendarView(
     if (items.length) void notify(items);
     void loadDeadlineNotes("snapshot", currentWindow ?? calendarWindowAround(focusDate.getTime()));
   } else {
-    await loadEvents("initial");
+    // Load events asynchronously to avoid delaying initial render
+    void loadEvents("initial");
   }
 
   form.addEventListener("submit", async (e) => {

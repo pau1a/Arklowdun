@@ -39,7 +39,7 @@ function firstLine(text: string): string {
 
 function renderMonth(
   root: HTMLElement,
-  events: CalendarEvent[],
+  eventsByDay: Map<string, CalendarEvent[]>,
   deadlineNotes: CalendarDeadlineNote[],
   focusMs: number,
   noteLimit: number,
@@ -64,7 +64,7 @@ function renderMonth(
     else notesByDay.set(key, [entry]);
   });
 
-  const defaultZone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
+  // Events are already normalised into eventsByDay; no per-cell filtering here.
 
   const table = document.createElement("table");
   table.className = "calendar__table";
@@ -100,18 +100,8 @@ function renderMonth(
     }
     cell.appendChild(dateDiv);
 
-    const dayEvents = events.filter((event) => {
-      const fmt = new Intl.DateTimeFormat("en-CA", {
-        timeZone: event.tz || defaultZone,
-      });
-      const parts = fmt.format(new Date(event.start_at_utc));
-      const [y, m, d] = parts.split("-").map(Number);
-      return (
-        y === cellDate.getFullYear() &&
-        m - 1 === cellDate.getMonth() &&
-        d === cellDate.getDate()
-      );
-    });
+    const dayKey = noteDayKey(cellDate.getFullYear(), cellDate.getMonth(), cellDate.getDate());
+    const dayEvents = eventsByDay.get(dayKey) ?? [];
     dayEvents.forEach((ev) => {
       const div = document.createElement("div");
       div.className = "calendar__event";
@@ -194,7 +184,10 @@ export function CalendarGrid(options: CalendarGridOptions = {}): CalendarGridIns
   const onNoteSelect = options.onNoteSelect;
   const noteLimit = options.noteDisplayLimit ?? NOTE_DISPLAY_LIMIT;
   let focusMs = normalizeFocusDate(new Date(getNow())).getTime();
+  // Events are indexed by display day (year-month-day) to avoid O(days*events)
+  // filtering on every render. This dramatically improves month-change perf.
   let currentEvents: CalendarEvent[] = [];
+  let currentEventsByDay: Map<string, CalendarEvent[]> = new Map();
   let currentDeadlineNotes: CalendarDeadlineNote[] = [];
   let activePopover: PopoverHandle | null = null;
 
@@ -263,7 +256,7 @@ export function CalendarGrid(options: CalendarGridOptions = {}): CalendarGridIns
   const rerender = () => {
     renderMonth(
       element,
-      currentEvents,
+      currentEventsByDay,
       currentDeadlineNotes,
       focusMs,
       noteLimit,
@@ -274,10 +267,38 @@ export function CalendarGrid(options: CalendarGridOptions = {}): CalendarGridIns
     );
   };
 
+  function indexEventsByDay(events: CalendarEvent[]): Map<string, CalendarEvent[]> {
+    const byDay = new Map<string, CalendarEvent[]>();
+    const defaultZone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
+    // Cache formatters per timezone for efficiency
+    const formatterByTz = new Map<string, Intl.DateTimeFormat>();
+    const getFmt = (tz: string) => {
+      const k = tz || defaultZone;
+      let fmt = formatterByTz.get(k);
+      if (!fmt) {
+        fmt = new Intl.DateTimeFormat("en-CA", { timeZone: k });
+        formatterByTz.set(k, fmt);
+      }
+      return fmt;
+    };
+    for (const ev of events) {
+      const fmt = getFmt(ev.tz || defaultZone);
+      const parts = fmt.format(new Date(ev.start_at_utc));
+      const [y, m, d] = parts.split("-").map(Number);
+      if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) continue;
+      const key = noteDayKey(y, m - 1, d);
+      const bucket = byDay.get(key);
+      if (bucket) bucket.push(ev);
+      else byDay.set(key, [ev]);
+    }
+    return byDay;
+  }
+
   return {
     element,
     setEvents(events: CalendarEvent[]) {
       currentEvents = [...events];
+      currentEventsByDay = indexEventsByDay(currentEvents);
       rerender();
     },
     setDeadlineNotes(notes: CalendarDeadlineNote[]) {
