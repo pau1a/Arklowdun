@@ -107,19 +107,15 @@ pub async fn get_active_household_id(
     pool: &SqlitePool,
     store: &StoreHandle,
 ) -> anyhow::Result<String> {
-    let mut fallback_reason: Option<&'static str> = None;
-
-    if let Some(candidate) = store.read_active() {
-        match household::assert_household_active(pool, &candidate).await {
+    let reason = match store.read_active() {
+        Some(candidate) => match household::assert_household_active(pool, &candidate).await {
             Ok(()) => return Ok(candidate),
-            Err(HouseholdGuardError::Deleted) => fallback_reason = Some("deleted"),
-            Err(HouseholdGuardError::NotFound) => fallback_reason = Some("not_found"),
-        }
-    } else {
-        fallback_reason = Some("missing");
-    }
+            Err(HouseholdGuardError::Deleted) => "deleted",
+            Err(HouseholdGuardError::NotFound) => "not_found",
+        },
+        None => "missing",
+    };
 
-    let reason = fallback_reason.unwrap_or("missing");
     let fallback = household::default_household_id(pool).await?;
     store.write_active(&fallback);
     store

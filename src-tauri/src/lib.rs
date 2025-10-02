@@ -32,7 +32,7 @@ use crate::{
         health::{DbHealthReport, DbHealthStatus, STORAGE_SANITY_HEAL_NOTE},
         repair::{self, DbRepairEvent, DbRepairSummary},
     },
-    household_active::{self, ActiveSetError},
+    household_active::ActiveSetError,
     ipc::guard,
     state::AppState,
 };
@@ -154,7 +154,7 @@ use notes::{
     notes_restore, notes_update,
 };
 use security::{error_map::UiError, fs_policy, fs_policy::RootKey, hash_path};
-use util::{dispatch_app_result, dispatch_async_app_result};
+use util::dispatch_async_app_result;
 
 // Simple count-based rotating writer that rotates before writing
 // when the next write would exceed the size limit, ensuring whole-line writes
@@ -983,7 +983,7 @@ async fn bills_list_due_between(
 async fn household_get_active(state: tauri::State<'_, state::AppState>) -> Result<String, String> {
     let pool = state.pool_clone();
     let store = state.store.clone();
-    let id = household_active::get_active_household_id(&pool, &store)
+    let id = crate::household_active::get_active_household_id(&pool, &store)
         .await
         .map_err(|err| err.to_string())?;
     let mut guard = state
@@ -1002,7 +1002,7 @@ async fn household_set_active(
 ) -> Result<(), String> {
     let pool = state.pool_clone();
     let store = state.store.clone();
-    match household_active::set_active_household_id(&pool, &store, &id).await {
+    match crate::household_active::set_active_household_id(&pool, &store, &id).await {
         Ok(()) => {
             {
                 let mut guard = state
@@ -1012,7 +1012,7 @@ async fn household_set_active(
                 *guard = id.clone();
             }
             tracing::info!(target: "arklowdun", event = "household_set_active", id = %id);
-            if let Err(err) = app.emit_all("household:changed", json!({ "id": id.clone() })) {
+            if let Err(err) = app.emit("household:changed", json!({ "id": id.clone() })) {
                 tracing::warn!(
                     target = "arklowdun",
                     event = "household_event_emit_failed",
@@ -2502,8 +2502,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let handle = app.handle();
-            let store_handle = household_active::StoreHandle::tauri(
-                tauri_plugin_store::StoreBuilder::new(&handle, "arklowdun.json").build()?,
+            let store_handle = crate::household_active::StoreHandle::tauri(
+                tauri_plugin_store::StoreBuilder::new(handle.clone(), "arklowdun.json").build()?,
             );
             if let Err(err) = crate::init_file_logging(handle.clone()) {
                 tracing::warn!(
@@ -2534,7 +2534,7 @@ pub fn run() {
             // Avoid creating new rows when the database is unhealthy. This preserves
             // write-block semantics during startup and aligns with the IPC write guard.
             let active_id = if matches!(health_report.status, DbHealthStatus::Ok) {
-                tauri::async_runtime::block_on(household_active::get_active_household_id(
+                tauri::async_runtime::block_on(crate::household_active::get_active_household_id(
                     &pool,
                     &store_handle,
                 ))?
