@@ -2501,10 +2501,10 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let handle = app.handle();
             let store_handle = crate::household_active::StoreHandle::tauri(
-                tauri_plugin_store::StoreBuilder::new(&handle, "arklowdun.json").build()?,
+                tauri_plugin_store::StoreBuilder::new(app, "arklowdun.json").build()?,
             );
+            let handle = app.handle();
             if let Err(err) = crate::init_file_logging(handle.clone()) {
                 tracing::warn!(
                     target: "arklowdun",
