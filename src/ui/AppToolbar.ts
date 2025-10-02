@@ -23,7 +23,7 @@ export function mountMacToolbar(host: HTMLElement): void {
       <h2 id="toolbar-page-title" class="toolbar__page-title"></h2>
     </div>
     <div class="toolbar-brand" data-tauri-drag-region="false" aria-label="Application">
-      <span class="brand__title">Arklowdun</span>
+      <span class="brand__title hide-md">Arklowdun</span>
       <img class="brand__logo" alt="" src="${logoUrl}" />
     </div>
   `;
