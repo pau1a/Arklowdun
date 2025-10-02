@@ -6,7 +6,7 @@ import {
 } from "./notification";
 import type { Bill } from "./models";
 import { nowMs, toDate } from "./db/time";
-import { defaultHouseholdId } from "./db/household";
+import { getHouseholdIdForCalls } from "./db/household";
 import { billsRepo } from "./repos";
 import { STR } from "./ui/strings";
 import { openAttachment, revealAttachment, revealLabel } from "./ui/attachments";
@@ -117,7 +117,7 @@ export async function BillsView(container: HTMLElement) {
   const dueInput = section.querySelector<HTMLInputElement>("#bill-due");
   const docInput = section.querySelector<HTMLInputElement>("#bill-doc");
 
-  const hh = await defaultHouseholdId();
+  const hh = await getHouseholdIdForCalls();
   let bills: Bill[] = await billsRepo.list({ householdId: hh });
   if (listEl) await renderBills(listEl, bills);
   await scheduleBillReminders(bills);

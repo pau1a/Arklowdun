@@ -37,7 +37,7 @@ test.describe('Calendar contextual notes persistence', () => {
         const callModule = await import('/src/lib/ipc/call.ts');
         let persistCount = 0;
         callModule.call = async (command: string, payload: any) => {
-          if (command === 'get_default_household_id') {
+          if (command === 'household_get_active') {
             return 'hh-playwright';
           }
           if (command === 'event_create') {

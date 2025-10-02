@@ -6,7 +6,7 @@ import {
 } from "./notification";
 import type { Policy } from "./models";
 import { nowMs, toDate } from "./db/time";
-import { defaultHouseholdId } from "./db/household";
+import { getHouseholdIdForCalls } from "./db/household";
 import { policiesRepo } from "./repos";
 import { STR } from "./ui/strings";
 import { openAttachment, revealAttachment, revealLabel } from "./ui/attachments";
@@ -116,7 +116,7 @@ export async function InsuranceView(container: HTMLElement) {
   const dueInput = section.querySelector<HTMLInputElement>("#policy-due");
   const docInput = section.querySelector<HTMLInputElement>("#policy-doc");
 
-  const hh = await defaultHouseholdId();
+  const hh = await getHouseholdIdForCalls();
   let policies: Policy[] = await policiesRepo.list({ householdId: hh });
   if (listEl) await renderPolicies(listEl, policies);
   await schedulePolicyReminders(policies);

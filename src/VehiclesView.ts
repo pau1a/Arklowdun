@@ -1,12 +1,12 @@
 import { vehiclesRepo } from "./db/vehiclesRepo";
-import { defaultHouseholdId } from "./db/household";
+import { getHouseholdIdForCalls } from "./db/household";
 import { fmt } from "./ui/fmt";
 import { showError } from "./ui/errors";
 import { VehicleDetailView } from "./VehicleDetail";
 import { STR } from "./ui/strings";
 
 export async function VehiclesView(container: HTMLElement) {
-  const hh = await defaultHouseholdId();
+  const hh = await getHouseholdIdForCalls();
   const section = document.createElement("section");
   container.innerHTML = "";
   container.appendChild(section);

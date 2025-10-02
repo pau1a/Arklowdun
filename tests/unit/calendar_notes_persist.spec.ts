@@ -158,7 +158,7 @@ test("CalendarNotesPanel persists events before loading and quick capture using 
     switch (cmd) {
       case "event_create":
         return null;
-      case "get_default_household_id":
+      case "household_get_active":
         return "hh-test";
       case "note_links_list_by_entity":
         assert.equal(args.entityId, "evt-series");
@@ -259,7 +259,7 @@ test("CalendarNotesPanel renders linked notes for recurrence instances", async (
     switch (cmd) {
       case "event_create":
         return null;
-      case "get_default_household_id":
+      case "household_get_active":
         return "hh-test";
       case "note_links_list_by_entity":
         assert.equal(args.entityId, "evt-series");

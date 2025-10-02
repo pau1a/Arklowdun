@@ -78,7 +78,7 @@ if let Some(row) = repo::first_active(&pool, "bills", &household_id, None).await
 }
 ```
 
-To obtain a `householdId`, call the `get_default_household_id` command or
+To obtain a `householdId`, call the `household_get_active` command or
 surface a selection flow so the user can choose a household explicitly.
 
 ## Notes & Shopping Soft Delete

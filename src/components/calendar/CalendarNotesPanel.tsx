@@ -1,6 +1,6 @@
 import { call } from "@lib/ipc/call";
 import type { CalendarEvent } from "@features/calendar";
-import { defaultHouseholdId } from "@db/household";
+import { getHouseholdIdForCalls } from "@db/household";
 import type { Note } from "@bindings/Note";
 import { notesRepo, type NotesListByEntityItem } from "@repos/notesRepo";
 import {
@@ -65,7 +65,7 @@ export async function ensureEventPersisted(
 export async function resolveQuickCaptureCategory(): Promise<string | null> {
   let categories = getCategories();
   if (categories.length === 0) {
-    const householdId = await defaultHouseholdId();
+    const householdId = await getHouseholdIdForCalls();
     const fetched = await categoriesRepo.list({
       householdId,
       orderBy: "position, created_at, id",
@@ -81,7 +81,7 @@ export async function resolveQuickCaptureCategory(): Promise<string | null> {
 
   if (categories.length === 0) {
     try {
-      const householdId = await defaultHouseholdId();
+      const householdId = await getHouseholdIdForCalls();
       const created = await categoriesRepo.create(householdId, {
         name: "Primary",
         slug: "primary",
@@ -308,7 +308,7 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
       loadMoreButton.disabled = true;
     }
     try {
-      const householdId = currentHouseholdId ?? (await defaultHouseholdId());
+      const householdId = currentHouseholdId ?? (await getHouseholdIdForCalls());
       currentHouseholdId = householdId;
       const categories = getCategories();
       const categoriesLoaded = categories.length > 0;
@@ -389,7 +389,7 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
       }
       currentError = null;
       syncErrorState();
-      const householdId = currentHouseholdId ?? (await defaultHouseholdId());
+      const householdId = currentHouseholdId ?? (await getHouseholdIdForCalls());
       currentHouseholdId = householdId;
       try {
         await ensureEventPersisted(currentEvent, householdId);
@@ -496,7 +496,7 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
     const token = fetchToken;
     void (async () => {
       try {
-        const householdId = currentHouseholdId ?? (await defaultHouseholdId());
+        const householdId = currentHouseholdId ?? (await getHouseholdIdForCalls());
         currentHouseholdId = householdId;
         await ensureEventPersisted(event, householdId);
       } catch (error) {

@@ -1,7 +1,7 @@
 // src/FamilyView.ts
 import type { FamilyMember } from "./models";
 import { familyRepo } from "./repos";
-import { defaultHouseholdId } from "./db/household";
+import { getHouseholdIdForCalls } from "./db/household";
 import { nowMs, toDate } from "./db/time";
 
 function renderMembers(listEl: HTMLUListElement, members: FamilyMember[]) {
@@ -22,7 +22,7 @@ export async function FamilyView(container: HTMLElement) {
   container.innerHTML = "";
   container.appendChild(section);
 
-  const householdId = await defaultHouseholdId();
+  const householdId = await getHouseholdIdForCalls();
 
   async function load(): Promise<FamilyMember[]> {
     // Order: position then created_at so it’s stable

@@ -1,5 +1,5 @@
 import { call } from "@lib/ipc/call";
-import { defaultHouseholdId } from "../../../db/household";
+import { getHouseholdIdForCalls } from "../../../db/household";
 import type { EventsListRangeResponse } from "@bindings/EventsListRangeResponse";
 import type { Note } from "@bindings/Note";
 import { notesRepo } from "@repos/notesRepo";
@@ -45,7 +45,7 @@ export function defaultCalendarWindow(): CalendarWindowRange {
 export async function fetchCalendarEvents(
   windowRange: CalendarWindowRange = defaultCalendarWindow(),
 ): Promise<CalendarQuery> {
-  const householdId = await defaultHouseholdId();
+  const householdId = await getHouseholdIdForCalls();
   const { items, truncated, limit } = await call<EventsListRangeResponse>("events_list_range", {
     householdId,
     start: windowRange.start,
@@ -133,7 +133,7 @@ export async function fetchCalendarDeadlineNotes({
     return [];
   }
 
-  const householdId = await defaultHouseholdId();
+  const householdId = await getHouseholdIdForCalls();
   const collected: Note[] = [];
   let cursor: string | null | undefined;
 

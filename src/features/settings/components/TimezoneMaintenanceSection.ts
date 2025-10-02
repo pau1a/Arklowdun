@@ -1,4 +1,4 @@
-import { defaultHouseholdId } from "@db/household";
+import { getHouseholdIdForCalls } from "@db/household";
 import createButton from "@ui/Button";
 import {
   cancelBackfill,
@@ -378,7 +378,7 @@ export function createTimezoneMaintenanceSection(): TimezoneMaintenanceSection {
   });
 
   void (async () => {
-    householdId = await defaultHouseholdId();
+    householdId = await getHouseholdIdForCalls();
     await refreshStatus();
     unlisten = await listenBackfillEvents(handleEvent);
   })();

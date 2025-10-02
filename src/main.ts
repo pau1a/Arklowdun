@@ -21,7 +21,7 @@ import {
   getFooterRoutes,
   type RouteDefinition,
 } from "./routes";
-import { defaultHouseholdId } from "./db/household";
+import { getHouseholdIdForCalls } from "./db/household";
 import { log } from "./utils/logger";
 import { initCommandPalette } from "@ui/CommandPalette";
 import { initKeyboardMap } from "@ui/keys";
@@ -464,7 +464,7 @@ window.addEventListener("DOMContentLoaded", () => {
   ensureFavicon(appLogoUrl);
 
   log.debug("app booted");
-  defaultHouseholdId().catch((e) => console.error("DB init failed:", e));
+  getHouseholdIdForCalls().catch((e) => console.error("DB init failed:", e));
 
   const onHashChange = () => {
     void handleRouteChange();

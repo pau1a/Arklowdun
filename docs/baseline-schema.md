@@ -54,6 +54,15 @@ use deterministic values to keep fixture diffs stable.
   `clear_soft_deleted_default`), and CI runs `npm run smoke:household` to
   enforce the invariant on every build.
 
+## Active household selection
+
+- The backend persists a per-install "active" household id using the Tauri
+  store plugin. Startup validates the stored id and falls back to the default
+  household if it is missing, deleted, or invalid.
+- When a new active id is chosen the backend re-uses the same validation guard
+  (`assert_household_active`) and emits a `household:changed` event so the UI
+  can invalidate caches.
+
 ## Schema fingerprint
 
 Run the verification helper to refresh fingerprints after intentional schema

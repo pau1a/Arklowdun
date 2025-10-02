@@ -1,5 +1,5 @@
 import { call } from "@lib/ipc/call";
-import { defaultHouseholdId } from "../db/household";
+import { getHouseholdIdForCalls } from "../db/household";
 import { showError } from "./errors";
 import { presentFsError } from "@lib/ipc";
 import {
@@ -36,7 +36,7 @@ export function ImportModal(el: HTMLElement) {
   }
 
   async function start() {
-    const hh = await defaultHouseholdId();
+    const hh = await getHouseholdIdForCalls();
 
     const u1 = await listenImportStarted((event) => {
       const p = event.payload;

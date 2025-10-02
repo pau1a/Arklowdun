@@ -1,14 +1,17 @@
-import { call } from "@lib/ipc/call";
 import { log } from "../utils/logger";
-import { emit } from "../store/events";
+import { ensureActiveHousehold, forceSetActiveHousehold } from "../state/householdStore";
 
 export async function defaultHouseholdId(): Promise<string> {
   try {
-    return await call<string>("get_default_household_id");
+    return await ensureActiveHousehold();
   } catch (e) {
     log.warn("Household id lookup failed; using fallback", e);
     return "default";
   }
+}
+
+export async function getHouseholdIdForCalls(): Promise<string> {
+  return ensureActiveHousehold();
 }
 
 export function requireHousehold(householdId: string): string {
@@ -17,6 +20,8 @@ export function requireHousehold(householdId: string): string {
 }
 
 export async function setDefaultHouseholdId(id: string): Promise<void> {
-  await call("set_default_household_id", { id });
-  emit("household:changed", { householdId: id });
+  const result = await forceSetActiveHousehold(id);
+  if (!result.ok) {
+    throw new Error(result.code);
+  }
 }

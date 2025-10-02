@@ -4,13 +4,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::{
-    db::health::DbHealthReport, events_tz_backfill::BackfillCoordinator, AppError, AppResult,
+    db::health::DbHealthReport, events_tz_backfill::BackfillCoordinator,
+    household_active::StoreHandle, AppError, AppResult,
 };
 
 #[derive(Clone)]
 pub struct AppState {
     pub pool: Arc<RwLock<SqlitePool>>,
-    pub default_household_id: Arc<Mutex<String>>,
+    pub active_household_id: Arc<Mutex<String>>,
+    pub store: StoreHandle,
     pub backfill: Arc<Mutex<BackfillCoordinator>>,
     pub db_health: Arc<Mutex<DbHealthReport>>,
     pub db_path: Arc<PathBuf>,

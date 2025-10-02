@@ -17,6 +17,9 @@ See the [Arklowdun Master Plan](docs/master-plan.md) for the high-level strategi
 - This release adds explicit default-household invariants. The default
   household cannot be deleted; switching will be added via Settings in a
   subsequent PR.
+- The desktop app now persists an "active" household selection, validating it
+  against soft-deleted or missing rows and falling back to the default
+  household when necessary.
 
 ## Dev
 

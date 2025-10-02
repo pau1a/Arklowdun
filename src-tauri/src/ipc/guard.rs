@@ -104,6 +104,7 @@ mod tests {
     use super::*;
     use crate::db::health::DbHealthReport;
     use crate::events_tz_backfill::BackfillCoordinator;
+    use crate::household_active::StoreHandle;
     use sqlx::sqlite::SqlitePoolOptions;
     use std::{
         path::PathBuf,
@@ -118,7 +119,8 @@ mod tests {
             .expect("create sqlite pool");
         AppState {
             pool: Arc::new(RwLock::new(pool)),
-            default_household_id: Arc::new(Mutex::new(String::new())),
+            active_household_id: Arc::new(Mutex::new(String::new())),
+            store: StoreHandle::in_memory(),
             backfill: Arc::new(Mutex::new(BackfillCoordinator::new())),
             db_health: Arc::new(Mutex::new(report)),
             db_path: Arc::new(PathBuf::from("test.sqlite3")),

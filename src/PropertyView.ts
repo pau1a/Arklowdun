@@ -4,7 +4,7 @@ import { sanitizeRelativePath } from "./files/path";
 import { isPermissionGranted, requestPermission, sendNotification } from "./notification";
 import type { PropertyDocument } from "./models";
 import { propertyDocsRepo } from "./repos";
-import { defaultHouseholdId } from "./db/household";
+import { getHouseholdIdForCalls } from "./db/household";
 import { nowMs, toDate } from "./db/time";
 import { STR } from "./ui/strings";
 import { openAttachment, revealAttachment, revealLabel } from "./ui/attachments";
@@ -88,7 +88,7 @@ async function scheduleDocReminders(docs: PropertyDocument[]) {
 }
 
 export async function PropertyView(container: HTMLElement) {
-  const hh = await defaultHouseholdId();
+  const hh = await getHouseholdIdForCalls();
 
   const section = document.createElement("section");
   section.innerHTML = `

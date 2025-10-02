@@ -1,5 +1,5 @@
 import { call } from "@lib/ipc/call";
-import { defaultHouseholdId } from "../db/household";
+import { getHouseholdIdForCalls } from "../db/household";
 import { log } from "../utils/logger";
 
 let caps: {
@@ -12,7 +12,7 @@ let capsTs = 0;
 let capsLogged = false;
 
 async function probe(): Promise<void> {
-  const household_id = await defaultHouseholdId();
+  const household_id = await getHouseholdIdForCalls();
   const [files_index, vehicles_cols, pets_cols] = await Promise.all([
     call<boolean>("db_files_index_ready", { household_id }),
     call<boolean>("db_has_vehicle_columns"),

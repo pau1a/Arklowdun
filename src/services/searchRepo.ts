@@ -1,5 +1,5 @@
 import { call } from "@lib/ipc/call";
-import { defaultHouseholdId } from "../db/household";
+import { getHouseholdIdForCalls } from "../db/household";
 import type { SearchResult } from "../bindings/SearchResult";
 import { log } from "../utils/logger";
 import { getSafe } from "@utils/object";
@@ -42,7 +42,7 @@ export async function search(
   limit = 100,
   offset = 0,
 ): Promise<SearchResult[]> {
-  const householdId = await defaultHouseholdId();
+  const householdId = await getHouseholdIdForCalls();
   const key = stableKey({ v: CACHE_VERSION, q: query, offset, limit, householdId });
   const now = Date.now();
   const existing = cache.get(key);
