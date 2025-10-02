@@ -44,6 +44,7 @@ async fn main() -> Result<()> {
         .await?;
     run_integrity_checks(&pool).await?;
     audit_foreign_keys(&pool, args.strict_fk).await?;
+    ensure_household_triggers(&pool).await?;
 
     let db_schema = load_db_schema(&pool, args.strict, args.include_migrations).await?;
     if let Some(dump) = &args.dump {
@@ -133,6 +134,35 @@ async fn run_integrity_checks(pool: &SqlitePool) -> Result<()> {
         .await?;
     if integrity.to_lowercase() != "ok" {
         return Err(anyhow!("integrity_check failed: {integrity}"));
+    }
+    Ok(())
+}
+
+async fn ensure_household_triggers(pool: &SqlitePool) -> Result<()> {
+    let rows: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_households_%'",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let expected = [
+        "trg_households_one_default_on_update",
+        "trg_households_one_default_on_insert",
+        "trg_households_must_have_default_on_update",
+        "trg_households_forbid_delete_default",
+        "trg_households_forbid_soft_delete_default",
+    ];
+    let existing: HashSet<String> = rows.into_iter().collect();
+    let missing: Vec<&str> = expected
+        .iter()
+        .copied()
+        .filter(|name| !existing.contains(*name))
+        .collect();
+    if !missing.is_empty() {
+        return Err(anyhow!(
+            "missing household triggers: {}",
+            missing.join(", ")
+        ));
     }
     Ok(())
 }

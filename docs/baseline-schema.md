@@ -9,8 +9,10 @@ changes must be additive migrations that build on this baseline.
 
 The full schema lives in `schema.sql`. Key domain tables:
 
-- **household** — identity, timezone, and soft-delete columns. Every domain
-  table references `household(id)` with cascading foreign keys.
+- **household** — identity, timezone, default flag, and soft-delete columns.
+  Exactly one row must have `is_default = 1`; triggers prevent deleting or
+  soft-deleting the default household. Every domain table references
+  `household(id)` with cascading foreign keys.
 - **categories** — per-household catalogue with unique `(slug, position)` pairs,
   timestamp columns without sentinel defaults, and deterministic seed IDs using
   the `cat_<slug>` convention.
@@ -38,6 +40,20 @@ list, including the `notes_deadline_idx` helper for upcoming-note queries.
 All timestamp columns store **milliseconds since the Unix epoch**. Seed rows
 use deterministic values to keep fixture diffs stable.
 
+## Household invariants
+
+- `household.is_default` marks the sole default household. Migrations repair
+  legacy databases by selecting the earliest active household when none are
+  marked default and clearing duplicate defaults.
+- SQLite triggers enforce the invariant: marking one row as default clears all
+  others, unsetting the final default aborts, and deleting or soft-deleting the
+  default raises `default_household_undeletable`.
+- `ensure_household_invariants` runs at startup to repair pre-trigger
+  inconsistencies and clear soft-deleted defaults.
+- Repairs are logged at INFO (`promote_default`, `trim_defaults`,
+  `clear_soft_deleted_default`), and CI runs `npm run smoke:household` to
+  enforce the invariant on every build.
+
 ## Schema fingerprint
 
 Run the verification helper to refresh fingerprints after intentional schema
@@ -52,5 +68,5 @@ the mirrored `src-tauri/schema.sql`. Update the hash whenever the schema shape
 changes. The current canonical hash is:
 
 ```
-5782592e346bc92f518bc3e386bbc3199e4b46dd99f47425df5b1f5e93c6a3f3
+0f6a6099d80e00868664961524e10d399e6367b25fec131c935ec2e96a60ef4b
 ```

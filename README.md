@@ -12,6 +12,12 @@ See the [Arklowdun Master Plan](docs/master-plan.md) for the high-level strategi
 - Calendar: month/week/day views; reminders and recurring events; import/export `.ics`.
 - Extras: links between files and events; household members and roles; backups.
 
+## Release notes
+
+- This release adds explicit default-household invariants. The default
+  household cannot be deleted; switching will be added via Settings in a
+  subsequent PR.
+
 ## Dev
 
 - `npm run dev` — run Vite dev server (Tauri will attach).

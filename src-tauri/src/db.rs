@@ -342,9 +342,12 @@ pub async fn apply_migrations(pool: &SqlitePool) -> Result<()> {
         .await;
 
     match result {
-        Ok(res) => {
+        Ok(mut res) => {
             if let Err(ref e) = res {
                 log::error!("migrations failed: {e}");
+            } else if let Err(err) = crate::household::ensure_household_invariants(pool).await {
+                log::error!("household invariant repair failed: {err}");
+                res = Err(err);
             } else {
                 log::info!("migrations succeeded");
             }
