@@ -114,6 +114,11 @@ pub mod events_tz_backfill;
 pub mod exdate;
 pub mod export;
 mod household; // declare module; avoid `use` to prevent name collision
+pub use household::{
+    assert_household_active,
+    ensure_household_invariants,
+    HouseholdGuardError,
+};
 mod id;
 pub mod import;
 mod importer;

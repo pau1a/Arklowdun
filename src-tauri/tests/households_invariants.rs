@@ -1,6 +1,8 @@
 use anyhow::Result;
 use arklowdun_lib::{
-    household::{assert_household_active, ensure_household_invariants, HouseholdGuardError},
+    assert_household_active,
+    ensure_household_invariants,
+    HouseholdGuardError,
     migrate,
 };
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
