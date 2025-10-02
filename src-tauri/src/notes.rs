@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 
 use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine as _};
-use chrono::{DateTime, Datelike, Duration, LocalResult, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, Datelike, LocalResult, TimeZone, Utc};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -158,7 +158,7 @@ fn parse_timezone(value: Option<&str>) -> Option<Tz> {
 fn ms_to_utc_datetime(ms: i64) -> Option<DateTime<Utc>> {
     let secs = ms.div_euclid(1000);
     let nanos = (ms.rem_euclid(1000) * 1_000_000) as u32;
-    NaiveDateTime::from_timestamp_opt(secs, nanos).map(|naive| DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc))
+    DateTime::<Utc>::from_timestamp(secs, nanos)
 }
 
 fn day_start_utc(deadline_ms: i64, tz: Tz) -> Option<i64> {
