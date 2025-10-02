@@ -1,4 +1,4 @@
-import { defaultHouseholdId } from "@db/household";
+import { getHouseholdIdForCalls } from "@db/household";
 import type { ContextNotesPage } from "@bindings/ContextNotesPage";
 import type { NoteLinkEntityType } from "@bindings/NoteLinkEntityType";
 import { contextNotesRepo } from "@repos/contextNotesRepo";
@@ -22,7 +22,7 @@ export async function useContextNotes(
   options: UseContextNotesOptions,
 ): Promise<UseContextNotesResult> {
   try {
-    const householdId = options.householdId ?? (await defaultHouseholdId());
+    const householdId = options.householdId ?? (await getHouseholdIdForCalls());
     const entityType: NoteLinkEntityType = options.entityType ?? "event";
     const data = await contextNotesRepo.listForEntity({
       householdId,

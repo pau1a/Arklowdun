@@ -59,7 +59,7 @@ test.describe('Calendar contextual notes', () => {
         categoriesStore.__resetCategories();
 
         const householdModule = await import('/src/db/household.ts');
-        householdModule.defaultHouseholdId = async () => 'hh-playwright';
+        householdModule.getHouseholdIdForCalls = async () => 'hh-playwright';
 
         const notesRepoModule = await import('/src/repos/contextNotesRepo.ts');
         notesRepoModule.contextNotesRepo.listForEntity = async () => ({

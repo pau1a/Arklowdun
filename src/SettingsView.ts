@@ -17,7 +17,8 @@ import { STR } from "./ui/strings";
 import createButton from "@ui/Button";
 import { createAttributionSectionAsync } from "@features/settings/components/AttributionSection";
 import { createAmbientBackgroundSection } from "@features/settings/components/AmbientBackgroundSection";
-import { defaultHouseholdId } from "./db/household";
+import { createHouseholdSwitcherSection } from "@features/settings/components/HouseholdSwitcherSection";
+import { getHouseholdIdForCalls } from "./db/household";
 import { categoriesRepo } from "./repos";
 import {
   getCategories as getCategoryState,
@@ -48,6 +49,7 @@ export interface SettingsViewOptions {
     createHardRepairView?: typeof createHardRepairView;
     createAmbientBackgroundSection?: typeof createAmbientBackgroundSection;
     createAttributionSectionAsync?: typeof createAttributionSectionAsync;
+    createHouseholdSwitcherSection?: typeof createHouseholdSwitcherSection;
   };
   useSettingsHook?: typeof useSettings;
 }
@@ -75,6 +77,8 @@ export function SettingsView(
     components.createAmbientBackgroundSection ?? createAmbientBackgroundSection;
   const createAttribution =
     components.createAttributionSectionAsync ?? createAttributionSectionAsync;
+  const createHouseholdSwitcher =
+    components.createHouseholdSwitcherSection ?? createHouseholdSwitcherSection;
 
   const useSettingsFn = options.useSettingsHook ?? useSettings;
 
@@ -158,7 +162,7 @@ export function SettingsView(
       return () => {
         if (cached) return Promise.resolve(cached);
         if (!promise) {
-          promise = defaultHouseholdId().then((value) => {
+          promise = getHouseholdIdForCalls().then((value) => {
             cached = value;
             return value;
           });
@@ -286,6 +290,8 @@ export function SettingsView(
     return panel;
   };
 
+  const householdSwitcher = createHouseholdSwitcher();
+  registerViewCleanup(container, householdSwitcher.destroy);
   const timezoneMaintenance = createTimezoneSection();
   const backups = createBackup();
   const exportView = createExport();
@@ -393,6 +399,7 @@ export function SettingsView(
 
   section.append(
     backButton,
+    householdSwitcher.element,
     timezoneMaintenance.element,
     backups.element,
     exportView.element,

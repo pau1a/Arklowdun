@@ -1,6 +1,6 @@
 // src/DashboardView.ts
 import { nowMs, toDate } from "./db/time";
-import { defaultHouseholdId } from "./db/household";
+import { getHouseholdIdForCalls } from "./db/household";
 import { billsApi, policiesRepo, eventsApi } from "./repos";
 import { vehiclesRepo } from "./db/vehiclesRepo";
 import type { Event } from "./models";
@@ -45,7 +45,7 @@ export async function DashboardView(container: HTMLElement) {
   const listEl = section.querySelector<HTMLDivElement>("#dash-list");
   const items: { date: number; text: string }[] = [];
   const now = nowMs();
-  const hh = await defaultHouseholdId();
+  const hh = await getHouseholdIdForCalls();
 
   // Bills
   {

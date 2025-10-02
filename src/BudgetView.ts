@@ -1,6 +1,6 @@
 // src/BudgetView.ts
 import type { BudgetCategory, Expense } from "./models";
-import { defaultHouseholdId } from "./db/household";
+import { getHouseholdIdForCalls } from "./db/household";
 import { toDate, nowMs } from "./db/time";
 import { budgetCategoriesRepo, expensesRepo } from "./repos";
 import { showError } from "./ui/errors";
@@ -121,7 +121,7 @@ export async function BudgetView(container: HTMLElement) {
   container.innerHTML = "";
   container.appendChild(section);
 
-  const householdId = await defaultHouseholdId();
+  const householdId = await getHouseholdIdForCalls();
 
   const catForm = section.querySelector<HTMLFormElement>("#category-form")!;
   const catName = section.querySelector<HTMLInputElement>("#cat-name")!;

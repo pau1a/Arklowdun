@@ -1,5 +1,5 @@
 // src/ManageView.ts
-import { defaultHouseholdId } from "./db/household";
+import { getHouseholdIdForCalls } from "./db/household";
 import { categoriesRepo } from "./repos";
 import { showError } from "./ui/errors";
 import { toast } from "./ui/Toast";
@@ -214,7 +214,7 @@ export async function ManageView(
   });
 
   try {
-    const householdId = options.householdId ?? (await defaultHouseholdId());
+    const householdId = options.householdId ?? (await getHouseholdIdForCalls());
     const load = options.loadCategories ?? fetchCategories;
     const categories = await load(householdId);
     hasResolvedInitialLoad = true;

@@ -4,6 +4,7 @@ use once_cell::sync::OnceCell;
 use paste::paste;
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -31,6 +32,7 @@ use crate::{
         health::{DbHealthReport, DbHealthStatus, STORAGE_SANITY_HEAL_NOTE},
         repair::{self, DbRepairEvent, DbRepairSummary},
     },
+    household_active::ActiveSetError,
     ipc::guard,
     state::AppState,
 };
@@ -114,11 +116,8 @@ pub mod events_tz_backfill;
 pub mod exdate;
 pub mod export;
 mod household; // declare module; avoid `use` to prevent name collision
-pub use household::{
-    assert_household_active,
-    ensure_household_invariants,
-    HouseholdGuardError,
-};
+pub mod household_active;
+pub use household::{assert_household_active, ensure_household_invariants, HouseholdGuardError};
 mod id;
 pub mod import;
 mod importer;
@@ -148,15 +147,14 @@ use events_tz_backfill::{
 };
 use note_links::{
     note_links_create, note_links_delete, note_links_get_for_note, note_links_list_by_entity,
-    note_links_unlink_entity, notes_list_for_entity,
-    notes_quick_create_for_entity,
+    note_links_unlink_entity, notes_list_for_entity, notes_quick_create_for_entity,
 };
 use notes::{
     notes_create, notes_delete, notes_get, notes_list_by_deadline_range, notes_list_cursor,
     notes_restore, notes_update,
 };
 use security::{error_map::UiError, fs_policy, fs_policy::RootKey, hash_path};
-use util::{dispatch_app_result, dispatch_async_app_result};
+use util::dispatch_async_app_result;
 
 // Simple count-based rotating writer that rotates before writing
 // when the next write would exceed the size limit, ensuring whole-line writes
@@ -679,6 +677,17 @@ pub struct Vehicle {
     pub position: i64,
 }
 
+#[derive(Serialize, Deserialize, Clone, sqlx::FromRow)]
+pub struct HouseholdSummary {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub is_default: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tz: Option<String>,
+}
+
 // Typed list for Dashboard (rich fields)
 #[tauri::command]
 async fn vehicles_list(
@@ -971,35 +980,79 @@ async fn bills_list_due_between(
 }
 
 #[tauri::command]
-async fn get_default_household_id(state: tauri::State<'_, state::AppState>) -> AppResult<String> {
-    let state = state.clone();
-    dispatch_async_app_result(move || async move {
-        let guard = state.default_household_id.lock().map_err(|_| {
-            AppError::new(
-                "STATE/LOCK_POISONED",
-                "Failed to access default household id",
-            )
-        })?;
-        Ok(guard.clone())
-    })
-    .await
+async fn household_get_active(state: tauri::State<'_, state::AppState>) -> Result<String, String> {
+    let pool = state.pool_clone();
+    let store = state.store.clone();
+    let id = crate::household_active::get_active_household_id(&pool, &store)
+        .await
+        .map_err(|err| err.to_string())?;
+    let mut guard = state
+        .active_household_id
+        .lock()
+        .map_err(|_| "STATE_LOCK_POISONED".to_string())?;
+    *guard = id.clone();
+    Ok(id)
 }
 
 #[tauri::command]
-#[allow(clippy::result_large_err)]
-fn set_default_household_id(state: tauri::State<state::AppState>, id: String) -> AppResult<()> {
-    dispatch_app_result(move || {
-        let requested_id = id.clone();
-        let mut guard = state.default_household_id.lock().map_err(|_| {
-            AppError::new(
-                "STATE/LOCK_POISONED",
-                "Failed to update default household id",
+async fn household_set_active(
+    id: String,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, state::AppState>,
+) -> Result<(), String> {
+    let pool = state.pool_clone();
+    let store = state.store.clone();
+    match crate::household_active::set_active_household_id(&pool, &store, &id).await {
+        Ok(()) => {
+            {
+                let mut guard = state
+                    .active_household_id
+                    .lock()
+                    .map_err(|_| "STATE_LOCK_POISONED".to_string())?;
+                *guard = id.clone();
+            }
+            tracing::info!(target: "arklowdun", event = "household_set_active", id = %id);
+            if let Err(err) = app.emit("household:changed", json!({ "id": id.clone() })) {
+                tracing::warn!(
+                    target = "arklowdun",
+                    event = "household_event_emit_failed",
+                    error = %err
+                );
+            }
+            Ok(())
+        }
+        Err(ActiveSetError::NotFound) => Err("HOUSEHOLD_NOT_FOUND".into()),
+        Err(ActiveSetError::Deleted) => Err("HOUSEHOLD_DELETED".into()),
+    }
+}
+
+#[tauri::command]
+async fn household_list_all(state: State<'_, AppState>) -> AppResult<Vec<HouseholdSummary>> {
+    let pool = state.pool_clone();
+    dispatch_async_app_result(move || {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_as::<_, HouseholdSummary>(
+                r#"
+        SELECT id,
+               name,
+               CASE WHEN is_default = 1 THEN 1 ELSE 0 END AS is_default,
+               tz
+          FROM household
+         WHERE deleted_at IS NULL
+         ORDER BY is_default DESC, name COLLATE NOCASE, id
+        "#,
             )
-            .with_context("requested_id", requested_id)
-        })?;
-        *guard = id;
-        Ok(())
+            .fetch_all(&pool)
+            .await
+            .map_err(|err| {
+                AppError::from(err)
+                    .with_context("operation", "household_list_all")
+                    .with_context("table", "household")
+            })
+        }
     })
+    .await
 }
 
 #[derive(Deserialize)]
@@ -2315,7 +2368,8 @@ macro_rules! app_commands {
             event_update,
             event_delete,
             event_restore,
-            get_default_household_id,
+            household_get_active,
+            household_list_all,
             household_list,
             household_get,
             household_create,
@@ -2447,6 +2501,9 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            let store_handle = crate::household_active::StoreHandle::tauri(
+                tauri_plugin_store::StoreBuilder::new(app, "arklowdun.json").build()?,
+            );
             let handle = app.handle();
             if let Err(err) = crate::init_file_logging(handle.clone()) {
                 tracing::warn!(
@@ -2476,8 +2533,11 @@ pub fn run() {
             log_db_health(&health_report);
             // Avoid creating new rows when the database is unhealthy. This preserves
             // write-block semantics during startup and aligns with the IPC write guard.
-            let hh = if matches!(health_report.status, DbHealthStatus::Ok) {
-                tauri::async_runtime::block_on(crate::household::default_household_id(&pool))?
+            let active_id = if matches!(health_report.status, DbHealthStatus::Ok) {
+                tauri::async_runtime::block_on(crate::household_active::get_active_household_id(
+                    &pool,
+                    &store_handle,
+                ))?
             } else {
                 // Attempt to use the first existing household id (if any). If none
                 // exist, leave empty and let the UI handle the unhealthy state.
@@ -2495,7 +2555,8 @@ pub fn run() {
             let pool_handle = Arc::new(RwLock::new(pool.clone()));
             app.manage(crate::state::AppState {
                 pool: pool_handle,
-                default_household_id: Arc::new(Mutex::new(hh)),
+                active_household_id: Arc::new(Mutex::new(active_id.clone())),
+                store: store_handle.clone(),
                 backfill: Arc::new(Mutex::new(
                     crate::events_tz_backfill::BackfillCoordinator::new(),
                 )),
@@ -2509,8 +2570,8 @@ pub fn run() {
             search_entities,
             import_run_legacy,
             open_path,
-            get_default_household_id,
-            set_default_household_id,
+            household_get_active,
+            household_set_active,
             db_table_exists,
             db_has_files_index,
             db_files_index_ready,
@@ -2676,7 +2737,8 @@ mod db_health_command_tests {
 
         let app_state = crate::state::AppState {
             pool: Arc::new(RwLock::new(pool.clone())),
-            default_household_id: Arc::new(Mutex::new(String::from("test-household"))),
+            active_household_id: Arc::new(Mutex::new(String::from("test-household"))),
+            store: crate::household_active::StoreHandle::in_memory(),
             backfill: Arc::new(Mutex::new(
                 crate::events_tz_backfill::BackfillCoordinator::new(),
             )),
@@ -2794,7 +2856,8 @@ mod write_guard_tests {
 
         let app_state = crate::state::AppState {
             pool: Arc::new(RwLock::new(pool.clone())),
-            default_household_id: Arc::new(Mutex::new(String::from("test"))),
+            active_household_id: Arc::new(Mutex::new(String::from("test"))),
+            store: crate::household_active::StoreHandle::in_memory(),
             backfill: Arc::new(Mutex::new(
                 crate::events_tz_backfill::BackfillCoordinator::new(),
             )),

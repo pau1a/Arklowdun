@@ -1,5 +1,5 @@
 // src/ShoppingListView.ts
-import { defaultHouseholdId } from "./db/household";
+import { getHouseholdIdForCalls } from "./db/household";
 import { shoppingRepo } from "./repos";
 import type { ShoppingItem } from "./models";
 import { showError } from "./ui/errors";
@@ -21,7 +21,7 @@ export async function ShoppingListView(container: HTMLElement) {
   const input = section.querySelector<HTMLInputElement>("#item-input")!;
   const listEl = section.querySelector<HTMLUListElement>("#items")!;
 
-  const hh = await defaultHouseholdId();
+  const hh = await getHouseholdIdForCalls();
   let items: ShoppingItem[] = await shoppingRepo.list({
     householdId: hh,
     orderBy: "position, created_at, id",

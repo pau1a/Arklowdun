@@ -2,7 +2,7 @@
 import { sanitizeRelativePath } from "./files/path";
 import type { Pet, PetMedicalRecord } from "./models";
 import { petMedicalRepo, petsRepo } from "./repos";
-import { defaultHouseholdId } from "./db/household";
+import { getHouseholdIdForCalls } from "./db/household";
 import { showError } from "./ui/errors";
 import { openAttachment, revealAttachment, revealLabel } from "./ui/attachments";
 
@@ -12,7 +12,7 @@ export async function PetDetailView(
   onChange: () => Promise<void> | void,
   onBack: () => void
 ) {
-  const hh = await defaultHouseholdId();
+  const hh = await getHouseholdIdForCalls();
 
   async function loadMedical(): Promise<PetMedicalRecord[]> {
     // List all medical records for this pet, newest first

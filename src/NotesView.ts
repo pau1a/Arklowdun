@@ -1,5 +1,5 @@
 // src/NotesView.ts
-import { defaultHouseholdId } from "./db/household";
+import { getHouseholdIdForCalls } from "./db/household";
 import { showError } from "./ui/errors";
 import { NotesList, useNotes, type Note } from "@features/notes";
 import {
@@ -263,7 +263,7 @@ export async function NotesView(
 
   let householdId =
     options.householdId ??
-    (await defaultHouseholdId().catch(() => "default"));
+    (await getHouseholdIdForCalls().catch(() => "default"));
   let activeCategoryIds = getActiveCategoryIds();
   let lastCategorySignature = activeCategoryIds.join("|");
   let categoriesLoaded = getCategories().length > 0;

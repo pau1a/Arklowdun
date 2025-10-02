@@ -2,7 +2,7 @@
 import { sanitizeRelativePath } from "./files/path";
 import { isPermissionGranted, requestPermission, sendNotification } from "./notification";
 import type { InventoryItem } from "./models";
-import { defaultHouseholdId } from "./db/household";
+import { getHouseholdIdForCalls } from "./db/household";
 import { nowMs, toDate } from "./db/time";
 import { inventoryRepo } from "./repos";
 import { STR } from "./ui/strings";
@@ -115,7 +115,7 @@ export async function InventoryView(container: HTMLElement) {
   const warrantyInput = section.querySelector<HTMLInputElement>("#inv-warranty")!;
   const docInput = section.querySelector<HTMLInputElement>("#inv-doc")!;
 
-  const hh = await defaultHouseholdId();
+  const hh = await getHouseholdIdForCalls();
   let items: InventoryItem[] = await inventoryRepo.list({ householdId: hh });
   await renderInventory(listEl, items);
   await scheduleInventoryReminders(items);

@@ -1,4 +1,4 @@
-import { defaultHouseholdId } from "../../../db/household";
+import { getHouseholdIdForCalls } from "../../../db/household";
 import { notesRepo } from "@repos/notesRepo";
 import type { NotesPage } from "@bindings/NotesPage";
 
@@ -13,7 +13,7 @@ export interface FetchNotesOptions {
 export async function fetchNotes(
   options: FetchNotesOptions = {},
 ): Promise<NotesPage> {
-  const householdId = options.householdId ?? (await defaultHouseholdId());
+  const householdId = options.householdId ?? (await getHouseholdIdForCalls());
   const result = await notesRepo.listCursor({
     householdId,
     includeDeleted: options.includeDeleted,

@@ -5,7 +5,7 @@ import {
   sendNotification,
 } from "./notification";
 import { nowMs } from "./db/time";
-import { defaultHouseholdId } from "./db/household";
+import { getHouseholdIdForCalls } from "./db/household";
 import { categoriesRepo } from "./repos";
 import {
   CalendarGrid,
@@ -67,7 +67,7 @@ async function saveEvent(
     "id" | "created_at" | "updated_at" | "household_id" | "deleted_at"
   >,
 ): Promise<CalendarEvent> {
-  const hh = await defaultHouseholdId();
+  const hh = await getHouseholdIdForCalls();
   const safeEvent = { ...event } as Record<string, unknown>;
   delete safeEvent.end_at_utc;
   return await call<CalendarEvent>("event_create", {
@@ -104,7 +104,7 @@ async function scheduleNotificationsInternal(events: CalendarEvent[]) {
 async function ensureCategoriesLoaded(): Promise<void> {
   if (getCategories().length > 0) return;
   try {
-    const householdId = await defaultHouseholdId();
+    const householdId = await getHouseholdIdForCalls();
     const categories = await categoriesRepo.list({
       householdId,
       orderBy: "position, created_at, id",
@@ -371,7 +371,7 @@ export async function CalendarView(
   };
 
   const loadDeadlineNotes = async (
-    source: string,
+    _source: string,
     rangeOverride?: CalendarWindowRange,
   ): Promise<void> => {
     const windowRange = rangeOverride ?? currentWindow ?? calendarWindowAround(focusDate.getTime());

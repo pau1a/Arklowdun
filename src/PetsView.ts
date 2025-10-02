@@ -2,7 +2,7 @@ import { isPermissionGranted, requestPermission, sendNotification } from "./noti
 import type { Pet } from "./models";
 import { PetDetailView } from "./PetDetailView";
 import { nowMs } from "./db/time";
-import { defaultHouseholdId } from "./db/household";
+import { getHouseholdIdForCalls } from "./db/household";
 import { petsRepo } from "./repos";
 
 const MAX_TIMEOUT = 2_147_483_647; // ~24.8 days
@@ -56,7 +56,7 @@ export async function PetsView(container: HTMLElement) {
   container.innerHTML = "";
   container.appendChild(section);
 
-  const hh = await defaultHouseholdId();
+  const hh = await getHouseholdIdForCalls();
 
   async function loadPets(): Promise<Pet[]> {
     // Ordered to match other views (position, created_at, id)
