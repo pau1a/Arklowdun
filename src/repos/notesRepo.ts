@@ -6,6 +6,7 @@ import type {
   NoteLinkListItem,
 } from "@bindings/NoteLinkList";
 import type { NotesPage } from "@bindings/NotesPage";
+import type { NotesDeadlineRangePage } from "@bindings/NotesDeadlineRangePage";
 
 export interface NotesListCursorOptions {
   householdId: string;
@@ -44,6 +45,21 @@ export interface NotesListByEntityOptions {
 
 export type NotesListByEntityItem = NoteLinkListItem;
 export type NotesListByEntityResult = NoteLinkList;
+
+export interface NotesListByDeadlineRangeOptions {
+  householdId: string;
+  startUtc: number;
+  endUtc: number;
+  categoryIds?: string[];
+  cursor?: string | null;
+  limit?: number;
+  viewerTz: string;
+}
+
+export interface NotesListByDeadlineRangeResult {
+  items: Note[];
+  cursor: string | null;
+}
 
 export interface NotesLinkInput {
   householdId: string;
@@ -134,6 +150,29 @@ export const notesRepo = {
       payload.category_ids = options.categoryIds;
     }
     return call<NotesListByEntityResult>("note_links_list_by_entity", payload);
+  },
+
+  async listByDeadlineRange(
+    options: NotesListByDeadlineRangeOptions,
+  ): Promise<NotesListByDeadlineRangeResult> {
+    const payload: Record<string, unknown> = {
+      householdId: options.householdId,
+      household_id: options.householdId,
+      startUtc: options.startUtc,
+      start_utc: options.startUtc,
+      endUtc: options.endUtc,
+      end_utc: options.endUtc,
+      viewerTz: options.viewerTz,
+      viewer_tz: options.viewerTz,
+    };
+    if (options.categoryIds) {
+      payload.categoryIds = options.categoryIds;
+      payload.category_ids = options.categoryIds;
+    }
+    if (options.cursor) payload.cursor = options.cursor;
+    if (options.limit !== undefined) payload.limit = options.limit;
+    const page = await call<NotesDeadlineRangePage>("notes_list_by_deadline_range", payload);
+    return { items: page.items ?? [], cursor: page.cursor ?? null };
   },
 
   async link(options: NotesLinkInput): Promise<NoteLink> {

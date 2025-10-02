@@ -273,7 +273,7 @@ CREATE INDEX inventory_items_household_updated_idx ON inventory_items(household_
 CREATE UNIQUE INDEX notes_household_position_idx ON notes(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX notes_scope_idx ON notes(household_id, deleted_at, position);
 CREATE INDEX notes_scope_z_idx ON notes(household_id, deleted_at, z, position);
-CREATE INDEX notes_deadline_idx ON notes(household_id, deadline) WHERE deadline IS NOT NULL AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS notes_deadline_idx ON notes(household_id, deadline);
 CREATE INDEX notes_household_category_idx
   ON notes(household_id, category_id) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX pet_medical_household_file_idx ON pet_medical(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;

@@ -1,8 +1,8 @@
 use arklowdun_lib::{
     migrate,
     note_links::{
-        create_link, get_link_for_note, list_notes_for_entity, quick_create_note_for_entity,
-        NoteLinkEntityType,
+        create_link, get_link_for_note, list_notes_for_entity, list_notes_for_entity_page,
+        quick_create_note_for_entity, NoteLinkEntityType,
     },
 };
 use sqlx::SqlitePool;
@@ -65,11 +65,22 @@ async fn insert_event(
     timestamp: i64,
 ) -> String {
     let id = Uuid::now_v7().to_string();
+    insert_event_with_id(pool, household_id, &id, title, timestamp).await;
+    id
+}
+
+async fn insert_event_with_id(
+    pool: &SqlitePool,
+    household_id: &str,
+    id: &str,
+    title: &str,
+    timestamp: i64,
+) {
     sqlx::query(
         "INSERT INTO events (id, title, reminder, household_id, created_at, updated_at, deleted_at, tz, start_at_utc)
          VALUES (?1, ?2, NULL, ?3, ?4, ?4, NULL, 'UTC', ?5)",
     )
-    .bind(&id)
+    .bind(id)
     .bind(title)
     .bind(household_id)
     .bind(timestamp)
@@ -77,7 +88,6 @@ async fn insert_event(
     .execute(pool)
     .await
     .expect("insert event");
-    id
 }
 
 async fn insert_file(
@@ -106,6 +116,80 @@ async fn insert_file(
     .await
     .expect("insert file");
     file_id
+}
+
+#[tokio::test]
+async fn note_links_accepts_instance_id_and_resolves_series() {
+    let pool = setup_pool().await;
+    insert_household(&pool, "default").await;
+
+    let series_id = "ev-series";
+    insert_event_with_id(&pool, "default", series_id, "Recurring", 1).await;
+    let note_id = insert_note(&pool, "default", "cat_primary", 0, 1, "Series note").await;
+
+    create_link(
+        &pool,
+        "default",
+        &note_id,
+        NoteLinkEntityType::Event,
+        series_id,
+        None,
+    )
+    .await
+    .expect("link series note");
+
+    let instance_id = format!("{series_id}::1696118400000");
+    let page = list_notes_for_entity_page(
+        &pool,
+        "default",
+        NoteLinkEntityType::Event,
+        &instance_id,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("list notes for recurring instance");
+
+    assert_eq!(page.items.len(), 1, "series note should be returned");
+    let item = &page.items[0];
+    assert_eq!(item.note.id, note_id);
+    assert_eq!(item.link.entity_id, series_id);
+}
+
+#[tokio::test]
+async fn note_links_cross_household_rejected_on_list() {
+    let pool = setup_pool().await;
+    insert_household(&pool, "default").await;
+    insert_household(&pool, "other").await;
+
+    let series_id = "ev-series";
+    insert_event_with_id(&pool, "default", series_id, "Recurring", 1).await;
+
+    let err = list_notes_for_entity_page(
+        &pool,
+        "other",
+        NoteLinkEntityType::Event,
+        series_id,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect_err("cross-household list should fail");
+
+    assert_eq!(err.code(), "NOTE_LINK/CROSS_HOUSEHOLD");
+}
+
+#[test]
+fn note_links_sql_does_not_touch_series_parent_id() {
+    let source = include_str!("../src/note_links.rs");
+    assert!(
+        !source.contains("series_parent_id"),
+        "note_links.rs should not reference events.series_parent_id"
+    );
 }
 
 #[tokio::test]
