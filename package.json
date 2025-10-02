@@ -52,6 +52,7 @@
     "check:sqlx-macros": "bash scripts/guards/no-sqlx-macros.sh",
     "check-all": "npm run check:plugin-fs && npm run check:sqlx-macros",
     "smoke:security": "bash scripts/security-smoke.sh",
+    "smoke:household": "bash scripts/ci/household-default-smoke.sh",
     "smoke:security:win": "powershell -ExecutionPolicy Bypass -File ./scripts/security-smoke.ps1",
     "check:migrations": "bash scripts/check_migrations.sh",
     "migrate:new": "bash scripts/new_migration.sh",

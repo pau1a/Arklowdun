@@ -34,7 +34,10 @@ if [ ! -e "$1" ]; then
   echo "no migrations found; nothing to test"
   exit 0
 fi
-MIG_FILES=$(printf '%s\n' "$@" | grep -E '/[0-9]+_.*\.sql$' | sort -u)
+MIG_FILES=$(printf '%s\n' "$@" \
+  | grep -E '/[0-9]+_.*\.sql$' \
+  | grep -v '\.down\.sql$' \
+  | sort -u)
 UP_COUNT=$(printf '%s\n' "$MIG_FILES" | sed '/^$/d' | wc -l | tr -d ' ')
 
 export LC_ALL=C

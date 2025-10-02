@@ -211,6 +211,29 @@ jobs:
           set -euxo pipefail
           cargo run --locked --bin time -- backfill-bench --rows 1000 --chunk-size 500 --progress-interval 0
 
+  gate_schema_household:
+    name: gate/schema-household
+    runs-on: ubuntu-latest
+    needs: [lint, unit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            sqlite3
+      - run: npm ci
+      - name: Migration idempotency check
+        run: npm run migrations:idempotency
+      - name: Household default smoke
+        run: npm run smoke:household
+      - name: Verify schema
+        run: npm run schema:ci
+
   gate_drop_legacy_evidence:
     name: gate/drop-legacy-evidence
     runs-on: ubuntu-latest
