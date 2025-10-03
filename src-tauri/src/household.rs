@@ -251,7 +251,7 @@ struct CascadePhase {
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
-struct CascadeCheckpoint {
+pub struct CascadeCheckpoint {
     pub household_id: String,
     pub phase_index: i64,
     pub deleted_count: i64,
@@ -642,7 +642,7 @@ pub async fn delete_household(
     pool: &SqlitePool,
     id: &str,
     active_id: Option<&str>,
-    mut options: CascadeDeleteOptions,
+    options: CascadeDeleteOptions,
 ) -> Result<DeleteOutcome, HouseholdCrudError> {
     ensure_cascade_tables(pool).await?;
 
