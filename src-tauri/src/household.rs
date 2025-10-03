@@ -223,7 +223,7 @@ pub struct CascadeProgress {
 
 pub type CascadeProgressObserver = Arc<dyn Fn(CascadeProgress) + Send + Sync + 'static>;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CascadeDeleteOptions {
     pub chunk_size: NonZeroU32,
     pub progress: Option<CascadeProgressObserver>,
@@ -252,13 +252,13 @@ struct CascadePhase {
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct CascadeCheckpoint {
-    household_id: String,
-    phase_index: i64,
-    deleted_count: i64,
-    total: i64,
-    phase: String,
-    updated_at: i64,
-    vacuum_pending: i64,
+    pub household_id: String,
+    pub phase_index: i64,
+    pub deleted_count: i64,
+    pub total: i64,
+    pub phase: String,
+    pub updated_at: i64,
+    pub vacuum_pending: i64,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -439,7 +439,7 @@ async fn load_checkpoint(
 }
 
 async fn save_checkpoint<'e, E>(
-    executor: &mut E,
+    executor: E,
     checkpoint: &CascadeCheckpoint,
 ) -> Result<(), HouseholdCrudError>
 where
@@ -700,7 +700,7 @@ pub async fn delete_household(
             .begin()
             .await
             .map_err(|err| HouseholdCrudError::Unexpected(err.into()))?;
-        save_checkpoint(&mut tx, checkpoint.as_ref().unwrap()).await?;
+        save_checkpoint(&mut *tx, checkpoint.as_ref().unwrap()).await?;
         tx.commit()
             .await
             .map_err(|err| HouseholdCrudError::Unexpected(err.into()))?;
@@ -744,7 +744,7 @@ pub async fn delete_household(
                 .begin()
                 .await
                 .map_err(|err| HouseholdCrudError::Unexpected(err.into()))?;
-            save_checkpoint(&mut tx, &checkpoint).await?;
+            save_checkpoint(&mut *tx, &checkpoint).await?;
             tx.commit()
                 .await
                 .map_err(|err| HouseholdCrudError::Unexpected(err.into()))?;
@@ -767,7 +767,7 @@ pub async fn delete_household(
             let affected = sqlx::query(&sql)
                 .bind(id)
                 .bind(chunk_size)
-                .execute(&mut tx)
+                .execute(&mut *tx)
                 .await
                 .map_err(|err| HouseholdCrudError::Unexpected(err.into()))?;
             let rows = affected.rows_affected() as i64;
@@ -778,7 +778,7 @@ pub async fn delete_household(
                 total_deleted = checkpoint.deleted_count.max(0) as u64;
             }
             checkpoint.updated_at = now;
-            save_checkpoint(&mut tx, &checkpoint).await?;
+            save_checkpoint(&mut *tx, &checkpoint).await?;
             tx.commit()
                 .await
                 .map_err(|err| HouseholdCrudError::Unexpected(err.into()))?;
@@ -814,7 +814,7 @@ pub async fn delete_household(
             .begin()
             .await
             .map_err(|err| HouseholdCrudError::Unexpected(err.into()))?;
-        save_checkpoint(&mut tx, &checkpoint).await?;
+        save_checkpoint(&mut *tx, &checkpoint).await?;
         tx.commit()
             .await
             .map_err(|err| HouseholdCrudError::Unexpected(err.into()))?;
@@ -826,7 +826,7 @@ pub async fn delete_household(
             .begin()
             .await
             .map_err(|err| HouseholdCrudError::Unexpected(err.into()))?;
-        save_checkpoint(&mut tx, &checkpoint).await?;
+        save_checkpoint(&mut *tx, &checkpoint).await?;
         tx.commit()
             .await
             .map_err(|err| HouseholdCrudError::Unexpected(err.into()))?;
@@ -862,7 +862,7 @@ pub async fn delete_household(
             .begin()
             .await
             .map_err(|err| HouseholdCrudError::Unexpected(err.into()))?;
-        save_checkpoint(&mut tx, &checkpoint).await?;
+        save_checkpoint(&mut *tx, &checkpoint).await?;
         tx.commit()
             .await
             .map_err(|err| HouseholdCrudError::Unexpected(err.into()))?;
@@ -899,7 +899,7 @@ pub async fn delete_household(
         .map_err(|err| HouseholdCrudError::Unexpected(err.into()))?;
     let affected = sqlx::query("DELETE FROM household WHERE id = ?1")
         .bind(id)
-        .execute(&mut tx)
+        .execute(&mut *tx)
         .await
         .map_err(|err| HouseholdCrudError::Unexpected(err.into()))?;
     let rows = affected.rows_affected() as i64;
@@ -908,7 +908,7 @@ pub async fn delete_household(
         total_deleted = checkpoint.deleted_count.max(0) as u64;
     }
     checkpoint.updated_at = now_ms();
-    save_checkpoint(&mut tx, &checkpoint).await?;
+    save_checkpoint(&mut *tx, &checkpoint).await?;
     tx.commit()
         .await
         .map_err(|err| HouseholdCrudError::Unexpected(err.into()))?;
