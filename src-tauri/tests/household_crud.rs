@@ -1,7 +1,7 @@
 use anyhow::Result;
 use arklowdun_lib::{
     create_household, default_household_id, delete_household, get_household,
-    household_active::{self, StoreHandle},
+    household_active::{self, ActiveSetError, StoreHandle},
     list_households, migrate, restore_household, update_household, HouseholdCrudError,
     HouseholdUpdateInput,
 };
@@ -68,6 +68,27 @@ async fn restore_soft_deleted_household() -> Result<()> {
 }
 
 #[tokio::test]
+async fn restore_allows_reactivation() -> Result<()> {
+    let pool = memory_pool().await?;
+    let store = StoreHandle::in_memory();
+    let created = create_household(&pool, "Reactivating", None).await?;
+    household_active::set_active_household_id(&pool, &store, &created.id).await?;
+
+    delete_household(&pool, &created.id, Some(&created.id)).await?;
+
+    let err = household_active::set_active_household_id(&pool, &store, &created.id)
+        .await
+        .expect_err("deleted household should not be reactivated");
+    assert!(matches!(err, ActiveSetError::Deleted));
+
+    let restored = restore_household(&pool, &created.id).await?;
+    assert!(restored.deleted_at.is_none());
+    household_active::set_active_household_id(&pool, &store, &restored.id).await?;
+    assert_eq!(store.snapshot().as_deref(), Some(restored.id.as_str()));
+    Ok(())
+}
+
+#[tokio::test]
 async fn update_rejected_when_deleted() -> Result<()> {
     let pool = memory_pool().await?;
     let created = create_household(&pool, "Target", None).await?;
@@ -84,6 +105,25 @@ async fn update_rejected_when_deleted() -> Result<()> {
     .await
     .expect_err("updates on deleted households should fail");
     assert!(matches!(err, HouseholdCrudError::Deleted));
+    Ok(())
+}
+
+#[tokio::test]
+async fn double_delete_and_restore_idempotent() -> Result<()> {
+    let pool = memory_pool().await?;
+    let created = create_household(&pool, "Archive", None).await?;
+
+    delete_household(&pool, &created.id, None).await?;
+    let second = delete_household(&pool, &created.id, None)
+        .await
+        .expect_err("second delete should fail");
+    assert!(matches!(second, HouseholdCrudError::Deleted));
+
+    let restored = restore_household(&pool, &created.id).await?;
+    assert!(restored.deleted_at.is_none());
+
+    let repeated = restore_household(&pool, &created.id).await?;
+    assert!(repeated.deleted_at.is_none());
     Ok(())
 }
 

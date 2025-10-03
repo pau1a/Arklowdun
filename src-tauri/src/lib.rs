@@ -1026,7 +1026,7 @@ fn map_household_crud_error(err: crate::household::HouseholdCrudError) -> AppErr
     match err {
         crate::household::HouseholdCrudError::DefaultUndeletable => AppError::new(
             "DEFAULT_UNDELETABLE",
-            "Default household cannot be deleted.",
+            "The default household cannot be deleted.",
         ),
         crate::household::HouseholdCrudError::NotFound => {
             AppError::new("HOUSEHOLD_NOT_FOUND", "Household not found.")
@@ -1117,7 +1117,7 @@ async fn household_create(
     let pool = state.pool_clone();
     let name = args.name;
     let color = args.color;
-    dispatch_async_app_result(move || {
+    let result = dispatch_async_app_result(move || {
         let pool = pool.clone();
         async move {
             crate::household::create_household(&pool, &name, color.as_deref())
@@ -1125,7 +1125,17 @@ async fn household_create(
                 .map_err(map_household_crud_error)
         }
     })
-    .await
+    .await?;
+
+    tracing::info!(
+        target: "arklowdun",
+        event = "household_create",
+        id = %result.id,
+        name = %result.name,
+        color = result.color.as_deref().unwrap_or("")
+    );
+
+    Ok(result)
 }
 
 #[tauri::command]
@@ -1138,7 +1148,7 @@ async fn household_update(
     let id = args.id;
     let name = args.name;
     let color = args.color;
-    dispatch_async_app_result(move || {
+    let result = dispatch_async_app_result(move || {
         let pool = pool.clone();
         async move {
             crate::household::update_household(
@@ -1153,7 +1163,17 @@ async fn household_update(
             .map_err(map_household_crud_error)
         }
     })
-    .await
+    .await?;
+
+    tracing::info!(
+        target: "arklowdun",
+        event = "household_update",
+        id = %result.id,
+        name = %result.name,
+        color = result.color.as_deref().unwrap_or("")
+    );
+
+    Ok(result)
 }
 
 #[tauri::command]
@@ -1165,9 +1185,24 @@ async fn household_delete(
     let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool_clone();
     let active = snapshot_active_id(&state);
-    let outcome = crate::household::delete_household(&pool, &id, active.as_deref())
-        .await
-        .map_err(map_household_crud_error)?;
+    let outcome = match crate::household::delete_household(&pool, &id, active.as_deref()).await {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            let reason = match &err {
+                crate::household::HouseholdCrudError::DefaultUndeletable => "default",
+                crate::household::HouseholdCrudError::NotFound => "not_found",
+                crate::household::HouseholdCrudError::Deleted => "already_deleted",
+                crate::household::HouseholdCrudError::Unexpected(_) => "unexpected",
+            };
+            tracing::warn!(
+                target: "arklowdun",
+                event = "household_delete_failed",
+                id = %id,
+                reason
+            );
+            return Err(map_household_crud_error(err));
+        }
+    };
 
     if let Some(ref fallback) = outcome.fallback_id {
         match crate::household_active::set_active_household_id(&pool, &state.store, fallback).await
@@ -1200,6 +1235,18 @@ async fn household_delete(
         }
     }
 
+    if let Ok(Some(record)) = crate::household::get_household(&pool, &id).await {
+        tracing::info!(
+            target: "arklowdun",
+            event = "household_delete",
+            id = %record.id,
+            name = %record.name,
+            color = record.color.as_deref().unwrap_or(""),
+            was_active = outcome.was_active,
+            fallback_id = outcome.fallback_id.as_deref()
+        );
+    }
+
     Ok(HouseholdDeleteResponse {
         fallback_id: outcome.fallback_id,
     })
@@ -1212,7 +1259,7 @@ async fn household_restore(
 ) -> AppResult<crate::household::HouseholdRecord> {
     let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool_clone();
-    dispatch_async_app_result(move || {
+    let record = dispatch_async_app_result(move || {
         let pool = pool.clone();
         let id = id.clone();
         async move {
@@ -1221,7 +1268,17 @@ async fn household_restore(
                 .map_err(map_household_crud_error)
         }
     })
-    .await
+    .await?;
+
+    tracing::info!(
+        target: "arklowdun",
+        event = "household_restore",
+        id = %record.id,
+        name = %record.name,
+        color = record.color.as_deref().unwrap_or("")
+    );
+
+    Ok(record)
 }
 
 #[tauri::command]
@@ -1229,19 +1286,37 @@ async fn household_set_active(
     id: String,
     app: tauri::AppHandle,
     state: tauri::State<'_, state::AppState>,
-) -> Result<(), String> {
+) -> AppResult<()> {
     let pool = state.pool_clone();
     let store = state.store.clone();
+    if snapshot_active_id(&state).as_deref() == Some(id.as_str()) {
+        tracing::warn!(
+            target: "arklowdun",
+            event = "household_set_active_failed",
+            id = %id,
+            reason = "already_active"
+        );
+        return Err(AppError::new(
+            "HOUSEHOLD_ALREADY_ACTIVE",
+            "Household is already active.",
+        ));
+    }
+
     match crate::household_active::set_active_household_id(&pool, &store, &id).await {
         Ok(()) => {
+            update_active_snapshot(&state, &id);
+            if let Some(record) = crate::household::get_household(&pool, &id)
+                .await
+                .map_err(map_household_crud_error)?
             {
-                let mut guard = state
-                    .active_household_id
-                    .lock()
-                    .map_err(|_| "STATE_LOCK_POISONED".to_string())?;
-                *guard = id.clone();
+                tracing::info!(
+                    target: "arklowdun",
+                    event = "household_set_active",
+                    id = %record.id,
+                    name = %record.name,
+                    color = record.color.as_deref().unwrap_or("")
+                );
             }
-            tracing::info!(target: "arklowdun", event = "household_set_active", id = %id);
             if let Err(err) = app.emit("household:changed", json!({ "id": id.clone() })) {
                 tracing::warn!(
                     target = "arklowdun",
@@ -1251,8 +1326,24 @@ async fn household_set_active(
             }
             Ok(())
         }
-        Err(ActiveSetError::NotFound) => Err("HOUSEHOLD_NOT_FOUND".into()),
-        Err(ActiveSetError::Deleted) => Err("HOUSEHOLD_DELETED".into()),
+        Err(ActiveSetError::NotFound) => {
+            tracing::warn!(
+                target: "arklowdun",
+                event = "household_set_active_failed",
+                id = %id,
+                reason = "not_found"
+            );
+            Err(AppError::new("HOUSEHOLD_NOT_FOUND", "Household not found."))
+        }
+        Err(ActiveSetError::Deleted) => {
+            tracing::warn!(
+                target: "arklowdun",
+                event = "household_set_active_failed",
+                id = %id,
+                reason = "deleted"
+            );
+            Err(AppError::new("HOUSEHOLD_DELETED", "Household is deleted."))
+        }
     }
 }
 

@@ -2,6 +2,7 @@ import {
   listHouseholds,
   type HouseholdRecord,
   type SetActiveHouseholdErrorCode,
+  HOUSEHOLD_ERROR_MESSAGES,
 } from "../../../api/households";
 import {
   ensureActiveHousehold,
@@ -23,14 +24,9 @@ export interface HouseholdSwitcherSection {
 }
 
 function describeError(code: SetActiveHouseholdErrorCode): string {
-  switch (code) {
-    case "HOUSEHOLD_NOT_FOUND":
-      return "The selected household could not be found. Refresh the list and try again.";
-    case "HOUSEHOLD_DELETED":
-      return "The selected household has been archived. Restore it before switching.";
-    default:
-      return "Unable to change the active household.";
-  }
+  return (
+    HOUSEHOLD_ERROR_MESSAGES[code] ?? "Unable to change the active household."
+  );
 }
 
 type HealthGate = { disabled: boolean; message: string | null };
@@ -42,13 +38,16 @@ function assessHealth(health: DbHealthState | null): HealthGate {
   if (health.phase === "pending") {
     return {
       disabled: true,
-      message: "Checking database health… Switching households is temporarily disabled.",
+      message:
+        "Checking database health… Switching households is temporarily disabled.",
     };
   }
   if (health.error?.code === DB_UNHEALTHY_WRITE_BLOCKED) {
     return {
       disabled: true,
-      message: health.error.message ?? "Resolve database health issues before switching households.",
+      message:
+        health.error.message ??
+        "Resolve database health issues before switching households.",
     };
   }
   if (health.report?.status === "error") {
@@ -60,7 +59,10 @@ function assessHealth(health: DbHealthState | null): HealthGate {
   return { disabled: false, message: null };
 }
 
-function formatLabel(household: HouseholdRecord, activeId: string | null): string {
+function formatLabel(
+  household: HouseholdRecord,
+  activeId: string | null,
+): string {
   const parts = [household.name];
   if (household.isDefault) {
     parts.push("Default");
@@ -185,11 +187,15 @@ export function createHouseholdSwitcherSection(): HouseholdSwitcherSection {
     }));
     select.update({ options, value: selectedId ?? "" });
 
-    const disableSelect = loading || pending || !hasHouseholds || health.disabled;
+    const disableSelect =
+      loading || pending || !hasHouseholds || health.disabled;
     select.update({ disabled: disableSelect });
 
     const disableApply =
-      disableSelect || !selectedId || selectedId === activeId || households.length === 0;
+      disableSelect ||
+      !selectedId ||
+      selectedId === activeId ||
+      households.length === 0;
     applyButton.disabled = disableApply || pending;
 
     let message = "";
@@ -229,7 +235,10 @@ export function createHouseholdSwitcherSection(): HouseholdSwitcherSection {
         list.some((item: HouseholdRecord) => item.id === previousSelection)
       ) {
         selectedId = previousSelection;
-      } else if (active && list.some((item: HouseholdRecord) => item.id === active)) {
+      } else if (
+        active &&
+        list.some((item: HouseholdRecord) => item.id === active)
+      ) {
         selectedId = active;
       } else {
         selectedId = list.length > 0 ? list[0].id : null;

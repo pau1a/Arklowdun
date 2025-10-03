@@ -85,8 +85,11 @@ surface a selection flow so the user can choose a household explicitly.
 
 - The `household_delete` IPC command soft-deletes rows by setting
   `deleted_at`. If the target row is the current active household, the backend
-  immediately switches the active selection back to the default household
-  before emitting `household:changed`.
+  immediately switches the active selection back to the default household,
+  persists the new selection, and emits `household:changed`.
+- Attempts to activate a soft-deleted household are rejected with
+  `HOUSEHOLD_DELETED`. When the user targets the already-active household the
+  IPC layer short-circuits with `HOUSEHOLD_ALREADY_ACTIVE`.
 - SQLite triggers ensure the default household cannot be deleted or
   soft-deleted. The IPC layer maps attempts to stable error codes so the UI can
   present consistent messages.
@@ -96,6 +99,7 @@ surface a selection flow so the user can choose a household explicitly.
 | Delete default household | `DEFAULT_UNDELETABLE` |
 | Operate on a missing household id | `HOUSEHOLD_NOT_FOUND` |
 | Operate on a soft-deleted household (update/set active) | `HOUSEHOLD_DELETED` |
+| Attempt to set already-active household | `HOUSEHOLD_ALREADY_ACTIVE` |
 
 ## Notes & Shopping Soft Delete
 
