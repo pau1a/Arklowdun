@@ -69,8 +69,8 @@ export type HouseholdErrorCode =
 
 export const HOUSEHOLD_ERROR_MESSAGES: Record<HouseholdErrorCode, string> = {
   DEFAULT_UNDELETABLE: "The default household cannot be deleted.",
-  HOUSEHOLD_NOT_FOUND: "The selected household could not be found.",
-  HOUSEHOLD_DELETED: "The selected household has been archived.",
+  HOUSEHOLD_NOT_FOUND: "That household no longer exists.",
+  HOUSEHOLD_DELETED: "That household is deleted. Restore it first.",
   HOUSEHOLD_ALREADY_ACTIVE: "The selected household is already active.",
 };
 
@@ -83,7 +83,7 @@ export type SetActiveHouseholdResult =
   | { ok: true }
   | { ok: false; code: SetActiveHouseholdErrorCode };
 
-function extractErrorCode(error: unknown): string {
+export function getHouseholdErrorCode(error: unknown): string {
   if (typeof error === "string") {
     return error;
   }
@@ -106,7 +106,7 @@ export async function setActiveHouseholdId(
     await call("household_set_active", { id });
     return { ok: true };
   } catch (error) {
-    const code = extractErrorCode(error);
+    const code = getHouseholdErrorCode(error);
     if (
       code === "HOUSEHOLD_NOT_FOUND" ||
       code === "HOUSEHOLD_DELETED" ||
@@ -116,6 +116,17 @@ export async function setActiveHouseholdId(
     }
     throw error;
   }
+}
+
+export function resolveHouseholdErrorMessage(
+  error: unknown,
+  fallback: string,
+): string {
+  const code = getHouseholdErrorCode(error);
+  if (code in HOUSEHOLD_ERROR_MESSAGES) {
+    return HOUSEHOLD_ERROR_MESSAGES[code as HouseholdErrorCode];
+  }
+  return fallback;
 }
 
 export async function getHousehold(
@@ -130,8 +141,7 @@ export async function createHousehold(
   color: string | null,
 ): Promise<HouseholdRecord> {
   const record = await call<HouseholdRecordRaw>("household_create", {
-    name,
-    color,
+    args: { name, color },
   });
   return normalizeHousehold(record);
 }

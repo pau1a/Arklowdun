@@ -101,6 +101,10 @@ surface a selection flow so the user can choose a household explicitly.
 | Operate on a soft-deleted household (update/set active) | `HOUSEHOLD_DELETED` |
 | Attempt to set already-active household | `HOUSEHOLD_ALREADY_ACTIVE` |
 
+The settings UI mirrors these rules (see `docs/settings-ui.md`). Error codes are
+surfaced with friendly copy and the frontend immediately falls back to the
+default household when the backend returns a `fallbackId` during delete.
+
 ## Notes & Shopping Soft Delete
 
 Notes and shopping items must use soft deletion. Rows are never removed;
