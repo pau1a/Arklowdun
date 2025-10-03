@@ -63,6 +63,15 @@ use deterministic values to keep fixture diffs stable.
   (`assert_household_active`) and emits a `household:changed` event so the UI
   can invalidate caches.
 
+## Household CRUD
+
+- Backend IPC exposes create, update, delete, and restore commands for
+  households. Soft-deleting an active non-default household immediately
+  switches the active selection back to the default row and emits a
+  `household:changed` event.
+- The default household remains undeletable and attempts are mapped to the
+  stable error code `DEFAULT_UNDELETABLE`.
+
 ## Schema fingerprint
 
 Run the verification helper to refresh fingerprints after intentional schema

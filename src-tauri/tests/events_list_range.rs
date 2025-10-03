@@ -1,15 +1,13 @@
 use arklowdun_lib::{
-    commands::{
-        self, EVENTS_LIST_RANGE_PER_SERIES_LIMIT, EVENTS_LIST_RANGE_TOTAL_LIMIT,
-    },
+    commands::{self, EVENTS_LIST_RANGE_PER_SERIES_LIMIT, EVENTS_LIST_RANGE_TOTAL_LIMIT},
     time_shadow,
 };
 use chrono::{DateTime, Datelike, NaiveDateTime, Offset, TimeZone, Utc, Weekday};
 use chrono_tz::Tz;
-use std::collections::HashSet;
 use once_cell::sync::Lazy;
 use proptest::prelude::*;
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+use std::collections::HashSet;
 use std::io::Write;
 use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::Mutex;
@@ -99,7 +97,9 @@ async fn seed_recurring_event(
     local_end: &str,
     rrule: &str,
 ) {
-    let tz: Tz = tz_name.parse().unwrap_or_else(|_| panic!("unknown tz: {tz_name}"));
+    let tz: Tz = tz_name
+        .parse()
+        .unwrap_or_else(|_| panic!("unknown tz: {tz_name}"));
     let start_local = resolve_local_datetime(&tz, parse_local_datetime(local_start));
     let end_local = resolve_local_datetime(&tz, parse_local_datetime(local_end));
     let start_at = start_local.naive_local().and_utc().timestamp_millis();
@@ -135,11 +135,12 @@ async fn range_start_must_be_before_end() {
         err.context().get("start").map(|ctx| ctx.as_str()),
         Some("1000")
     );
-    assert_eq!(err.context().get("end").map(|ctx| ctx.as_str()), Some("1000"));
     assert_eq!(
-        err.context()
-            .get("operation")
-            .map(|ctx| ctx.as_str()),
+        err.context().get("end").map(|ctx| ctx.as_str()),
+        Some("1000")
+    );
+    assert_eq!(
+        err.context().get("operation").map(|ctx| ctx.as_str()),
         Some("events_list_range")
     );
 }
@@ -402,7 +403,11 @@ async fn dst_forward_series_produces_unique_instances() {
 
     let mut seen = HashSet::new();
     for inst in &res.items {
-        assert!(seen.insert(inst.start_at_utc), "duplicate start {}", inst.start_at_utc);
+        assert!(
+            seen.insert(inst.start_at_utc),
+            "duplicate start {}",
+            inst.start_at_utc
+        );
         assert_eq!(inst.tz.as_deref(), Some("Europe/London"));
         assert!(inst.start_at_utc >= range_start && inst.start_at_utc <= range_end);
     }
@@ -551,17 +556,16 @@ async fn series_truncation_preserves_ordering() {
     }
     let mut sorted = tuples.clone();
     sorted.sort();
-    assert_eq!(tuples, sorted, "instances should remain sorted after truncation");
+    assert_eq!(
+        tuples, sorted,
+        "instances should remain sorted after truncation"
+    );
 }
 
 #[tokio::test]
 async fn ordering_breaks_ties_by_title_and_id() {
     let pool = setup_pool().await;
-    for (id, title) in [
-        ("tie-3", "Omega"),
-        ("tie-1", "Alpha"),
-        ("tie-2", "Alpha"),
-    ] {
+    for (id, title) in [("tie-3", "Omega"), ("tie-1", "Alpha"), ("tie-2", "Alpha")] {
         sqlx::query(
             "INSERT INTO events (id, household_id, title, start_at, end_at, tz, start_at_utc, end_at_utc, created_at, updated_at)\
              VALUES (?1, 'HH', ?2, 1_000, 4_000, 'UTC', 1_000, 4_000, 0, 0)",

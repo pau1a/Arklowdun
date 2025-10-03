@@ -225,12 +225,20 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            sqlite3
+            sqlite3 \
+            libglib2.0-dev
       - run: npm ci
       - name: Migration idempotency check
         run: npm run migrations:idempotency
       - name: Household default smoke
         run: npm run smoke:household
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+      - name: Household lifecycle smoke
+        run: npm run smoke:household:lifecycle
       - name: Verify schema
         run: npm run schema:ci
 
