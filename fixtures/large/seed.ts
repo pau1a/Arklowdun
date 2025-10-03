@@ -1,3 +1,4 @@
+/* eslint-disable security/detect-object-injection -- fixture generator indexes controlled schema keys */
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";

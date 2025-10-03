@@ -666,7 +666,7 @@ export async function NotesView(
   const snapshotCategories = initialSnapshot?.activeCategoryIds ?? [];
   const matchesActiveCategories =
     snapshotCategories.length === activeCategoryIds.length &&
-    snapshotCategories.every((id, index) => id === activeCategoryIds[index]);
+    snapshotCategories.every((id, index) => id === (activeCategoryIds.at(index) ?? null));
   if (initialSnapshot && matchesActiveCategories) {
     notesLocal = cloneNotes(initialSnapshot.items);
     render();

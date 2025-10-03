@@ -106,9 +106,9 @@ export async function toggleCategory(
   householdId: string,
   id: string,
 ): Promise<void> {
-  const index = state.findIndex((category) => category.id === id);
-  if (index === -1) return;
-  const nextVisible = !state[index].isVisible;
+  const target = state.find((category) => category.id === id);
+  if (!target) return;
+  const nextVisible = !target.isVisible;
   const previous = state;
   const optimistic = state.map((category) =>
     category.id === id ? { ...category, isVisible: nextVisible } : category,
@@ -130,9 +130,9 @@ export async function updateCategory(
     isVisible?: boolean;
   },
 ): Promise<void> {
-  const index = state.findIndex((category) => category.id === id);
-  if (index === -1) return;
-  const nextVisible = patch.isVisible ?? state[index].isVisible;
+  const target = state.find((category) => category.id === id);
+  if (!target) return;
+  const nextVisible = patch.isVisible ?? target.isVisible;
   const update: Partial<Category> = {
     name: patch.name,
     slug: patch.slug,

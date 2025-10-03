@@ -15,6 +15,23 @@ const TONES: Record<BlobTone, ToneDefinition> = {
   coral: { colorVar: "--blob-coral", alphaVar: "--blob-alpha-coral" },
 };
 
+function getToneDefinition(tone: BlobTone): ToneDefinition {
+  switch (tone) {
+    case "teal":
+      return TONES.teal;
+    case "teal2":
+      return TONES.teal2;
+    case "shade":
+      return TONES.shade;
+    case "aqua":
+      return TONES.aqua;
+    case "coral":
+      return TONES.coral;
+    default:
+      return TONES.teal;
+  }
+}
+
 export interface BlobState {
   tone: BlobTone;
   color: string;
@@ -125,16 +142,17 @@ function computeRadii(
   const a2 = 0.10 + rng() * 0.06;
   const a3 = 0.06 + rng() * 0.04;
   const out = new Float32Array(points);
-  for (let i = 0; i < points; i += 1) {
-    const t = i / points;
-    const ang = t * twoPi;
-    const noise = (a1 * (0.85 + 0.15 * Math.sin(morph))) * Math.sin(f1 * ang + p1 + morph * 0.6)
-      + (a2 * (0.85 + 0.15 * Math.cos(morph * 1.2))) * Math.sin(f2 * ang + p2 + morph * 1.1)
-      + (a3 * (0.85 + 0.15 * Math.sin(morph * 0.8))) * Math.sin(f3 * ang + p3 - morph * 0.9);
-    out[i] = Math.max(1, baseRadius * (1 + noise));
+    for (let i = 0; i < points; i += 1) {
+      const t = i / points;
+      const ang = t * twoPi;
+      const noise = (a1 * (0.85 + 0.15 * Math.sin(morph))) * Math.sin(f1 * ang + p1 + morph * 0.6)
+        + (a2 * (0.85 + 0.15 * Math.cos(morph * 1.2))) * Math.sin(f2 * ang + p2 + morph * 1.1)
+        + (a3 * (0.85 + 0.15 * Math.sin(morph * 0.8))) * Math.sin(f3 * ang + p3 - morph * 0.9);
+      const value = Math.max(1, baseRadius * (1 + noise));
+      out.set([value], i);
+    }
+    return out;
   }
-  return out;
-}
 
 // Fill a blob from a precomputed radii array (three feathered layers)
 function fillFromRadii(
@@ -158,14 +176,15 @@ function fillFromRadii(
   // Crisp, non-glowing edge: fill only the inner body and skip any outer rings
   ctx.beginPath();
   for (let i = 0; i <= points; i += 1) {
-    const idx = i % points;
-    const ang = (idx / points) * twoPi;
-    const rad = Math.max(1, radii[idx] * innerScale);
-    const x = cx + Math.cos(ang) * rad;
-    const y = cy + Math.sin(ang) * rad;
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-  }
-  ctx.closePath();
+      const idx = i % points;
+      const ang = (idx / points) * twoPi;
+      const base = radii.at(idx) ?? 1;
+      const rad = Math.max(1, base * innerScale);
+      const x = cx + Math.cos(ang) * rad;
+      const y = cy + Math.sin(ang) * rad;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
   ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
   ctx.fill();
 }
@@ -181,14 +200,15 @@ function pathFromRadii(
   const points = radii.length;
   ctx.beginPath();
   for (let i = 0; i <= points; i += 1) {
-    const idx = i % points;
-    const ang = (idx / points) * twoPi;
-    const rad = Math.max(1, radii[idx] * scale);
-    const x = cx + Math.cos(ang) * rad;
-    const y = cy + Math.sin(ang) * rad;
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-  }
-  ctx.closePath();
+      const idx = i % points;
+      const ang = (idx / points) * twoPi;
+      const base = radii.at(idx) ?? 1;
+      const rad = Math.max(1, base * scale);
+      const x = cx + Math.cos(ang) * rad;
+      const y = cy + Math.sin(ang) * rad;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
 }
 
 function makeSprite(
@@ -444,7 +464,7 @@ export abstract class AmbientBlobCanvas {
   }
 
   protected createBlob(tone: BlobTone, rng: () => number, emphasis = 1): BlobState {
-    const def = TONES[tone] ?? TONES.teal;
+      const def = getToneDefinition(tone);
     const color = readCssVar(def.colorVar, "#00C896");
     const baseAlpha = parseAlpha(def.alphaVar);
     // Narrow opacity range: keep min (0.8x) but lower max to 1.0x (was 1.2x)
@@ -617,10 +637,13 @@ export abstract class AmbientBlobCanvas {
         smoothed = newR;
       } else {
         smoothed = new Float32Array(POINTS);
-        for (let i = 0; i < POINTS; i += 1) {
-          smoothed[i] = prev[i]! + (newR[i]! - prev[i]!) * k;
+          for (let i = 0; i < POINTS; i += 1) {
+            const previousValue = prev.at(i) ?? 0;
+            const nextValue = newR.at(i) ?? previousValue;
+            const blended = previousValue + (nextValue - previousValue) * k;
+            smoothed.set([blended], i);
+          }
         }
-      }
       (blob as any).prevR = smoothed;
       const effectiveAlpha = Math.max(0, Math.min(1, blob.alpha * alphaMult));
       // Non-additive compositing: clear exactly the inner fill region,

@@ -201,7 +201,8 @@ export function createRepairView(): RepairViewInstance {
 
     const label = document.createElement("span");
     label.className = "repair__step-label";
-    label.textContent = STEP_LABELS[step];
+      // eslint-disable-next-line security/detect-object-injection -- step keys are validated enum values
+      label.textContent = STEP_LABELS[step];
 
     const note = document.createElement("span");
     note.className = "repair__step-note";
@@ -274,7 +275,8 @@ export function createRepairView(): RepairViewInstance {
     const elements = stepElements.get(step);
     if (!elements) return;
     elements.item.dataset.status = statusValue;
-    const iconClass = STATUS_ICONS[statusValue] ?? STATUS_ICONS.pending;
+      // eslint-disable-next-line security/detect-object-injection -- statusValue derives from known enum variants
+      const iconClass = STATUS_ICONS[statusValue] ?? STATUS_ICONS.pending;
     elements.icon.className = iconClass;
     if (message && message.trim().length) {
       elements.note.textContent = message;

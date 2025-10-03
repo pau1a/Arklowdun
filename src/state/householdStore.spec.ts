@@ -1,3 +1,4 @@
+/* eslint-disable security/detect-object-injection -- test doubles index controlled listener maps */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const eventListeners: Record<string, (event: { payload: { id: string } }) => void> = {};

@@ -14,7 +14,8 @@ import createSelect from "@ui/Select";
 import createButton from "@ui/Button";
 import { toast } from "@ui/Toast";
 import { showError } from "@ui/errors";
-import { DB_UNHEALTHY_WRITE_BLOCKED } from "@lib/ipc/call";
+
+const DB_UNHEALTHY_WRITE_BLOCKED = "DB_UNHEALTHY_WRITE_BLOCKED" as const;
 
 export interface HouseholdSwitcherSection {
   element: HTMLElement;
