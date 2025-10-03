@@ -6,7 +6,7 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use sqlx::Row;
+use sqlx::{Row, SqlitePool};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     io::{self, Write},
@@ -29,7 +29,7 @@ use crate::{
     db::{
         backup,
         hard_repair::{self, HardRepairOutcome},
-        health::{DbHealthReport, DbHealthStatus, STORAGE_SANITY_HEAL_NOTE},
+        health::{DbHealthCheck, DbHealthReport, DbHealthStatus, STORAGE_SANITY_HEAL_NOTE},
         repair::{self, DbRepairEvent, DbRepairSummary},
     },
     household_active::ActiveSetError,
@@ -118,10 +118,12 @@ pub mod export;
 mod household; // declare module; avoid `use` to prevent name collision
 pub mod household_active;
 pub use household::{
-    assert_household_active, create_household, default_household_id, delete_household,
-    ensure_household_invariants, get_household, list_households, restore_household,
-    update_household, DeleteOutcome, HouseholdCrudError, HouseholdGuardError, HouseholdRecord,
-    HouseholdUpdateInput,
+    acknowledge_vacuum, assert_household_active, cascade_phase_tables, create_household,
+    default_household_id, delete_household, ensure_household_invariants, get_household,
+    list_households, pending_cascades, restore_household, resume_household_delete,
+    update_household, vacuum_queue, CascadeDeleteOptions, CascadeProgress,
+    CascadeProgressObserver, DeleteOutcome, HouseholdCrudError, HouseholdGuardError,
+    HouseholdRecord, HouseholdUpdateInput,
 };
 mod id;
 pub mod import;
@@ -158,6 +160,68 @@ use notes::{
     notes_create, notes_delete, notes_get, notes_list_by_deadline_range, notes_list_cursor,
     notes_restore, notes_update,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        db::health::{DbHealthReport, DbHealthStatus},
+        events_tz_backfill::BackfillCoordinator,
+        household_active::StoreHandle,
+        ipc::guard,
+    };
+    use anyhow::Result;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use std::{
+        path::PathBuf,
+        sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
+    };
+
+    #[tokio::test]
+    async fn pending_cascade_blocks_writes_via_health_cache() -> Result<()> {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await?;
+        sqlx::query("PRAGMA foreign_keys=ON;")
+            .execute(&pool)
+            .await?;
+        crate::migrate::apply_migrations(&pool).await?;
+
+        let report = DbHealthReport {
+            status: DbHealthStatus::Ok,
+            checks: Vec::new(),
+            offenders: Vec::new(),
+            schema_hash: "test".into(),
+            app_version: "test".into(),
+            generated_at: "2024-01-01T00:00:00Z".into(),
+        };
+
+        let state = AppState {
+            pool: Arc::new(RwLock::new(pool.clone())),
+            active_household_id: Arc::new(Mutex::new(String::new())),
+            store: StoreHandle::in_memory(),
+            backfill: Arc::new(Mutex::new(BackfillCoordinator::new())),
+            db_health: Arc::new(Mutex::new(report)),
+            db_path: Arc::new(PathBuf::from("test.sqlite")),
+            maintenance: Arc::new(AtomicBool::new(false)),
+        };
+
+        let household = crate::household::create_household(&pool, "Health", None).await?;
+        let _ = crate::household::pending_cascades(&pool).await?;
+        sqlx::query(
+            "INSERT INTO cascade_checkpoints (household_id, phase_index, deleted_count, total, phase, updated_at, vacuum_pending)\n             VALUES (?1, 0, 0, 1, 'note_links', 1, 0)",
+        )
+        .bind(&household.id)
+        .execute(&pool)
+        .await?;
+
+        sync_cascade_health(&state, &pool).await?;
+        let err = guard::ensure_db_writable(&state).expect_err("writes should be blocked");
+        assert_eq!(err.code(), guard::DB_UNHEALTHY_CODE);
+        Ok(())
+    }
+}
 use security::{error_map::UiError, fs_policy, fs_policy::RootKey, hash_path};
 use util::dispatch_async_app_result;
 
@@ -1020,6 +1084,14 @@ struct HouseholdUpdateArgs {
 struct HouseholdDeleteResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     fallback_id: Option<String>,
+    #[serde(default)]
+    total_deleted: u64,
+    #[serde(default)]
+    total_expected: u64,
+    #[serde(default)]
+    vacuum_recommended: bool,
+    #[serde(default)]
+    completed: bool,
 }
 
 fn map_household_crud_error(err: crate::household::HouseholdCrudError) -> AppError {
@@ -1070,6 +1142,100 @@ fn update_active_snapshot(state: &state::AppState, id: &str) {
             *guard = id.to_string();
         }
     }
+}
+
+const CASCADE_HEALTH_CHECK: &str = "cascade_state";
+
+fn cascade_health_message(offenders: &[String]) -> String {
+    if offenders.len() == 1 {
+        format!("Unfinished cascade for {}", offenders[0])
+    } else {
+        format!(
+            "Unfinished cascades for households: {}",
+            offenders.join(", ")
+        )
+    }
+}
+
+fn update_cascade_health_cache(state: &state::AppState, offenders: &[String]) -> AppResult<()> {
+    let mut guard = state.db_health.lock().map_err(|_| {
+        AppError::new(
+            "STATE/LOCK_POISONED",
+            "Failed to update database health cache",
+        )
+    })?;
+    guard
+        .checks
+        .retain(|check| check.name != CASCADE_HEALTH_CHECK);
+    if offenders.is_empty() {
+        let any_failed = guard.checks.iter().any(|check| !check.passed);
+        guard.status = if any_failed {
+            DbHealthStatus::Error
+        } else {
+            DbHealthStatus::Ok
+        };
+    } else {
+        let detail = cascade_health_message(offenders);
+        guard.checks.push(DbHealthCheck {
+            name: CASCADE_HEALTH_CHECK.to_string(),
+            passed: false,
+            duration_ms: 0,
+            details: Some(detail),
+        });
+        guard.status = DbHealthStatus::Error;
+    }
+    Ok(())
+}
+
+async fn sync_cascade_health(state: &state::AppState, pool: &SqlitePool) -> AppResult<()> {
+    let pending = crate::household::pending_cascades(pool)
+        .await
+        .map_err(map_household_crud_error)?;
+    if pending.is_empty() {
+        let db_path = (*state.db_path).clone();
+        let report = crate::db::health::run_health_checks(pool, &db_path)
+            .await
+            .map_err(|err| {
+                AppError::from(err).with_context("operation", "cascade_health_refresh")
+            })?;
+        let mut guard = state.db_health.lock().map_err(|_| {
+            AppError::new(
+                "STATE/LOCK_POISONED",
+                "Failed to update database health cache",
+            )
+        })?;
+        *guard = report;
+    } else {
+        let offenders: Vec<String> = pending.into_iter().map(|c| c.household_id).collect();
+        update_cascade_health_cache(state, &offenders)?;
+    }
+    Ok(())
+}
+
+fn make_delete_progress_handler(
+    app: &tauri::AppHandle,
+    household_id: &str,
+) -> CascadeProgressObserver {
+    let emitter = app.clone();
+    let household_id = household_id.to_string();
+    Arc::new(move |progress: CascadeProgress| {
+        let payload = json!({
+            "householdId": progress.household_id,
+            "deleted": progress.deleted,
+            "total": progress.total,
+            "phase": progress.phase,
+            "phaseIndex": progress.phase_index,
+            "phaseTotal": progress.phase_total,
+        });
+        if let Err(err) = emitter.emit("household:delete_progress", payload) {
+            tracing::warn!(
+                target: "arklowdun",
+                event = "household_delete_progress_emit_failed",
+                error = %err,
+                household_id = %household_id
+            );
+        }
+    })
 }
 
 #[tauri::command]
@@ -1184,25 +1350,33 @@ async fn household_delete(
 ) -> AppResult<HouseholdDeleteResponse> {
     let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool_clone();
+    update_cascade_health_cache(&state, &[id.clone()])?;
     let active = snapshot_active_id(&state);
-    let outcome = match crate::household::delete_household(&pool, &id, active.as_deref()).await {
-        Ok(outcome) => outcome,
-        Err(err) => {
-            let reason = match &err {
-                crate::household::HouseholdCrudError::DefaultUndeletable => "default",
-                crate::household::HouseholdCrudError::NotFound => "not_found",
-                crate::household::HouseholdCrudError::Deleted => "already_deleted",
-                crate::household::HouseholdCrudError::Unexpected(_) => "unexpected",
-            };
-            tracing::warn!(
-                target: "arklowdun",
-                event = "household_delete_failed",
-                id = %id,
-                reason
-            );
-            return Err(map_household_crud_error(err));
-        }
-    };
+    let progress_handler = make_delete_progress_handler(&app, &id);
+    let mut options = CascadeDeleteOptions::default();
+    options.progress = Some(progress_handler);
+    options.max_duration_ms = Some(2_000);
+    let outcome =
+        match crate::household::delete_household(&pool, &id, active.as_deref(), options).await {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                let reason = match &err {
+                    crate::household::HouseholdCrudError::DefaultUndeletable => "default",
+                    crate::household::HouseholdCrudError::NotFound => "not_found",
+                    crate::household::HouseholdCrudError::Deleted => "already_deleted",
+                    crate::household::HouseholdCrudError::Unexpected(_) => "unexpected",
+                };
+                tracing::warn!(
+                    target: "arklowdun",
+                    event = "household_delete_failed",
+                    id = %id,
+                    reason
+                );
+                return Err(map_household_crud_error(err));
+            }
+        };
+
+    sync_cascade_health(&state, &pool).await?;
 
     if let Some(ref fallback) = outcome.fallback_id {
         match crate::household_active::set_active_household_id(&pool, &state.store, fallback).await
@@ -1249,7 +1423,240 @@ async fn household_delete(
 
     Ok(HouseholdDeleteResponse {
         fallback_id: outcome.fallback_id,
+        total_deleted: outcome.total_deleted,
+        total_expected: outcome.total_expected,
+        vacuum_recommended: outcome.vacuum_recommended,
+        completed: outcome.completed,
     })
+}
+
+#[tauri::command]
+async fn household_resume_delete(
+    id: String,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<HouseholdDeleteResponse> {
+    let _permit = guard::ensure_db_writable(&state)?;
+    let pool = state.pool_clone();
+    update_cascade_health_cache(&state, &[id.clone()])?;
+    let active = snapshot_active_id(&state);
+    let progress_handler = make_delete_progress_handler(&app, &id);
+    let mut options = CascadeDeleteOptions::default();
+    options.progress = Some(progress_handler);
+    options.resume = true;
+    options.max_duration_ms = Some(2_000);
+    let outcome =
+        match crate::household::resume_household_delete(&pool, &id, active.as_deref(), options)
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                let reason = match &err {
+                    crate::household::HouseholdCrudError::DefaultUndeletable => "default",
+                    crate::household::HouseholdCrudError::NotFound => "not_found",
+                    crate::household::HouseholdCrudError::Deleted => "already_deleted",
+                    crate::household::HouseholdCrudError::Unexpected(_) => "unexpected",
+                };
+                tracing::warn!(
+                    target: "arklowdun",
+                    event = "household_resume_failed",
+                    id = %id,
+                    reason
+                );
+                return Err(map_household_crud_error(err));
+            }
+        };
+
+    sync_cascade_health(&state, &pool).await?;
+
+    if let Some(ref fallback) = outcome.fallback_id {
+        match crate::household_active::set_active_household_id(&pool, &state.store, fallback).await
+        {
+            Ok(()) => {
+                update_active_snapshot(&state, fallback);
+                tracing::info!(
+                    target: "arklowdun",
+                    event = "household_active_switched",
+                    reason = "resume_delete_active_fallback",
+                    id = %fallback
+                );
+                if let Err(err) = app.emit("household:changed", json!({ "id": fallback.clone() })) {
+                    tracing::warn!(
+                        target: "arklowdun",
+                        event = "household_event_emit_failed",
+                        error = %err
+                    );
+                }
+            }
+            Err(err) => {
+                tracing::warn!(
+                    target: "arklowdun",
+                    event = "household_active_switch_failed",
+                    reason = "resume_delete_active_fallback",
+                    id = %fallback,
+                    error = ?err
+                );
+            }
+        }
+    }
+
+    if let Ok(Some(record)) = crate::household::get_household(&pool, &id).await {
+        tracing::info!(
+            target: "arklowdun",
+            event = "household_delete_resume",
+            id = %record.id,
+            name = %record.name,
+            color = record.color.as_deref().unwrap_or(""),
+            was_active = outcome.was_active,
+            fallback_id = outcome.fallback_id.as_deref()
+        );
+    }
+
+    Ok(HouseholdDeleteResponse {
+        fallback_id: outcome.fallback_id,
+        total_deleted: outcome.total_deleted,
+        total_expected: outcome.total_expected,
+        vacuum_recommended: outcome.vacuum_recommended,
+        completed: outcome.completed,
+    })
+}
+
+#[tauri::command]
+async fn household_repair(
+    id: String,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<HouseholdDeleteResponse> {
+    let _permit = guard::ensure_db_writable(&state)?;
+    let pool = state.pool_clone();
+    let fk_rows = sqlx::query("PRAGMA foreign_key_check;")
+        .fetch_all(&pool)
+        .await
+        .map_err(|err| AppError::from(err).with_context("operation", "household_repair_fk"))?;
+    if !fk_rows.is_empty() {
+        tracing::warn!(
+            target: "arklowdun",
+            event = "household_repair_fk_failed",
+            id = %id,
+            offenders = fk_rows.len()
+        );
+        return Err(AppError::new(
+            "DB_FOREIGN_KEY_VIOLATION",
+            "Foreign key violations detected during repair.",
+        ));
+    }
+
+    update_cascade_health_cache(&state, &[id.clone()])?;
+    let active = snapshot_active_id(&state);
+    let progress_handler = make_delete_progress_handler(&app, &id);
+    let mut options = CascadeDeleteOptions::default();
+    options.progress = Some(progress_handler);
+    options.max_duration_ms = Some(2_000);
+    options.resume = true;
+    let outcome =
+        match crate::household::resume_household_delete(&pool, &id, active.as_deref(), options)
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                let reason = match &err {
+                    crate::household::HouseholdCrudError::DefaultUndeletable => "default",
+                    crate::household::HouseholdCrudError::NotFound => "not_found",
+                    crate::household::HouseholdCrudError::Deleted => "already_deleted",
+                    crate::household::HouseholdCrudError::Unexpected(_) => "unexpected",
+                };
+                tracing::warn!(
+                    target: "arklowdun",
+                    event = "household_repair_failed",
+                    id = %id,
+                    reason
+                );
+                return Err(map_household_crud_error(err));
+            }
+        };
+
+    sync_cascade_health(&state, &pool).await?;
+
+    if let Some(ref fallback) = outcome.fallback_id {
+        match crate::household_active::set_active_household_id(&pool, &state.store, fallback).await
+        {
+            Ok(()) => {
+                update_active_snapshot(&state, fallback);
+                tracing::info!(
+                    target: "arklowdun",
+                    event = "household_active_switched",
+                    reason = "repair_delete_active_fallback",
+                    id = %fallback
+                );
+                if let Err(err) = app.emit("household:changed", json!({ "id": fallback.clone() })) {
+                    tracing::warn!(
+                        target: "arklowdun",
+                        event = "household_event_emit_failed",
+                        error = %err
+                    );
+                }
+            }
+            Err(err) => {
+                tracing::warn!(
+                    target: "arklowdun",
+                    event = "household_active_switch_failed",
+                    reason = "repair_delete_active_fallback",
+                    id = %fallback,
+                    error = ?err
+                );
+            }
+        }
+    }
+
+    if let Ok(Some(record)) = crate::household::get_household(&pool, &id).await {
+        tracing::info!(
+            target: "arklowdun",
+            event = "household_delete_repair",
+            id = %record.id,
+            name = %record.name,
+            color = record.color.as_deref().unwrap_or(""),
+            was_active = outcome.was_active,
+            fallback_id = outcome.fallback_id.as_deref()
+        );
+    }
+
+    Ok(HouseholdDeleteResponse {
+        fallback_id: outcome.fallback_id,
+        total_deleted: outcome.total_deleted,
+        total_expected: outcome.total_expected,
+        vacuum_recommended: outcome.vacuum_recommended,
+        completed: outcome.completed,
+    })
+}
+
+#[tauri::command]
+async fn household_vacuum_execute(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    let _permit = guard::ensure_db_writable(&state)?;
+    let pool = state.pool_clone();
+    let queue = crate::household::vacuum_queue(&pool)
+        .await
+        .map_err(map_household_crud_error)?;
+    if !queue.iter().any(|entry| entry.household_id == id) {
+        return Err(AppError::new(
+            "VACUUM_NOT_QUEUED",
+            "No vacuum task is queued for this household.",
+        ));
+    }
+
+    sqlx::query("VACUUM;")
+        .execute(&pool)
+        .await
+        .map_err(|err| AppError::from(err).with_context("operation", "household_vacuum"))?;
+    crate::household::acknowledge_vacuum(&pool, &id)
+        .await
+        .map_err(map_household_crud_error)?;
+    sync_cascade_health(&state, &pool).await?;
+    tracing::info!(
+        target: "arklowdun",
+        event = "household_delete_vacuum",
+        household_id = %id
+    );
+    Ok(())
 }
 
 #[tauri::command]
@@ -2696,6 +3103,9 @@ macro_rules! app_commands {
             household_create,
             household_update,
             household_delete,
+            household_resume_delete,
+            household_repair,
+            household_vacuum_execute,
             household_restore,
             bills_list,
             bills_get,
@@ -2848,9 +3258,25 @@ pub fn run() {
                 crate::migration_guard::enforce_events_legacy_columns_removed(&pool),
             )
             .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
-            let health_report = tauri::async_runtime::block_on(
+            let mut health_report = tauri::async_runtime::block_on(
                 crate::db::health::run_health_checks(&pool, &db_path),
             )?;
+            let pending_cascades =
+                tauri::async_runtime::block_on(crate::household::pending_cascades(&pool))?;
+            if !pending_cascades.is_empty() {
+                let offenders: Vec<String> = pending_cascades
+                    .into_iter()
+                    .map(|c| c.household_id)
+                    .collect();
+                let detail = cascade_health_message(&offenders);
+                health_report.checks.push(DbHealthCheck {
+                    name: CASCADE_HEALTH_CHECK.to_string(),
+                    passed: false,
+                    duration_ms: 0,
+                    details: Some(detail),
+                });
+                health_report.status = DbHealthStatus::Error;
+            }
             log_db_health(&health_report);
             // Avoid creating new rows when the database is unhealthy. This preserves
             // write-block semantics during startup and aligns with the IPC write guard.

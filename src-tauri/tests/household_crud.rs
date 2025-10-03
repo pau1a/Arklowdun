@@ -2,8 +2,8 @@ use anyhow::Result;
 use arklowdun_lib::{
     create_household, default_household_id, delete_household, get_household,
     household_active::{self, ActiveSetError, StoreHandle},
-    list_households, migrate, restore_household, update_household, HouseholdCrudError,
-    HouseholdUpdateInput,
+    list_households, migrate, restore_household, update_household, CascadeDeleteOptions,
+    HouseholdCrudError, HouseholdUpdateInput,
 };
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 
@@ -28,9 +28,16 @@ async fn delete_active_falls_back_to_default() -> Result<()> {
     let created = create_household(&pool, "Secondary", None).await?;
     household_active::set_active_household_id(&pool, &store, &created.id).await?;
 
-    let outcome = delete_household(&pool, &created.id, Some(&created.id)).await?;
+    let outcome = delete_household(
+        &pool,
+        &created.id,
+        Some(&created.id),
+        CascadeDeleteOptions::default(),
+    )
+    .await?;
     assert!(outcome.was_active);
     assert_eq!(outcome.fallback_id.as_deref(), Some(default_id.as_str()));
+    assert!(outcome.completed);
 
     let record = get_household(&pool, &created.id)
         .await?
@@ -49,9 +56,14 @@ async fn delete_active_falls_back_to_default() -> Result<()> {
 async fn delete_default_is_rejected() -> Result<()> {
     let pool = memory_pool().await?;
     let default_id = default_household_id(&pool).await?;
-    let err = delete_household(&pool, &default_id, Some(&default_id))
-        .await
-        .expect_err("default household delete should fail");
+    let err = delete_household(
+        &pool,
+        &default_id,
+        Some(&default_id),
+        CascadeDeleteOptions::default(),
+    )
+    .await
+    .expect_err("default household delete should fail");
     assert!(matches!(err, HouseholdCrudError::DefaultUndeletable));
     Ok(())
 }
@@ -60,7 +72,7 @@ async fn delete_default_is_rejected() -> Result<()> {
 async fn restore_soft_deleted_household() -> Result<()> {
     let pool = memory_pool().await?;
     let created = create_household(&pool, "Restore", None).await?;
-    delete_household(&pool, &created.id, None).await?;
+    delete_household(&pool, &created.id, None, CascadeDeleteOptions::default()).await?;
 
     let restored = restore_household(&pool, &created.id).await?;
     assert!(restored.deleted_at.is_none());
@@ -74,7 +86,13 @@ async fn restore_allows_reactivation() -> Result<()> {
     let created = create_household(&pool, "Reactivating", None).await?;
     household_active::set_active_household_id(&pool, &store, &created.id).await?;
 
-    delete_household(&pool, &created.id, Some(&created.id)).await?;
+    delete_household(
+        &pool,
+        &created.id,
+        Some(&created.id),
+        CascadeDeleteOptions::default(),
+    )
+    .await?;
 
     let err = household_active::set_active_household_id(&pool, &store, &created.id)
         .await
@@ -92,7 +110,7 @@ async fn restore_allows_reactivation() -> Result<()> {
 async fn update_rejected_when_deleted() -> Result<()> {
     let pool = memory_pool().await?;
     let created = create_household(&pool, "Target", None).await?;
-    delete_household(&pool, &created.id, None).await?;
+    delete_household(&pool, &created.id, None, CascadeDeleteOptions::default()).await?;
 
     let err = update_household(
         &pool,
@@ -113,8 +131,8 @@ async fn double_delete_and_restore_idempotent() -> Result<()> {
     let pool = memory_pool().await?;
     let created = create_household(&pool, "Archive", None).await?;
 
-    delete_household(&pool, &created.id, None).await?;
-    let second = delete_household(&pool, &created.id, None)
+    delete_household(&pool, &created.id, None, CascadeDeleteOptions::default()).await?;
+    let second = delete_household(&pool, &created.id, None, CascadeDeleteOptions::default())
         .await
         .expect_err("second delete should fail");
     assert!(matches!(second, HouseholdCrudError::Deleted));
@@ -132,7 +150,7 @@ async fn list_includes_deleted_when_requested() -> Result<()> {
     let pool = memory_pool().await?;
     let active = create_household(&pool, "Active", None).await?;
     let archived = create_household(&pool, "Archived", None).await?;
-    delete_household(&pool, &archived.id, None).await?;
+    delete_household(&pool, &archived.id, None, CascadeDeleteOptions::default()).await?;
 
     let active_only = list_households(&pool, false).await?;
     assert!(active_only.iter().any(|row| row.id == active.id));
