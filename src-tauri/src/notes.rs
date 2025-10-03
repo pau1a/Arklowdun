@@ -144,15 +144,14 @@ fn normalise_deadline_limit(limit: Option<i64>) -> i64 {
 }
 
 fn parse_timezone(value: Option<&str>) -> Option<Tz> {
-    value
-        .and_then(|name| {
-            let trimmed = name.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                trimmed.parse::<Tz>().ok()
-            }
-        })
+    value.and_then(|name| {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            trimmed.parse::<Tz>().ok()
+        }
+    })
 }
 
 fn ms_to_utc_datetime(ms: i64) -> Option<DateTime<Utc>> {
@@ -312,7 +311,10 @@ async fn list_deadline_range_page(
     })?;
 
     if end_utc < start_utc {
-        return Ok(NotesDeadlineRangePage { items: Vec::new(), cursor: None });
+        return Ok(NotesDeadlineRangePage {
+            items: Vec::new(),
+            cursor: None,
+        });
     }
 
     let (filter_categories, had_filter) = match category_ids {
@@ -328,7 +330,10 @@ async fn list_deadline_range_page(
     };
 
     if had_filter && filter_categories.is_empty() {
-        return Ok(NotesDeadlineRangePage { items: Vec::new(), cursor: None });
+        return Ok(NotesDeadlineRangePage {
+            items: Vec::new(),
+            cursor: None,
+        });
     }
 
     let limit = normalise_deadline_limit(limit);
@@ -500,7 +505,6 @@ pub async fn notes_list_by_deadline_range(
     })
     .await
 }
-
 
 #[tauri::command]
 pub async fn notes_get(

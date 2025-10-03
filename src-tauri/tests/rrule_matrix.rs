@@ -90,8 +90,8 @@ async fn rrule_matrix_matches_snapshots() -> Result<()> {
 }
 
 fn load_scenarios() -> Result<Vec<Scenario>> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../fixtures/time/recurrence/matrix.json");
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/time/recurrence/matrix.json");
     let data = fs::read_to_string(&path)
         .with_context(|| format!("read scenario fixture: {}", path.display()))?;
     let scenarios: Vec<Scenario> = serde_json::from_str(&data)
@@ -134,7 +134,8 @@ async fn run_scenario(scenario: &Scenario) -> Result<()> {
     let first_records = records_from_instances(&first.items, &tz)?;
     let second_records = records_from_instances(&second.items, &tz)?;
     assert_eq!(
-        first_records, second_records,
+        first_records,
+        second_records,
         "{} ordering drift",
         scenario.name()
     );

@@ -37,6 +37,7 @@ function resolveKey(key: SettingsStringKey): string {
     ) {
       throw new Error(`Missing settings string for key "${key}"`);
     }
+    // eslint-disable-next-line security/detect-object-injection -- keys are validated via SettingsStringKey
     current = (current as Record<string, unknown>)[part];
   }
 

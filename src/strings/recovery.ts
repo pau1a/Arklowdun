@@ -35,6 +35,7 @@ function resolveKey(key: RecoveryStringKey): string {
     ) {
       throw new Error(`Missing recovery string for key "${key}"`);
     }
+    // eslint-disable-next-line security/detect-object-injection -- keys are validated via RecoveryStringKey
     current = (current as Record<string, unknown>)[part];
   }
 

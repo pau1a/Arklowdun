@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { generateInventory } from "../../scripts/licensing/npm-inventory.ts";

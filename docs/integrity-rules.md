@@ -81,6 +81,22 @@ if let Some(row) = repo::first_active(&pool, "bills", &household_id, None).await
 To obtain a `householdId`, call the `household_get_active` command or
 surface a selection flow so the user can choose a household explicitly.
 
+## Household CRUD Guards
+
+- The `household_delete` IPC command soft-deletes rows by setting
+  `deleted_at`. If the target row is the current active household, the backend
+  immediately switches the active selection back to the default household
+  before emitting `household:changed`.
+- SQLite triggers ensure the default household cannot be deleted or
+  soft-deleted. The IPC layer maps attempts to stable error codes so the UI can
+  present consistent messages.
+
+| Scenario | Error code |
+| --- | --- |
+| Delete default household | `DEFAULT_UNDELETABLE` |
+| Operate on a missing household id | `HOUSEHOLD_NOT_FOUND` |
+| Operate on a soft-deleted household (update/set active) | `HOUSEHOLD_DELETED` |
+
 ## Notes & Shopping Soft Delete
 
 Notes and shopping items must use soft deletion. Rows are never removed;

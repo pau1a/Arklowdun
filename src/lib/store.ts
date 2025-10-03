@@ -55,6 +55,7 @@ async function readValue<K extends keyof WindowStateSchema>(
       log.warn("store: read failed", { key, error });
     }
   }
+  // eslint-disable-next-line security/detect-object-injection -- key is restricted to WindowStateSchema properties
   return volatileState[key];
 }
 
@@ -62,6 +63,7 @@ async function persistValue<K extends keyof WindowStateSchema>(
   key: K,
   value: WindowStateSchema[K],
 ): Promise<void> {
+  // eslint-disable-next-line security/detect-object-injection -- key is restricted to WindowStateSchema properties
   volatileState[key] = value;
   const store = await loadStore();
   if (!store) return;
@@ -140,6 +142,7 @@ export function onRotationModeChange(listener: (mode: RotationMode) => void): ()
 
 export function __resetStoreForTests(): void {
   Object.keys(volatileState).forEach((key) => {
+    // eslint-disable-next-line security/detect-object-injection -- cleanup iterates over controlled local keys
     delete (volatileState as Record<string, unknown>)[key];
   });
   storeLoader = null;

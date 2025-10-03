@@ -305,10 +305,11 @@ async fn cancel_mid_run_persists_checkpoint_and_progress_monotonic() -> Result<(
 
     let progress_log: Arc<Mutex<Vec<(u64, u64, u64)>>> = Arc::new(Mutex::new(Vec::new()));
     let progress_sink = progress_log.clone();
-    let progress_cb: Arc<dyn Fn(BackfillProgress) + Send + Sync> = Arc::new(move |progress: BackfillProgress| {
-        let mut guard = progress_sink.lock().unwrap();
-        guard.push((progress.scanned, progress.updated, progress.elapsed_ms));
-    });
+    let progress_cb: Arc<dyn Fn(BackfillProgress) + Send + Sync> =
+        Arc::new(move |progress: BackfillProgress| {
+            let mut guard = progress_sink.lock().unwrap();
+            guard.push((progress.scanned, progress.updated, progress.elapsed_ms));
+        });
 
     let summary = run_events_backfill(
         &pool,

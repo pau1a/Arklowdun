@@ -23,6 +23,19 @@ const defaultMessages: Record<DbHealthBannerState, string> = {
   unhealthy: recoveryText('db.health.banner.unhealthy'),
 };
 
+function defaultMessageFor(state: DbHealthBannerState): string {
+  switch (state) {
+    case 'running':
+      return defaultMessages.running;
+    case 'healthy':
+      return defaultMessages.healthy;
+    case 'unhealthy':
+      return defaultMessages.unhealthy;
+    default:
+      return defaultMessages.running;
+  }
+}
+
 function applyStateClass(el: HTMLElement, state: DbHealthBannerState): void {
   el.className = 'db-health-banner';
   el.classList.add(`db-health-banner--${state}`);
@@ -72,7 +85,7 @@ export function createDbHealthBanner(
   root.append(status, description, actions);
 
   let currentState: DbHealthBannerState = props.state;
-  let currentMessage = props.message ?? defaultMessages[currentState];
+  let currentMessage = props.message ?? defaultMessageFor(currentState);
   let currentDescription = props.description ?? '';
   let currentHidden = props.hidden ?? false;
   let currentShowSpinner = props.showSpinner ?? currentState === 'running';
@@ -86,7 +99,7 @@ export function createDbHealthBanner(
 
     const messageText = currentMessage?.trim().length
       ? currentMessage
-      : defaultMessages[currentState];
+      : defaultMessageFor(currentState);
     message.textContent = messageText;
 
     if (currentDescription && currentDescription.trim().length > 0) {
@@ -113,7 +126,7 @@ export function createDbHealthBanner(
   root.update = (next: Partial<DbHealthBannerProps>) => {
     if (next.state !== undefined) currentState = next.state;
     if (next.message !== undefined)
-      currentMessage = next.message ?? defaultMessages[currentState];
+      currentMessage = next.message ?? defaultMessageFor(currentState);
     if (next.description !== undefined)
       currentDescription = next.description ?? '';
     if (next.hidden !== undefined) currentHidden = next.hidden;

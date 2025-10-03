@@ -343,6 +343,7 @@ function renderPlanTables(
     row.appendChild(conflictsCell);
 
     if (execution) {
+      // eslint-disable-next-line security/detect-object-injection -- table names come from trusted plan metadata
       const exec = execution.tables[name];
       if (exec) {
         row.dataset.executionAdds = numberFormatter.format(exec.adds);

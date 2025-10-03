@@ -20,6 +20,10 @@ See the [Arklowdun Master Plan](docs/master-plan.md) for the high-level strategi
 - The desktop app now persists an "active" household selection, validating it
   against soft-deleted or missing rows and falling back to the default
   household when necessary.
+- Backend household CRUD commands now expose create/update/delete/restore
+  flows with stable error codes. Deleting the active non-default household
+  automatically switches back to the default and emits a `household:changed`
+  event.
 
 ## Dev
 
