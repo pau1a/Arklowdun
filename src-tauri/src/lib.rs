@@ -162,7 +162,7 @@ use notes::{
 };
 
 #[cfg(test)]
-mod tests {
+mod cascade_health_tests {
     use super::*;
     use crate::{
         db::health::{DbHealthReport, DbHealthStatus},
