@@ -178,7 +178,7 @@ function fillFromRadii(
   for (let i = 0; i <= points; i += 1) {
       const idx = i % points;
       const ang = (idx / points) * twoPi;
-      const base = radii.at(idx) ?? 1;
+      const base = radii[idx] ?? 1;
       const rad = Math.max(1, base * innerScale);
       const x = cx + Math.cos(ang) * rad;
       const y = cy + Math.sin(ang) * rad;
@@ -202,7 +202,7 @@ function pathFromRadii(
   for (let i = 0; i <= points; i += 1) {
       const idx = i % points;
       const ang = (idx / points) * twoPi;
-      const base = radii.at(idx) ?? 1;
+      const base = radii[idx] ?? 1;
       const rad = Math.max(1, base * scale);
       const x = cx + Math.cos(ang) * rad;
       const y = cy + Math.sin(ang) * rad;
@@ -638,8 +638,8 @@ export abstract class AmbientBlobCanvas {
       } else {
         smoothed = new Float32Array(POINTS);
           for (let i = 0; i < POINTS; i += 1) {
-            const previousValue = prev.at(i) ?? 0;
-            const nextValue = newR.at(i) ?? previousValue;
+            const previousValue = prev[i] ?? 0;
+            const nextValue = newR[i] ?? previousValue;
             const blended = previousValue + (nextValue - previousValue) * k;
             smoothed.set([blended], i);
           }
