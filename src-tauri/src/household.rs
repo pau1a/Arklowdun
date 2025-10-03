@@ -206,6 +206,7 @@ pub struct DeleteOutcome {
 #[derive(Debug, sqlx::FromRow)]
 struct HouseholdStatus {
     id: String,
+    name: String,
     is_default: bool,
     deleted_at: Option<i64>,
 }
@@ -224,7 +225,7 @@ const SELECT_HOUSEHOLD_BASE: &str = r#"
 
 async fn fetch_status(pool: &SqlitePool, id: &str) -> Result<HouseholdStatus, HouseholdCrudError> {
     let status = sqlx::query_as::<_, HouseholdStatus>(
-        "SELECT id, CASE WHEN is_default = 1 THEN 1 ELSE 0 END AS is_default, deleted_at\n         FROM household WHERE id = ?1",
+        "SELECT id, name, CASE WHEN is_default = 1 THEN 1 ELSE 0 END AS is_default, deleted_at\n         FROM household WHERE id = ?1",
     )
     .bind(id)
     .fetch_optional(pool)
@@ -291,7 +292,6 @@ pub async fn create_household(
     .await
     .map_err(|err| HouseholdCrudError::Unexpected(err.into()))?;
 
-    info!(target: "arklowdun", event = "household_created", id = %id);
     fetch_details(pool, &id).await
 }
 
@@ -338,7 +338,6 @@ pub async fn update_household(
         .await
         .map_err(|err| HouseholdCrudError::Unexpected(err.into()))?;
 
-    info!(target: "arklowdun", event = "household_updated", id = %status.id);
     fetch_details(pool, id).await
 }
 
@@ -349,9 +348,23 @@ pub async fn delete_household(
 ) -> Result<DeleteOutcome, HouseholdCrudError> {
     let status = fetch_status(pool, id).await?;
     if status.is_default {
+        warn!(
+            target: "arklowdun",
+            event = "household_delete_failed",
+            id = %status.id,
+            name = %status.name,
+            reason = "default"
+        );
         return Err(HouseholdCrudError::DefaultUndeletable);
     }
     if status.deleted_at.is_some() {
+        warn!(
+            target: "arklowdun",
+            event = "household_delete_failed",
+            id = %status.id,
+            name = %status.name,
+            reason = "already_deleted"
+        );
         return Err(HouseholdCrudError::Deleted);
     }
 
@@ -374,13 +387,6 @@ pub async fn delete_household(
         None
     };
 
-    info!(
-        target: "arklowdun",
-        event = "household_deleted",
-        id = %status.id,
-        was_active
-    );
-
     Ok(DeleteOutcome {
         was_active,
         fallback_id,
@@ -393,6 +399,12 @@ pub async fn restore_household(
 ) -> Result<HouseholdRecord, HouseholdCrudError> {
     let status = fetch_status(pool, id).await?;
     if status.deleted_at.is_none() {
+        info!(
+            target: "arklowdun",
+            event = "household_restore_skipped",
+            id = %status.id,
+            name = %status.name
+        );
         return fetch_details(pool, id).await;
     }
 
@@ -404,6 +416,5 @@ pub async fn restore_household(
         .await
         .map_err(|err| HouseholdCrudError::Unexpected(err.into()))?;
 
-    info!(target: "arklowdun", event = "household_restored", id = %status.id);
     fetch_details(pool, id).await
 }

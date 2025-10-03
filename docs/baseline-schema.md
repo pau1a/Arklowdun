@@ -71,6 +71,12 @@ use deterministic values to keep fixture diffs stable.
   `household:changed` event.
 - The default household remains undeletable and attempts are mapped to the
   stable error code `DEFAULT_UNDELETABLE`.
+- A soft-deleted household cannot be made active until restored and the IPC
+  surface responds with `HOUSEHOLD_DELETED`. Requests to activate the current
+  household return `HOUSEHOLD_ALREADY_ACTIVE` so the UI can short-circuit
+  without reloading state.
+- `deleted_at` is `NULL` for active rows; restores clear the timestamp and
+  update `updated_at`.
 
 ## Schema fingerprint
 
