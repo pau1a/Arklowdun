@@ -141,8 +141,7 @@ export async function createHousehold(
   color: string | null,
 ): Promise<HouseholdRecord> {
   const record = await call<HouseholdRecordRaw>("household_create", {
-    name,
-    color,
+    args: { name, color },
   });
   return normalizeHousehold(record);
 }
