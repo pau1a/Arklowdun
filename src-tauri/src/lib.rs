@@ -1110,7 +1110,6 @@ async fn household_get(
 
 #[tauri::command]
 async fn household_create(
-    window: tauri::Window,
     state: State<'_, AppState>,
     args: HouseholdCreateArgs,
 ) -> AppResult<crate::household::HouseholdRecord> {
@@ -1118,7 +1117,6 @@ async fn household_create(
     let pool = state.pool_clone();
     let name = args.name;
     let color = args.color;
-    let actor = window.label().to_string();
     let result = dispatch_async_app_result(move || {
         let pool = pool.clone();
         async move {
@@ -1134,8 +1132,7 @@ async fn household_create(
         event = "household_create",
         id = %result.id,
         name = %result.name,
-        color = result.color.as_deref().unwrap_or(""),
-        actor = %actor
+        color = result.color.as_deref().unwrap_or("")
     );
 
     Ok(result)
@@ -1143,7 +1140,6 @@ async fn household_create(
 
 #[tauri::command]
 async fn household_update(
-    window: tauri::Window,
     state: State<'_, AppState>,
     args: HouseholdUpdateArgs,
 ) -> AppResult<crate::household::HouseholdRecord> {
@@ -1152,7 +1148,6 @@ async fn household_update(
     let id = args.id;
     let name = args.name;
     let color = args.color;
-    let actor = window.label().to_string();
     let result = dispatch_async_app_result(move || {
         let pool = pool.clone();
         async move {
@@ -1175,8 +1170,7 @@ async fn household_update(
         event = "household_update",
         id = %result.id,
         name = %result.name,
-        color = result.color.as_deref().unwrap_or(""),
-        actor = %actor
+        color = result.color.as_deref().unwrap_or("")
     );
 
     Ok(result)
@@ -1184,7 +1178,6 @@ async fn household_update(
 
 #[tauri::command]
 async fn household_delete(
-    window: tauri::Window,
     id: String,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -1192,7 +1185,6 @@ async fn household_delete(
     let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool_clone();
     let active = snapshot_active_id(&state);
-    let actor = window.label().to_string();
     let outcome = match crate::household::delete_household(&pool, &id, active.as_deref()).await {
         Ok(outcome) => outcome,
         Err(err) => {
@@ -1206,8 +1198,7 @@ async fn household_delete(
                 target: "arklowdun",
                 event = "household_delete_failed",
                 id = %id,
-                reason,
-                actor = %actor
+                reason
             );
             return Err(map_household_crud_error(err));
         }
@@ -1251,7 +1242,6 @@ async fn household_delete(
             id = %record.id,
             name = %record.name,
             color = record.color.as_deref().unwrap_or(""),
-            actor = %actor,
             was_active = outcome.was_active,
             fallback_id = outcome.fallback_id.as_deref()
         );
@@ -1264,13 +1254,11 @@ async fn household_delete(
 
 #[tauri::command]
 async fn household_restore(
-    window: tauri::Window,
     state: State<'_, AppState>,
     id: String,
 ) -> AppResult<crate::household::HouseholdRecord> {
     let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool_clone();
-    let actor = window.label().to_string();
     let record = dispatch_async_app_result(move || {
         let pool = pool.clone();
         let id = id.clone();
@@ -1287,8 +1275,7 @@ async fn household_restore(
         event = "household_restore",
         id = %record.id,
         name = %record.name,
-        color = record.color.as_deref().unwrap_or(""),
-        actor = %actor
+        color = record.color.as_deref().unwrap_or("")
     );
 
     Ok(record)
@@ -1296,21 +1283,18 @@ async fn household_restore(
 
 #[tauri::command]
 async fn household_set_active(
-    window: tauri::Window,
     id: String,
     app: tauri::AppHandle,
     state: tauri::State<'_, state::AppState>,
 ) -> AppResult<()> {
     let pool = state.pool_clone();
     let store = state.store.clone();
-    let actor = window.label().to_string();
     if snapshot_active_id(&state).as_deref() == Some(id.as_str()) {
         tracing::warn!(
             target: "arklowdun",
             event = "household_set_active_failed",
             id = %id,
-            reason = "already_active",
-            actor = %actor
+            reason = "already_active"
         );
         return Err(AppError::new(
             "HOUSEHOLD_ALREADY_ACTIVE",
@@ -1330,8 +1314,7 @@ async fn household_set_active(
                     event = "household_set_active",
                     id = %record.id,
                     name = %record.name,
-                    color = record.color.as_deref().unwrap_or(""),
-                    actor = %actor
+                    color = record.color.as_deref().unwrap_or("")
                 );
             }
             if let Err(err) = app.emit("household:changed", json!({ "id": id.clone() })) {
@@ -1348,8 +1331,7 @@ async fn household_set_active(
                 target: "arklowdun",
                 event = "household_set_active_failed",
                 id = %id,
-                reason = "not_found",
-                actor = %actor
+                reason = "not_found"
             );
             Err(AppError::new("HOUSEHOLD_NOT_FOUND", "Household not found."))
         }
@@ -1358,8 +1340,7 @@ async fn household_set_active(
                 target: "arklowdun",
                 event = "household_set_active_failed",
                 id = %id,
-                reason = "deleted",
-                actor = %actor
+                reason = "deleted"
             );
             Err(AppError::new("HOUSEHOLD_DELETED", "Household is deleted."))
         }
