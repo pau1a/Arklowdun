@@ -93,6 +93,9 @@ surface a selection flow so the user can choose a household explicitly.
 - SQLite triggers ensure the default household cannot be deleted or
   soft-deleted. The IPC layer maps attempts to stable error codes so the UI can
   present consistent messages.
+- Renderer controls keep the default household delete action disabled and the
+  backend clears any cascade checkpoints before returning `DEFAULT_UNDELETABLE`
+  so health checks remain green.
 
 | Scenario | Error code |
 | --- | --- |

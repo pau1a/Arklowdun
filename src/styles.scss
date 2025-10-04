@@ -1310,6 +1310,20 @@ footer a.footer__settings {
   justify-content: flex-end;
 }
 
+.settings__household-actions .is-disabled {
+  cursor: not-allowed;
+  background: var(--color-surface-subtle);
+  color: var(--color-text-muted);
+  border-color: var(--color-border-soft);
+  box-shadow: none;
+}
+
+.theme--dark .settings__household-actions .is-disabled {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.72);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
 .settings__household-edit {
   display: flex;
   flex-direction: column;

@@ -40,6 +40,8 @@ immediate feedback while mirroring the behaviour of the backend invariants.
   - `DEFAULT_UNDELETABLE` → "The default household cannot be deleted."
   - `HOUSEHOLD_NOT_FOUND` → "That household no longer exists."
   - `HOUSEHOLD_DELETED` → "That household is deleted. Restore it first."
+- The default household always renders with a disabled "Delete" control and a
+  tooltip explaining the guard so users understand why the action is blocked.
 - Success and error paths surface toast notifications so users receive feedback
   without leaving the page.
 

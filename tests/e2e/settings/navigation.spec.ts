@@ -32,4 +32,40 @@ test.describe('Settings navigation', () => {
 
     await expect(page.locator('#settings-notifications')).toBeVisible();
   });
+
+  test('default household delete guard surfaces toast and keeps health green', async ({ page }) => {
+    await page.goto('/#/settings#settings-household');
+
+    const defaultRow = page
+      .locator('.settings__household-row')
+      .filter({ hasText: 'Default household' });
+    const deleteButton = defaultRow.getByRole('button', { name: 'Delete' });
+
+    await expect(deleteButton).toBeDisabled();
+
+    await deleteButton.evaluate((button: HTMLButtonElement) => {
+      button.disabled = false;
+      button.removeAttribute('aria-disabled');
+    });
+
+    const statusLine = page.locator('.settings__household-status');
+    const initialStatus = await statusLine.textContent();
+
+    page.once('dialog', (dialog) => dialog.accept());
+    await deleteButton.click();
+
+    const errorToast = page
+      .locator('#ui-toast-region .toast')
+      .filter({ hasText: 'The default household cannot be deleted.' });
+    await expect(errorToast).toBeVisible();
+
+    if (initialStatus && initialStatus.trim().length > 0) {
+      await expect(statusLine).toHaveText(initialStatus);
+    } else {
+      await expect(statusLine).not.toContainText('Resolve database health issues');
+    }
+
+    const healthBanner = page.locator('[data-ui="db-health-banner"]');
+    await expect(healthBanner).toHaveAttribute('data-state', 'healthy');
+  });
 });

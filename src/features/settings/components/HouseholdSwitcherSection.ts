@@ -300,13 +300,26 @@ function createHouseholdRow(
     globalLoading: false,
   };
 
+  const syncDeleteAffordance = (disabled: boolean) => {
+    const lockedDefault = current.isDefault;
+    deleteButton.disabled = disabled || lockedDefault;
+    deleteButton.classList.toggle("is-disabled", lockedDefault);
+    if (lockedDefault) {
+      deleteButton.setAttribute("aria-disabled", "true");
+      deleteButton.title = "Default household cannot be deleted.";
+    } else {
+      deleteButton.removeAttribute("aria-disabled");
+      deleteButton.removeAttribute("title");
+    }
+  };
+
   const setPending = (value: boolean, context: RowContext) => {
     pending = value;
     const disabled = pending || context.actionsDisabled || context.globalLoading;
     activateButton.disabled = disabled;
     renameButton.disabled = disabled || current.deletedAt !== null;
-    deleteButton.disabled = disabled || current.deletedAt !== null;
     restoreButton.disabled = disabled || current.deletedAt === null;
+    syncDeleteAffordance(disabled || current.deletedAt !== null);
     nameInput.disabled = pending;
     colorPicker.setDisabled(pending);
     saveButton.disabled = pending;

@@ -14,6 +14,14 @@ export const settingsInitStub = `(() => {
   let activeId = '0';
   let counter = 1;
   const listeners = new Map();
+  const dbHealth = {
+    status: 'ok',
+    checks: [],
+    offenders: [],
+    schema_hash: 'test-schema',
+    app_version: '1.0.0-test',
+    generated_at: new Date().toISOString(),
+  };
 
   const emitEvent = (event, payload) => {
     const bucket = listeners.get(event);
@@ -148,6 +156,11 @@ export const settingsInitStub = `(() => {
           target.updated_at = Date.now();
           return Promise.resolve({ ...target });
         }
+        case 'db_get_health_report':
+          return Promise.resolve({ ...dbHealth });
+        case 'db_recheck':
+          dbHealth.generated_at = new Date().toISOString();
+          return Promise.resolve({ ...dbHealth });
         case 'categories_list':
           return Promise.resolve([]);
         case 'about_metadata':

@@ -651,6 +651,8 @@ pub async fn delete_household(
 
     let status = fetch_status(pool, id).await?;
     if status.is_default {
+        clear_checkpoint(pool, id).await?;
+        acknowledge_vacuum(pool, id).await?;
         warn!(
             target: "arklowdun",
             event = "household_delete_failed",

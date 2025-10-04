@@ -70,17 +70,18 @@ test.describe('Settings households lifecycle', () => {
     await expect(defaultRow.locator('.settings__household-badge--active')).toBeVisible();
   });
 
-  test('deleting the default household surfaces an error toast', async ({ page }) => {
+  test('default household delete control is visibly disabled', async ({ page }) => {
     const defaultRow = page
       .locator('.settings__household-row')
       .filter({ hasText: 'Default household' });
+    const deleteButton = defaultRow.getByRole('button', { name: 'Delete' });
 
-    page.once('dialog', (dialog) => dialog.accept());
-    await defaultRow.getByRole('button', { name: 'Delete' }).click();
-
-    const errorToast = page
-      .locator('#ui-toast-region .toast')
-      .filter({ hasText: 'The default household cannot be deleted.' });
-    await expect(errorToast).toBeVisible();
+    await expect(deleteButton).toBeDisabled();
+    await expect(deleteButton).toHaveAttribute(
+      'title',
+      'Default household cannot be deleted.',
+    );
+    await expect(deleteButton).toHaveAttribute('aria-disabled', 'true');
+    await expect(deleteButton).toHaveClass(/is-disabled/);
   });
 });
