@@ -5,7 +5,8 @@ CREATE TABLE household (
   created_at INTEGER,
   updated_at INTEGER,
   deleted_at INTEGER,
-  tz TEXT
+  tz TEXT,
+  color TEXT
 );
 CREATE TABLE categories (
   id TEXT PRIMARY KEY,
