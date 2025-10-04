@@ -1325,6 +1325,7 @@ async fn household_update(
     let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool_clone();
     let id = args.id;
+    let id_for_log = id.clone();
     let name = args.name;
     let color = args.color;
     let result = dispatch_async_app_result(move || {
@@ -1360,7 +1361,7 @@ async fn household_update(
             tracing::warn!(
                 target: "arklowdun",
                 event = "household_update",
-                household_id = %id,
+                household_id = %id_for_log,
                 result = "error",
                 error_code = %err.code()
             );
