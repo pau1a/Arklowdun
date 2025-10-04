@@ -54,6 +54,11 @@ export interface SettingsViewOptions {
   useSettingsHook?: typeof useSettings;
 }
 
+interface SettingsNavItem {
+  headingId: string;
+  label: string;
+}
+
 export function SettingsView(
   container: HTMLElement,
   options: SettingsViewOptions = {},
@@ -84,6 +89,15 @@ export function SettingsView(
 
   const panel = SettingsPanel();
   const section = panel.element; // allow other modules to locate settings root
+
+  const layout = document.createElement("div");
+  layout.className = "settings__layout";
+
+  const content = document.createElement("div");
+  content.className = "settings__content";
+  layout.appendChild(content);
+
+  section.appendChild(layout);
 
   const backButton = createButton({
     label: "Back to dashboard",
@@ -290,19 +304,73 @@ export function SettingsView(
     return panel;
   };
 
+  const navSections: SettingsNavItem[] = [];
+
+  const registerNavSection = (
+    headingId: string,
+    label: string,
+    element: HTMLElement,
+  ): HTMLElement => {
+    element.dataset.settingsSection = headingId;
+    content.appendChild(element);
+    navSections.push({ headingId, label });
+    return element;
+  };
+
   const householdSwitcher = createHouseholdSwitcher();
   registerViewCleanup(container, householdSwitcher.destroy);
+  registerNavSection("settings-household", "Households", householdSwitcher.element);
+
   const timezoneMaintenance = createTimezoneSection();
-  const backups = createBackup();
-  const exportView = createExport();
-  const importView = createImport();
-  const repair = createRepair();
-  const hardRepair = createHardRepair();
-  const manageCategories = manageCategoriesSection();
-  const general = createEmptySection("settings-general", "General");
-  const storage = createEmptySection("settings-storage", "Storage and permissions");
-  const notifications = createEmptySection("settings-notifications", "Notifications");
-  const appearance = createAmbient();
+  registerNavSection(
+    "settings-timezone-maintenance",
+    "Time & timezone",
+    timezoneMaintenance.element,
+  );
+
+  registerNavSection("settings-backups", "Backups", createBackup().element);
+
+  registerNavSection("settings-export", "Export", createExport().element);
+
+  registerNavSection("settings-import", "Import", createImport().element);
+
+  registerNavSection("settings-repair", "Repair", createRepair().element);
+
+  registerNavSection(
+    "settings-hard-repair",
+    "Advanced repair",
+    createHardRepair().element,
+  );
+
+  registerNavSection(
+    "settings-manage-categories",
+    "Categories",
+    manageCategoriesSection(),
+  );
+
+  registerNavSection(
+    "settings-general",
+    "General",
+    createEmptySection("settings-general", "General"),
+  );
+
+  registerNavSection(
+    "settings-storage",
+    "Storage & permissions",
+    createEmptySection("settings-storage", "Storage and permissions"),
+  );
+
+  registerNavSection(
+    "settings-notifications",
+    "Notifications",
+    createEmptySection("settings-notifications", "Notifications"),
+  );
+
+  registerNavSection(
+    "settings-ambient",
+    "Appearance",
+    createAmbient(),
+  );
 
   const about = document.createElement("section");
   about.className = "card settings__section";
@@ -397,25 +465,23 @@ export function SettingsView(
   });
   about.append(aboutHeading, aboutBody);
 
-  section.append(
-    backButton,
-    householdSwitcher.element,
-    timezoneMaintenance.element,
-    backups.element,
-    exportView.element,
-    importView.element,
-    repair.element,
-    hardRepair.element,
-    manageCategories,
-    general,
-    storage,
-    notifications,
-    appearance,
-    about,
-  );
+  registerNavSection("settings-about", "Diagnostics", about);
+
+  section.insertBefore(backButton, layout);
+  const navigation = setupSettingsNavigation(navSections);
+  layout.insertBefore(navigation.element, content);
+
+  registerViewCleanup(container, navigation.destroy);
 
   container.innerHTML = "";
   container.appendChild(section);
+
+  const applyNavigationState = () => navigation.applyInitialState();
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(applyNavigationState);
+  } else {
+    applyNavigationState();
+  }
 
   section
     .querySelectorAll<HTMLElement>(".settings__empty")
@@ -427,6 +493,263 @@ export function SettingsView(
     fetchSummary,
     openDiagnostics,
   });
+}
+
+interface SettingsNavigationHandle {
+  element: HTMLElement;
+  applyInitialState: () => void;
+  destroy: () => void;
+}
+
+const SETTINGS_SECTION_STORAGE_KEY = "arklowdun.settings.activeSection";
+
+const FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  '[href]',
+  'input:not([disabled]):not([type="hidden"])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(", ");
+
+function setupSettingsNavigation(items: SettingsNavItem[]): SettingsNavigationHandle {
+  const nav = document.createElement("nav");
+  nav.className = "settings__nav";
+  nav.setAttribute("aria-label", "Settings sections");
+  nav.dataset.testid = "settings-nav";
+
+  const list = document.createElement("ul");
+  list.className = "settings__nav-list";
+  nav.appendChild(list);
+
+  const anchors = new Map<string, HTMLAnchorElement>();
+
+  items.forEach((item) => {
+    const li = document.createElement("li");
+    li.className = "settings__nav-item";
+
+    const anchor = document.createElement("a");
+    anchor.className = "settings__nav-link";
+    anchor.href = `#${item.headingId}`;
+    anchor.textContent = item.label;
+    anchor.dataset.testid = `settings-nav-${item.headingId}`;
+
+    anchor.addEventListener("click", (event) => {
+      event.preventDefault();
+      activate(item.headingId, {
+        behavior: "smooth",
+        focus: true,
+        updateHash: true,
+        store: true,
+      });
+    });
+
+    li.appendChild(anchor);
+    list.appendChild(li);
+    anchors.set(item.headingId, anchor);
+  });
+
+  let currentId: string | null = null;
+  let scrollLockUntil = 0;
+
+  const markCurrent = (id: string, { store = true }: { store?: boolean } = {}) => {
+    if (!anchors.has(id) || currentId === id) return;
+    currentId = id;
+    for (const [key, anchor] of anchors) {
+      if (key === id) {
+        anchor.setAttribute("aria-current", "true");
+      } else {
+        anchor.removeAttribute("aria-current");
+      }
+    }
+    if (store) {
+      try {
+        window.localStorage?.setItem(SETTINGS_SECTION_STORAGE_KEY, id);
+      } catch {
+        // ignore storage failures
+      }
+    }
+  };
+
+  const findSectionElements = (
+    headingId: string,
+  ): { section: HTMLElement; heading: HTMLElement } | null => {
+    const heading = document.getElementById(headingId);
+    if (!heading) return null;
+    const section = heading.closest<HTMLElement>(".settings__section") ?? heading;
+    return { section, heading };
+  };
+
+  const focusSection = (section: HTMLElement, heading: HTMLElement) => {
+    const focusable = section.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+    if (focusable) {
+      focusable.focus({ preventScroll: true });
+      return;
+    }
+
+    const previousTabIndex = heading.getAttribute("tabindex");
+    heading.setAttribute("tabindex", "-1");
+    heading.focus({ preventScroll: true });
+    if (previousTabIndex === null) {
+      const cleanup = () => heading.removeAttribute("tabindex");
+      heading.addEventListener("blur", cleanup, { once: true });
+    }
+  };
+
+  const prefersReducedMotion =
+    window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
+
+  type ActivateOptions = {
+    behavior?: ScrollBehavior;
+    focus?: boolean;
+    updateHash?: boolean;
+    store?: boolean;
+  };
+
+  const activate = (id: string, options: ActivateOptions = {}): boolean => {
+    const match = findSectionElements(id);
+    if (!match) return false;
+
+    const behavior = options.behavior ?? "auto";
+    const shouldFocus = options.focus ?? true;
+    const shouldUpdateHash = options.updateHash ?? false;
+    const shouldStore = options.store ?? true;
+
+    const finalBehavior: ScrollBehavior =
+      prefersReducedMotion && behavior === "smooth" ? "auto" : behavior;
+
+    match.section.scrollIntoView({ block: "start", behavior: finalBehavior });
+
+    if (shouldFocus) {
+      focusSection(match.section, match.heading);
+    }
+
+    markCurrent(id, { store: shouldStore });
+
+    if (shouldUpdateHash) {
+      const baseHash = extractRouteHash(window.location.hash) ?? "#/settings";
+      history.replaceState(null, "", `${baseHash}#${id}`);
+    }
+
+    const now =
+      typeof performance !== "undefined" && typeof performance.now === "function"
+        ? performance.now()
+        : Date.now();
+    scrollLockUntil = now + 400;
+    return true;
+  };
+
+  const readStoredSection = (): string | null => {
+    try {
+      return window.localStorage?.getItem(SETTINGS_SECTION_STORAGE_KEY) ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleHashChange = () => {
+    const next = extractSectionId(window.location.hash);
+    if (next && anchors.has(next)) {
+      activate(next, { behavior: "smooth", focus: true, updateHash: false });
+    }
+  };
+
+  window.addEventListener("hashchange", handleHashChange);
+
+  const computeOffset = () => {
+    const root = document.documentElement;
+    const raw = getComputedStyle(root).getPropertyValue("--app-toolbar-height");
+    const toolbar = Number.parseFloat(raw) || 64;
+    return toolbar + 32;
+  };
+
+  const handleScroll = () => {
+    const now =
+      typeof performance !== "undefined" && typeof performance.now === "function"
+        ? performance.now()
+        : Date.now();
+    if (now < scrollLockUntil) return;
+
+    const headings = items
+      .map((item) => document.getElementById(item.headingId))
+      .filter((el): el is HTMLElement => el instanceof HTMLElement);
+
+    if (!headings.length) return;
+
+    const offset = computeOffset();
+    let candidate: HTMLElement | null = headings[0];
+
+    for (const heading of headings) {
+      const rect = heading.getBoundingClientRect();
+      if (rect.top - offset <= 0) {
+        candidate = heading;
+      } else {
+        break;
+      }
+    }
+
+    if (candidate) {
+      markCurrent(candidate.id, { store: true });
+    }
+  };
+
+  const onScroll = () => handleScroll();
+  window.addEventListener("scroll", onScroll, { passive: true });
+
+  const destroy = () => {
+    window.removeEventListener("hashchange", handleHashChange);
+    window.removeEventListener("scroll", onScroll);
+  };
+
+  const applyInitialState = () => {
+    const headings = items
+      .map((item) => document.getElementById(item.headingId))
+      .filter((el): el is HTMLElement => el instanceof HTMLElement);
+
+    if (!headings.length) return;
+
+    const fromHash = extractSectionId(window.location.hash);
+    if (fromHash && anchors.has(fromHash)) {
+      activate(fromHash, { behavior: "auto", focus: true, updateHash: false });
+      return;
+    }
+
+    const stored = readStoredSection();
+    if (stored && anchors.has(stored)) {
+      activate(stored, {
+        behavior: "auto",
+        focus: false,
+        updateHash: false,
+        store: false,
+      });
+      markCurrent(stored, { store: true });
+      return;
+    }
+
+    markCurrent(headings[0].id, { store: false });
+  };
+
+  return { element: nav, applyInitialState, destroy };
+}
+
+function extractSectionId(hash: string | null | undefined): string | null {
+  if (!hash) return null;
+  const trimmed = hash.trim();
+  if (!trimmed) return null;
+  const withHash = trimmed.startsWith("#") ? trimmed : `#${trimmed}`;
+  const anchorIndex = withHash.indexOf("#", 2);
+  if (anchorIndex === -1) return null;
+  const candidate = withHash.slice(anchorIndex + 1).trim();
+  return candidate || null;
+}
+
+function extractRouteHash(hash: string | null | undefined): string | null {
+  if (!hash) return null;
+  const trimmed = hash.trim();
+  if (!trimmed) return null;
+  const withHash = trimmed.startsWith("#") ? trimmed : `#${trimmed}`;
+  const anchorIndex = withHash.indexOf("#", 2);
+  return anchorIndex === -1 ? withHash : withHash.slice(0, anchorIndex);
 }
 
 function describeError(error: unknown): string {

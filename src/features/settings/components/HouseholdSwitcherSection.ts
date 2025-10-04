@@ -22,6 +22,7 @@ import createInput from "@ui/Input";
 import { createSwitch, type SwitchElement } from "@ui/Switch";
 import { toast } from "@ui/Toast";
 import { showError } from "@ui/errors";
+import { isHexColor, readableOn, MIN_CONTRAST_AA } from "@utils/color";
 
 const COLOR_SWATCHES = [
   "#2563EB",
@@ -33,6 +34,11 @@ const COLOR_SWATCHES = [
   "#8B5CF6",
   "#14B8A6",
 ] as const;
+
+const CHIP_FOREGROUND: Record<"black" | "white", string> = {
+  black: "rgba(15, 23, 42, 0.94)",
+  white: "rgba(255, 255, 255, 0.94)",
+};
 
 type HealthGate = { disabled: boolean; message: string | null };
 
@@ -87,7 +93,14 @@ type ColorPickerControl = {
 function createColorPicker(initial: string | null): ColorPickerControl {
   const container = document.createElement("div");
   container.className = "settings__household-color-picker";
-  let value: string | null = initial ?? null;
+  const normalize = (input: string | null | undefined): string | null => {
+    if (typeof input !== "string") return null;
+    const trimmed = input.trim();
+    if (!isHexColor(trimmed)) return null;
+    return trimmed.toUpperCase();
+  };
+
+  let value: string | null = normalize(initial);
   const swatches: Array<{ value: string | null; button: HTMLButtonElement }> = [];
 
   const updateSelection = () => {
@@ -99,7 +112,7 @@ function createColorPicker(initial: string | null): ColorPickerControl {
   };
 
   const select = (next: string | null) => {
-    value = next;
+    value = normalize(next);
     updateSelection();
   };
 
@@ -107,18 +120,21 @@ function createColorPicker(initial: string | null): ColorPickerControl {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "settings__household-color";
-    if (swatchValue) {
-      button.style.setProperty("--household-color", swatchValue);
+    const normalized = normalize(swatchValue);
+    if (normalized) {
+      button.style.setProperty("--household-color", normalized);
       button.setAttribute("aria-label", `Use colour ${label}`);
+      button.title = label;
     } else {
       button.classList.add("settings__household-color--none");
       button.setAttribute("aria-label", "Use no colour");
+      button.title = "No colour";
     }
     button.addEventListener("click", (event) => {
       event.preventDefault();
-      select(swatchValue);
+      select(normalized);
     });
-    swatches.push({ value: swatchValue, button });
+    swatches.push({ value: normalized, button });
     return button;
   };
 
@@ -133,7 +149,7 @@ function createColorPicker(initial: string | null): ColorPickerControl {
     element: container,
     getValue: () => value,
     setValue(next) {
-      value = next ?? null;
+      value = normalize(next);
       updateSelection();
     },
     setDisabled(disabled) {
@@ -243,7 +259,27 @@ function createHouseholdRow(
   colorLabel.className = "settings__household-field-label";
   colorLabel.textContent = "Colour";
   const colorPicker = createColorPicker(record.color);
-  colorField.append(colorLabel, colorPicker.element);
+  const colorError = document.createElement("p");
+  colorError.className = "settings__household-error";
+  colorError.hidden = true;
+  const colorErrorId = `household-${record.id}-color-error`;
+  colorError.id = colorErrorId;
+  const showColorError = (message: string | null) => {
+    if (message && message.trim().length > 0) {
+      colorError.textContent = message;
+      colorError.hidden = false;
+      colorError.setAttribute("role", "alert");
+      colorPicker.element.setAttribute("aria-describedby", colorErrorId);
+      colorPicker.element.dataset.invalid = "true";
+    } else {
+      colorError.textContent = "";
+      colorError.hidden = true;
+      colorError.removeAttribute("role");
+      colorPicker.element.removeAttribute("aria-describedby");
+      delete colorPicker.element.dataset.invalid;
+    }
+  };
+  colorField.append(colorLabel, colorPicker.element, colorError);
 
   const editActions = document.createElement("div");
   editActions.className = "settings__household-edit-actions";
@@ -285,12 +321,30 @@ function createHouseholdRow(
   };
 
   const applyColor = () => {
-    if (current.color) {
+    colorChip.classList.remove(
+      "settings__household-chip--low-contrast",
+      "settings__household-chip--empty",
+    );
+    colorChip.removeAttribute("data-contrast");
+    colorChip.removeAttribute("data-contrast-warning");
+    if (current.color && isHexColor(current.color)) {
+      const { foreground, contrast } = readableOn(current.color);
       colorChip.style.setProperty("--household-color", current.color);
-      colorChip.classList.remove("settings__household-chip--empty");
+      colorChip.style.setProperty(
+        "--household-chip-foreground",
+        CHIP_FOREGROUND[foreground],
+      );
+      colorChip.setAttribute("data-contrast", contrast.toFixed(2));
+      colorChip.title = `Colour ${current.color}`;
+      if (contrast < MIN_CONTRAST_AA) {
+        colorChip.classList.add("settings__household-chip--low-contrast");
+        colorChip.setAttribute("data-contrast-warning", "true");
+      }
     } else {
       colorChip.style.removeProperty("--household-color");
+      colorChip.style.removeProperty("--household-chip-foreground");
       colorChip.classList.add("settings__household-chip--empty");
+      colorChip.removeAttribute("title");
     }
   };
 
@@ -300,13 +354,26 @@ function createHouseholdRow(
     globalLoading: false,
   };
 
+  const syncDeleteAffordance = (disabled: boolean) => {
+    const lockedDefault = current.isDefault;
+    deleteButton.disabled = disabled || lockedDefault;
+    deleteButton.classList.toggle("is-disabled", lockedDefault);
+    if (lockedDefault) {
+      deleteButton.setAttribute("aria-disabled", "true");
+      deleteButton.title = "Default household cannot be deleted.";
+    } else {
+      deleteButton.removeAttribute("aria-disabled");
+      deleteButton.removeAttribute("title");
+    }
+  };
+
   const setPending = (value: boolean, context: RowContext) => {
     pending = value;
     const disabled = pending || context.actionsDisabled || context.globalLoading;
     activateButton.disabled = disabled;
     renameButton.disabled = disabled || current.deletedAt !== null;
-    deleteButton.disabled = disabled || current.deletedAt !== null;
     restoreButton.disabled = disabled || current.deletedAt === null;
+    syncDeleteAffordance(disabled || current.deletedAt !== null);
     nameInput.disabled = pending;
     colorPicker.setDisabled(pending);
     saveButton.disabled = pending;
@@ -315,6 +382,7 @@ function createHouseholdRow(
 
   const toggleEditing = (value: boolean, context: RowContext) => {
     editing = value;
+    showColorError(null);
     if (editing) {
       nameInput.update({ value: current.name });
       colorPicker.setValue(current.color);
@@ -365,10 +433,25 @@ function createHouseholdRow(
     void (async () => {
       setPending(true, lastContext);
       try {
+        showColorError(null);
         await actions.onRename(current, { name: nameValue, color: colorValue });
         toggleEditing(false, lastContext);
-      } catch {
-        // handled upstream
+      } catch (error) {
+        const message = resolveHouseholdErrorMessage(
+          error,
+          "Unable to update household.",
+        );
+        if (message === HOUSEHOLD_ERROR_MESSAGES.INVALID_COLOR) {
+          showColorError(message);
+          toast.show({ kind: "error", message });
+          const selectedSwatch = colorPicker.element.querySelector<HTMLElement>(
+            '[data-selected="true"]',
+          );
+          selectedSwatch?.focus();
+        } else {
+          showColorError(null);
+          showError(error);
+        }
       } finally {
         setPending(false, lastContext);
       }
@@ -604,16 +687,11 @@ export function createHouseholdSwitcherSection(): HouseholdSwitcherSection {
       }
     },
     onRename: async (record, input) => {
-      try {
-        await updateHousehold(record.id, {
-          name: input.name,
-          color: input.color,
-        });
-        toast.show({ kind: "success", message: "Household renamed." });
-      } catch (error) {
-        showError(error);
-        throw error;
-      }
+      await updateHousehold(record.id, {
+        name: input.name,
+        color: input.color,
+      });
+      toast.show({ kind: "success", message: "Household updated." });
     },
     onDelete: async (record) => {
       const fallback = "Unable to delete household.";

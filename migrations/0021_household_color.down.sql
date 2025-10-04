@@ -1,0 +1,2 @@
+-- SQLite does not support dropping a single column without rebuilding the table.
+-- This down migration intentionally does nothing.

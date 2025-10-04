@@ -310,7 +310,14 @@ function ensureLayout(): LayoutContext {
 }
 
 function ensureCanonicalHash(route: RouteDefinition) {
-  if (window.location.hash === route.hash) return;
+  const current = window.location.hash;
+  if (
+    current === route.hash ||
+    current.startsWith(`${route.hash}#`) ||
+    current.startsWith(`${route.hash}?`)
+  ) {
+    return;
+  }
   history.replaceState(null, "", route.hash);
 }
 

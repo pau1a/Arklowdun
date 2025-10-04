@@ -753,6 +753,8 @@ pub struct HouseholdSummary {
     pub is_default: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tz: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
 }
 
 // Typed list for Dashboard (rich fields)
@@ -1075,7 +1077,7 @@ struct HouseholdUpdateArgs {
     id: String,
     name: Option<String>,
     #[serde(default)]
-    color: Option<String>,
+    color: Option<Option<String>>,
 }
 
 #[derive(Serialize)]
@@ -1104,6 +1106,9 @@ fn map_household_crud_error(err: crate::household::HouseholdCrudError) -> AppErr
         }
         crate::household::HouseholdCrudError::Deleted => {
             AppError::new("HOUSEHOLD_DELETED", "Household is deleted.")
+        }
+        crate::household::HouseholdCrudError::InvalidColor => {
+            AppError::new("INVALID_COLOR", "Please use a hex colour like #2563EB.")
         }
         crate::household::HouseholdCrudError::Unexpected(err) => AppError::from(err),
     }
@@ -1324,19 +1329,26 @@ async fn household_update(
 ) -> AppResult<crate::household::HouseholdRecord> {
     let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool_clone();
-    let id = args.id;
+    let HouseholdUpdateArgs { id, name, color } = args;
     let id_for_log = id.clone();
-    let name = args.name;
-    let color = args.color;
+    let mut changed_fields: Vec<&'static str> = Vec::new();
+    if name.is_some() {
+        changed_fields.push("name");
+    }
+    if color.is_some() {
+        changed_fields.push("color");
+    }
     let result = dispatch_async_app_result(move || {
         let pool = pool.clone();
+        let name = name;
+        let color = color;
         async move {
             crate::household::update_household(
                 &pool,
                 &id,
                 crate::household::HouseholdUpdateInput {
                     name: name.as_deref(),
-                    color: color.as_deref(),
+                    color: color.as_ref().map(|value| value.as_deref()),
                 },
             )
             .await
@@ -1352,6 +1364,7 @@ async fn household_update(
                 event = "household_update",
                 household_id = %record.id,
                 result = "ok",
+                changed_fields = ?changed_fields,
                 name = %record.name,
                 color = record.color.as_deref().unwrap_or("")
             );
@@ -1363,6 +1376,7 @@ async fn household_update(
                 event = "household_update",
                 household_id = %id_for_log,
                 result = "error",
+                changed_fields = ?changed_fields,
                 error_code = %err.code()
             );
             Err(err)
@@ -1392,6 +1406,7 @@ async fn household_delete(
                     crate::household::HouseholdCrudError::DefaultUndeletable => "default",
                     crate::household::HouseholdCrudError::NotFound => "not_found",
                     crate::household::HouseholdCrudError::Deleted => "already_deleted",
+                    crate::household::HouseholdCrudError::InvalidColor => "invalid_color",
                     crate::household::HouseholdCrudError::Unexpected(_) => "unexpected",
                 };
                 let app_error = map_household_crud_error(err);
@@ -1491,6 +1506,7 @@ async fn household_resume_delete(
                     crate::household::HouseholdCrudError::DefaultUndeletable => "default",
                     crate::household::HouseholdCrudError::NotFound => "not_found",
                     crate::household::HouseholdCrudError::Deleted => "already_deleted",
+                    crate::household::HouseholdCrudError::InvalidColor => "invalid_color",
                     crate::household::HouseholdCrudError::Unexpected(_) => "unexpected",
                 };
                 tracing::warn!(
@@ -1606,6 +1622,7 @@ async fn household_repair(
                     crate::household::HouseholdCrudError::DefaultUndeletable => "default",
                     crate::household::HouseholdCrudError::NotFound => "not_found",
                     crate::household::HouseholdCrudError::Deleted => "already_deleted",
+                    crate::household::HouseholdCrudError::InvalidColor => "invalid_color",
                     crate::household::HouseholdCrudError::Unexpected(_) => "unexpected",
                 };
                 tracing::warn!(
@@ -1824,7 +1841,8 @@ async fn household_list_all(state: State<'_, AppState>) -> AppResult<Vec<Househo
         SELECT id,
                name,
                CASE WHEN is_default = 1 THEN 1 ELSE 0 END AS is_default,
-               tz
+               tz,
+               color
           FROM household
          WHERE deleted_at IS NULL
          ORDER BY is_default DESC, name COLLATE NOCASE, id

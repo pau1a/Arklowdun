@@ -6,7 +6,7 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://${HOST}:${PORT}`;
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: ['a11y/*.spec.ts', 'ui/*.spec.ts'],
+  testMatch: ['a11y/*.spec.ts', 'ui/*.spec.ts', 'e2e/**/*.spec.ts'],
   fullyParallel: false,
   use: {
     baseURL,

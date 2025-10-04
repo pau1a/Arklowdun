@@ -40,8 +40,15 @@ immediate feedback while mirroring the behaviour of the backend invariants.
   - `DEFAULT_UNDELETABLE` → "The default household cannot be deleted."
   - `HOUSEHOLD_NOT_FOUND` → "That household no longer exists."
   - `HOUSEHOLD_DELETED` → "That household is deleted. Restore it first."
+  - `INVALID_COLOR` → "Please use a hex colour like #2563EB."
+- The default household always renders with a disabled "Delete" control and a
+  tooltip explaining the guard so users understand why the action is blocked.
 - Success and error paths surface toast notifications so users receive feedback
   without leaving the page.
+- Colour selections update the chip immediately and persist through store
+  refreshes. Clearing the colour falls back to a neutral chip state.
+- Failed colour updates keep the inline form open, surface an inline error, and
+  render a toast alongside the invalid swatch outline.
 
 ## Accessibility & Styling
 
@@ -49,5 +56,7 @@ immediate feedback while mirroring the behaviour of the backend invariants.
   styles are consistent.
 - Inline forms reuse the input styles from the rest of the settings view.
 - Colour swatches expose accessible labels ("Use colour #…" / "Use no colour").
+- Swatch focus states use high-contrast outlines and low-contrast chip colours
+  receive a dashed outline so they remain visible against both themes.
 - Badges use uppercase typography with distinctive colours (`Default` muted,
   `Active` accent, `Deleted` danger) to make status obvious at a glance.

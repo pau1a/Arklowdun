@@ -200,8 +200,47 @@ pub enum HouseholdCrudError {
     NotFound,
     #[error("household is soft-deleted")]
     Deleted,
+    #[error("invalid color")]
+    InvalidColor,
     #[error(transparent)]
     Unexpected(#[from] anyhow::Error),
+}
+
+fn is_valid_hex_color(value: &str) -> bool {
+    if value.len() != 7 {
+        return false;
+    }
+    let mut chars = value.chars();
+    match chars.next() {
+        Some('#') => {}
+        _ => return false,
+    }
+    chars.all(|c| matches!(c, '0'..='9' | 'a'..='f' | 'A'..='F'))
+}
+
+fn normalize_color_value(value: Option<&str>) -> Result<Option<String>, HouseholdCrudError> {
+    match value {
+        None => Ok(None),
+        Some(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return Ok(None);
+            }
+            if !is_valid_hex_color(trimmed) {
+                return Err(HouseholdCrudError::InvalidColor);
+            }
+            Ok(Some(trimmed.to_uppercase()))
+        }
+    }
+}
+
+fn normalize_color_update(
+    value: Option<Option<&str>>,
+) -> Result<Option<Option<String>>, HouseholdCrudError> {
+    match value {
+        None => Ok(None),
+        Some(inner) => Ok(Some(normalize_color_value(inner)?)),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -384,7 +423,7 @@ const SELECT_HOUSEHOLD_BASE: &str = r#"
                created_at,
                updated_at,
                deleted_at,
-               NULL AS color
+               color
           FROM household
 "#;
 
@@ -580,24 +619,24 @@ pub async fn create_household(
 ) -> Result<HouseholdRecord, HouseholdCrudError> {
     let id = new_uuid_v7();
     let now = now_ms();
-    // TODO(Milestone C): persist color to the household row once the UI collects it.
-    let _ = color;
+    let normalized_color = normalize_color_value(color)?;
     sqlx::query(
-        "INSERT INTO household (id, name, is_default, created_at, updated_at, tz) VALUES (?1, ?2, 0, ?3, ?3, NULL)",
+        "INSERT INTO household (id, name, is_default, created_at, updated_at, tz, color) VALUES (?1, ?2, 0, ?3, ?3, NULL, ?4)",
     )
-    .bind(&id)
-    .bind(name)
-    .bind(now)
-    .execute(pool)
-    .await
-    .map_err(|err| HouseholdCrudError::Unexpected(err.into()))?;
+        .bind(&id)
+        .bind(name)
+        .bind(now)
+        .bind(normalized_color.as_deref())
+        .execute(pool)
+        .await
+        .map_err(|err| HouseholdCrudError::Unexpected(err.into()))?;
 
     fetch_details(pool, &id).await
 }
 
 pub struct HouseholdUpdateInput<'a> {
     pub name: Option<&'a str>,
-    pub color: Option<&'a str>,
+    pub color: Option<Option<&'a str>>,
 }
 
 pub async fn update_household(
@@ -610,14 +649,19 @@ pub async fn update_household(
         return Err(HouseholdCrudError::Deleted);
     }
 
+    let HouseholdUpdateInput { name, color } = input;
     let mut fields = Vec::new();
-    let mut binds: Vec<Option<&str>> = Vec::new();
+    let mut bind_name = None;
+    let normalized_color = normalize_color_update(color)?;
 
-    if let Some(name) = input.name {
+    if let Some(name) = name {
         fields.push("name = ?");
-        binds.push(Some(name));
+        bind_name = Some(name);
     }
-    let _ = input.color;
+
+    if normalized_color.is_some() {
+        fields.push("color = ?");
+    }
 
     if fields.is_empty() {
         return fetch_details(pool, id).await;
@@ -627,8 +671,11 @@ pub async fn update_household(
 
     let sql = format!("UPDATE household SET {} WHERE id = ?", fields.join(", "));
     let mut query = sqlx::query(&sql);
-    for value in binds {
-        query = query.bind(value);
+    if let Some(name) = bind_name {
+        query = query.bind(name);
+    }
+    if let Some(color) = &normalized_color {
+        query = query.bind(color.as_deref());
     }
     query = query.bind(now_ms());
     query = query.bind(id);
@@ -651,6 +698,8 @@ pub async fn delete_household(
 
     let status = fetch_status(pool, id).await?;
     if status.is_default {
+        clear_checkpoint(pool, id).await?;
+        acknowledge_vacuum(pool, id).await?;
         warn!(
             target: "arklowdun",
             event = "household_delete_failed",

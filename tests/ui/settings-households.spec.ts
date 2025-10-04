@@ -1,184 +1,8 @@
 import { expect, test } from '@playwright/test';
-
-const householdStub = `(() => {
-  const households = [
-    {
-      id: '0',
-      name: 'Default household',
-      is_default: 1,
-      tz: null,
-      created_at: Date.now(),
-      updated_at: Date.now(),
-      deleted_at: null,
-      color: '#2563EB',
-    },
-  ];
-  let activeId = '0';
-  let counter = 1;
-  const listeners = new Map();
-
-  const emitEvent = (event, payload) => {
-    const bucket = listeners.get(event);
-    if (!bucket) return;
-    for (const handler of bucket.values()) {
-      try {
-        handler({ event, payload });
-      } catch (error) {
-        console.error(error);
-      }
-    }
-  };
-
-  window.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
-    unregisterListener(event, id) {
-      const bucket = listeners.get(event);
-      if (!bucket) return;
-      bucket.delete(id);
-      if (bucket.size === 0) listeners.delete(event);
-    },
-  };
-
-  window.__TAURI_INTERNALS__ = {
-    transformCallback(callback) {
-      return callback;
-    },
-    convertFileSrc(path) {
-      return path;
-    },
-    invoke(cmd, args = {}) {
-      switch (cmd) {
-        case 'plugin:event|listen': {
-          const handler = args.handler;
-          const id = 'listener_' + Math.random().toString(16).slice(2);
-          const bucket = listeners.get(args.event) ?? new Map();
-          bucket.set(id, handler);
-          listeners.set(args.event, bucket);
-          return Promise.resolve(id);
-        }
-        case 'plugin:event|unlisten': {
-          const { event, eventId } = args;
-          window.__TAURI_EVENT_PLUGIN_INTERNALS__.unregisterListener(event, eventId);
-          return Promise.resolve();
-        }
-        case 'household_list': {
-          const includeDeleted = Boolean(args?.includeDeleted);
-          const filtered = includeDeleted
-            ? households
-            : households.filter((item) => item.deleted_at === null);
-          return Promise.resolve(filtered.map((item) => ({ ...item })));
-        }
-        case 'household_get_active':
-          return Promise.resolve(activeId);
-        case 'household_set_active': {
-          const id = args?.id;
-          const target = households.find((item) => item.id === id);
-          if (!target) {
-            return Promise.reject({ code: 'HOUSEHOLD_NOT_FOUND' });
-          }
-          if (target.deleted_at !== null) {
-            return Promise.reject({ code: 'HOUSEHOLD_DELETED' });
-          }
-          if (id === activeId) {
-            return Promise.reject({ code: 'HOUSEHOLD_ALREADY_ACTIVE' });
-          }
-          activeId = id;
-          emitEvent('household:changed', { id });
-          return Promise.resolve(null);
-        }
-        case 'household_create': {
-          const id = 'hh-' + counter++;
-          const record = {
-            id,
-            name: args?.name ?? id,
-            is_default: 0,
-            tz: null,
-            created_at: Date.now(),
-            updated_at: Date.now(),
-            deleted_at: null,
-            color: args?.color ?? null,
-          };
-          households.push(record);
-          return Promise.resolve({ ...record });
-        }
-        case 'household_update': {
-          const id = args?.id;
-          const target = households.find((item) => item.id === id);
-          if (!target) {
-            return Promise.reject({ code: 'HOUSEHOLD_NOT_FOUND' });
-          }
-          if (target.deleted_at !== null) {
-            return Promise.reject({ code: 'HOUSEHOLD_DELETED' });
-          }
-          if (typeof args?.name === 'string') {
-            target.name = args.name;
-          }
-          if ('color' in args) {
-            target.color = args.color ?? null;
-          }
-          target.updated_at = Date.now();
-          return Promise.resolve({ ...target });
-        }
-        case 'household_delete': {
-          const id = args?.id;
-          const target = households.find((item) => item.id === id);
-          if (!target) {
-            return Promise.reject({ code: 'HOUSEHOLD_NOT_FOUND' });
-          }
-          if (target.is_default) {
-            return Promise.reject({ code: 'DEFAULT_UNDELETABLE' });
-          }
-          if (target.deleted_at !== null) {
-            return Promise.reject({ code: 'HOUSEHOLD_DELETED' });
-          }
-          target.deleted_at = Date.now();
-          target.updated_at = target.deleted_at;
-          let fallbackId = null;
-          if (activeId === id) {
-            fallbackId = '0';
-            activeId = fallbackId;
-            emitEvent('household:changed', { id: fallbackId });
-          }
-          return Promise.resolve({ fallbackId });
-        }
-        case 'household_restore': {
-          const id = args?.id;
-          const target = households.find((item) => item.id === id);
-          if (!target) {
-            return Promise.reject({ code: 'HOUSEHOLD_NOT_FOUND' });
-          }
-          target.deleted_at = null;
-          target.updated_at = Date.now();
-          return Promise.resolve({ ...target });
-        }
-        default:
-          return Promise.resolve(null);
-      }
-    },
-  };
-
-  const stubWindow = {
-    label: 'main',
-    close: () => Promise.resolve(),
-    minimize: () => Promise.resolve(),
-    maximize: () => Promise.resolve(),
-    unmaximize: () => Promise.resolve(),
-    isMaximized: () => Promise.resolve(false),
-    isDecorated: () => Promise.resolve(false),
-    show: () => Promise.resolve(),
-    hide: () => Promise.resolve(),
-    setFocus: () => Promise.resolve(),
-  };
-
-  window.__TAURI_INTERNALS__.currentWindow = stubWindow;
-  window.__TAURI_INTERNALS__.getCurrentWindow = () => stubWindow;
-  window.__TAURI_INTERNALS__.metadata = {
-    currentWindow: { label: 'main' },
-    currentWebview: { windowLabel: 'main', label: 'main' },
-  };
-})();`;
+import { settingsInitStub } from '../support/tauri-stubs';
 
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(householdStub);
+  await page.addInitScript(settingsInitStub);
 });
 
 test.describe('Settings households lifecycle', () => {
@@ -226,6 +50,66 @@ test.describe('Settings households lifecycle', () => {
     ).toBeVisible();
   });
 
+  test('colour selection updates chip and failed saves surface validation', async ({ page }) => {
+    const defaultRow = page
+      .locator('.settings__household-row')
+      .filter({ hasText: 'Default household' });
+    const chip = defaultRow.locator('.settings__household-chip');
+
+    await defaultRow.getByRole('button', { name: 'Rename' }).click();
+    await defaultRow.getByRole('button', { name: 'Use colour #F59E0B' }).click();
+    await defaultRow.getByRole('button', { name: 'Save' }).click();
+
+    await expect(chip).not.toHaveClass(/settings__household-chip--empty/);
+    await expect(chip).toHaveAttribute('title', 'Colour #F59E0B');
+    const storedColour = await chip.evaluate((node) =>
+      node.style.getPropertyValue('--household-color'),
+    );
+    expect(storedColour).toBe('#F59E0B');
+    const contrastAttr = await chip.getAttribute('data-contrast');
+    expect(contrastAttr).toBeTruthy();
+
+    await defaultRow.getByRole('button', { name: 'Rename' }).click();
+    await defaultRow.getByRole('button', { name: 'Use colour #EF4444' }).click();
+
+    await page.evaluate(() => {
+      const original = window.__TAURI_INTERNALS__.invoke;
+      window.__TAURI_INTERNALS__ = {
+        ...window.__TAURI_INTERNALS__,
+        invoke(cmd, args) {
+          if (cmd === 'household_update') {
+            return Promise.reject({ code: 'INVALID_COLOR' });
+          }
+          return original(cmd, args);
+        },
+        __restore: original,
+      };
+    });
+
+    await defaultRow.getByRole('button', { name: 'Save' }).click();
+
+    const errorMessage = defaultRow.locator('.settings__household-error');
+    await expect(errorMessage).toBeVisible();
+    await expect(errorMessage).toHaveText('Please use a hex colour like #2563EB.');
+    await expect(defaultRow.locator('.settings__household-color-picker')).toHaveAttribute(
+      'data-invalid',
+      'true',
+    );
+    const toast = page
+      .locator('#ui-toast-region .toast')
+      .filter({ hasText: 'Please use a hex colour like #2563EB.' });
+    await expect(toast).toBeVisible();
+    await expect(defaultRow.locator('.settings__household-edit')).toBeVisible();
+
+    await page.evaluate(() => {
+      const restore = window.__TAURI_INTERNALS__.__restore;
+      if (restore) {
+        window.__TAURI_INTERNALS__.invoke = restore;
+        delete window.__TAURI_INTERNALS__.__restore;
+      }
+    });
+  });
+
   test('deleting the active household falls back to default', async ({ page }) => {
     await page.getByRole('button', { name: 'Create household' }).click();
     await page.getByPlaceholder('Household name').fill('Temporary');
@@ -246,17 +130,18 @@ test.describe('Settings households lifecycle', () => {
     await expect(defaultRow.locator('.settings__household-badge--active')).toBeVisible();
   });
 
-  test('deleting the default household surfaces an error toast', async ({ page }) => {
+  test('default household delete control is visibly disabled', async ({ page }) => {
     const defaultRow = page
       .locator('.settings__household-row')
       .filter({ hasText: 'Default household' });
+    const deleteButton = defaultRow.getByRole('button', { name: 'Delete' });
 
-    page.once('dialog', (dialog) => dialog.accept());
-    await defaultRow.getByRole('button', { name: 'Delete' }).click();
-
-    const errorToast = page
-      .locator('#ui-toast-region .toast')
-      .filter({ hasText: 'The default household cannot be deleted.' });
-    await expect(errorToast).toBeVisible();
+    await expect(deleteButton).toBeDisabled();
+    await expect(deleteButton).toHaveAttribute(
+      'title',
+      'Default household cannot be deleted.',
+    );
+    await expect(deleteButton).toHaveAttribute('aria-disabled', 'true');
+    await expect(deleteButton).toHaveClass(/is-disabled/);
   });
 });
