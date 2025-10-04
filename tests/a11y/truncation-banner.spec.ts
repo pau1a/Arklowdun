@@ -2,8 +2,13 @@ import { expect, test } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { formatViolations } from './helpers';
 import { createUtcEvents, seedCalendarSnapshot } from '../support/calendar';
+import { settingsInitStub } from '../support/tauri-stubs';
 
 test.describe('Truncation banner accessibility', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(settingsInitStub);
+  });
+
   test('banner announces via status region and passes axe-core scan', async ({ page }) => {
     await page.goto('/#/calendar');
     await page.waitForSelector('main[role="main"]');

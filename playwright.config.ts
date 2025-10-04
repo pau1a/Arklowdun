@@ -16,6 +16,14 @@ export default defineConfig({
   webServer: {
     command: `vite --mode test --host ${HOST} --port ${PORT}`,
     url: baseURL,
+    env: {
+      VITE_ENV: 'test',
+      VITE_LOG_LEVEL: 'debug',
+      VITE_IPC_ADAPTER: 'fake',
+      VITE_IPC_SCENARIO: process.env.PLAYWRIGHT_SCENARIO ?? 'defaultHousehold',
+      VITE_ROUTER_MODE: 'hash',
+      PLAYWRIGHT_SCENARIO: process.env.PLAYWRIGHT_SCENARIO ?? 'defaultHousehold',
+    },
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
     stdout: 'pipe',

@@ -1,4 +1,9 @@
 import { expect, test } from '@playwright/test';
+import { settingsInitStub } from '../support/tauri-stubs';
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(settingsInitStub);
+});
 
 test.describe('Files view triad', () => {
   test('cycles through loading, empty, error, and data states', async ({ page }) => {
