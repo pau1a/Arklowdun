@@ -3,7 +3,7 @@ import { call } from "@lib/ipc/call";
 interface HouseholdStatsRaw {
   id: string;
   name?: string | null;
-  is_default?: boolean | number | null;
+  isDefault?: boolean | number | null;
   counts?: Record<string, unknown> | null;
 }
 
@@ -17,7 +17,7 @@ export interface HouseholdStatsEntry {
 export function normaliseHouseholdStats(row: HouseholdStatsRaw): HouseholdStatsEntry {
   const name =
     typeof row.name === "string" && row.name.trim().length > 0 ? row.name : row.id;
-  const isDefault = Boolean(row.is_default);
+  const isDefault = Boolean(row.isDefault);
   const counts: Record<string, number> = {};
   if (row.counts && typeof row.counts === "object") {
     for (const [key, value] of Object.entries(row.counts)) {
