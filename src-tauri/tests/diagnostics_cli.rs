@@ -25,7 +25,7 @@ async fn migrate_database(path: &Path) -> Result<()> {
         .connect_with(options)
         .await?;
     migrate::apply_migrations(&pool).await?;
-    pool.close().await?;
+    pool.close().await;
     Ok(())
 }
 

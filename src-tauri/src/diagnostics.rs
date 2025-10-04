@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::{collections::BTreeMap, env, fs, path::PathBuf};
 
@@ -28,7 +28,7 @@ pub struct AboutInfo {
     pub commit_hash: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HouseholdStatsEntry {
     pub id: String,
