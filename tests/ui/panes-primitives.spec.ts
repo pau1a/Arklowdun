@@ -1,4 +1,6 @@
 import { expect, test } from '@playwright/test';
+import { gotoAppRoute } from '../support/appReady';
+import { settingsInitStub } from '../support/tauri-stubs';
 
 const NOTE_TEMPLATE = {
   id: 'note-e2e',
@@ -15,8 +17,12 @@ const NOTE_TEMPLATE = {
 };
 
 test.describe('Pane primitives', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(settingsInitStub);
+  });
+
   test('calendar form is built from primitives', async ({ page }) => {
-    await page.goto('/#/calendar');
+    await gotoAppRoute(page, '/#/calendar');
 
     const form = page.locator('.calendar__form');
     await expect(form).toBeVisible();
@@ -26,7 +32,7 @@ test.describe('Pane primitives', () => {
   });
 
   test('notes controls rely on primitives', async ({ page }) => {
-    await page.goto('/#/notes');
+    await gotoAppRoute(page, '/#/notes');
     await page.waitForSelector('#notes-canvas');
 
     await page.evaluate(async (note) => {
@@ -44,7 +50,7 @@ test.describe('Pane primitives', () => {
   });
 
   test('settings diagnostics controls use Button primitive', async ({ page }) => {
-    await page.goto('/#/settings');
+    await gotoAppRoute(page, '/#/settings');
 
     const settings = page.locator('.settings');
     await expect(settings).toBeVisible();
