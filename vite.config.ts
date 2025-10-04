@@ -1,4 +1,5 @@
-import { defineConfig } from "vite";
+import { defineConfig, searchForWorkspaceRoot } from "vite";
+import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
 
 const resolveAlias = {
@@ -35,7 +36,10 @@ export default defineConfig(async () => ({
     strictPort: true,
     host: host || false,
     fs: {
-      allow: [fileURLToPath(new URL('./tests', import.meta.url))],
+      allow: [
+        searchForWorkspaceRoot(process.cwd()),
+        path.resolve(fileURLToPath(new URL("./tests", import.meta.url))),
+      ],
     },
     hmr: host
       ? {
@@ -48,5 +52,8 @@ export default defineConfig(async () => ({
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
+  },
+  optimizeDeps: {
+    entries: ["src/**/*", "tests/scenarios/*.ts"],
   },
 }));
