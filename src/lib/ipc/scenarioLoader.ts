@@ -89,6 +89,7 @@ if (registry.size === 0) {
       vehicles_get: () => null,
       diagnostics_summary: () => ({ ok: true }),
       diagnostics_household_stats: () => ({ households: 1 }),
+      bills_list_due_between: () => [],
       db_backup_overview: () => ({
         availableBytes: 0,
         dbSizeBytes: 0,

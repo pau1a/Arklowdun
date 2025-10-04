@@ -16,8 +16,23 @@ function resolveEnv(): AdapterName {
     return "tauri";
   }
 
-  const isTauri = typeof window !== "undefined" && typeof navigator !== "undefined" && /\bTauri\b/i.test(navigator.userAgent ?? "");
-  return isTauri ? "tauri" : "fake";
+  const globalWindow =
+    typeof window !== "undefined" ? ((window as unknown) as Record<string, unknown>) : undefined;
+
+  const hasTauriBridge = Boolean(
+    globalWindow?.["__TAURI__"] ||
+      globalWindow?.["__TAURI_IPC__"] ||
+      globalWindow?.["__TAURI_INTERNALS__"] ||
+      globalWindow?.["__TAURI_METADATA__"],
+  );
+
+  const isTauriUA =
+    typeof navigator !== "undefined" && /\bTauri\b/i.test(navigator.userAgent ?? "");
+
+  const isTauriProtocol =
+    typeof location !== "undefined" && location.protocol.startsWith("tauri");
+
+  return hasTauriBridge || isTauriUA || isTauriProtocol ? "tauri" : "fake";
 }
 
 function createAdapter(name: AdapterName, options?: TestAdapterOptions): IpcAdapter {
