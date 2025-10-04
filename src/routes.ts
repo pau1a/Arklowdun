@@ -259,7 +259,13 @@ export function resolveRouteFromHash(hash: string | null | undefined): RouteDefi
   const trimmed = hash.trim();
   if (!trimmed) return DEFAULT_ROUTE;
   const withHash = trimmed.startsWith("#") ? trimmed : `#${trimmed}`;
-  return routeByHash.get(withHash) ?? routeByHash.get(normaliseHash(withHash)) ?? DEFAULT_ROUTE;
+  const anchorIndex = withHash.indexOf("#", 2);
+  const routeHash = anchorIndex === -1 ? withHash : withHash.slice(0, anchorIndex);
+  return (
+    routeByHash.get(routeHash) ??
+    routeByHash.get(normaliseHash(routeHash)) ??
+    DEFAULT_ROUTE
+  );
 }
 
 export function getRouteById(id: AppPane): RouteDefinition | undefined {
