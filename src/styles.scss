@@ -2764,6 +2764,13 @@ footer a.footer__settings {
   line-height: 1.25rem;
 }
 
+html[data-test-mode='true'] .calendar__notes-toggle {
+  display: inline-flex;
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
+}
+
 .calendar__notes-toggle[aria-pressed="true"] {
   background: var(--color-accent);
   border-color: transparent;

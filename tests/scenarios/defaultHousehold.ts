@@ -16,6 +16,7 @@ import type { TablePlan } from "../../src/bindings/TablePlan";
 import type { ValidationReport } from "../../src/bindings/ValidationReport";
 import type { Vehicle } from "../../src/bindings/Vehicle";
 import { createScenario, type ScenarioData } from "./base";
+import type { Category } from "../../src/bindings/Category";
 
 const TIMESTAMP = "2024-06-01T12:00:00Z";
 const BASE_SECONDS = Math.floor(Date.parse(TIMESTAMP) / 1000);
@@ -106,10 +107,30 @@ const hardRepairOutcome: HardRepairOutcome = {
 const households = [
   {
     id: "hh-default",
-    name: "Default Household",
+    name: "Default household",
     tz: "UTC",
     color: "#2563EB",
     is_default: true,
+    created_at: BASE_SECONDS,
+    updated_at: BASE_SECONDS,
+    deleted_at: null,
+  },
+  {
+    id: "hh-secondary",
+    name: "Secondary household",
+    tz: "UTC",
+    color: "#8B5CF6",
+    is_default: false,
+    created_at: BASE_SECONDS,
+    updated_at: BASE_SECONDS,
+    deleted_at: null,
+  },
+  {
+    id: "hh-temp",
+    name: "Temporary",
+    tz: "UTC",
+    color: "#F59E0B",
+    is_default: false,
     created_at: BASE_SECONDS,
     updated_at: BASE_SECONDS,
     deleted_at: null,
@@ -132,13 +153,57 @@ const events: Event[] = [
     deleted_at: undefined,
     series_parent_id: undefined,
   },
+  {
+    id: "evt-cross-zone",
+    household_id: "hh-default",
+    title: "Cross-zone call",
+    tz: "America/New_York",
+    start_at_utc: BASE_SECONDS + 18_000,
+    end_at_utc: BASE_SECONDS + 21_600,
+    rrule: undefined,
+    exdates: undefined,
+    reminder: 600,
+    created_at: BASE_SECONDS,
+    updated_at: BASE_SECONDS,
+    deleted_at: undefined,
+    series_parent_id: undefined,
+  },
+];
+
+const categories: Category[] = [
+  {
+    id: "cat-work",
+    household_id: "hh-default",
+    name: "Work",
+    slug: "work",
+    color: "#2563EB",
+    position: 0,
+    z: 0,
+    is_visible: true,
+    created_at: BASE_SECONDS,
+    updated_at: BASE_SECONDS,
+    deleted_at: undefined,
+  },
+  {
+    id: "cat-personal",
+    household_id: "hh-default",
+    name: "Personal",
+    slug: "personal",
+    color: "#10B981",
+    position: 1,
+    z: 0,
+    is_visible: true,
+    created_at: BASE_SECONDS,
+    updated_at: BASE_SECONDS,
+    deleted_at: undefined,
+  },
 ];
 
 const notes: Note[] = [
   {
     id: "note-maintenance",
     household_id: "hh-default",
-    category_id: undefined,
+    category_id: "cat-work",
     position: 0,
     created_at: BASE_SECONDS,
     updated_at: BASE_SECONDS,
@@ -192,6 +257,13 @@ const searchResults: SearchResult[] = [
     start_at_utc: BASE_SECONDS + 3600,
     tz: "UTC",
   },
+  {
+    kind: "Event",
+    id: "evt-cross-zone",
+    title: "Cross-zone call",
+    start_at_utc: BASE_SECONDS + 18_000,
+    tz: "America/New_York",
+  },
 ];
 
 const scenarioData: ScenarioData = {
@@ -202,6 +274,7 @@ const scenarioData: ScenarioData = {
   noteLinks,
   vehicles,
   searchResults,
+  categories,
   backups: {
     manifest,
     overview,

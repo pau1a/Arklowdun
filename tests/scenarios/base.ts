@@ -4,6 +4,7 @@ import type { Note } from "../../src/bindings/Note";
 import type { NoteLink } from "../../src/bindings/NoteLink";
 import type { Vehicle } from "../../src/bindings/Vehicle";
 import type { SearchResult } from "../../src/bindings/SearchResult";
+import type { Category } from "../../src/bindings/Category";
 import type { BackupOverview } from "../../src/bindings/BackupOverview";
 import type { BackupEntry } from "../../src/bindings/BackupEntry";
 import type { BackupManifest } from "../../src/bindings/BackupManifest";
@@ -39,6 +40,7 @@ type ScenarioData = {
   noteLinks: NoteLink[];
   vehicles: Vehicle[];
   searchResults: SearchResult[];
+  categories: Category[];
   backups: {
     manifest: BackupManifest;
     overview: BackupOverview;
@@ -68,6 +70,7 @@ function cloneData(data: ScenarioData): MutableScenarioState {
     noteLinks: data.noteLinks.map((l) => ({ ...l })),
     vehicles: data.vehicles.map((v) => ({ ...v })),
     searchResults: data.searchResults.map((r) => ({ ...r })),
+    categories: data.categories.map((c) => ({ ...c })),
     backups: {
       manifest: { ...data.backups.manifest },
       overview: {
@@ -154,18 +157,42 @@ interface ScenarioConfig {
 export function createScenario(config: ScenarioConfig): ScenarioDefinition {
   const state = cloneData(config.data);
 
+  const defaultCategoryForHousehold = (householdId: string): Category | null => {
+    return (
+      state.categories.find(
+        (category) =>
+          category.household_id === householdId &&
+          (category.deleted_at === undefined || category.deleted_at === null),
+      ) ?? null
+    );
+  };
+
   const makeNote = (data: Partial<Note> | undefined, ctx: ScenarioContext): Note => {
     const now = Math.floor(ctx.clock.now().getTime() / 1000);
+    const source = data as Partial<Note> & { household_id?: string; categoryId?: string };
+    const householdId =
+      typeof source?.household_id === "string" && source.household_id.length > 0
+        ? source.household_id
+        : typeof (source as Record<string, unknown>)?.householdId === "string"
+          ? ((source as Record<string, unknown>).householdId as string)
+          : state.activeHouseholdId;
+    const explicitCategory =
+      typeof source?.category_id === "string" && source.category_id.length > 0
+        ? source.category_id
+        : typeof source?.categoryId === "string" && source.categoryId.length > 0
+          ? source.categoryId
+          : undefined;
+    const categoryId = explicitCategory ?? defaultCategoryForHousehold(householdId)?.id;
     const note: Note = {
       id: nextId(state, "note", ctx.rng.next()),
-      household_id: data?.household_id ?? state.activeHouseholdId,
-      category_id: data?.category_id,
+      household_id: householdId,
+      category_id: categoryId,
       position: typeof data?.position === "number" ? data.position : state.notes.length,
       created_at: now,
       updated_at: now,
       deleted_at: undefined,
-      text: (data?.text as string) ?? "",
-      color: (data?.color as string) ?? "#2563EB",
+      text: typeof data?.text === "string" ? data.text : "",
+      color: typeof data?.color === "string" ? data.color : "#2563EB",
       x: typeof data?.x === "number" ? data.x : 0,
       y: typeof data?.y === "number" ? data.y : 0,
       z: typeof data?.z === "number" ? data.z : undefined,
@@ -383,11 +410,103 @@ export function createScenario(config: ScenarioConfig): ScenarioDefinition {
       const notes = state.notes.filter((note) => links.some((link) => link.note_id === note.id));
       return toContextNotesPage(notes, links);
     },
+    categories_list: (payload) => {
+      const args = (payload as { args?: Record<string, unknown> }).args ?? (payload as Record<string, unknown>);
+      const householdId =
+        (typeof (payload as Record<string, unknown>)?.householdId === "string"
+          ? (payload as Record<string, unknown>).householdId
+          : undefined) ??
+        (typeof (payload as Record<string, unknown>)?.household_id === "string"
+          ? (payload as Record<string, unknown>).household_id
+          : undefined) ??
+        (typeof args?.householdId === "string"
+          ? (args.householdId as string)
+          : typeof args?.household_id === "string"
+            ? (args.household_id as string)
+            : state.activeHouseholdId);
+      const includeHidden = Boolean(
+        (args?.includeHidden as boolean | undefined) ??
+          (args?.include_hidden as boolean | undefined) ??
+          (payload as Record<string, unknown>)?.includeHidden ??
+          (payload as Record<string, unknown>)?.include_hidden ??
+          false,
+      );
+      return state.categories
+        .filter((category) => {
+          if (category.household_id !== householdId) return false;
+          if (includeHidden) return true;
+          return category.deleted_at === undefined || category.deleted_at === null;
+        })
+        .map((category) => ({ ...category }));
+    },
     notes_quick_create_for_entity: (payload, ctx) => {
-      const raw = payload as { entityId?: string; entityType?: NoteLink["entity_type"]; data?: Partial<Note> };
-      const entityId = raw.entityId ?? (payload as any)?.args?.entityId ?? state.events[0]?.id ?? "entity";
-      const entityType = raw.entityType ?? (payload as any)?.args?.entityType ?? "Event";
-      const note = makeNote(raw.data ?? {}, ctx);
+      const args = (payload as { args?: Record<string, unknown> }).args ?? (payload as Record<string, unknown>);
+      const householdId =
+        (typeof (payload as Record<string, unknown>)?.householdId === "string"
+          ? (payload as Record<string, unknown>).householdId
+          : undefined) ??
+        (typeof (payload as Record<string, unknown>)?.household_id === "string"
+          ? (payload as Record<string, unknown>).household_id
+          : undefined) ??
+        (typeof args?.householdId === "string"
+          ? (args.householdId as string)
+          : typeof args?.household_id === "string"
+            ? (args.household_id as string)
+            : state.activeHouseholdId);
+      const entityId =
+        (typeof (payload as Record<string, unknown>)?.entityId === "string"
+          ? (payload as Record<string, unknown>).entityId
+          : undefined) ??
+        (typeof (payload as Record<string, unknown>)?.entity_id === "string"
+          ? (payload as Record<string, unknown>).entity_id
+          : undefined) ??
+        (typeof args?.entityId === "string"
+          ? (args.entityId as string)
+          : typeof args?.entity_id === "string"
+            ? (args.entity_id as string)
+            : state.events[0]?.id ?? "event-0");
+      const entityType =
+        ((typeof (payload as Record<string, unknown>)?.entityType === "string"
+          ? (payload as Record<string, unknown>).entityType
+          : undefined) ??
+          (typeof (payload as Record<string, unknown>)?.entity_type === "string"
+            ? (payload as Record<string, unknown>).entity_type
+            : undefined) ??
+          (typeof args?.entityType === "string"
+            ? (args.entityType as string)
+            : typeof args?.entity_type === "string"
+              ? (args.entity_type as string)
+              : "Event")) as NoteLink["entity_type"];
+      const categoryId =
+        (typeof (payload as Record<string, unknown>)?.categoryId === "string"
+          ? (payload as Record<string, unknown>).categoryId
+          : undefined) ??
+        (typeof (payload as Record<string, unknown>)?.category_id === "string"
+          ? (payload as Record<string, unknown>).category_id
+          : undefined) ??
+        (typeof args?.categoryId === "string"
+          ? (args.categoryId as string)
+          : typeof args?.category_id === "string"
+            ? (args.category_id as string)
+            : defaultCategoryForHousehold(householdId)?.id);
+      const text =
+        (typeof (payload as Record<string, unknown>)?.text === "string"
+          ? (payload as Record<string, unknown>).text
+          : undefined) ?? (typeof args?.text === "string" ? (args.text as string) : "");
+      const color =
+        (typeof (payload as Record<string, unknown>)?.color === "string"
+          ? (payload as Record<string, unknown>).color
+          : undefined) ?? (typeof args?.color === "string" ? (args.color as string) : undefined);
+
+      const note = makeNote(
+        {
+          household_id: householdId,
+          category_id: categoryId ?? undefined,
+          text,
+          color,
+        },
+        ctx,
+      );
       const link = makeLink(note, entityId, entityType, ctx);
       return toContextNotesPage([note], [link]);
     },

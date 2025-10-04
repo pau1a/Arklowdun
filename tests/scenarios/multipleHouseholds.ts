@@ -4,6 +4,7 @@ import type { Note } from "../../src/bindings/Note";
 import type { NoteLink } from "../../src/bindings/NoteLink";
 import type { SearchResult } from "../../src/bindings/SearchResult";
 import type { Vehicle } from "../../src/bindings/Vehicle";
+import type { Category } from "../../src/bindings/Category";
 import { createScenario, type ScenarioData } from "./base";
 
 const TIMESTAMP = "2024-06-01T12:00:00Z";
@@ -69,7 +70,7 @@ const notes: Note[] = [
   {
     id: "note-default",
     household_id: "hh-default",
-    category_id: undefined,
+    category_id: "cat-default",
     position: 0,
     created_at: BASE_SECONDS,
     updated_at: BASE_SECONDS,
@@ -85,7 +86,7 @@ const notes: Note[] = [
   {
     id: "note-coastal",
     household_id: "hh-coastal",
-    category_id: undefined,
+    category_id: "cat-coastal",
     position: 1,
     created_at: BASE_SECONDS,
     updated_at: BASE_SECONDS,
@@ -120,6 +121,35 @@ const noteLinks: NoteLink[] = [
     relation: "related",
     created_at: BASE_SECONDS,
     updated_at: BASE_SECONDS,
+  },
+];
+
+const categories: Category[] = [
+  {
+    id: "cat-default",
+    household_id: "hh-default",
+    name: "Default",
+    slug: "default",
+    color: "#2563EB",
+    position: 0,
+    z: 0,
+    is_visible: true,
+    created_at: BASE_SECONDS,
+    updated_at: BASE_SECONDS,
+    deleted_at: undefined,
+  },
+  {
+    id: "cat-coastal",
+    household_id: "hh-coastal",
+    name: "Coastal",
+    slug: "coastal",
+    color: "#059669",
+    position: 0,
+    z: 0,
+    is_visible: true,
+    created_at: BASE_SECONDS,
+    updated_at: BASE_SECONDS,
+    deleted_at: undefined,
   },
 ];
 
@@ -174,6 +204,7 @@ const scenarioData: ScenarioData = {
   noteLinks,
   vehicles,
   searchResults,
+  categories,
   backups: {
     manifest: {
       appVersion: "test",

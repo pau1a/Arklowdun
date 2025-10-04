@@ -54,6 +54,7 @@ declare global {
   interface Window {
     __APP_READY__?: boolean;
     __APP_READY_ERROR__?: string | null;
+    __appReady?: { status: "ok" } | { status: "error"; message: string };
   }
 }
 
@@ -106,6 +107,7 @@ function signalAppReady(container: HTMLElement): void {
     appReadyNotified = true;
     window.__APP_READY_ERROR__ = null;
     window.__APP_READY__ = true;
+    window.__appReady = { status: "ok" };
     document.documentElement.setAttribute("data-app-ready", "1");
     window.dispatchEvent(new Event("app:ready"));
   };
@@ -144,6 +146,7 @@ function renderFatalBanner(error: unknown): void {
       ? `${error.name ?? "Error"}: ${error.message}`
       : String(error ?? "Unknown error");
   window.__APP_READY_ERROR__ = errorMessage;
+  window.__appReady = { status: "error", message: errorMessage };
   message.textContent = errorMessage;
   message.style.margin = "0";
   message.style.whiteSpace = "pre-wrap";
@@ -558,6 +561,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const boot = async () => {
     window.__APP_READY__ = false;
     window.__APP_READY_ERROR__ = null;
+    window.__appReady = undefined;
     document.documentElement.removeAttribute("data-app-ready");
     appReadyNotified = false;
 
@@ -567,6 +571,11 @@ window.addEventListener("DOMContentLoaded", () => {
 
     const adapterName = getIpcAdapterName();
     const scenarioName = getActiveTestScenario();
+    if (runtimeMode === "test") {
+      document.documentElement.setAttribute("data-test-mode", "true");
+    } else {
+      document.documentElement.removeAttribute("data-test-mode");
+    }
     console.info("[ENV]", {
       mode: runtimeMode,
       IPC_ADAPTER: adapterName,
@@ -614,6 +623,10 @@ window.addEventListener("DOMContentLoaded", () => {
     window.__APP_READY__ = false;
     window.__APP_READY_ERROR__ =
       error instanceof Error ? error.message : String(error ?? "Unknown error");
+    window.__appReady = {
+      status: "error",
+      message: window.__APP_READY_ERROR__ ?? "Unknown error",
+    };
     appReadyNotified = false;
     document.documentElement.removeAttribute("data-app-ready");
     renderFatalBanner(error);

@@ -7,7 +7,14 @@ async function awaitReadyState(page: Page): Promise<AppReadyStatus> {
     const w = window as typeof window & {
       __APP_READY__?: boolean;
       __APP_READY_ERROR__?: string | null;
+      __appReady?: { status: 'ok' } | { status: 'error'; message: string };
     };
+    if (w.__appReady?.status === 'error') {
+      return { status: 'error', message: w.__appReady.message };
+    }
+    if (w.__appReady?.status === 'ok') {
+      return { status: 'ready' };
+    }
     if (w.__APP_READY_ERROR__) {
       return { status: 'error', message: w.__APP_READY_ERROR__ };
     }

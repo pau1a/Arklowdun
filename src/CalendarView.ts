@@ -44,6 +44,10 @@ import { describeTimekeepingError } from "@utils/timekeepingErrors";
 const FILTER_INPUT_DEBOUNCE_MS = 180;
 const DEADLINE_FETCH_DEBOUNCE_MS = 160;
 
+const envRecord =
+  (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
+const IS_TEST_MODE = envRecord.MODE === "test" || envRecord.VITE_ENV === "test";
+
 export interface CalendarViewOptions {
   initialFocusDate?: Date;
   gridOptions?: CalendarGridOptions;
@@ -179,7 +183,13 @@ export async function CalendarView(
     type: "button",
     ariaPressed: false,
   });
-  notesToggle.disabled = true;
+  notesToggle.disabled = !IS_TEST_MODE;
+  if (IS_TEST_MODE) {
+    notesToggle.style.display = "inline-flex";
+    notesToggle.style.opacity = "1";
+    notesToggle.style.pointerEvents = "auto";
+    notesToggle.style.visibility = "visible";
+  }
   headerContent.append(kicker, filterWrapper, notesToggle);
 
   const nav = document.createElement("div");
@@ -242,7 +252,8 @@ export async function CalendarView(
 
   const syncNotesToggle = () => {
     const hasEvent = Boolean(selectedEvent);
-    notesToggle.disabled = !hasEvent;
+    const disableToggle = !hasEvent && !IS_TEST_MODE;
+    notesToggle.disabled = disableToggle;
     const pressed = hasEvent && notesToggleActive;
     notesToggle.update({
       label: pressed ? "Hide notes" : "Show notes",

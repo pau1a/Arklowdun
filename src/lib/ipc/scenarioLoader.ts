@@ -84,6 +84,7 @@ if (registry.size === 0) {
       notes_quick_create_for_entity: () => ({ notes: [], links: [] }),
       note_links_list_by_entity: () => ({ items: [] }),
       note_links_get_for_note: () => ({ items: [] }),
+      categories_list: () => [],
       search_entities: () => [],
       vehicles_list: () => [],
       vehicles_get: () => null,
