@@ -110,7 +110,7 @@ mod attachments;
 mod categories;
 pub mod commands;
 pub mod db;
-mod diagnostics;
+pub mod diagnostics;
 pub mod error;
 pub mod events_tz_backfill;
 pub mod exdate;
