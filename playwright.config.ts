@@ -8,6 +8,7 @@ export default defineConfig({
   testDir: './tests',
   testMatch: ['a11y/*.spec.ts', 'ui/*.spec.ts', 'e2e/**/*.spec.ts'],
   fullyParallel: false,
+  globalSetup: './tests/e2e/global.setup.ts',
   use: {
     baseURL,
     headless: true,
