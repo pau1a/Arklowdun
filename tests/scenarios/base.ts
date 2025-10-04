@@ -16,7 +16,6 @@ import type { HardRepairOutcome } from "../../src/bindings/HardRepairOutcome";
 import type { ContextNotesPage } from "../../src/bindings/ContextNotesPage";
 import type { NotesPage } from "../../src/bindings/NotesPage";
 import type { NotesDeadlineRangePage } from "../../src/bindings/NotesDeadlineRangePage";
-import type { EventsListRangeResponse } from "../../src/bindings/EventsListRangeResponse";
 import type { NoteLinkList } from "../../src/bindings/NoteLinkList";
 
 const BASE_SECONDS = Math.floor(Date.parse("2024-06-01T12:00:00Z") / 1000);
@@ -114,10 +113,6 @@ function toContextNotesPage(notes: Note[], links: NoteLink[]): ContextNotesPage 
 
 function toDeadlineRangePage(notes: Note[]): NotesDeadlineRangePage {
   return { items: notes.map((note) => ({ ...note })) };
-}
-
-function toEventsResponse(events: Event[]): EventsListRangeResponse {
-  return { items: events.map((event) => ({ ...event })), truncated: false, limit: 100 };
 }
 
 function placeholderNote(householdId: string): Note {
@@ -273,14 +268,18 @@ export function createScenario(config: ScenarioConfig): ScenarioDefinition {
       const start = args.start ?? BASE_SECONDS - 86_400;
       const end = args.end ?? BASE_SECONDS + 86_400;
       const householdId = args.householdId ?? state.activeHouseholdId;
-      const items = state.events.filter(
+      const eligible = state.events.filter(
         (event) =>
           event.household_id === householdId &&
           (event.deleted_at === undefined || event.deleted_at === null) &&
           event.start_at_utc >= start &&
           event.start_at_utc <= end,
       );
-      return toEventsResponse(items);
+      const sorted = eligible.slice().sort((a, b) => a.start_at_utc - b.start_at_utc);
+      const limit = 50;
+      const truncated = sorted.length > limit;
+      const items = truncated ? sorted.slice(0, limit) : sorted;
+      return { items: items.map((item) => ({ ...item })), truncated, limit };
     },
     event_create: (payload, ctx) => {
       const id = nextId(state, "event", ctx.rng.next());
@@ -523,8 +522,8 @@ export function createScenario(config: ScenarioConfig): ScenarioDefinition {
         },
         ctx,
       );
-      const link = makeLink(note, entityId, entityType, ctx);
-      return toContextNotesPage([note], [link]);
+      makeLink(note, entityId, entityType, ctx);
+      return { ...note };
     },
     notes_create: (payload, ctx) => {
       const args = (payload as { data?: Partial<Note> }).data ?? (payload as any);
