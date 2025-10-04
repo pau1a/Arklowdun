@@ -20,5 +20,9 @@ export default defineConfig({
     timeout: 60_000,
     stdout: 'pipe',
     stderr: 'pipe',
+    env: {
+      VITE_IPC_ADAPTER: 'fake',
+      VITE_IPC_SCENARIO: process.env.PLAYWRIGHT_SCENARIO ?? 'defaultHousehold',
+    },
   },
 });

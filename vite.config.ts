@@ -34,6 +34,9 @@ export default defineConfig(async () => ({
     port: 1420,
     strictPort: true,
     host: host || false,
+    fs: {
+      allow: [fileURLToPath(new URL('./tests', import.meta.url))],
+    },
     hmr: host
       ? {
           protocol: "ws",
