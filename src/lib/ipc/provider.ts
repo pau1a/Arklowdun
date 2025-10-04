@@ -5,16 +5,35 @@ import { UNKNOWN_IPC_ERROR_CODE } from "./errors";
 
 type AdapterName = "tauri" | "fake";
 
+const envRecord =
+  (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
+
+const mode = envRecord.MODE ?? envRecord.VITE_ENV ?? "development";
+const isTestMode = mode === "test";
+
+const forcedAdapterName: AdapterName | undefined = isTestMode
+  ? "fake"
+  : (envRecord.VITE_IPC_ADAPTER as AdapterName | undefined);
+
+const forcedScenarioName = (() => {
+  if (!isTestMode && !envRecord.VITE_IPC_SCENARIO) return undefined;
+  const candidate = envRecord.VITE_IPC_SCENARIO?.trim();
+  if (candidate) return candidate;
+  return isTestMode ? "defaultHousehold" : undefined;
+})();
+
 let activeAdapter: IpcAdapter | undefined;
 let activeName: AdapterName | undefined;
+let activeTestOptions: TestAdapterOptions | undefined;
 
-function resolveEnv(): AdapterName {
-  const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
-  if (env?.VITE_IPC_ADAPTER === "fake") {
-    return "fake";
+function resolveAdapterName(): AdapterName {
+  if (forcedAdapterName) {
+    return forcedAdapterName;
   }
-  if (env?.VITE_IPC_ADAPTER === "tauri") {
-    return "tauri";
+
+  const envAdapter = envRecord.VITE_IPC_ADAPTER as AdapterName | undefined;
+  if (envAdapter === "fake" || envAdapter === "tauri") {
+    return envAdapter;
   }
 
   const globalWindow =
@@ -50,28 +69,48 @@ function resolveEnv(): AdapterName {
   throw error;
 }
 
+function mergeTestOptions(options?: TestAdapterOptions): TestAdapterOptions | undefined {
+  const scenario = options?.scenarioName ?? forcedScenarioName;
+  if (!scenario && !options) return undefined;
+  const merged: TestAdapterOptions = { ...(options ?? {}) };
+  if (scenario && !merged.scenarioName) {
+    merged.scenarioName = scenario;
+  }
+  return merged;
+}
+
 function createAdapter(name: AdapterName, options?: TestAdapterOptions): IpcAdapter {
   if (name === "fake") {
-    return new TestAdapter(options);
+    const merged = mergeTestOptions(options);
+    activeTestOptions = merged;
+    return new TestAdapter(merged);
   }
+  activeTestOptions = undefined;
   return new TauriAdapter();
 }
 
 export function configureIpcAdapter(name: AdapterName, options?: TestAdapterOptions): void {
-  activeAdapter = createAdapter(name, options);
   activeName = name;
+  activeAdapter = createAdapter(name, options);
 }
 
 export function getIpcAdapter(): IpcAdapter {
   if (!activeAdapter) {
-    configureIpcAdapter(resolveEnv());
+    const name = resolveAdapterName();
+    configureIpcAdapter(name);
   }
   return activeAdapter!;
 }
 
 export function getIpcAdapterName(): AdapterName {
   if (!activeAdapter) {
-    configureIpcAdapter(resolveEnv());
+    getIpcAdapter();
   }
   return activeName ?? "tauri";
+}
+
+export function getActiveTestScenario(): string | undefined {
+  if ((activeName ?? forcedAdapterName) !== "fake") return undefined;
+  const scenario = activeTestOptions?.scenarioName ?? forcedScenarioName;
+  return scenario ?? envRecord.VITE_IPC_SCENARIO ?? undefined;
 }

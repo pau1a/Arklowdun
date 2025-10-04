@@ -14,15 +14,11 @@ export default defineConfig({
     headless: true,
   },
   webServer: {
-    command: `npm run dev -- --host ${HOST} --port ${PORT}`,
+    command: `vite --mode test --host ${HOST} --port ${PORT}`,
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
     stdout: 'pipe',
     stderr: 'pipe',
-    env: {
-      VITE_IPC_ADAPTER: 'fake',
-      VITE_IPC_SCENARIO: process.env.PLAYWRIGHT_SCENARIO ?? 'defaultHousehold',
-    },
   },
 });
