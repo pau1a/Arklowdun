@@ -1,7 +1,13 @@
 import { expect, test } from '@playwright/test';
 
 import { createUtcEvents, seedCalendarSnapshot } from '../support/calendar';
+import { gotoAppRoute } from '../support/appReady';
 import { STORE_MODULE_PATH } from '../support/store';
+import { settingsInitStub } from '../support/tauri-stubs';
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(settingsInitStub);
+});
 
 test.describe('Calendar contextual notes', () => {
   test('quick capture resolves categories on demand', async ({ page }) => {
@@ -14,7 +20,7 @@ test.describe('Calendar contextual notes', () => {
       titlePrefix: 'Planning session',
     });
 
-    await page.goto('/#/calendar');
+    await gotoAppRoute(page, '/#/calendar');
 
     const windowRange = {
       start: now - 24 * 60 * 60 * 1000,

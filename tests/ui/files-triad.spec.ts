@@ -1,8 +1,14 @@
 import { expect, test } from '@playwright/test';
+import { gotoAppRoute } from '../support/appReady';
+import { settingsInitStub } from '../support/tauri-stubs';
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(settingsInitStub);
+});
 
 test.describe('Files view triad', () => {
   test('cycles through loading, empty, error, and data states', async ({ page }) => {
-    await page.goto('/#/files');
+    await gotoAppRoute(page, '/#/files');
 
     const loading = page.locator('[data-ui="loading"]');
     await expect(loading).toBeVisible();

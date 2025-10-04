@@ -3,13 +3,19 @@ import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 
 import { createUtcEvents, seedCalendarSnapshot } from '../support/calendar';
+import { gotoAppRoute } from '../support/appReady';
+import { settingsInitStub } from '../support/tauri-stubs';
 
 const formatNumber = async (page: Page, value: number) =>
   page.evaluate((count) => new Intl.NumberFormat().format(count), value);
 
 test.describe('Truncation banner', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(settingsInitStub);
+  });
+
   test('calendar announces cap, focuses filters, and respects dismissal tokens', async ({ page }) => {
-    await page.goto('/#/calendar');
+    await gotoAppRoute(page, '/#/calendar');
     await page.waitForSelector('.calendar');
 
     const banner = page.locator('[data-ui="truncation-banner"]');
@@ -111,7 +117,7 @@ test.describe('Truncation banner', () => {
   });
 
   test('hides automatically when filters cut results below the cap', async ({ page }) => {
-    await page.goto('/#/calendar');
+    await gotoAppRoute(page, '/#/calendar');
     await page.waitForSelector('.calendar');
 
     const baseNow = Date.UTC(2024, 4, 15, 12, 0, 0);
@@ -149,7 +155,7 @@ test.describe('Truncation banner', () => {
   });
 
   test('pluralises copy based on the limit', async ({ page }) => {
-    await page.goto('/#/calendar');
+    await gotoAppRoute(page, '/#/calendar');
     await page.waitForSelector('.calendar');
 
     const baseNow = Date.UTC(2024, 6, 1, 12, 0, 0);
@@ -178,7 +184,7 @@ test.describe('Truncation banner', () => {
   });
 
   test('escape returns focus to refine trigger after focusing filters', async ({ page }) => {
-    await page.goto('/#/calendar');
+    await gotoAppRoute(page, '/#/calendar');
     await page.waitForSelector('.calendar');
 
     const baseNow = Date.UTC(2024, 5, 15, 10, 0, 0);
@@ -211,7 +217,7 @@ test.describe('Truncation banner', () => {
   });
 
   test('slash shortcut ignores active overlays', async ({ page }) => {
-    await page.goto('/#/calendar');
+    await gotoAppRoute(page, '/#/calendar');
     await page.waitForSelector('.calendar');
 
     await page.evaluate(() => {

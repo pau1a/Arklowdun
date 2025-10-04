@@ -1,11 +1,12 @@
 import { expect, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
+import { gotoAppRoute } from '../support/appReady';
+
 export type AxeViolations = Awaited<ReturnType<AxeBuilder['analyze']>>['violations'];
 
 export async function expectNoAxeViolations(page: Page, url: string) {
-  await page.goto(url);
-  await page.waitForSelector('main[role="main"]');
+  await gotoAppRoute(page, url);
   const results = await new AxeBuilder({ page })
     // Brand palette: active sidebar links fail 4.5:1 contrast; tracked in docs/a11y-checklist.md.
     .exclude('.sidebar a.active > span')

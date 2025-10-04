@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { gotoAppRoute, waitForAppReady } from '../../support/appReady';
 import { settingsInitStub } from '../../support/tauri-stubs';
 
 test.beforeEach(async ({ page }) => {
@@ -7,7 +8,7 @@ test.beforeEach(async ({ page }) => {
 
 test.describe('Settings navigation', () => {
   test('deep link focuses diagnostics and remembers last section', async ({ page }) => {
-    await page.goto('/#/settings#settings-about');
+    await gotoAppRoute(page, '/#/settings#settings-about');
 
     const nav = page.getByTestId('settings-nav');
     await expect(nav).toBeVisible();
@@ -25,6 +26,7 @@ test.describe('Settings navigation', () => {
     await expect(notificationsLink).toHaveAttribute('aria-current', 'true');
 
     await page.reload();
+    await waitForAppReady(page);
     await expect(page.getByTestId('settings-nav')).toBeVisible();
     await expect(
       page.getByTestId('settings-nav-settings-notifications'),
@@ -34,7 +36,7 @@ test.describe('Settings navigation', () => {
   });
 
   test('default household delete guard surfaces toast and keeps health green', async ({ page }) => {
-    await page.goto('/#/settings#settings-household');
+    await gotoAppRoute(page, '/#/settings#settings-household');
 
     const defaultRow = page
       .locator('.settings__household-row')
@@ -70,7 +72,7 @@ test.describe('Settings navigation', () => {
   });
 
   test('household colour picker retains selection after reload', async ({ page }) => {
-    await page.goto('/#/settings#settings-household');
+    await gotoAppRoute(page, '/#/settings#settings-household');
 
     const defaultRow = page
       .locator('.settings__household-row')

@@ -1,11 +1,17 @@
 import { expect, test } from '@playwright/test';
 
 import { createUtcEvents, seedCalendarSnapshot } from '../support/calendar';
+import { gotoAppRoute } from '../support/appReady';
 import { STORE_MODULE_PATH } from '../support/store';
+import { settingsInitStub } from '../support/tauri-stubs';
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(settingsInitStub);
+});
 
 test.describe('Timezone badge integrations', () => {
   test('shows in calendar notes panel for cross-timezone events', async ({ page }) => {
-    await page.goto('/#/calendar');
+    await gotoAppRoute(page, '/#/calendar');
 
     // Place the event near "now" so the default calendar view renders it.
     const eventStart = Date.now();
@@ -47,7 +53,7 @@ test.describe('Timezone badge integrations', () => {
   });
 
   test('appears for note deadlines when timezone differs', async ({ page }) => {
-    await page.goto('/#/notes');
+    await gotoAppRoute(page, '/#/notes');
 
     const noteSeed = Date.UTC(2024, 5, 13, 16, 30, 0);
     const noteSnapshotTs = noteSeed + 2_000;
@@ -84,7 +90,7 @@ test.describe('Timezone badge integrations', () => {
   });
 
   test('files reminder detail surfaces timezone badge', async ({ page }) => {
-    await page.goto('/#/files');
+    await gotoAppRoute(page, '/#/files');
 
     const reminderSeed = Date.UTC(2024, 5, 14, 12, 0, 0);
     const reminderDue = reminderSeed + 7 * 24 * 60 * 60 * 1000;

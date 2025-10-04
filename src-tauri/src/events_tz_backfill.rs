@@ -10,7 +10,11 @@ use tokio::time::{sleep, Duration};
 use tracing::{info, warn};
 
 use crate::{
-    state::AppState, time::now_ms, time_errors::TimeErrorCode, util::dispatch_async_app_result,
+    migration_guard::{check_events_legacy_columns, LegacyEventsColumnsStatus},
+    state::AppState,
+    time::now_ms,
+    time_errors::TimeErrorCode,
+    util::dispatch_async_app_result,
     AppError, AppResult,
 };
 
@@ -24,6 +28,75 @@ const DEFAULT_CHUNK_SIZE: usize = 500;
 const MAX_SKIP_LOG_EXAMPLES: usize = 50;
 const BUSY_RETRY_MAX_ATTEMPTS: usize = 5;
 const BUSY_RETRY_BASE_DELAY_MS: u64 = 150;
+
+#[derive(Debug, Clone, Copy)]
+struct EventsColumnLayout {
+    has_start_at: bool,
+    has_end_at: bool,
+}
+
+impl From<LegacyEventsColumnsStatus> for EventsColumnLayout {
+    fn from(status: LegacyEventsColumnsStatus) -> Self {
+        Self {
+            has_start_at: status.has_start_at,
+            has_end_at: status.has_end_at,
+        }
+    }
+}
+
+impl EventsColumnLayout {
+    #[inline]
+    fn requires_backfill(&self) -> bool {
+        self.has_start_at
+    }
+
+    #[inline]
+    fn include_end_at(&self) -> bool {
+        self.has_end_at
+    }
+}
+
+async fn detect_events_column_layout(pool: &SqlitePool) -> AppResult<EventsColumnLayout> {
+    let status = check_events_legacy_columns(pool).await.map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", OPERATION)
+            .with_context("step", "detect_column_layout")
+    })?;
+    Ok(status.into())
+}
+
+fn pending_conditions_sql(layout: &EventsColumnLayout) -> String {
+    let mut clauses = vec!["start_at_utc IS NULL".to_string()];
+    if layout.include_end_at() {
+        clauses.push("(end_at IS NOT NULL AND end_at_utc IS NULL)".to_string());
+    }
+    clauses.push("tz IS NULL".to_string());
+    clauses.push("COALESCE(LENGTH(TRIM(tz)), 0) = 0".to_string());
+
+    format!("({})", clauses.join(" OR "))
+}
+
+fn pending_events_query(layout: &EventsColumnLayout) -> String {
+    let end_at_select = if layout.include_end_at() {
+        "end_at".to_string()
+    } else {
+        "CAST(NULL AS INTEGER) AS end_at".to_string()
+    };
+
+    format!(
+        r#"
+        SELECT rowid, id, start_at, {end_at_select}, tz
+        FROM events
+        WHERE household_id = ?1
+          AND rowid > ?2
+          AND {conditions}
+        ORDER BY rowid
+        LIMIT ?3
+    "#,
+        end_at_select = end_at_select,
+        conditions = pending_conditions_sql(layout)
+    )
+}
 
 #[derive(Debug, Clone)]
 pub struct BackfillOptions {
@@ -452,6 +525,15 @@ async fn ensure_checkpoint_table(pool: &SqlitePool) -> AppResult<()> {
         })
 }
 
+fn is_missing_checkpoint_table(err: &SqlxError) -> bool {
+    matches!(
+        err,
+        SqlxError::Database(db_err)
+            if db_err.message().contains("no such table")
+                && db_err.message().contains(CHECKPOINT_TABLE)
+    )
+}
+
 #[allow(clippy::result_large_err)]
 async fn reset_checkpoint(pool: &SqlitePool, household_id: &str) -> AppResult<()> {
     let sql = format!("DELETE FROM {CHECKPOINT_TABLE} WHERE household_id=?1");
@@ -501,16 +583,22 @@ async fn fetch_checkpoint(pool: &SqlitePool, household_id: &str) -> AppResult<Op
     let sql = format!(
         "SELECT last_rowid, processed, updated, skipped, total FROM {CHECKPOINT_TABLE} WHERE household_id=?1"
     );
-    let row = sqlx::query(&sql)
+    let row = match sqlx::query(&sql)
         .bind(household_id)
         .fetch_optional(pool)
         .await
-        .map_err(|err| {
-            AppError::from(err)
+    {
+        Ok(row) => row,
+        Err(err) if is_missing_checkpoint_table(&err) => {
+            return Ok(None);
+        }
+        Err(err) => {
+            return Err(AppError::from(err)
                 .with_context("operation", OPERATION)
                 .with_context("step", "fetch_checkpoint")
-                .with_context("household_id", household_id.to_string())
-        })?;
+                .with_context("household_id", household_id.to_string()));
+        }
+    };
 
     let Some(row) = row else {
         return Ok(None);
@@ -667,17 +755,17 @@ async fn count_pending_after(
     pool: &SqlitePool,
     household_id: &str,
     after_rowid: i64,
+    layout: &EventsColumnLayout,
 ) -> AppResult<u64> {
-    let sql = "SELECT COUNT(*) as cnt FROM events
-        WHERE household_id=?1
-          AND rowid > ?2
-          AND (
-            start_at_utc IS NULL
-            OR (end_at IS NOT NULL AND end_at_utc IS NULL)
-            OR tz IS NULL
-            OR COALESCE(LENGTH(TRIM(tz)), 0) = 0
-          )";
-    let count: i64 = sqlx::query_scalar(sql)
+    if !layout.requires_backfill() {
+        return Ok(0);
+    }
+
+    let sql = format!(
+        "SELECT COUNT(*) as cnt FROM events\n        WHERE household_id=?1\n          AND rowid > ?2\n          AND {}",
+        pending_conditions_sql(layout)
+    );
+    let count: i64 = sqlx::query_scalar(&sql)
         .bind(household_id)
         .bind(after_rowid)
         .fetch_one(pool)
@@ -758,16 +846,37 @@ async fn run_dry_run(
     progress_cb: Option<&ProgressCallback>,
     chunk_observer: Option<&ChunkObserver>,
 ) -> AppResult<(BackfillSummary, Vec<SkipLogEntry>)> {
+    let layout = detect_events_column_layout(pool).await?;
+    if !layout.requires_backfill() {
+        let summary = BackfillSummary {
+            household_id: options.household_id.clone(),
+            total_scanned: 0,
+            total_updated: 0,
+            total_skipped: 0,
+            elapsed_ms: 0,
+            status: BackfillStatus::Completed,
+        };
+        info!(
+            target: "arklowdun",
+            event = "events_backfill_noop_modern_schema",
+            household_id = %options.household_id,
+            reason = "no legacy start_at column"
+        );
+        return Ok((summary, Vec::new()));
+    }
+
     let mut scanned = 0u64;
     let mut updated = 0u64;
     let mut skipped = 0u64;
     let mut last_rowid = 0i64;
-    let total = count_pending_after(pool, &options.household_id, 0).await?;
+    let total = count_pending_after(pool, &options.household_id, 0, &layout).await?;
     let mut skip_examples = Vec::new();
     let mut chunk_index = 0u64;
 
     let start = Instant::now();
     let mut last_emit = Instant::now();
+
+    let select_sql = pending_events_query(&layout);
 
     emit_progress(
         progress_cb,
@@ -784,21 +893,7 @@ async fn run_dry_run(
 
     loop {
         let chunk_started = Instant::now();
-        let sql = r#"
-            SELECT rowid, id, start_at, end_at, tz
-            FROM events
-            WHERE household_id = ?1
-              AND rowid > ?2
-              AND (
-                start_at_utc IS NULL
-                OR (end_at IS NOT NULL AND end_at_utc IS NULL)
-                OR tz IS NULL
-                OR COALESCE(LENGTH(TRIM(tz)), 0) = 0
-              )
-            ORDER BY rowid
-            LIMIT ?3
-        "#;
-        let rows = sqlx::query(sql)
+        let rows = sqlx::query(&select_sql)
             .bind(&options.household_id)
             .bind(last_rowid)
             .bind(chunk_size as i64)
@@ -1058,6 +1153,24 @@ pub async fn run_events_backfill(
     let progress_ms = sanitize_progress_interval(options.progress_interval_ms)?;
     let progress_interval = Duration::from_millis(progress_ms);
 
+    let layout = detect_events_column_layout(pool).await?;
+    if !layout.requires_backfill() {
+        info!(
+            target: "arklowdun",
+            event = "events_backfill_noop_modern_schema",
+            household_id = %options.household_id,
+            reason = "no legacy start_at column"
+        );
+        return Ok(BackfillSummary {
+            household_id: options.household_id,
+            total_scanned: 0,
+            total_updated: 0,
+            total_skipped: 0,
+            elapsed_ms: 0,
+            status: BackfillStatus::Completed,
+        });
+    }
+
     let (fallback_tz, fallback_label) = resolve_fallback_tz(pool, &options).await?;
 
     info!(
@@ -1098,7 +1211,7 @@ pub async fn run_events_backfill(
     let mut checkpoint = match fetch_checkpoint(pool, &options.household_id).await? {
         Some(cp) => cp,
         None => {
-            let total = count_pending_after(pool, &options.household_id, 0).await?;
+            let total = count_pending_after(pool, &options.household_id, 0, &layout).await?;
             insert_checkpoint(pool, &options.household_id, total).await?
         }
     };
@@ -1106,7 +1219,7 @@ pub async fn run_events_backfill(
     let processed_at_start = checkpoint.processed;
 
     let pending_after =
-        count_pending_after(pool, &options.household_id, checkpoint.last_rowid).await?;
+        count_pending_after(pool, &options.household_id, checkpoint.last_rowid, &layout).await?;
     checkpoint.total = checkpoint.processed + pending_after;
     if checkpoint.total < checkpoint.processed {
         checkpoint.total = checkpoint.processed;
@@ -1133,6 +1246,8 @@ pub async fn run_events_backfill(
     let mut skip_examples = Vec::new();
     let mut chunk_index = 0u64;
 
+    let select_sql = pending_events_query(&layout);
+
     loop {
         if control_ref.map(|c| c.is_cancelled()).unwrap_or(false) {
             break;
@@ -1140,21 +1255,7 @@ pub async fn run_events_backfill(
 
         let mut tx = begin_tx_with_retry(pool, &options.household_id).await?;
         let chunk_started = Instant::now();
-        let sql = r#"
-            SELECT rowid, id, start_at, end_at, tz
-            FROM events
-            WHERE household_id = ?1
-              AND rowid > ?2
-              AND (
-                start_at_utc IS NULL
-                OR (end_at IS NOT NULL AND end_at_utc IS NULL)
-                OR tz IS NULL
-                OR COALESCE(LENGTH(TRIM(tz)), 0) = 0
-              )
-            ORDER BY rowid
-            LIMIT ?3
-        "#;
-        let rows = sqlx::query(sql)
+        let rows = sqlx::query(&select_sql)
             .bind(&options.household_id)
             .bind(checkpoint.last_rowid)
             .bind(chunk_size as i64)
@@ -1493,6 +1594,7 @@ pub async fn events_backfill_timezone_status(
 ) -> AppResult<BackfillStatusReport> {
     let state: State<AppState> = app.state();
     let pool = state.pool_clone();
+    let layout = detect_events_column_layout(&pool).await?;
     let running = {
         let guard = state.backfill.lock().map_err(|_| {
             AppError::new(
@@ -1511,7 +1613,7 @@ pub async fn events_backfill_timezone_status(
         total: cp.total,
         remaining: cp.total.saturating_sub(cp.processed),
     });
-    let pending = count_pending_after(&pool, &household_id, 0).await?;
+    let pending = count_pending_after(&pool, &household_id, 0, &layout).await?;
 
     Ok(BackfillStatusReport {
         running,

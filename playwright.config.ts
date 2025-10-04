@@ -8,13 +8,22 @@ export default defineConfig({
   testDir: './tests',
   testMatch: ['a11y/*.spec.ts', 'ui/*.spec.ts', 'e2e/**/*.spec.ts'],
   fullyParallel: false,
+  globalSetup: './tests/e2e/global.setup.ts',
   use: {
     baseURL,
     headless: true,
   },
   webServer: {
-    command: `npm run dev -- --host ${HOST} --port ${PORT}`,
+    command: `vite --mode test --host ${HOST} --port ${PORT}`,
     url: baseURL,
+    env: {
+      VITE_ENV: 'test',
+      VITE_LOG_LEVEL: 'debug',
+      VITE_IPC_ADAPTER: 'fake',
+      VITE_IPC_SCENARIO: process.env.PLAYWRIGHT_SCENARIO ?? 'defaultHousehold',
+      VITE_ROUTER_MODE: 'hash',
+      PLAYWRIGHT_SCENARIO: process.env.PLAYWRIGHT_SCENARIO ?? 'defaultHousehold',
+    },
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
     stdout: 'pipe',

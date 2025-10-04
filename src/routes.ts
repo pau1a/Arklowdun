@@ -16,6 +16,11 @@ import { ManageView } from "./ManageView";
 import type { AppPane } from "./store";
 import { ImportModal } from "@ui/ImportModal";
 
+const envRecord =
+  (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
+const mode = envRecord.MODE ?? envRecord.VITE_ENV ?? "development";
+const defaultRouteIdForMode: AppPane = (mode === "test" ? "calendar" : "dashboard") as AppPane;
+
 type RoutePlacement = "hub" | "sidebar" | "footer" | "hidden";
 
 type IconVariant = "solid" | "regular";
@@ -246,7 +251,8 @@ ROUTE_DEFINITIONS.forEach((route) => {
   });
 });
 
-const DEFAULT_ROUTE = routeById.get("dashboard")!;
+const DEFAULT_ROUTE =
+  routeById.get(defaultRouteIdForMode) ?? routeById.get("calendar") ?? routeById.get("dashboard")!;
 
 function normaliseHash(fragment: string): string {
   const value = fragment.startsWith("#") ? fragment : `#${fragment}`;

@@ -13,8 +13,9 @@ let capsLogged = false;
 
 async function probe(): Promise<void> {
   const household_id = await getHouseholdIdForCalls();
+  const filesIndexPayload = { household_id, householdId: household_id } as const;
   const [files_index, vehicles_cols, pets_cols] = await Promise.all([
-    call<boolean>("db_files_index_ready", { household_id }),
+    call<boolean>("db_files_index_ready", filesIndexPayload),
     call<boolean>("db_has_vehicle_columns"),
     call<boolean>("db_has_pet_columns"),
   ]);

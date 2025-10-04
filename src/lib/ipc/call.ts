@@ -1,8 +1,9 @@
-import { invoke } from "@tauri-apps/api/core";
 import type { DbHealthReport } from "@bindings/DbHealthReport";
 import type { AppError } from "@bindings/AppError";
 import { actions } from "@store/index";
 import { recoveryText } from "@strings/recovery";
+import { getIpcAdapter } from "./provider";
+import type { ContractRequest, ContractResponse, IpcCommand } from "./port";
 
 const FALLBACK_CODE = "APP/UNKNOWN";
 export const DB_UNHEALTHY_WRITE_BLOCKED = "DB_UNHEALTHY_WRITE_BLOCKED";
@@ -69,18 +70,29 @@ export function normalizeError(error: unknown): AppError {
   return { code: FALLBACK_CODE, message: String(error), context: undefined };
 }
 
-const DB_HEALTH_COMMANDS = new Set(["db_get_health_report", "db_recheck"]);
+const DB_HEALTH_COMMANDS = new Set<IpcCommand>([
+  "db_get_health_report",
+  "db_recheck",
+]);
 
-export async function call<T>(
+export async function call<K extends IpcCommand>(
+  cmd: K,
+  args?: ContractRequest<K>,
+): Promise<ContractResponse<K>>;
+export async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T>;
+export async function call(
   cmd: string,
   args?: Record<string, unknown>,
-): Promise<T> {
-  const trackDbHealth = DB_HEALTH_COMMANDS.has(cmd);
+): Promise<unknown> {
+  const adapter = getIpcAdapter();
+  const typedCmd = cmd as IpcCommand;
+  const payload = (args ?? {}) as ContractRequest<typeof typedCmd>;
+  const trackDbHealth = DB_HEALTH_COMMANDS.has(typedCmd);
   if (trackDbHealth) {
     actions.db.health.beginCheck();
   }
   try {
-    const result = await invoke<T>(cmd, args);
+    const result = await adapter.invoke(typedCmd, payload);
     if (trackDbHealth) {
       actions.db.health.receive(result as unknown as DbHealthReport);
     }
