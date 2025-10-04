@@ -9,8 +9,15 @@ let activeName: AdapterName | undefined;
 
 function resolveEnv(): AdapterName {
   const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
-  const name = env?.VITE_IPC_ADAPTER === "fake" ? "fake" : "tauri";
-  return name;
+  if (env?.VITE_IPC_ADAPTER === "fake") {
+    return "fake";
+  }
+  if (env?.VITE_IPC_ADAPTER === "tauri") {
+    return "tauri";
+  }
+
+  const isTauri = typeof window !== "undefined" && typeof navigator !== "undefined" && /\bTauri\b/i.test(navigator.userAgent ?? "");
+  return isTauri ? "tauri" : "fake";
 }
 
 function createAdapter(name: AdapterName, options?: TestAdapterOptions): IpcAdapter {
