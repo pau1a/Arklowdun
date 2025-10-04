@@ -1,19 +1,86 @@
 export const settingsInitStub = `(() => {
   const bootstrap = window.__ARKLOWDUN_FIXTURE__ ?? {};
-  const households = bootstrap.households ?? [
-    {
-      id: '0',
-      name: 'Default household',
-      is_default: 1,
-      tz: null,
-      created_at: Date.now(),
-      updated_at: Date.now(),
-      deleted_at: null,
-      color: '#2563EB',
-    },
-  ];
-  let activeId = bootstrap.activeId ?? '0';
-  let counter = bootstrap.counter ?? households.length;
+  const STORAGE_KEYS = {
+    households: "__ARKLOWDUN_TEST_HOUSEHOLDS__",
+    activeId: "__ARKLOWDUN_TEST_ACTIVE_ID__",
+    counter: "__ARKLOWDUN_TEST_COUNTER__",
+  };
+
+  const canUseStorage = (() => {
+    try {
+      return typeof localStorage !== "undefined";
+    } catch {
+      return false;
+    }
+  })();
+
+  const loadPersistedState = () => {
+    if (!canUseStorage) return null;
+    try {
+      const rawHouseholds = localStorage.getItem(STORAGE_KEYS.households);
+      const rawActiveId = localStorage.getItem(STORAGE_KEYS.activeId);
+      const rawCounter = localStorage.getItem(STORAGE_KEYS.counter);
+      const households = rawHouseholds ? JSON.parse(rawHouseholds) : null;
+      const counter = rawCounter != null ? Number.parseInt(rawCounter, 10) : null;
+      if (!Array.isArray(households)) {
+        return null;
+      }
+      return {
+        households,
+        activeId: typeof rawActiveId === "string" ? rawActiveId : null,
+        counter: Number.isFinite(counter) ? counter : null,
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const persistState = (state) => {
+    if (!canUseStorage) return;
+    try {
+      localStorage.setItem(
+        STORAGE_KEYS.households,
+        JSON.stringify(state.households ?? []),
+      );
+      if (state.activeId == null) {
+        localStorage.removeItem(STORAGE_KEYS.activeId);
+      } else {
+        localStorage.setItem(STORAGE_KEYS.activeId, state.activeId);
+      }
+      localStorage.setItem(
+        STORAGE_KEYS.counter,
+        String(state.counter ?? state.households?.length ?? 0),
+      );
+    } catch {
+      // ignore storage failures in tests
+    }
+  };
+
+  const persisted = loadPersistedState();
+
+  const households =
+    persisted?.households ??
+    bootstrap.households ?? [
+      {
+        id: '0',
+        name: 'Default household',
+        is_default: 1,
+        tz: null,
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        deleted_at: null,
+        color: '#2563EB',
+      },
+    ];
+  let activeId = persisted?.activeId ?? bootstrap.activeId ?? '0';
+  let counter = persisted?.counter ?? bootstrap.counter ?? households.length;
+  if (typeof counter !== "number" || !Number.isFinite(counter)) {
+    counter = households.length;
+  }
+  if (counter < households.length) {
+    counter = households.length;
+  }
+  counter = Math.max(counter, 1);
   const listeners = new Map();
   const dbHealth = bootstrap.dbHealth ?? {
     status: 'ok',
@@ -31,6 +98,7 @@ export const settingsInitStub = `(() => {
       counter,
       dbHealth,
     };
+    persistState({ households, activeId, counter });
   };
   syncFixture();
 

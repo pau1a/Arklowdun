@@ -93,7 +93,14 @@ type ColorPickerControl = {
 function createColorPicker(initial: string | null): ColorPickerControl {
   const container = document.createElement("div");
   container.className = "settings__household-color-picker";
-  let value: string | null = isHexColor(initial) ? initial : null;
+  const normalize = (input: string | null | undefined): string | null => {
+    if (typeof input !== "string") return null;
+    const trimmed = input.trim();
+    if (!isHexColor(trimmed)) return null;
+    return trimmed.toUpperCase();
+  };
+
+  let value: string | null = normalize(initial);
   const swatches: Array<{ value: string | null; button: HTMLButtonElement }> = [];
 
   const updateSelection = () => {
@@ -105,7 +112,7 @@ function createColorPicker(initial: string | null): ColorPickerControl {
   };
 
   const select = (next: string | null) => {
-    value = next;
+    value = normalize(next);
     updateSelection();
   };
 
@@ -113,8 +120,9 @@ function createColorPicker(initial: string | null): ColorPickerControl {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "settings__household-color";
-    if (swatchValue) {
-      button.style.setProperty("--household-color", swatchValue);
+    const normalized = normalize(swatchValue);
+    if (normalized) {
+      button.style.setProperty("--household-color", normalized);
       button.setAttribute("aria-label", `Use colour ${label}`);
       button.title = label;
     } else {
@@ -124,9 +132,9 @@ function createColorPicker(initial: string | null): ColorPickerControl {
     }
     button.addEventListener("click", (event) => {
       event.preventDefault();
-      select(swatchValue);
+      select(normalized);
     });
-    swatches.push({ value: swatchValue, button });
+    swatches.push({ value: normalized, button });
     return button;
   };
 
@@ -141,7 +149,7 @@ function createColorPicker(initial: string | null): ColorPickerControl {
     element: container,
     getValue: () => value,
     setValue(next) {
-      value = next && isHexColor(next) ? next : null;
+      value = normalize(next);
       updateSelection();
     },
     setDisabled(disabled) {
