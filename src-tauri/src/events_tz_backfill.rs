@@ -452,6 +452,15 @@ async fn ensure_checkpoint_table(pool: &SqlitePool) -> AppResult<()> {
         })
 }
 
+fn is_missing_checkpoint_table(err: &SqlxError) -> bool {
+    matches!(
+        err,
+        SqlxError::Database(db_err)
+            if db_err.message().contains("no such table")
+                && db_err.message().contains(CHECKPOINT_TABLE)
+    )
+}
+
 #[allow(clippy::result_large_err)]
 async fn reset_checkpoint(pool: &SqlitePool, household_id: &str) -> AppResult<()> {
     let sql = format!("DELETE FROM {CHECKPOINT_TABLE} WHERE household_id=?1");
@@ -501,16 +510,22 @@ async fn fetch_checkpoint(pool: &SqlitePool, household_id: &str) -> AppResult<Op
     let sql = format!(
         "SELECT last_rowid, processed, updated, skipped, total FROM {CHECKPOINT_TABLE} WHERE household_id=?1"
     );
-    let row = sqlx::query(&sql)
+    let row = match sqlx::query(&sql)
         .bind(household_id)
         .fetch_optional(pool)
         .await
-        .map_err(|err| {
-            AppError::from(err)
+    {
+        Ok(row) => row,
+        Err(err) if is_missing_checkpoint_table(&err) => {
+            return Ok(None);
+        }
+        Err(err) => {
+            return Err(AppError::from(err)
                 .with_context("operation", OPERATION)
                 .with_context("step", "fetch_checkpoint")
-                .with_context("household_id", household_id.to_string())
-        })?;
+                .with_context("household_id", household_id.to_string()));
+        }
+    };
 
     let Some(row) = row else {
         return Ok(None);

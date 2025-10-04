@@ -27,7 +27,7 @@ const emptyObject = z.object({}).strict();
 const hexColor = z
   .string()
   .regex(/^#(?:[0-9a-fA-F]{3}){1,2}$/)
-  .transform((value) => value.toUpperCase());
+  .transform((value: string) => value.toUpperCase());
 
 const nullableHexColor = z.union([hexColor, z.null()]);
 
@@ -57,6 +57,20 @@ const householdUpdateArgs = householdArgs
   })
   .partial({ name: true, color: true })
   .required({ id: true });
+
+const filesIndexRequestBase = z
+  .object({
+    household_id: z.string().optional(),
+    householdId: z.string().optional(),
+  })
+  .passthrough();
+
+const filesIndexRequest = filesIndexRequestBase.superRefine((value, ctx) => {
+  if (typeof value.household_id === "string" || typeof value.householdId === "string") {
+    return;
+  }
+  ctx.addIssue({ code: z.ZodIssueCode.custom, message: "household id required" });
+});
 
 const householdDeleteResponse = z
   .object({ fallbackId: z.string().nullable().optional() })
@@ -246,7 +260,7 @@ export const contracts = {
   db_backup_reveal: contract({ request: flexibleRequest, response: z.void() }),
   db_backup_reveal_root: contract({ request: flexibleRequest, response: z.void() }),
   db_export_run: contract({ request: flexibleRequest, response: z.custom<ExportEntryDto>() }),
-  db_files_index_ready: contract({ request: flexibleRequest, response: z.boolean() }),
+  db_files_index_ready: contract({ request: filesIndexRequest, response: z.boolean() }),
   db_has_files_index: contract({ request: flexibleRequest, response: z.boolean() }),
   db_get_health_report: contract({ request: dbRequest, response: z.custom<DbHealthReport>() }),
   db_hard_repair_run: contract({ request: flexibleRequest, response: z.custom<HardRepairOutcome>() }),
