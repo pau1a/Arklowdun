@@ -155,10 +155,15 @@ export async function updateHousehold(
   id: string,
   input: UpdateHouseholdInput,
 ): Promise<HouseholdRecord> {
+  const payload: Record<string, unknown> = { id };
+  if (typeof input.name === "string") {
+    payload.name = input.name;
+  }
+  if (Object.prototype.hasOwnProperty.call(input, "color")) {
+    payload.color = input.color ?? null;
+  }
   const record = await call<HouseholdRecordRaw>("household_update", {
-    id,
-    name: input.name,
-    color: input.color,
+    args: payload,
   });
   return normalizeHousehold(record);
 }

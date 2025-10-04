@@ -35,6 +35,27 @@ export const settingsInitStub = `(() => {
     }
   };
 
+  const expectCommandArgs = (command, input) => {
+    if (!input || typeof input !== 'object' || !('args' in input)) {
+      return {
+        error: {
+          code: 'APP/UNKNOWN',
+          message: 'missing required key args for command ' + command,
+        },
+      };
+    }
+    const nested = input.args;
+    if (!nested || typeof nested !== 'object') {
+      return {
+        error: {
+          code: 'APP/UNKNOWN',
+          message: 'invalid args payload for command ' + command,
+        },
+      };
+    }
+    return { params: nested };
+  };
+
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
     unregisterListener(event, id) {
       const bucket = listeners.get(event);
@@ -92,22 +113,36 @@ export const settingsInitStub = `(() => {
           return Promise.resolve(null);
         }
         case 'household_create': {
+          const { params, error } = expectCommandArgs('household_create', args);
+          if (error) {
+            return Promise.reject(error);
+          }
           const id = 'hh-' + counter++;
           const record = {
             id,
-            name: args?.name ?? id,
+            name: typeof params.name === 'string' ? params.name : id,
             is_default: 0,
             tz: null,
             created_at: Date.now(),
             updated_at: Date.now(),
             deleted_at: null,
-            color: args?.color ?? null,
+            color: params.color ?? null,
           };
           households.push(record);
           return Promise.resolve({ ...record });
         }
         case 'household_update': {
-          const id = args?.id;
+          const { params, error } = expectCommandArgs('household_update', args);
+          if (error) {
+            return Promise.reject(error);
+          }
+          const id = params.id;
+          if (typeof id !== 'string' || id.trim() === '') {
+            return Promise.reject({
+              code: 'APP/UNKNOWN',
+              message: 'household_update requires an id string',
+            });
+          }
           const target = households.find((item) => item.id === id);
           if (!target) {
             return Promise.reject({ code: 'HOUSEHOLD_NOT_FOUND' });
@@ -115,11 +150,11 @@ export const settingsInitStub = `(() => {
           if (target.deleted_at !== null) {
             return Promise.reject({ code: 'HOUSEHOLD_DELETED' });
           }
-          if (typeof args?.name === 'string') {
-            target.name = args.name;
+          if (typeof params.name === 'string') {
+            target.name = params.name;
           }
-          if ('color' in args) {
-            target.color = args.color ?? null;
+          if (Object.prototype.hasOwnProperty.call(params, 'color')) {
+            target.color = params.color ?? null;
           }
           target.updated_at = Date.now();
           return Promise.resolve({ ...target });
