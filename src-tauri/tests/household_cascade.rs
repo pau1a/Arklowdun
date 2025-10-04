@@ -202,9 +202,7 @@ async fn cascade_pause_emits_paused_progress() -> Result<()> {
 #[tokio::test]
 async fn cascade_phase_registry_covers_household_tables() -> Result<()> {
     let pool = memory_pool().await?;
-    let known: HashSet<_> = arklowdun_lib::cascade_phase_tables()
-        .into_iter()
-        .collect();
+    let known: HashSet<_> = arklowdun_lib::cascade_phase_tables().into_iter().collect();
     let tables = sqlx::query_scalar::<_, String>(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
     )

@@ -21,6 +21,7 @@ use arklowdun_lib::db::{
         self, DbRepairEvent, DbRepairOptions, DbRepairStep, DbRepairStepState, DbRepairSummary,
     },
 };
+use arklowdun_lib::diagnostics::{self, HOUSEHOLD_STATS_ALIASES};
 use arklowdun_lib::import::{
     build_plan, execute_plan, validate_bundle, write_import_report, ExecutionContext,
     ExecutionReport, ImportBundle, ImportMode, ImportPlan, PlanContext, ValidationContext,
@@ -41,6 +42,9 @@ enum Commands {
     /// Database maintenance and inspection commands.
     #[command(subcommand)]
     Db(DbCommand),
+    /// Diagnostics and support utilities.
+    #[command(subcommand)]
+    Diagnostics(DiagnosticsCommand),
 }
 
 #[derive(Debug, Subcommand)]
@@ -80,6 +84,16 @@ enum DbCommand {
         /// Run validation and planning without executing the plan.
         #[arg(long)]
         dry_run: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum DiagnosticsCommand {
+    /// Summaries of entity counts per household.
+    HouseholdStats {
+        /// Emit JSON instead of a table view.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -125,6 +139,7 @@ fn main() {
 fn handle_cli(command: Commands) -> Result<i32> {
     match command {
         Commands::Db(db) => handle_db_command(db),
+        Commands::Diagnostics(diag) => handle_diagnostics_command(diag),
     }
 }
 
@@ -168,6 +183,89 @@ fn handle_db_command(command: DbCommand) -> Result<i32> {
             mode,
             dry_run,
         } => handle_db_import(input, mode, dry_run),
+    }
+}
+
+fn handle_diagnostics_command(command: DiagnosticsCommand) -> Result<i32> {
+    match command {
+        DiagnosticsCommand::HouseholdStats { json } => handle_household_stats(json),
+    }
+}
+
+fn handle_household_stats(json: bool) -> Result<i32> {
+    let db_path = default_db_path().context("determine database path")?;
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create database parent directory {}", parent.display()))?;
+    }
+
+    let stats = match guard_cli_db_mutation(&db_path)? {
+        Ok(pool) => tauri::async_runtime::block_on(async {
+            let result = diagnostics::household_stats(&pool).await;
+            pool.close().await;
+            result.map_err(|err| anyhow::anyhow!("{}: {}", err.code(), err.message()))
+        })?,
+        Err(code) => return Ok(code),
+    };
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&stats).context("serialize household stats")?
+        );
+    } else {
+        print_household_stats_table(&stats);
+    }
+
+    Ok(0)
+}
+
+fn print_household_stats_table(stats: &[diagnostics::HouseholdStatsEntry]) {
+    if stats.is_empty() {
+        println!("No households found.");
+        return;
+    }
+
+    let mut id_width = "Household ID".len();
+    let mut name_width = "Name".len();
+    for entry in stats {
+        id_width = id_width.max(entry.id.len());
+        name_width = name_width.max(entry.name.len());
+    }
+    let mut column_widths: Vec<usize> = HOUSEHOLD_STATS_ALIASES
+        .iter()
+        .map(|key| key.len())
+        .collect();
+
+    for (idx, key) in HOUSEHOLD_STATS_ALIASES.iter().enumerate() {
+        for entry in stats {
+            let count = entry.counts.get(*key).copied().unwrap_or(0);
+            column_widths[idx] = column_widths[idx].max(count.to_string().len());
+        }
+    }
+
+    let default_width = "Default".len().max(7);
+
+    print!(
+        "{:<id_width$}  {:<name_width$}  {:<default_width$}",
+        "Household ID", "Name", "Default",
+    );
+    for (key, width) in HOUSEHOLD_STATS_ALIASES.iter().zip(column_widths.iter()) {
+        print!("  {:>width$}", key, width = width);
+    }
+    println!();
+
+    for entry in stats {
+        let default_label = if entry.is_default { "yes" } else { "no" };
+        print!(
+            "{:<id_width$}  {:<name_width$}  {:<default_width$}",
+            entry.id, entry.name, default_label,
+        );
+        for (key, width) in HOUSEHOLD_STATS_ALIASES.iter().zip(column_widths.iter()) {
+            let count = entry.counts.get(*key).copied().unwrap_or(0);
+            print!("  {:>width$}", count, width = width);
+        }
+        println!();
     }
 }
 
