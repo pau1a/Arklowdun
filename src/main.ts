@@ -116,6 +116,24 @@ function signalAppReady(container: HTMLElement): void {
   });
 }
 
+function serializeError(error: unknown): string {
+  if (error instanceof Error && typeof error.message === "string") {
+    return error.message;
+  }
+  if (
+    error &&
+    typeof error === "object" &&
+    typeof (error as { message?: unknown }).message === "string"
+  ) {
+    return String((error as { message: string }).message);
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error ?? "Unknown error");
+  }
+}
+
 function renderFatalBanner(error: unknown): void {
   if (typeof document === "undefined") return;
   const existing = document.getElementById("fatal-app-error");
@@ -141,10 +159,7 @@ function renderFatalBanner(error: unknown): void {
   title.style.marginBottom = "12px";
 
   const message = document.createElement("p");
-  const errorMessage =
-    error instanceof Error
-      ? `${error.name ?? "Error"}: ${error.message}`
-      : String(error ?? "Unknown error");
+  const errorMessage = serializeError(error);
   window.__APP_READY_ERROR__ = errorMessage;
   window.__appReady = { status: "error", message: errorMessage };
   message.textContent = errorMessage;
@@ -621,11 +636,11 @@ window.addEventListener("DOMContentLoaded", () => {
   boot().catch((error) => {
     console.error("[BOOT]", error);
     window.__APP_READY__ = false;
-    window.__APP_READY_ERROR__ =
-      error instanceof Error ? error.message : String(error ?? "Unknown error");
+    const message = serializeError(error);
+    window.__APP_READY_ERROR__ = message;
     window.__appReady = {
       status: "error",
-      message: window.__APP_READY_ERROR__ ?? "Unknown error",
+      message,
     };
     appReadyNotified = false;
     document.documentElement.removeAttribute("data-app-ready");

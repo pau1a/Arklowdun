@@ -71,6 +71,7 @@ if (registry.size === 0) {
           tz: "UTC",
           color: "#2563EB",
           is_default: true,
+          is_active: true,
           created_at: 0,
           updated_at: 0,
           deleted_at: null,

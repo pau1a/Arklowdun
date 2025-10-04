@@ -27,6 +27,7 @@ type HouseholdRecordRaw = {
   tz: string | null;
   color: string | null;
   is_default: boolean;
+  is_active?: boolean | null;
   created_at: number;
   updated_at: number;
   deleted_at: number | null;
@@ -333,7 +334,10 @@ export function createScenario(config: ScenarioConfig): ScenarioDefinition {
       const includeDeleted = Boolean((payload as { includeDeleted?: boolean }).includeDeleted);
       return state.households
         .filter((household) => includeDeleted || household.deleted_at === null)
-        .map((household) => ({ ...household }));
+        .map((household) => ({
+          ...household,
+          is_active: household.id === state.activeHouseholdId,
+        }));
     },
     household_get_active: () => state.activeHouseholdId,
     household_get: (payload) => {
@@ -351,6 +355,7 @@ export function createScenario(config: ScenarioConfig): ScenarioDefinition {
         tz: (args?.tz as string) ?? null,
         color: (args?.color as string) ?? null,
         is_default: false,
+        is_active: false,
         created_at: now,
         updated_at: now,
         deleted_at: null,
@@ -377,6 +382,10 @@ export function createScenario(config: ScenarioConfig): ScenarioDefinition {
     household_delete: (payload, ctx) => {
       const id = (payload as { id?: string }).id ?? (payload as any)?.args?.id ?? state.activeHouseholdId;
       const record = state.households.find((h) => h.id === id);
+      if (record?.is_default) {
+        const message = "The default household cannot be deleted.";
+        throw { code: "DEFAULT_UNDELETABLE", message };
+      }
       if (record) {
         record.deleted_at = Math.floor(ctx.clock.now().getTime() / 1000);
       }
@@ -384,6 +393,9 @@ export function createScenario(config: ScenarioConfig): ScenarioDefinition {
       if (state.activeHouseholdId === id && fallback) {
         state.activeHouseholdId = fallback.id;
       }
+      state.households.forEach((household) => {
+        household.is_active = household.id === state.activeHouseholdId;
+      });
       return { fallbackId: fallback ? fallback.id : null };
     },
     household_restore: (payload) => {
@@ -399,6 +411,9 @@ export function createScenario(config: ScenarioConfig): ScenarioDefinition {
       if (typeof id === "string") {
         state.activeHouseholdId = id;
       }
+      state.households.forEach((household) => {
+        household.is_active = household.id === state.activeHouseholdId;
+      });
       return null;
     },
     import_run_legacy: () => ({ ok: true }),
