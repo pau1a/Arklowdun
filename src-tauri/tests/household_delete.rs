@@ -1,16 +1,11 @@
 use std::path::Path;
 
 use anyhow::Result;
-use arklowdun_lib::{
-    default_household_id,
-    delete_household,
-    migrate,
-    pending_cascades,
-    vacuum_queue,
-    CascadeDeleteOptions,
-    HouseholdCrudError,
-};
 use arklowdun_lib::db::health::{run_health_checks, DbHealthStatus};
+use arklowdun_lib::{
+    default_household_id, delete_household, migrate, pending_cascades, vacuum_queue,
+    CascadeDeleteOptions, HouseholdCrudError,
+};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::SqlitePool;
 use tempfile::tempdir;

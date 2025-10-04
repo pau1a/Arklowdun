@@ -1,0 +1,1 @@
+ALTER TABLE household ADD COLUMN color TEXT NULL;

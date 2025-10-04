@@ -50,6 +50,66 @@ test.describe('Settings households lifecycle', () => {
     ).toBeVisible();
   });
 
+  test('colour selection updates chip and failed saves surface validation', async ({ page }) => {
+    const defaultRow = page
+      .locator('.settings__household-row')
+      .filter({ hasText: 'Default household' });
+    const chip = defaultRow.locator('.settings__household-chip');
+
+    await defaultRow.getByRole('button', { name: 'Rename' }).click();
+    await defaultRow.getByRole('button', { name: 'Use colour #F59E0B' }).click();
+    await defaultRow.getByRole('button', { name: 'Save' }).click();
+
+    await expect(chip).not.toHaveClass(/settings__household-chip--empty/);
+    await expect(chip).toHaveAttribute('title', 'Colour #F59E0B');
+    const storedColour = await chip.evaluate((node) =>
+      node.style.getPropertyValue('--household-color'),
+    );
+    expect(storedColour).toBe('#F59E0B');
+    const contrastAttr = await chip.getAttribute('data-contrast');
+    expect(contrastAttr).toBeTruthy();
+
+    await defaultRow.getByRole('button', { name: 'Rename' }).click();
+    await defaultRow.getByRole('button', { name: 'Use colour #EF4444' }).click();
+
+    await page.evaluate(() => {
+      const original = window.__TAURI_INTERNALS__.invoke;
+      window.__TAURI_INTERNALS__ = {
+        ...window.__TAURI_INTERNALS__,
+        invoke(cmd, args) {
+          if (cmd === 'household_update') {
+            return Promise.reject({ code: 'INVALID_COLOR' });
+          }
+          return original(cmd, args);
+        },
+        __restore: original,
+      };
+    });
+
+    await defaultRow.getByRole('button', { name: 'Save' }).click();
+
+    const errorMessage = defaultRow.locator('.settings__household-error');
+    await expect(errorMessage).toBeVisible();
+    await expect(errorMessage).toHaveText('Please use a hex colour like #2563EB.');
+    await expect(defaultRow.locator('.settings__household-color-picker')).toHaveAttribute(
+      'data-invalid',
+      'true',
+    );
+    const toast = page
+      .locator('#ui-toast-region .toast')
+      .filter({ hasText: 'Please use a hex colour like #2563EB.' });
+    await expect(toast).toBeVisible();
+    await expect(defaultRow.locator('.settings__household-edit')).toBeVisible();
+
+    await page.evaluate(() => {
+      const restore = window.__TAURI_INTERNALS__.__restore;
+      if (restore) {
+        window.__TAURI_INTERNALS__.invoke = restore;
+        delete window.__TAURI_INTERNALS__.__restore;
+      }
+    });
+  });
+
   test('deleting the active household falls back to default', async ({ page }) => {
     await page.getByRole('button', { name: 'Create household' }).click();
     await page.getByPlaceholder('Household name').fill('Temporary');

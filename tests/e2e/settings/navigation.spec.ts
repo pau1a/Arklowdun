@@ -68,4 +68,24 @@ test.describe('Settings navigation', () => {
     const healthBanner = page.locator('[data-ui="db-health-banner"]');
     await expect(healthBanner).toHaveAttribute('data-state', 'healthy');
   });
+
+  test('household colour picker retains selection after reload', async ({ page }) => {
+    await page.goto('/#/settings#settings-household');
+
+    const defaultRow = page
+      .locator('.settings__household-row')
+      .filter({ hasText: 'Default household' });
+
+    await defaultRow.getByRole('button', { name: 'Rename' }).click();
+    await defaultRow.getByRole('button', { name: 'Use colour #8B5CF6' }).click();
+    await defaultRow.getByRole('button', { name: 'Save' }).click();
+
+    await page.reload();
+    await expect(page.locator('.settings__household-row')).toBeVisible();
+
+    await defaultRow.getByRole('button', { name: 'Rename' }).click();
+    await expect(
+      defaultRow.getByRole('button', { name: 'Use colour #8B5CF6' }),
+    ).toHaveAttribute('data-selected', 'true');
+  });
 });

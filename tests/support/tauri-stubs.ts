@@ -1,5 +1,6 @@
 export const settingsInitStub = `(() => {
-  const households = [
+  const bootstrap = window.__ARKLOWDUN_FIXTURE__ ?? {};
+  const households = bootstrap.households ?? [
     {
       id: '0',
       name: 'Default household',
@@ -11,10 +12,10 @@ export const settingsInitStub = `(() => {
       color: '#2563EB',
     },
   ];
-  let activeId = '0';
-  let counter = 1;
+  let activeId = bootstrap.activeId ?? '0';
+  let counter = bootstrap.counter ?? households.length;
   const listeners = new Map();
-  const dbHealth = {
+  const dbHealth = bootstrap.dbHealth ?? {
     status: 'ok',
     checks: [],
     offenders: [],
@@ -22,6 +23,16 @@ export const settingsInitStub = `(() => {
     app_version: '1.0.0-test',
     generated_at: new Date().toISOString(),
   };
+
+  const syncFixture = () => {
+    window.__ARKLOWDUN_FIXTURE__ = {
+      households,
+      activeId,
+      counter,
+      dbHealth,
+    };
+  };
+  syncFixture();
 
   const emitEvent = (event, payload) => {
     const bucket = listeners.get(event);
@@ -55,6 +66,9 @@ export const settingsInitStub = `(() => {
     }
     return { params: nested };
   };
+
+  const isHexColor = (value) =>
+    typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value.trim());
 
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
     unregisterListener(event, id) {
@@ -110,6 +124,7 @@ export const settingsInitStub = `(() => {
           }
           activeId = id;
           emitEvent('household:changed', { id });
+          syncFixture();
           return Promise.resolve(null);
         }
         case 'household_create': {
@@ -118,6 +133,16 @@ export const settingsInitStub = `(() => {
             return Promise.reject(error);
           }
           const id = 'hh-' + counter++;
+          let color = null;
+          if (Object.prototype.hasOwnProperty.call(params, 'color')) {
+            if (params.color == null || params.color === '') {
+              color = null;
+            } else if (isHexColor(params.color)) {
+              color = params.color.trim().toUpperCase();
+            } else {
+              return Promise.reject({ code: 'INVALID_COLOR' });
+            }
+          }
           const record = {
             id,
             name: typeof params.name === 'string' ? params.name : id,
@@ -126,9 +151,10 @@ export const settingsInitStub = `(() => {
             created_at: Date.now(),
             updated_at: Date.now(),
             deleted_at: null,
-            color: params.color ?? null,
+            color,
           };
           households.push(record);
+          syncFixture();
           return Promise.resolve({ ...record });
         }
         case 'household_update': {
@@ -154,9 +180,16 @@ export const settingsInitStub = `(() => {
             target.name = params.name;
           }
           if (Object.prototype.hasOwnProperty.call(params, 'color')) {
-            target.color = params.color ?? null;
+            if (params.color == null || params.color === '') {
+              target.color = null;
+            } else if (isHexColor(params.color)) {
+              target.color = params.color.trim().toUpperCase();
+            } else {
+              return Promise.reject({ code: 'INVALID_COLOR' });
+            }
           }
           target.updated_at = Date.now();
+          syncFixture();
           return Promise.resolve({ ...target });
         }
         case 'household_delete': {
@@ -179,6 +212,7 @@ export const settingsInitStub = `(() => {
             activeId = fallbackId;
             emitEvent('household:changed', { id: fallbackId });
           }
+          syncFixture();
           return Promise.resolve({ fallbackId });
         }
         case 'household_restore': {
@@ -189,12 +223,14 @@ export const settingsInitStub = `(() => {
           }
           target.deleted_at = null;
           target.updated_at = Date.now();
+          syncFixture();
           return Promise.resolve({ ...target });
         }
         case 'db_get_health_report':
           return Promise.resolve({ ...dbHealth });
         case 'db_recheck':
           dbHealth.generated_at = new Date().toISOString();
+          syncFixture();
           return Promise.resolve({ ...dbHealth });
         case 'categories_list':
           return Promise.resolve([]);

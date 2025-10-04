@@ -96,6 +96,9 @@ surface a selection flow so the user can choose a household explicitly.
 - Renderer controls keep the default household delete action disabled and the
   backend clears any cascade checkpoints before returning `DEFAULT_UNDELETABLE`
   so health checks remain green.
+- Household rows include an optional `color` column (`TEXT NULL`). The backend
+  normalises `#RRGGBB` values and rejects invalid input with
+  `INVALID_COLOR` so renderer validation bugs cannot corrupt persisted data.
 
 | Scenario | Error code |
 | --- | --- |
@@ -103,6 +106,7 @@ surface a selection flow so the user can choose a household explicitly.
 | Operate on a missing household id | `HOUSEHOLD_NOT_FOUND` |
 | Operate on a soft-deleted household (update/set active) | `HOUSEHOLD_DELETED` |
 | Attempt to set already-active household | `HOUSEHOLD_ALREADY_ACTIVE` |
+| Provide an invalid colour swatch payload | `INVALID_COLOR` |
 
 The settings UI mirrors these rules (see `docs/settings-ui.md`). Error codes are
 surfaced with friendly copy and the frontend immediately falls back to the

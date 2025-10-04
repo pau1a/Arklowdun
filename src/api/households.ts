@@ -65,13 +65,15 @@ export type HouseholdErrorCode =
   | "DEFAULT_UNDELETABLE"
   | "HOUSEHOLD_NOT_FOUND"
   | "HOUSEHOLD_DELETED"
-  | "HOUSEHOLD_ALREADY_ACTIVE";
+  | "HOUSEHOLD_ALREADY_ACTIVE"
+  | "INVALID_COLOR";
 
 export const HOUSEHOLD_ERROR_MESSAGES: Record<HouseholdErrorCode, string> = {
   DEFAULT_UNDELETABLE: "The default household cannot be deleted.",
   HOUSEHOLD_NOT_FOUND: "That household no longer exists.",
   HOUSEHOLD_DELETED: "That household is deleted. Restore it first.",
   HOUSEHOLD_ALREADY_ACTIVE: "The selected household is already active.",
+  INVALID_COLOR: "Please use a hex colour like #2563EB.",
 };
 
 export type SetActiveHouseholdErrorCode = Extract<
