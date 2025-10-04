@@ -150,6 +150,14 @@ function toFooterItem(route: RouteDefinition): FooterItemConfig {
   };
 }
 
+function applyRouteTitle(route: RouteDefinition): void {
+  const label = route.display?.label ?? route.id;
+  setAppToolbarTitle(label);
+  if (typeof document !== "undefined") {
+    document.title = `Arklowdun – ${label}`;
+  }
+}
+
 type DbHealthState = ReturnType<(typeof selectors)['db']['health']>;
 
 function formatDbHealthTimestamp(
@@ -330,6 +338,7 @@ async function renderApp({ route }: { route: RouteDefinition }) {
   ensureCanonicalHash(route);
 
   if (currentRouteId === route.id) {
+    applyRouteTitle(route);
     log.debug("renderApp: route unchanged", { route: route.id, reusedLayout });
     return;
   }
@@ -342,6 +351,8 @@ async function renderApp({ route }: { route: RouteDefinition }) {
 
   log.debug("renderApp: mount route", { route: route.id, reusedLayout });
 
+  applyRouteTitle(route);
+
   try {
     await route.mount(container);
   } catch (error) {
@@ -351,9 +362,6 @@ async function renderApp({ route }: { route: RouteDefinition }) {
 
   if (sequence === renderSequence) {
     currentRouteId = route.id;
-    // Update toolbar page title using route display label (fallback to id)
-    const display = route.display;
-    setAppToolbarTitle(display?.label ?? route.id);
   }
 }
 

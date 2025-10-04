@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import { contracts, type ContractEntry } from "./contracts/index";
+import { UnknownIpcCommandError } from "./errors";
 
 export type IpcCommand = keyof typeof contracts;
 
@@ -14,5 +15,20 @@ export interface IpcAdapter {
 }
 
 export function getContract<K extends IpcCommand>(command: K): ContractEntry<K> {
-  return contracts[command];
+  const contract = contracts[command];
+  if (!contract) {
+    const known = Object.keys(contracts).sort();
+    const error = new UnknownIpcCommandError(String(command), known);
+    const stack = new Error().stack;
+    console.error(
+      `[ipc] unknown command invoked`,
+      {
+        command,
+        known,
+        stack,
+      },
+    );
+    throw error;
+  }
+  return contract;
 }

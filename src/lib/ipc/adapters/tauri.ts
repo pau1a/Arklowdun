@@ -1,4 +1,11 @@
-import { getContract, type ContractRequest, type ContractResponse, type IpcAdapter, type IpcCommand } from "../port";
+import {
+  getContract,
+  type ContractRequest,
+  type ContractResponse,
+  type IpcAdapter,
+  type IpcCommand,
+} from "../port";
+import { IpcLogBuffer, attachGlobalDump, type IpcLogEntry } from "../logBuffer";
 
 interface TauriInvoke {
   invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T>;
@@ -7,11 +14,19 @@ interface TauriInvoke {
 declare global {
   interface Window {
     __TAURI__?: TauriInvoke;
+    __ARKLOWDUN_TAURI_ADAPTER__?: {
+      dumpLogs: () => IpcLogEntry[];
+    };
   }
 }
 
 export class TauriAdapter implements IpcAdapter {
   private invoker?: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+  private readonly logger = new IpcLogBuffer("tauri", 200);
+
+  constructor() {
+    attachGlobalDump("__ARKLOWDUN_TAURI_ADAPTER__", () => this.logger.dump());
+  }
 
   private async getInvoke() {
     if (this.invoker) {
@@ -38,10 +53,19 @@ export class TauriAdapter implements IpcAdapter {
     command: K,
     payload: ContractRequest<K>,
   ): Promise<ContractResponse<K>> {
-    const contract = getContract(command);
-    const request = contract.request.parse(payload ?? {});
-    const invoke = await this.getInvoke();
-    const result = await invoke<ContractResponse<K>>(command, request as Record<string, unknown>);
-    return contract.response.parse(result);
+    const span = this.logger.start(command, payload ?? {});
+    try {
+      const contract = getContract(command);
+      const request = contract.request.parse(payload ?? {});
+      const invoke = await this.getInvoke();
+      const result = await invoke<ContractResponse<K>>(command, request as Record<string, unknown>);
+      const parsed = contract.response.parse(result);
+      span.finish({ success: true });
+      return parsed;
+    } catch (error) {
+      span.finish({ success: false, error });
+      console.error(`[ipc] tauri invoke failed`, { command, error });
+      throw error;
+    }
   }
 }

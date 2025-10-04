@@ -1,6 +1,7 @@
 import { TauriAdapter } from "./adapters/tauri";
 import { TestAdapter, type TestAdapterOptions } from "./adapters/test";
 import type { IpcAdapter } from "./port";
+import { UNKNOWN_IPC_ERROR_CODE } from "./errors";
 
 type AdapterName = "tauri" | "fake";
 
@@ -32,7 +33,21 @@ function resolveEnv(): AdapterName {
   const isTauriProtocol =
     typeof location !== "undefined" && location.protocol.startsWith("tauri");
 
-  return hasTauriBridge || isTauriUA || isTauriProtocol ? "tauri" : "fake";
+  if (hasTauriBridge || isTauriUA || isTauriProtocol) {
+    return "tauri";
+  }
+
+  const messageParts = [
+    "No IPC adapter detected.",
+    "Set VITE_IPC_ADAPTER=fake for browser or Playwright runs.",
+    "Set VITE_IPC_SCENARIO to one of: defaultHousehold, multipleHouseholds, calendarPopulated, corruptHealth.",
+  ];
+  const message = messageParts.join(" ");
+  const error = new Error(message) as Error & { code?: string };
+  error.name = "IpcAdapterResolutionError";
+  error.code = UNKNOWN_IPC_ERROR_CODE;
+  console.error("[ipc] adapter resolution failed", { message, stack: new Error().stack });
+  throw error;
 }
 
 function createAdapter(name: AdapterName, options?: TestAdapterOptions): IpcAdapter {
