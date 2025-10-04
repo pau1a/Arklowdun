@@ -1406,7 +1406,6 @@ async fn household_delete(
                     crate::household::HouseholdCrudError::DefaultUndeletable => "default",
                     crate::household::HouseholdCrudError::NotFound => "not_found",
                     crate::household::HouseholdCrudError::Deleted => "already_deleted",
-                    crate::household::HouseholdCrudError::AlreadyActive => "already_active",
                     crate::household::HouseholdCrudError::InvalidColor => "invalid_color",
                     crate::household::HouseholdCrudError::Unexpected(_) => "unexpected",
                 };
@@ -1507,7 +1506,6 @@ async fn household_resume_delete(
                     crate::household::HouseholdCrudError::DefaultUndeletable => "default",
                     crate::household::HouseholdCrudError::NotFound => "not_found",
                     crate::household::HouseholdCrudError::Deleted => "already_deleted",
-                    crate::household::HouseholdCrudError::AlreadyActive => "already_active",
                     crate::household::HouseholdCrudError::InvalidColor => "invalid_color",
                     crate::household::HouseholdCrudError::Unexpected(_) => "unexpected",
                 };
@@ -1624,7 +1622,6 @@ async fn household_repair(
                     crate::household::HouseholdCrudError::DefaultUndeletable => "default",
                     crate::household::HouseholdCrudError::NotFound => "not_found",
                     crate::household::HouseholdCrudError::Deleted => "already_deleted",
-                    crate::household::HouseholdCrudError::AlreadyActive => "already_active",
                     crate::household::HouseholdCrudError::InvalidColor => "invalid_color",
                     crate::household::HouseholdCrudError::Unexpected(_) => "unexpected",
                 };
