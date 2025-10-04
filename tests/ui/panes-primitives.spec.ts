@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { settingsInitStub } from '../support/tauri-stubs';
 
 const NOTE_TEMPLATE = {
   id: 'note-e2e',
@@ -15,6 +16,10 @@ const NOTE_TEMPLATE = {
 };
 
 test.describe('Pane primitives', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(settingsInitStub);
+  });
+
   test('calendar form is built from primitives', async ({ page }) => {
     await page.goto('/#/calendar');
 

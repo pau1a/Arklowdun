@@ -2,6 +2,11 @@ import { expect, test } from '@playwright/test';
 
 import { createUtcEvents, seedCalendarSnapshot } from '../support/calendar';
 import { STORE_MODULE_PATH } from '../support/store';
+import { settingsInitStub } from '../support/tauri-stubs';
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(settingsInitStub);
+});
 
 test.describe('Timezone badge integrations', () => {
   test('shows in calendar notes panel for cross-timezone events', async ({ page }) => {

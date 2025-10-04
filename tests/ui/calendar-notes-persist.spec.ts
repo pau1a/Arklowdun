@@ -1,8 +1,13 @@
 import { expect, test } from '@playwright/test';
 
 import { createUtcEvents, seedCalendarSnapshot } from '../support/calendar';
+import { settingsInitStub } from '../support/tauri-stubs';
 
 const persistSource = 'playwright-calendar-notes-persist';
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(settingsInitStub);
+});
 
 test.describe('Calendar contextual notes persistence', () => {
   test('snapshot events are persisted before notes load and quick capture', async ({ page }) => {

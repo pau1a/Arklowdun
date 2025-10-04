@@ -1,4 +1,9 @@
 import { expect, test } from '@playwright/test';
+import { settingsInitStub } from '../support/tauri-stubs';
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(settingsInitStub);
+});
 
 test.describe('Calendar error surfaces', () => {
   test('shows taxonomy message for unsupported RRULE', async ({ page }) => {

@@ -5,6 +5,11 @@ import {
   resetDbHealth,
   setDbHealthReport,
 } from '../support/dbHealth';
+import { settingsInitStub } from '../support/tauri-stubs';
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(settingsInitStub);
+});
 
 test.describe('Database health banner', () => {
   test('shows spinner and renders drawer details', async ({ page }) => {

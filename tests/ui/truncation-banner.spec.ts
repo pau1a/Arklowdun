@@ -3,11 +3,16 @@ import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 
 import { createUtcEvents, seedCalendarSnapshot } from '../support/calendar';
+import { settingsInitStub } from '../support/tauri-stubs';
 
 const formatNumber = async (page: Page, value: number) =>
   page.evaluate((count) => new Intl.NumberFormat().format(count), value);
 
 test.describe('Truncation banner', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(settingsInitStub);
+  });
+
   test('calendar announces cap, focuses filters, and respects dismissal tokens', async ({ page }) => {
     await page.goto('/#/calendar');
     await page.waitForSelector('.calendar');
