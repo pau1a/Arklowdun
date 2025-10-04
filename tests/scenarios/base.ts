@@ -230,6 +230,7 @@ export function createScenario(config: ScenarioConfig): ScenarioDefinition {
     attachment_open: () => null,
     attachment_reveal: () => null,
     bills_list_due_between: () => [],
+    policies_list: () => [],
     db_backup_create: (_, ctx) => {
       const now = ctx.clock.now().toISOString();
       const entry: BackupEntry = {

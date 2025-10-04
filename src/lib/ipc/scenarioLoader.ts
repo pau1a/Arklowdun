@@ -92,6 +92,7 @@ if (registry.size === 0) {
       diagnostics_summary: () => ({ ok: true }),
       diagnostics_household_stats: () => ({ households: 1 }),
       bills_list_due_between: () => [],
+      policies_list: () => [],
       db_backup_overview: () => ({
         availableBytes: 0,
         dbSizeBytes: 0,
