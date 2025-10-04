@@ -1,5 +1,6 @@
-use serde::Serialize;
-use std::{env, fs, path::PathBuf};
+use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
+use std::{collections::BTreeMap, env, fs, path::PathBuf};
 
 use crate::{git_commit_hash, resolve_logs_dir, AppError, AppResult, LOG_FILE_NAME};
 use tauri::Manager;
@@ -25,6 +26,57 @@ pub struct Summary {
 pub struct AboutInfo {
     pub app_version: String,
     pub commit_hash: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HouseholdStatsEntry {
+    pub id: String,
+    pub name: String,
+    pub is_default: bool,
+    pub counts: BTreeMap<String, u64>,
+}
+
+struct CountSpec {
+    table: &'static str,
+    alias: &'static str,
+    filter_deleted: bool,
+}
+
+macro_rules! household_count_specs {
+    ($($table:literal => $alias:literal => $filter_deleted:expr),+ $(,)?) => {
+        const COUNT_SPECS: &[CountSpec] = &[
+            $(CountSpec {
+                table: $table,
+                alias: $alias,
+                filter_deleted: $filter_deleted,
+            }),+
+        ];
+
+        pub const HOUSEHOLD_STATS_ALIASES: &[&str] = &[
+            $($alias),+
+        ];
+    };
+}
+
+household_count_specs! {
+    "notes" => "notes" => true,
+    "events" => "events" => true,
+    "files_index" => "files" => false,
+    "bills" => "bills" => true,
+    "policies" => "policies" => true,
+    "property_documents" => "propertyDocuments" => true,
+    "inventory_items" => "inventoryItems" => true,
+    "vehicles" => "vehicles" => true,
+    "vehicle_maintenance" => "vehicleMaintenance" => true,
+    "pets" => "pets" => true,
+    "pet_medical" => "petMedical" => true,
+    "family_members" => "familyMembers" => true,
+    "categories" => "categories" => true,
+    "budget_categories" => "budgetCategories" => true,
+    "expenses" => "expenses" => true,
+    "shopping_items" => "shoppingItems" => true,
+    "note_links" => "noteLinks" => false,
 }
 
 #[allow(clippy::result_large_err)]
@@ -98,6 +150,79 @@ pub fn about_info<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AboutInfo {
         app_version: app.package_info().version.to_string(),
         commit_hash: git_commit_hash().to_string(),
     }
+}
+
+#[derive(sqlx::FromRow)]
+struct HouseholdRow {
+    id: String,
+    name: String,
+    is_default: i64,
+}
+
+#[allow(clippy::result_large_err)]
+pub async fn household_stats(pool: &SqlitePool) -> AppResult<Vec<HouseholdStatsEntry>> {
+    let households = sqlx::query_as::<_, HouseholdRow>(
+        "SELECT id, name, is_default FROM household ORDER BY name COLLATE NOCASE, id",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::from)?;
+
+    let mut stats: Vec<HouseholdStatsEntry> = households
+        .into_iter()
+        .map(|row| {
+            let mut counts = BTreeMap::new();
+            for spec in COUNT_SPECS {
+                counts.insert(spec.alias.to_string(), 0);
+            }
+            HouseholdStatsEntry {
+                id: row.id,
+                name: row.name,
+                is_default: row.is_default != 0,
+                counts,
+            }
+        })
+        .collect();
+
+    if stats.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut index_by_id = std::collections::HashMap::new();
+    for (idx, entry) in stats.iter().enumerate() {
+        index_by_id.insert(entry.id.clone(), idx);
+    }
+
+    for spec in COUNT_SPECS {
+        let sql = if spec.filter_deleted {
+            format!(
+                "SELECT household_id, COUNT(*) as count FROM {} WHERE deleted_at IS NULL GROUP BY household_id",
+                spec.table
+            )
+        } else {
+            format!(
+                "SELECT household_id, COUNT(*) as count FROM {} GROUP BY household_id",
+                spec.table
+            )
+        };
+
+        let rows = sqlx::query_as::<_, (String, i64)>(&sql)
+            .fetch_all(pool)
+            .await
+            .map_err(AppError::from)?;
+
+        for (household_id, count) in rows {
+            if let Some(index) = index_by_id.get(&household_id) {
+                if let Some(entry) = stats.get_mut(*index) {
+                    entry
+                        .counts
+                        .insert(spec.alias.to_string(), count.max(0) as u64);
+                }
+            }
+        }
+    }
+
+    Ok(stats)
 }
 
 #[allow(clippy::result_large_err)]

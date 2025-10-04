@@ -4,7 +4,10 @@ use thiserror::Error;
 use tracing::{info, warn};
 
 use std::num::NonZeroU32;
-use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::{Duration, Instant};
 
 use crate::id::new_uuid_v7;

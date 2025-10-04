@@ -110,7 +110,7 @@ mod attachments;
 mod categories;
 pub mod commands;
 pub mod db;
-mod diagnostics;
+pub mod diagnostics;
 pub mod error;
 pub mod events_tz_backfill;
 pub mod exdate;
@@ -121,9 +121,8 @@ pub use household::{
     acknowledge_vacuum, assert_household_active, cascade_phase_tables, create_household,
     default_household_id, delete_household, ensure_household_invariants, get_household,
     list_households, pending_cascades, restore_household, resume_household_delete,
-    update_household, vacuum_queue, CascadeDeleteOptions, CascadeProgress,
-    CascadeProgressObserver, DeleteOutcome, HouseholdCrudError, HouseholdGuardError,
-    HouseholdRecord, HouseholdUpdateInput,
+    update_household, vacuum_queue, CascadeDeleteOptions, CascadeProgress, CascadeProgressObserver,
+    DeleteOutcome, HouseholdCrudError, HouseholdGuardError, HouseholdRecord, HouseholdUpdateInput,
 };
 mod id;
 pub mod import;
@@ -1291,17 +1290,31 @@ async fn household_create(
                 .map_err(map_household_crud_error)
         }
     })
-    .await?;
+    .await;
 
-    tracing::info!(
-        target: "arklowdun",
-        event = "household_create",
-        id = %result.id,
-        name = %result.name,
-        color = result.color.as_deref().unwrap_or("")
-    );
-
-    Ok(result)
+    match result {
+        Ok(record) => {
+            tracing::info!(
+                target: "arklowdun",
+                event = "household_create",
+                household_id = %record.id,
+                result = "ok",
+                name = %record.name,
+                color = record.color.as_deref().unwrap_or("")
+            );
+            Ok(record)
+        }
+        Err(err) => {
+            tracing::warn!(
+                target: "arklowdun",
+                event = "household_create",
+                household_id = "",
+                result = "error",
+                error_code = %err.code()
+            );
+            Err(err)
+        }
+    }
 }
 
 #[tauri::command]
@@ -1312,6 +1325,7 @@ async fn household_update(
     let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool_clone();
     let id = args.id;
+    let id_for_log = id.clone();
     let name = args.name;
     let color = args.color;
     let result = dispatch_async_app_result(move || {
@@ -1329,17 +1343,31 @@ async fn household_update(
             .map_err(map_household_crud_error)
         }
     })
-    .await?;
+    .await;
 
-    tracing::info!(
-        target: "arklowdun",
-        event = "household_update",
-        id = %result.id,
-        name = %result.name,
-        color = result.color.as_deref().unwrap_or("")
-    );
-
-    Ok(result)
+    match result {
+        Ok(record) => {
+            tracing::info!(
+                target: "arklowdun",
+                event = "household_update",
+                household_id = %record.id,
+                result = "ok",
+                name = %record.name,
+                color = record.color.as_deref().unwrap_or("")
+            );
+            Ok(record)
+        }
+        Err(err) => {
+            tracing::warn!(
+                target: "arklowdun",
+                event = "household_update",
+                household_id = %id_for_log,
+                result = "error",
+                error_code = %err.code()
+            );
+            Err(err)
+        }
+    }
 }
 
 #[tauri::command]
@@ -1366,13 +1394,16 @@ async fn household_delete(
                     crate::household::HouseholdCrudError::Deleted => "already_deleted",
                     crate::household::HouseholdCrudError::Unexpected(_) => "unexpected",
                 };
+                let app_error = map_household_crud_error(err);
                 tracing::warn!(
                     target: "arklowdun",
-                    event = "household_delete_failed",
-                    id = %id,
-                    reason
+                    event = "household_delete",
+                    household_id = %id,
+                    result = "error",
+                    reason,
+                    error_code = %app_error.code()
                 );
-                return Err(map_household_crud_error(err));
+                return Err(app_error);
             }
         };
 
@@ -1386,13 +1417,16 @@ async fn household_delete(
                 tracing::info!(
                     target: "arklowdun",
                     event = "household_active_switched",
-                    reason = "delete_active_fallback",
-                    id = %fallback
+                    household_id = %fallback,
+                    result = "ok",
+                    reason = "delete_active_fallback"
                 );
                 if let Err(err) = app.emit("household:changed", json!({ "id": fallback.clone() })) {
                     tracing::warn!(
                         target: "arklowdun",
                         event = "household_event_emit_failed",
+                        household_id = %fallback,
+                        result = "error",
                         error = %err
                     );
                 }
@@ -1402,7 +1436,8 @@ async fn household_delete(
                     target: "arklowdun",
                     event = "household_active_switch_failed",
                     reason = "delete_active_fallback",
-                    id = %fallback,
+                    household_id = %fallback,
+                    result = "error",
                     error = ?err
                 );
             }
@@ -1413,7 +1448,8 @@ async fn household_delete(
         tracing::info!(
             target: "arklowdun",
             event = "household_delete",
-            id = %record.id,
+            household_id = %record.id,
+            result = "ok",
             name = %record.name,
             color = record.color.as_deref().unwrap_or(""),
             was_active = outcome.was_active,
@@ -1460,7 +1496,8 @@ async fn household_resume_delete(
                 tracing::warn!(
                     target: "arklowdun",
                     event = "household_resume_failed",
-                    id = %id,
+                    household_id = %id,
+                    result = "error",
                     reason
                 );
                 return Err(map_household_crud_error(err));
@@ -1477,13 +1514,16 @@ async fn household_resume_delete(
                 tracing::info!(
                     target: "arklowdun",
                     event = "household_active_switched",
-                    reason = "resume_delete_active_fallback",
-                    id = %fallback
+                    household_id = %fallback,
+                    result = "ok",
+                    reason = "resume_delete_active_fallback"
                 );
                 if let Err(err) = app.emit("household:changed", json!({ "id": fallback.clone() })) {
                     tracing::warn!(
                         target: "arklowdun",
                         event = "household_event_emit_failed",
+                        household_id = %fallback,
+                        result = "error",
                         error = %err
                     );
                 }
@@ -1493,7 +1533,8 @@ async fn household_resume_delete(
                     target: "arklowdun",
                     event = "household_active_switch_failed",
                     reason = "resume_delete_active_fallback",
-                    id = %fallback,
+                    household_id = %fallback,
+                    result = "error",
                     error = ?err
                 );
             }
@@ -1504,7 +1545,8 @@ async fn household_resume_delete(
         tracing::info!(
             target: "arklowdun",
             event = "household_delete_resume",
-            id = %record.id,
+            household_id = %record.id,
+            result = "ok",
             name = %record.name,
             color = record.color.as_deref().unwrap_or(""),
             was_active = outcome.was_active,
@@ -1537,7 +1579,8 @@ async fn household_repair(
         tracing::warn!(
             target: "arklowdun",
             event = "household_repair_fk_failed",
-            id = %id,
+            household_id = %id,
+            result = "error",
             offenders = fk_rows.len()
         );
         return Err(AppError::new(
@@ -1568,7 +1611,8 @@ async fn household_repair(
                 tracing::warn!(
                     target: "arklowdun",
                     event = "household_repair_failed",
-                    id = %id,
+                    household_id = %id,
+                    result = "error",
                     reason
                 );
                 return Err(map_household_crud_error(err));
@@ -1585,13 +1629,16 @@ async fn household_repair(
                 tracing::info!(
                     target: "arklowdun",
                     event = "household_active_switched",
-                    reason = "repair_delete_active_fallback",
-                    id = %fallback
+                    household_id = %fallback,
+                    result = "ok",
+                    reason = "repair_delete_active_fallback"
                 );
                 if let Err(err) = app.emit("household:changed", json!({ "id": fallback.clone() })) {
                     tracing::warn!(
                         target: "arklowdun",
                         event = "household_event_emit_failed",
+                        household_id = %fallback,
+                        result = "error",
                         error = %err
                     );
                 }
@@ -1601,7 +1648,8 @@ async fn household_repair(
                     target: "arklowdun",
                     event = "household_active_switch_failed",
                     reason = "repair_delete_active_fallback",
-                    id = %fallback,
+                    household_id = %fallback,
+                    result = "error",
                     error = ?err
                 );
             }
@@ -1612,7 +1660,8 @@ async fn household_repair(
         tracing::info!(
             target: "arklowdun",
             event = "household_delete_repair",
-            id = %record.id,
+            household_id = %record.id,
+            result = "ok",
             name = %record.name,
             color = record.color.as_deref().unwrap_or(""),
             was_active = outcome.was_active,
@@ -1680,7 +1729,8 @@ async fn household_restore(
     tracing::info!(
         target: "arklowdun",
         event = "household_restore",
-        id = %record.id,
+        household_id = %record.id,
+        result = "ok",
         name = %record.name,
         color = record.color.as_deref().unwrap_or("")
     );
@@ -1699,9 +1749,11 @@ async fn household_set_active(
     if snapshot_active_id(&state).as_deref() == Some(id.as_str()) {
         tracing::warn!(
             target: "arklowdun",
-            event = "household_set_active_failed",
-            id = %id,
-            reason = "already_active"
+            event = "household_set_active",
+            household_id = %id,
+            result = "error",
+            reason = "already_active",
+            error_code = "HOUSEHOLD_ALREADY_ACTIVE"
         );
         return Err(AppError::new(
             "HOUSEHOLD_ALREADY_ACTIVE",
@@ -1719,7 +1771,8 @@ async fn household_set_active(
                 tracing::info!(
                     target: "arklowdun",
                     event = "household_set_active",
-                    id = %record.id,
+                    household_id = %record.id,
+                    result = "ok",
                     name = %record.name,
                     color = record.color.as_deref().unwrap_or("")
                 );
@@ -1728,6 +1781,8 @@ async fn household_set_active(
                 tracing::warn!(
                     target = "arklowdun",
                     event = "household_event_emit_failed",
+                    household_id = %id,
+                    result = "error",
                     error = %err
                 );
             }
@@ -1736,18 +1791,22 @@ async fn household_set_active(
         Err(ActiveSetError::NotFound) => {
             tracing::warn!(
                 target: "arklowdun",
-                event = "household_set_active_failed",
-                id = %id,
-                reason = "not_found"
+                event = "household_set_active",
+                household_id = %id,
+                result = "error",
+                reason = "not_found",
+                error_code = "HOUSEHOLD_NOT_FOUND"
             );
             Err(AppError::new("HOUSEHOLD_NOT_FOUND", "Household not found."))
         }
         Err(ActiveSetError::Deleted) => {
             tracing::warn!(
                 target: "arklowdun",
-                event = "household_set_active_failed",
-                id = %id,
-                reason = "deleted"
+                event = "household_set_active",
+                household_id = %id,
+                result = "error",
+                reason = "deleted",
+                error_code = "HOUSEHOLD_DELETED"
             );
             Err(AppError::new("HOUSEHOLD_DELETED", "Household is deleted."))
         }
@@ -2775,6 +2834,41 @@ async fn diagnostics_summary(app: tauri::AppHandle) -> AppResult<diagnostics::Su
 }
 
 #[tauri::command]
+async fn diagnostics_household_stats(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<diagnostics::HouseholdStatsEntry>> {
+    let pool = state.pool_clone();
+    let result = dispatch_async_app_result(move || {
+        let pool = pool.clone();
+        async move { diagnostics::household_stats(&pool).await }
+    })
+    .await;
+
+    match result {
+        Ok(stats) => {
+            tracing::info!(
+                target: "arklowdun",
+                event = "household_stats",
+                household_id = "",
+                result = "ok",
+                households = stats.len()
+            );
+            Ok(stats)
+        }
+        Err(err) => {
+            tracing::warn!(
+                target: "arklowdun",
+                event = "household_stats",
+                household_id = "",
+                result = "error",
+                error_code = %err.code()
+            );
+            Err(err)
+        }
+    }
+}
+
+#[tauri::command]
 #[allow(clippy::result_large_err)]
 fn about_metadata(app: tauri::AppHandle) -> AppResult<diagnostics::AboutInfo> {
     Ok(diagnostics::about_info(&app))
@@ -3203,6 +3297,7 @@ macro_rules! app_commands {
             attachment_open,
             attachment_reveal,
             diagnostics_summary,
+            diagnostics_household_stats,
             diagnostics_doc_path,
             open_diagnostics_doc,
             db_backup_overview,
