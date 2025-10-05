@@ -5,10 +5,16 @@ import {
   resetDbHealth,
   setDbHealthReport,
 } from '../support/dbHealth';
+import { gotoAppRoute } from '../support/appReady';
+import { settingsInitStub } from '../support/tauri-stubs';
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(settingsInitStub);
+});
 
 test.describe('Database health banner', () => {
   test('shows spinner and renders drawer details', async ({ page }) => {
-    await page.goto('/#/dashboard');
+    await gotoAppRoute(page, '/#/dashboard');
     await resetDbHealth(page);
 
     const banner = page.locator('[data-ui="db-health-banner"]');

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { gotoAppRoute } from '../support/appReady';
 import { settingsInitStub } from '../support/tauri-stubs';
 
 test.beforeEach(async ({ page }) => {
@@ -7,7 +8,7 @@ test.beforeEach(async ({ page }) => {
 
 test.describe('Settings households lifecycle', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/#/settings');
+    await gotoAppRoute(page, '/#/settings');
     await expect(page.getByRole('button', { name: 'Create household' })).toBeVisible();
   });
 

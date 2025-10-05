@@ -1,8 +1,14 @@
 import { expect, test } from '@playwright/test';
+import { gotoAppRoute } from '../support/appReady';
+import { settingsInitStub } from '../support/tauri-stubs';
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(settingsInitStub);
+});
 
 test.describe('Calendar error surfaces', () => {
   test('shows taxonomy message for unsupported RRULE', async ({ page }) => {
-    await page.goto('/#/calendar');
+    await gotoAppRoute(page, '/#/calendar');
 
     await page.evaluate(async () => {
       const { emit } = await import('/src/store/events.ts');

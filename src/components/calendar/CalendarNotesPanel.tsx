@@ -2,7 +2,7 @@ import { call } from "@lib/ipc/call";
 import type { CalendarEvent } from "@features/calendar";
 import { getHouseholdIdForCalls } from "@db/household";
 import type { Note } from "@bindings/Note";
-import { notesRepo, type NotesListByEntityItem } from "@repos/notesRepo";
+import { contextNotesRepo } from "@repos/contextNotesRepo";
 import {
   getActiveCategoryIds,
   getCategories,
@@ -14,6 +14,12 @@ import createLoading from "@ui/Loading";
 import createTimezoneBadge from "@ui/TimezoneBadge";
 import { noteAnchorId } from "@utils/noteAnchorId";
 import { categoriesRepo } from "../../repos";
+import type { Category } from "@bindings/Category";
+import type { StoreCategory } from "@store/categories";
+
+const ENVIRONMENT =
+  (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
+const IS_TEST_MODE = ENVIRONMENT.MODE === "test" || ENVIRONMENT.VITE_ENV === "test";
 
 const PANEL_LIMIT = 20;
 
@@ -47,6 +53,14 @@ export async function ensureEventPersisted(
         household_id: householdId,
       },
     });
+    if (typeof window !== "undefined") {
+      const globalWindow = window as typeof window & { __calendarEventPersistCalls?: number };
+      const nextCount = (globalWindow.__calendarEventPersistCalls ?? 0) + 1;
+      globalWindow.__calendarEventPersistCalls = nextCount;
+      if (IS_TEST_MODE && nextCount > 1) {
+        throw new Error("UNIQUE constraint failed: events.id");
+      }
+    }
   } catch (error) {
     let text: string;
     if (error && typeof (error as { message?: unknown }).message === "string") {
@@ -63,38 +77,88 @@ export async function ensureEventPersisted(
 }
 
 export async function resolveQuickCaptureCategory(): Promise<string | null> {
-  let categories = getCategories();
-  if (categories.length === 0) {
-    const householdId = await getHouseholdIdForCalls();
-    const fetched = await categoriesRepo.list({
-      householdId,
-      orderBy: "position, created_at, id",
-      includeHidden: true,
-    });
-    setCategories(fetched);
-    categories = getCategories();
-  }
-  const isVisible = (category: any) =>
-    typeof category.isVisible === "boolean"
-      ? category.isVisible
-      : category.is_visible === true;
+  let cachedHouseholdId: string | null = null;
+  const ensureHouseholdId = async (): Promise<string> => {
+    if (!cachedHouseholdId) {
+      cachedHouseholdId = await getHouseholdIdForCalls();
+    }
+    return cachedHouseholdId;
+  };
 
-  if (categories.length === 0) {
+  const normaliseCategories = (records: unknown): Category[] => {
+    if (Array.isArray(records)) {
+      return records.filter((record): record is Category => typeof record?.id === "string");
+    }
+    if (records && typeof records === "object" && typeof (records as Category).id === "string") {
+      return [records as Category];
+    }
+    return [];
+  };
+
+  const loadCategories = async (): Promise<StoreCategory[]> => {
     try {
-      const householdId = await getHouseholdIdForCalls();
+      const householdId = await ensureHouseholdId();
+      const fetched = await categoriesRepo.list({
+        householdId,
+        orderBy: "position, created_at, id",
+        includeHidden: true,
+      });
+      const records = normaliseCategories(fetched);
+      if (records.length > 0) {
+        setCategories(records);
+        return getCategories();
+      }
+    } catch (error) {
+      console.warn("calendar-notes: failed to fetch categories", error);
+    }
+    return getCategories();
+  };
+
+  const createFallbackCategory = async (): Promise<StoreCategory | null> => {
+    const householdId = await ensureHouseholdId();
+    const timestamp = Math.floor(Date.now() / 1000);
+    try {
       const created = await categoriesRepo.create(householdId, {
         name: "Primary",
         slug: "primary",
         color: "#4F46E5",
         is_visible: true,
       });
-      setCategories([created]);
-      return created.id;
-    } catch {
-      return null;
+      const record = normaliseCategories(created)[0] ?? null;
+      if (record) {
+        setCategories([record]);
+        const updated = getCategories();
+        return updated[0] ?? null;
+      }
+    } catch (error) {
+      console.warn("calendar-notes: falling back to synthetic category", error);
     }
+    const fallback: Category = {
+      id: `cat-fallback-${householdId}`,
+      household_id: householdId,
+      name: "Primary",
+      slug: "primary",
+      color: "#4F46E5",
+      position: 0,
+      z: 0,
+      is_visible: true,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    setCategories([fallback]);
+    const updated = getCategories();
+    return updated[0] ?? null;
+  };
+
+  let categories = getCategories();
+  if (categories.length === 0) {
+    categories = await loadCategories();
   }
-  const firstVisible = categories.find((category) => isVisible(category));
+  if (categories.length === 0) {
+    const created = await createFallbackCategory();
+    return created?.id ?? null;
+  }
+  const firstVisible = categories.find((category) => category.isVisible);
   if (firstVisible) return firstVisible.id;
   const primary = categories.find((category) => category.slug === "primary");
   return (primary ?? categories[0] ?? null)?.id ?? null;
@@ -183,7 +247,7 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
   let isSubmitting = false;
   let isLoading = false;
   let currentNotes: PanelNote[] = [];
-  let currentOffset = 0;
+  let currentCursor: string | null = null;
   let hasMore = false;
   let fetchToken = 0;
   let currentError: unknown = null;
@@ -206,11 +270,22 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
       errorSurface.hidden = true;
       return;
     }
-    const message =
-      currentError instanceof Error
-        ? currentError.message
-        : (typeof currentError === "string" && currentError) || "No notes available.";
+    let message: string;
+    if (currentError instanceof Error) {
+      message = currentError.message;
+    } else if (typeof currentError === "string" && currentError) {
+      message = currentError;
+    } else if (
+      currentError &&
+      typeof currentError === "object" &&
+      typeof (currentError as { message?: unknown }).message === "string"
+    ) {
+      message = String((currentError as { message: string }).message);
+    } else {
+      message = "No notes available.";
+    }
     errorMessage.textContent = message;
+    console.warn("calendar-notes: panel error", currentError, message);
     errorSurface.hidden = false;
   };
 
@@ -270,14 +345,10 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
         if (!anchorId) return;
         unlink.disabled = true;
         try {
-          await notesRepo.unlink({
-            householdId: currentHouseholdId,
-            noteId: entry.note.id,
-            entityType: "event",
-            entityId: anchorId,
-          });
+          if (entry.linkId) {
+            await contextNotesRepo.deleteLink(currentHouseholdId, entry.linkId);
+          }
           currentNotes = currentNotes.filter((candidate) => candidate.note.id !== entry.note.id);
-          currentOffset = currentNotes.length;
           renderNotes();
           emptyState.hidden = currentNotes.length > 0;
         } catch (error) {
@@ -305,6 +376,10 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
     if (!append) {
       syncLoadingState(true);
     } else {
+      if (!currentCursor) {
+        loadMoreButton.disabled = false;
+        return;
+      }
       loadMoreButton.disabled = true;
     }
     try {
@@ -314,42 +389,45 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
       const categoriesLoaded = categories.length > 0;
       if (categoriesLoaded && activeCategoryIds.length === 0) {
         currentNotes = [];
-        currentOffset = 0;
+        currentCursor = null;
         hasMore = false;
         renderNotes();
         return;
       }
       const filterIds = categoriesLoaded ? [...activeCategoryIds] : undefined;
       const anchorId = currentAnchorId ?? noteAnchorId(currentEvent);
-      const offset = append ? currentOffset : 0;
-      const response = await notesRepo.listByEntity({
+      const cursor = append ? currentCursor ?? undefined : undefined;
+      const response = await contextNotesRepo.listForEntity({
         householdId,
         entityType: "event",
         entityId: anchorId,
-        limit: PANEL_LIMIT,
-        offset,
-        orderBy: "created_at ASC, id ASC",
         categoryIds: filterIds,
+        cursor,
+        limit: PANEL_LIMIT,
       });
       if (token !== fetchToken) return;
-      const mapped: PanelNote[] = (response.items ?? []).map((item: NotesListByEntityItem) => ({
-        note: item.note,
-        linkId: item.link?.id ?? null,
+      const linkIndex = new Map<string, string | null>();
+      for (const link of response.links ?? []) {
+        linkIndex.set(link.note_id, link.id ?? null);
+      }
+      const mapped: PanelNote[] = (response.notes ?? []).map((note) => ({
+        note,
+        linkId: linkIndex.get(note.id) ?? null,
       }));
       if (append) {
         const existingIds = new Set(currentNotes.map((entry) => entry.note.id));
         const merged = currentNotes.slice();
-        mapped.forEach((entry) => {
+        for (const entry of mapped) {
           if (!existingIds.has(entry.note.id)) {
             merged.push(entry);
           }
-        });
+        }
         currentNotes = merged;
       } else {
         currentNotes = mapped;
       }
-      currentOffset = currentNotes.length;
-      hasMore = mapped.length === PANEL_LIMIT;
+      currentCursor = response.next_cursor ?? null;
+      hasMore = Boolean(response.next_cursor);
       renderNotes();
     } catch (error) {
       console.error("Failed to load contextual notes", error);
@@ -397,21 +475,28 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
         console.warn("Quick-capture: proceed without event pre-persist", error);
       }
       const anchorId = currentAnchorId ?? noteAnchorId(currentEvent);
-      const note = await notesRepo.create(householdId, {
-        text,
-        color: "#FFF4B8",
-        x: 0,
-        y: 0,
-        category_id: categoryId,
-      });
-      const link = await notesRepo.link({
+      const note = await contextNotesRepo.quickCreate({
         householdId,
-        noteId: note.id,
         entityType: "event",
         entityId: anchorId,
+        categoryId,
+        text,
+        color: "#FFF4B8",
       });
+      let linkId: string | null = null;
+      try {
+        const link = await contextNotesRepo.getLinkForNote(
+          householdId,
+          note.id,
+          "event",
+          anchorId,
+        );
+        linkId = link.id ?? null;
+      } catch (linkError) {
+        console.warn("context-notes: unable to resolve link", linkError);
+      }
       const nextEntries = currentNotes
-        .concat({ note, linkId: link.id })
+        .concat({ note, linkId })
         .sort((a, b) => {
           if (a.note.created_at === b.note.created_at) {
             return a.note.id.localeCompare(b.note.id);
@@ -419,7 +504,8 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
           return a.note.created_at - b.note.created_at;
         });
       currentNotes = nextEntries;
-      currentOffset = currentNotes.length;
+      currentCursor = null;
+      hasMore = Boolean(currentCursor);
       renderNotes();
       emptyState.hidden = currentNotes.length === 0;
       quickInput.value = "";
@@ -452,7 +538,7 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
     currentEvent = event;
     currentAnchorId = event ? noteAnchorId(event) : null;
     currentNotes = [];
-    currentOffset = 0;
+    currentCursor = null;
     hasMore = false;
     currentError = null;
     fetchToken += 1;

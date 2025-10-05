@@ -19,6 +19,7 @@ import {
   getHubRoutes,
   getSidebarRoutes,
   getFooterRoutes,
+  getDefaultRoute,
   type RouteDefinition,
 } from "./routes";
 import { getHouseholdIdForCalls } from "./db/household";
@@ -40,9 +41,22 @@ import { ensureDbHealthReport, recheckDbHealth } from "./services/dbHealth";
 import { recoveryText } from "@strings/recovery";
 import { mountMacToolbar, setAppToolbarTitle } from "@ui/AppToolbar";
 import { initAmbientBackground, type AmbientBackgroundController } from "@ui/AmbientBackground";
+import { getActiveTestScenario, getIpcAdapterName } from "@lib/ipc/provider";
 
 // Resolve main app logo (SVG) as a URL the bundler can serve
 const appLogoUrl = new URL("./assets/logo.svg", import.meta.url).href;
+
+const envRecord =
+  (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
+const runtimeMode = envRecord.MODE ?? envRecord.VITE_ENV ?? "development";
+
+declare global {
+  interface Window {
+    __APP_READY__?: boolean;
+    __APP_READY_ERROR__?: string | null;
+    __appReady?: { status: "ok" } | { status: "error"; message: string };
+  }
+}
 
 function ensureFavicon(url: string): void {
   const head = document.head || document.documentElement;
@@ -81,6 +95,81 @@ let dbHealthUi: DbHealthUiContext | null = null;
 const numberFormatter = new Intl.NumberFormat();
 let ambientController: AmbientBackgroundController | null = null;
 let ambientInit: Promise<void> | null = null;
+let appReadyNotified = false;
+
+function signalAppReady(container: HTMLElement): void {
+  if (typeof window === "undefined" || appReadyNotified) return;
+  const mainHost = container.closest("main[role='main']") ??
+    document.querySelector<HTMLElement>("main[role='main']");
+  if (!mainHost) return;
+  const markReady = () => {
+    if (appReadyNotified) return;
+    appReadyNotified = true;
+    window.__APP_READY_ERROR__ = null;
+    window.__APP_READY__ = true;
+    window.__appReady = { status: "ok" };
+    document.documentElement.setAttribute("data-app-ready", "1");
+    window.dispatchEvent(new Event("app:ready"));
+  };
+  requestAnimationFrame(() => {
+    requestAnimationFrame(markReady);
+  });
+}
+
+function serializeError(error: unknown): string {
+  if (error instanceof Error && typeof error.message === "string") {
+    return error.message;
+  }
+  if (
+    error &&
+    typeof error === "object" &&
+    typeof (error as { message?: unknown }).message === "string"
+  ) {
+    return String((error as { message: string }).message);
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error ?? "Unknown error");
+  }
+}
+
+function renderFatalBanner(error: unknown): void {
+  if (typeof document === "undefined") return;
+  const existing = document.getElementById("fatal-app-error");
+  existing?.remove();
+  const host = document.createElement("div");
+  host.id = "fatal-app-error";
+  host.setAttribute("role", "alert");
+  host.style.position = "fixed";
+  host.style.inset = "0";
+  host.style.background = "#7f1d1d";
+  host.style.color = "#fff";
+  host.style.display = "flex";
+  host.style.flexDirection = "column";
+  host.style.alignItems = "center";
+  host.style.justifyContent = "center";
+  host.style.padding = "32px";
+  host.style.fontFamily = "Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  host.style.zIndex = "9999";
+
+  const title = document.createElement("strong");
+  title.textContent = "Application failed to start";
+  title.style.fontSize = "1.5rem";
+  title.style.marginBottom = "12px";
+
+  const message = document.createElement("p");
+  const errorMessage = serializeError(error);
+  window.__APP_READY_ERROR__ = errorMessage;
+  window.__appReady = { status: "error", message: errorMessage };
+  message.textContent = errorMessage;
+  message.style.margin = "0";
+  message.style.whiteSpace = "pre-wrap";
+  message.style.textAlign = "center";
+
+  host.append(title, message);
+  document.body.append(host);
+}
 
 function ensureAmbientBackground(): void {
   if (ambientInit) return;
@@ -148,6 +237,14 @@ function toFooterItem(route: RouteDefinition): FooterItemConfig {
       variant: icon?.defaultVariant ?? "solid",
     },
   };
+}
+
+function applyRouteTitle(route: RouteDefinition): void {
+  const label = route.display?.label ?? route.id;
+  setAppToolbarTitle(label);
+  if (typeof document !== "undefined") {
+    document.title = `Arklowdun – ${label}`;
+  }
 }
 
 type DbHealthState = ReturnType<(typeof selectors)['db']['health']>;
@@ -330,6 +427,7 @@ async function renderApp({ route }: { route: RouteDefinition }) {
   ensureCanonicalHash(route);
 
   if (currentRouteId === route.id) {
+    applyRouteTitle(route);
     log.debug("renderApp: route unchanged", { route: route.id, reusedLayout });
     return;
   }
@@ -342,18 +440,21 @@ async function renderApp({ route }: { route: RouteDefinition }) {
 
   log.debug("renderApp: mount route", { route: route.id, reusedLayout });
 
+  applyRouteTitle(route);
+
   try {
     await route.mount(container);
   } catch (error) {
     log.error("renderApp: mount failed", error);
+    if (!appReadyNotified) {
+      throw error;
+    }
     return;
   }
 
   if (sequence === renderSequence) {
     currentRouteId = route.id;
-    // Update toolbar page title using route display label (fallback to id)
-    const display = route.display;
-    setAppToolbarTitle(display?.label ?? route.id);
+    signalAppReady(container);
   }
 }
 
@@ -455,31 +556,67 @@ function setupDynamicMinSize() {
   calibrateMinHeight(1000);
 }
 
-async function handleRouteChange() {
+interface HandleRouteChangeOptions {
+  suppressErrors?: boolean;
+}
+
+async function handleRouteChange(options: HandleRouteChangeOptions = {}) {
   const route = resolveRouteFromHash(window.location.hash);
   try {
     await renderApp({ route });
   } catch (error) {
     log.error("handleRouteChange failed", error);
+    if (!options.suppressErrors) {
+      throw error;
+    }
   }
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  const root = document.getElementById("app") ?? document.body;
-  mountMacToolbar(root);
-  // Use the same SVG as the app-wide favicon/brand mark
-  ensureFavicon(appLogoUrl);
+  const boot = async () => {
+    window.__APP_READY__ = false;
+    window.__APP_READY_ERROR__ = null;
+    window.__appReady = undefined;
+    document.documentElement.removeAttribute("data-app-ready");
+    appReadyNotified = false;
 
-  log.debug("app booted");
-  getHouseholdIdForCalls().catch((e) => console.error("DB init failed:", e));
+    const root = document.getElementById("app") ?? document.body;
+    mountMacToolbar(root);
+    ensureFavicon(appLogoUrl);
 
-  const onHashChange = () => {
-    void handleRouteChange();
-  };
-  window.addEventListener("hashchange", onHashChange);
+    const adapterName = getIpcAdapterName();
+    const scenarioName = getActiveTestScenario();
+    if (runtimeMode === "test") {
+      document.documentElement.setAttribute("data-test-mode", "true");
+    } else {
+      document.documentElement.removeAttribute("data-test-mode");
+    }
+    console.info("[ENV]", {
+      mode: runtimeMode,
+      IPC_ADAPTER: adapterName,
+      IPC_SCENARIO: scenarioName ?? null,
+    });
 
-  void (async () => {
-    await handleRouteChange();
+    const defaultRoute = getDefaultRoute();
+    if (!window.location.hash || window.location.hash === "#" || window.location.hash === "#/") {
+      history.replaceState(null, "", defaultRoute.hash);
+    }
+
+    log.debug("app booted");
+    getHouseholdIdForCalls().catch((e) => console.error("DB init failed:", e));
+
+    const onHashChange = () => {
+      void handleRouteChange({ suppressErrors: true });
+    };
+    window.addEventListener("hashchange", onHashChange);
+
+    try {
+      await handleRouteChange();
+    } catch (error) {
+      window.removeEventListener("hashchange", onHashChange);
+      throw error;
+    }
+
     void ensureDbHealthReport();
     const palette = initCommandPalette();
     initKeyboardMap({
@@ -494,9 +631,21 @@ window.addEventListener("DOMContentLoaded", () => {
       console.log("Runtime window label:", appWindow.label);
       setupDynamicMinSize();
     });
+  };
 
-    // ambient debug probe removed; overlay verified
-  })();
+  boot().catch((error) => {
+    console.error("[BOOT]", error);
+    window.__APP_READY__ = false;
+    const message = serializeError(error);
+    window.__APP_READY_ERROR__ = message;
+    window.__appReady = {
+      status: "error",
+      message,
+    };
+    appReadyNotified = false;
+    document.documentElement.removeAttribute("data-app-ready");
+    renderFatalBanner(error);
+  });
 });
 
 window.addEventListener("beforeunload", () => {
