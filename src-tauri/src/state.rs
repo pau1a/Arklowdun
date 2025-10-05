@@ -1,11 +1,12 @@
 use sqlx::SqlitePool;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::{
     db::health::DbHealthReport, events_tz_backfill::BackfillCoordinator,
-    household_active::StoreHandle, AppError, AppResult,
+    household_active::StoreHandle, vault::Vault, vault_migration::VaultMigrationManager, AppError,
+    AppResult,
 };
 
 #[derive(Clone)]
@@ -16,6 +17,9 @@ pub struct AppState {
     pub backfill: Arc<Mutex<BackfillCoordinator>>,
     pub db_health: Arc<Mutex<DbHealthReport>>,
     pub db_path: Arc<PathBuf>,
+    pub attachments_root: Arc<PathBuf>,
+    pub vault: Arc<Vault>,
+    pub vault_migration: Arc<VaultMigrationManager>,
     pub maintenance: Arc<AtomicBool>,
 }
 
@@ -35,6 +39,18 @@ impl AppState {
 
     pub fn maintenance_active(&self) -> bool {
         self.maintenance.load(Ordering::SeqCst)
+    }
+
+    pub fn attachments_root(&self) -> &Path {
+        self.attachments_root.as_path()
+    }
+
+    pub fn vault(&self) -> Arc<Vault> {
+        self.vault.clone()
+    }
+
+    pub fn vault_migration(&self) -> Arc<VaultMigrationManager> {
+        self.vault_migration.clone()
     }
 }
 

@@ -12,6 +12,10 @@ import { createRepairView } from "@features/settings/components/RepairView";
 import { createExportView } from "@features/settings/components/ExportView";
 import { createImportView } from "@features/settings/components/ImportView";
 import { createHardRepairView } from "@features/settings/components/HardRepairView";
+import {
+  createStorageVaultView,
+  vaultMigrationUiEnabled,
+} from "@features/settings/components/StorageVaultView";
 import { createEmptyState } from "./ui/EmptyState";
 import { STR } from "./ui/strings";
 import createButton from "@ui/Button";
@@ -47,6 +51,7 @@ export interface SettingsViewOptions {
     createExportView?: typeof createExportView;
     createImportView?: typeof createImportView;
     createHardRepairView?: typeof createHardRepairView;
+    createStorageVaultView?: typeof createStorageVaultView;
     createAmbientBackgroundSection?: typeof createAmbientBackgroundSection;
     createAttributionSectionAsync?: typeof createAttributionSectionAsync;
     createHouseholdSwitcherSection?: typeof createHouseholdSwitcherSection;
@@ -78,6 +83,7 @@ export function SettingsView(
   const createExport = components.createExportView ?? createExportView;
   const createImport = components.createImportView ?? createImportView;
   const createHardRepair = components.createHardRepairView ?? createHardRepairView;
+  const createStorageVault = components.createStorageVaultView ?? createStorageVaultView;
   const createAmbient =
     components.createAmbientBackgroundSection ?? createAmbientBackgroundSection;
   const createAttribution =
@@ -354,11 +360,11 @@ export function SettingsView(
     createEmptySection("settings-general", "General"),
   );
 
-  registerNavSection(
-    "settings-storage",
-    "Storage & permissions",
-    createEmptySection("settings-storage", "Storage and permissions"),
-  );
+  if (vaultMigrationUiEnabled) {
+    const storageVault = createStorageVault();
+    registerViewCleanup(container, storageVault.destroy);
+    registerNavSection("settings-storage", "Storage & permissions", storageVault.element);
+  }
 
   registerNavSection(
     "settings-notifications",

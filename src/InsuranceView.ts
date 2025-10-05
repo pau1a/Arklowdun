@@ -1,4 +1,6 @@
 import { sanitizeRelativePath } from "./files/path";
+
+const POLICIES_CATEGORY = "policies" as const;
 import {
   isPermissionGranted,
   requestPermission,
@@ -61,7 +63,7 @@ async function renderPolicies(listEl: HTMLUListElement, policies: Policy[]) {
       const revealBtn = document.createElement("button");
       revealBtn.textContent = revealLabel();
       revealBtn.addEventListener("click", () =>
-        revealAttachment("policies", String(p.id), p.root_key, p.relative_path),
+        revealAttachment("policies", String(p.id)),
       );
       li.appendChild(revealBtn);
     }
@@ -131,8 +133,8 @@ export async function InsuranceView(container: HTMLElement) {
     const policy = await policiesRepo.create(hh, {
       amount: Math.round(parseFloat(amountInput.value) * 100),
       due_date: dueTs,
-      root_key: "appData",
       relative_path: sanitizeRelativePath(docInput.value),
+      category: POLICIES_CATEGORY,
       reminder,
       position: policies.length,
     });

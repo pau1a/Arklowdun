@@ -105,6 +105,7 @@ mod tests {
     use crate::db::health::DbHealthReport;
     use crate::events_tz_backfill::BackfillCoordinator;
     use crate::household_active::StoreHandle;
+    use crate::vault::Vault;
     use sqlx::sqlite::SqlitePoolOptions;
     use std::{
         path::PathBuf,
@@ -117,6 +118,7 @@ mod tests {
             .max_connections(1)
             .connect_lazy("sqlite::memory:")
             .expect("create sqlite pool");
+        let attachments = PathBuf::from("test.attachments");
         AppState {
             pool: Arc::new(RwLock::new(pool)),
             active_household_id: Arc::new(Mutex::new(String::new())),
@@ -124,6 +126,8 @@ mod tests {
             backfill: Arc::new(Mutex::new(BackfillCoordinator::new())),
             db_health: Arc::new(Mutex::new(report)),
             db_path: Arc::new(PathBuf::from("test.sqlite3")),
+            attachments_root: Arc::new(attachments.clone()),
+            vault: Arc::new(Vault::new(attachments)),
             maintenance: Arc::new(AtomicBool::new(false)),
         }
     }

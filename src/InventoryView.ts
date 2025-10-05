@@ -1,5 +1,7 @@
 // src/InventoryView.ts
 import { sanitizeRelativePath } from "./files/path";
+
+const INVENTORY_CATEGORY = "inventory_items" as const;
 import { isPermissionGranted, requestPermission, sendNotification } from "./notification";
 import type { InventoryItem } from "./models";
 import { getHouseholdIdForCalls } from "./db/household";
@@ -58,7 +60,7 @@ async function renderInventory(listEl: HTMLUListElement, items: InventoryItem[])
       const revealBtn = document.createElement("button");
       revealBtn.textContent = revealLabel();
       revealBtn.addEventListener("click", () =>
-        revealAttachment("inventory_items", String(it.id), it.root_key, it.relative_path!),
+        revealAttachment("inventory_items", String(it.id)),
       );
       li.appendChild(revealBtn);
     }
@@ -139,8 +141,8 @@ export async function InventoryView(container: HTMLElement) {
       name: nameInput.value,
       purchase_date: purchaseTs,
       warranty_expiry: warrantyTs,
-      root_key: "appData",
       relative_path: sanitizeRelativePath(docInput.value || ""),
+      category: INVENTORY_CATEGORY,
       reminder,
       position: items.length,
     });

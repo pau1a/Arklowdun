@@ -27,6 +27,7 @@
     "lint:rs": "cargo clippy --manifest-path src-tauri/Cargo.toml --lib --bins --examples --all-features -- -D clippy::unwrap_used -D clippy::expect_used && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features",
     "gen:models": "cargo test --no-default-features --manifest-path src-tauri/Cargo.toml",
     "check:models": "npm run gen:models && git diff --exit-code -- src/bindings",
+    "check:attachment-categories": "npm run gen:models && git diff --exit-code -- src/bindings/AttachmentCategory.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "guard:invoke": "bash scripts/guards/no-direct-invoke.sh",
     "guard:ui-colors": "bash scripts/guards/no-ui-color-literals.sh",

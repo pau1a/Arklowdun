@@ -1,5 +1,7 @@
 // src/PetDetailView.ts
 import { sanitizeRelativePath } from "./files/path";
+
+const PET_MEDICAL_CATEGORY = "pet_medical" as const;
 import type { Pet, PetMedicalRecord } from "./models";
 import { petMedicalRepo, petsRepo } from "./repos";
 import { getHouseholdIdForCalls } from "./db/household";
@@ -81,7 +83,7 @@ export async function PetDetailView(
         const id = li.getAttribute("data-id")!;
         const m = medical.find((x) => x.id === id);
         if (!m) return;
-        revealAttachment("pet_medical", id, m.root_key, m.relative_path!);
+        revealAttachment("pet_medical", id);
       });
     });
 
@@ -133,7 +135,9 @@ export async function PetDetailView(
           pet_id: pet.id,
           date: dateLocalNoon,
           description: descInput.value,
-          ...(rel ? { root_key: "appData", relative_path: rel } : {}),
+          ...(rel
+            ? { relative_path: rel, category: PET_MEDICAL_CATEGORY }
+            : { category: PET_MEDICAL_CATEGORY }),
           reminder: reminderTs,
         });
 

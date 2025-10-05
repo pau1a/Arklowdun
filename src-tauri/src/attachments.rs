@@ -1,19 +1,33 @@
-use crate::{repo, AppError};
+use crate::{
+    attachment_category::AttachmentCategory,
+    repo,
+    vault::{ERR_INVALID_CATEGORY, ERR_INVALID_HOUSEHOLD},
+    AppError,
+};
 use sqlx::Row;
 use std::path::Path;
+use std::str::FromStr;
 
-/// Query a table for (root_key, relative_path).
+#[derive(Debug, Clone)]
+pub struct AttachmentDescriptor {
+    pub household_id: String,
+    pub category: AttachmentCategory,
+    pub relative_path: String,
+}
+
+/// Query a table for the attachment vault coordinates.
 #[allow(clippy::result_large_err)]
-pub async fn load_attachment_columns(
+pub async fn load_attachment_descriptor(
     pool: &sqlx::SqlitePool,
     table: &str,
     id: &str,
-) -> Result<(String, String), AppError> {
-    repo::ensure_table(table)
-        .map_err(|err| AppError::from(err).with_context("operation", "load_attachment_columns"))?;
+) -> Result<AttachmentDescriptor, AppError> {
+    repo::ensure_table(table).map_err(|err| {
+        AppError::from(err).with_context("operation", "load_attachment_descriptor")
+    })?;
 
     let sql = format!(
-        "SELECT root_key, relative_path FROM {} WHERE id = ?1 AND deleted_at IS NULL",
+        "SELECT household_id, category, relative_path FROM {} WHERE id = ?1 AND deleted_at IS NULL",
         table
     );
     let row = sqlx::query(&sql)
@@ -22,25 +36,57 @@ pub async fn load_attachment_columns(
         .await
         .map_err(|err| {
             AppError::from(err)
-                .with_context("operation", "load_attachment_columns")
+                .with_context("operation", "load_attachment_descriptor")
                 .with_context("table", table.to_string())
                 .with_context("id", id.to_string())
         })?;
 
-    if let Some(row) = row {
-        let root_key: String = row.try_get("root_key").unwrap_or_default();
-        let rel: String = row.try_get("relative_path").unwrap_or_default();
-        if root_key.is_empty() || rel.is_empty() {
-            return Err(AppError::new("IO/ENOENT", "No attachment on this record")
-                .with_context("table", table.to_string())
-                .with_context("id", id.to_string()));
-        }
-        Ok((root_key, rel))
-    } else {
-        Err(AppError::new("DB/NOT_FOUND", "Record not found")
+    let Some(row) = row else {
+        return Err(AppError::new("DB/NOT_FOUND", "Record not found")
             .with_context("table", table.to_string())
-            .with_context("id", id.to_string()))
-    }
+            .with_context("id", id.to_string()));
+    };
+
+    let household_id: Option<String> = row.try_get("household_id").ok();
+    let category: Option<String> = row.try_get("category").ok();
+    let relative_path: Option<String> = row.try_get("relative_path").ok();
+
+    let household_id = household_id
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            AppError::new(
+                ERR_INVALID_HOUSEHOLD,
+                "Attachment record is missing a valid household.",
+            )
+        })?;
+
+    let relative_path = relative_path.filter(|v| !v.is_empty()).ok_or_else(|| {
+        AppError::new("IO/ENOENT", "No attachment on this record")
+            .with_context("table", table.to_string())
+            .with_context("id", id.to_string())
+    })?;
+
+    let category = category.ok_or_else(|| {
+        AppError::new(ERR_INVALID_CATEGORY, "Attachment category is required.")
+            .with_context("table", table.to_string())
+            .with_context("id", id.to_string())
+    })?;
+
+    let category = AttachmentCategory::from_str(&category).map_err(|_| {
+        AppError::new(
+            ERR_INVALID_CATEGORY,
+            "Attachment category is not supported.",
+        )
+        .with_context("table", table.to_string())
+        .with_context("id", id.to_string())
+        .with_context("category", category)
+    })?;
+
+    Ok(AttachmentDescriptor {
+        household_id,
+        category,
+        relative_path,
+    })
 }
 
 /// Open the file with the OS.

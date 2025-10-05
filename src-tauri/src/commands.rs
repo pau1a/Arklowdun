@@ -1,6 +1,12 @@
 use serde_json::{Map, Value};
 use sqlx::{sqlite::SqliteRow, Column, Row, SqlitePool, TypeInfo, ValueRef};
 
+use crate::attachment_category::AttachmentCategory;
+use crate::attachments;
+use crate::vault::{self, Vault};
+use crate::vault_migration::ATTACHMENT_TABLES;
+use std::str::FromStr;
+
 use crate::{
     exdate::{inspect_exdates, parse_rrule_until, split_csv_exdates, ExdateContext},
     id::new_uuid_v7,
@@ -13,6 +19,7 @@ use crate::{
 use chrono::{DateTime, Duration, Utc};
 use chrono_tz::Tz as ChronoTz;
 use rrule::{RRule, RRuleSet, Tz, Unvalidated};
+use tokio::fs;
 
 pub const EVENTS_LIST_RANGE_PER_SERIES_LIMIT: usize = 500;
 pub const EVENTS_LIST_RANGE_TOTAL_LIMIT: usize = 10_000;
@@ -647,12 +654,17 @@ async fn get(
 }
 
 // TXN: domain=OUT OF SCOPE tables=*
-async fn create(pool: &SqlitePool, table: &str, data: Map<String, Value>) -> AppResult<Value> {
+async fn create(
+    pool: &SqlitePool,
+    table: &str,
+    mut data: Map<String, Value>,
+    vault: Option<&Vault>,
+) -> AppResult<Value> {
     if table == "events" {
         return create_event(pool, data).await;
     }
 
-    let mut data = data;
+    prepare_attachment_create(table, &mut data, vault)?;
     let id = data
         .get("id")
         .and_then(|v| v.as_str())
@@ -765,6 +777,198 @@ async fn create_event(pool: &SqlitePool, mut data: Map<String, Value>) -> AppRes
     Ok(Value::Object(data))
 }
 
+fn prepare_attachment_create(
+    table: &str,
+    data: &mut Map<String, Value>,
+    vault: Option<&Vault>,
+) -> AppResult<()> {
+    if !ATTACHMENT_TABLES.contains(&table) {
+        if data.contains_key("root_key") {
+            data.insert("root_key".into(), Value::Null);
+        }
+        return Ok(());
+    }
+
+    let vault = vault
+        .ok_or_else(|| AppError::new("VAULT/UNAVAILABLE", "Vault resolver is not available."))?;
+
+    data.insert("root_key".into(), Value::Null);
+
+    let household = data
+        .get("household_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            AppError::new(
+                vault::ERR_INVALID_HOUSEHOLD,
+                "Attachments require a household id.",
+            )
+        })?;
+
+    let category_raw = data
+        .get("category")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            AppError::new(
+                vault::ERR_INVALID_CATEGORY,
+                "Attachment category is required.",
+            )
+        })?;
+    let category = AttachmentCategory::from_str(category_raw).map_err(|_| {
+        AppError::new(
+            vault::ERR_INVALID_CATEGORY,
+            "Attachment category is not supported.",
+        )
+        .with_context("category", category_raw.to_string())
+    })?;
+
+    if let Some(relative) = data.get_mut("relative_path") {
+        match relative {
+            Value::Null => return Ok(()),
+            Value::String(raw) => {
+                if raw.trim().is_empty() {
+                    *relative = Value::Null;
+                    return Ok(());
+                }
+                match vault.resolve(household, category, raw) {
+                    Ok(resolved) => {
+                        if let Some(normalized) =
+                            vault.relative_from_resolved(&resolved, household, category)
+                        {
+                            *relative = Value::String(normalized);
+                        }
+                    }
+                    Err(err) => {
+                        return Err(err);
+                    }
+                }
+            }
+            _ => {
+                return Err(AppError::new(
+                    vault::ERR_FILENAME_INVALID,
+                    "Attachment path must be a string.",
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn prepare_attachment_update(
+    pool: &SqlitePool,
+    table: &str,
+    id: &str,
+    data: &mut Map<String, Value>,
+    household_id: Option<&str>,
+    vault: Option<&Vault>,
+) -> AppResult<()> {
+    if !ATTACHMENT_TABLES.contains(&table) {
+        if data.contains_key("root_key") {
+            data.insert("root_key".into(), Value::Null);
+        }
+        return Ok(());
+    }
+
+    let vault = vault
+        .ok_or_else(|| AppError::new("VAULT/UNAVAILABLE", "Vault resolver is not available."))?;
+    let household = household_id.ok_or_else(|| {
+        AppError::new(
+            vault::ERR_INVALID_HOUSEHOLD,
+            "Attachments require a household id.",
+        )
+    })?;
+
+    data.insert("root_key".into(), Value::Null);
+
+    let mut category: Option<AttachmentCategory> = None;
+    if let Some(value) = data.get("category") {
+        match value {
+            Value::String(raw) => {
+                category = Some(AttachmentCategory::from_str(raw).map_err(|_| {
+                    AppError::new(
+                        vault::ERR_INVALID_CATEGORY,
+                        "Attachment category is not supported.",
+                    )
+                    .with_context("category", raw.to_string())
+                })?);
+            }
+            Value::Null => {
+                return Err(AppError::new(
+                    vault::ERR_INVALID_CATEGORY,
+                    "Attachment category is required.",
+                ));
+            }
+            _ => {
+                return Err(AppError::new(
+                    vault::ERR_INVALID_CATEGORY,
+                    "Attachment category must be a string.",
+                ));
+            }
+        }
+    }
+
+    if let Some(relative) = data.get_mut("relative_path") {
+        match relative {
+            Value::Null => return Ok(()),
+            Value::String(raw) => {
+                if raw.trim().is_empty() {
+                    *relative = Value::Null;
+                    return Ok(());
+                }
+                let category = if let Some(category) = category {
+                    category
+                } else {
+                    let existing = repo::get_active(pool, table, Some(household), id)
+                        .await
+                        .map_err(AppError::from)?
+                        .ok_or_else(|| {
+                            AppError::new("COMMANDS/ROW_MISSING", "Attachment record not found.")
+                        })?;
+                    let current = row_to_value(existing);
+                    let cat = current
+                        .as_object()
+                        .and_then(|obj| obj.get("category"))
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            AppError::new(
+                                vault::ERR_INVALID_CATEGORY,
+                                "Attachment category is required.",
+                            )
+                        })?;
+                    AttachmentCategory::from_str(cat).map_err(|_| {
+                        AppError::new(
+                            vault::ERR_INVALID_CATEGORY,
+                            "Attachment category is not supported.",
+                        )
+                        .with_context("category", cat.to_string())
+                    })?
+                };
+
+                match vault.resolve(household, category, raw) {
+                    Ok(resolved) => {
+                        if let Some(normalized) =
+                            vault.relative_from_resolved(&resolved, household, category)
+                        {
+                            *relative = Value::String(normalized);
+                        }
+                    }
+                    Err(err) => {
+                        return Err(err);
+                    }
+                }
+            }
+            _ => {
+                return Err(AppError::new(
+                    vault::ERR_FILENAME_INVALID,
+                    "Attachment path must be a string.",
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 // TXN: domain=OUT OF SCOPE tables=*
 async fn update(
     pool: &SqlitePool,
@@ -772,6 +976,7 @@ async fn update(
     id: &str,
     mut data: Map<String, Value>,
     household_id: Option<&str>,
+    vault: Option<&Vault>,
 ) -> AppResult<()> {
     if table == "events" {
         let hh = household_id.ok_or_else(|| {
@@ -783,6 +988,7 @@ async fn update(
         normalize_event_exdates_for_update(pool, hh, id, &mut data).await?;
         derive_event_wall_clock_for_update(pool, hh, id, &mut data).await?;
     }
+    prepare_attachment_update(pool, table, id, &mut data, household_id, vault).await?;
     data.remove("id");
     data.remove("created_at");
     let now = now_ms();
@@ -873,8 +1079,9 @@ pub async fn create_command(
     pool: &SqlitePool,
     table: &str,
     data: Map<String, Value>,
+    vault: Option<&Vault>,
 ) -> AppResult<Value> {
-    create(pool, table, data).await.map_err(|err| {
+    create(pool, table, data, vault).await.map_err(|err| {
         err.with_context("operation", "create")
             .with_context("table", table.to_string())
     })
@@ -887,8 +1094,9 @@ pub async fn update_command(
     id: &str,
     data: Map<String, Value>,
     household_id: Option<&str>,
+    vault: Option<&Vault>,
 ) -> AppResult<()> {
-    update(pool, table, id, data, household_id)
+    update(pool, table, id, data, household_id, vault)
         .await
         .map_err(|err| {
             let household = household_id.unwrap_or("");
@@ -905,7 +1113,46 @@ pub async fn delete_command(
     table: &str,
     household_id: &str,
     id: &str,
+    vault: Option<&Vault>,
 ) -> AppResult<()> {
+    if ATTACHMENT_TABLES.contains(&table) {
+        let vault = vault.ok_or_else(|| {
+            AppError::new("VAULT/UNAVAILABLE", "Vault resolver is not available.")
+        })?;
+
+        match attachments::load_attachment_descriptor(pool, table, id).await {
+            Ok(descriptor) => {
+                match vault.resolve(
+                    &descriptor.household_id,
+                    descriptor.category,
+                    &descriptor.relative_path,
+                ) {
+                    Ok(resolved) => {
+                        if let Err(err) = fs::remove_file(&resolved).await {
+                            if err.kind() != std::io::ErrorKind::NotFound {
+                                return Err(AppError::from(err)
+                                    .with_context("operation", "delete_attachment_file")
+                                    .with_context("table", table.to_string())
+                                    .with_context("id", id.to_string()));
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        return Err(err
+                            .with_context("operation", "delete_attachment_resolve")
+                            .with_context("table", table.to_string())
+                            .with_context("id", id.to_string()));
+                    }
+                }
+            }
+            Err(err) => {
+                if err.code() != "IO/ENOENT" {
+                    return Err(err);
+                }
+            }
+        }
+    }
+
     if table == "inventory_items" || table == "shopping_items" {
         return repo::items::delete_item(pool, table, household_id, id)
             .await
