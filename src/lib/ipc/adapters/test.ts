@@ -1,7 +1,11 @@
 import { FixedClock, type Clock } from "@lib/runtime/clock";
 import { SeededRng, type Rng } from "@lib/runtime/rng";
 import type { DbHealthReport } from "@bindings/DbHealthReport";
-import { ScenarioLoader, type ScenarioDefinition, type ScenarioHandler } from "../scenarioLoader";
+import {
+  ScenarioLoader,
+  type ScenarioDefinition,
+  type ScenarioHandler,
+} from "../scenarioLoader";
 import { MissingScenarioHandlerError } from "../errors";
 import {
   getContract,
@@ -15,6 +19,16 @@ import { IpcLogBuffer, attachGlobalDump, type IpcLogEntry } from "../logBuffer";
 const DEFAULT_TIMESTAMP = "2024-06-01T12:00:00.000Z";
 
 type HealthState = "healthy" | "unhealthy";
+
+const LEGACY_PASSTHROUGH_COMMANDS = new Set<IpcCommand>([
+  "household_list",
+  "household_get_active",
+  "household_set_active",
+  "household_create",
+  "household_update",
+  "household_delete",
+  "household_restore",
+]);
 
 export interface TestAdapterOptions {
   loader?: ScenarioLoader;
@@ -117,6 +131,27 @@ export class TestAdapter implements IpcAdapter {
     try {
       const contract = getContract(command);
       const parsedPayload = contract.request.parse(payload ?? {});
+
+      const legacyInternals =
+        typeof window !== "undefined"
+          ? ((window as unknown as { __TAURI_INTERNALS__?: { invoke?: unknown } })
+              .__TAURI_INTERNALS__ ?? null)
+          : null;
+      const legacyInvoke = legacyInternals?.invoke;
+
+      if (
+        LEGACY_PASSTHROUGH_COMMANDS.has(command) &&
+        typeof legacyInvoke === "function"
+      ) {
+        const result = await legacyInvoke.call(
+          legacyInternals,
+          command,
+          parsedPayload,
+        );
+        const parsedResult = contract.response.parse(result ?? null);
+        span.finish({ success: true });
+        return parsedResult as ContractResponse<K>;
+      }
 
       if (command === "db_get_health_report" || command === "db_recheck") {
         const report = this.healthReport();

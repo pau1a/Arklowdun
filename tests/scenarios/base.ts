@@ -265,8 +265,15 @@ export function createScenario(config: ScenarioConfig): ScenarioDefinition {
     events_backfill_timezone_status: () => ({ status: "idle" }),
     events_list_range: (payload) => {
       const args = payload as { start?: number; end?: number; householdId?: string };
-      const start = args.start ?? BASE_SECONDS - 86_400;
-      const end = args.end ?? BASE_SECONDS + 86_400;
+      const normalizeWindow = (value: number | undefined, fallback: number) => {
+        if (typeof value !== "number" || Number.isNaN(value)) return fallback;
+        if (value > 9_999_999_999) {
+          return Math.floor(value / 1_000);
+        }
+        return Math.floor(value);
+      };
+      const start = normalizeWindow(args.start, BASE_SECONDS - 86_400);
+      const end = normalizeWindow(args.end, BASE_SECONDS + 86_400);
       const householdId = args.householdId ?? state.activeHouseholdId;
       const eligible = state.events.filter(
         (event) =>

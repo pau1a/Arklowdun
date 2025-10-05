@@ -2,7 +2,7 @@ import { call } from "@lib/ipc/call";
 import type { CalendarEvent } from "@features/calendar";
 import { getHouseholdIdForCalls } from "@db/household";
 import type { Note } from "@bindings/Note";
-import { notesRepo, type NotesListByEntityItem } from "@repos/notesRepo";
+import { contextNotesRepo } from "@repos/contextNotesRepo";
 import {
   getActiveCategoryIds,
   getCategories,
@@ -183,7 +183,7 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
   let isSubmitting = false;
   let isLoading = false;
   let currentNotes: PanelNote[] = [];
-  let currentOffset = 0;
+  let currentCursor: string | null = null;
   let hasMore = false;
   let fetchToken = 0;
   let currentError: unknown = null;
@@ -270,14 +270,10 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
         if (!anchorId) return;
         unlink.disabled = true;
         try {
-          await notesRepo.unlink({
-            householdId: currentHouseholdId,
-            noteId: entry.note.id,
-            entityType: "event",
-            entityId: anchorId,
-          });
+          if (entry.linkId) {
+            await contextNotesRepo.deleteLink(currentHouseholdId, entry.linkId);
+          }
           currentNotes = currentNotes.filter((candidate) => candidate.note.id !== entry.note.id);
-          currentOffset = currentNotes.length;
           renderNotes();
           emptyState.hidden = currentNotes.length > 0;
         } catch (error) {
@@ -305,6 +301,10 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
     if (!append) {
       syncLoadingState(true);
     } else {
+      if (!currentCursor) {
+        loadMoreButton.disabled = false;
+        return;
+      }
       loadMoreButton.disabled = true;
     }
     try {
@@ -314,42 +314,45 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
       const categoriesLoaded = categories.length > 0;
       if (categoriesLoaded && activeCategoryIds.length === 0) {
         currentNotes = [];
-        currentOffset = 0;
+        currentCursor = null;
         hasMore = false;
         renderNotes();
         return;
       }
       const filterIds = categoriesLoaded ? [...activeCategoryIds] : undefined;
       const anchorId = currentAnchorId ?? noteAnchorId(currentEvent);
-      const offset = append ? currentOffset : 0;
-      const response = await notesRepo.listByEntity({
+      const cursor = append ? currentCursor ?? undefined : undefined;
+      const response = await contextNotesRepo.listForEntity({
         householdId,
         entityType: "event",
         entityId: anchorId,
-        limit: PANEL_LIMIT,
-        offset,
-        orderBy: "created_at ASC, id ASC",
         categoryIds: filterIds,
+        cursor,
+        limit: PANEL_LIMIT,
       });
       if (token !== fetchToken) return;
-      const mapped: PanelNote[] = (response.items ?? []).map((item: NotesListByEntityItem) => ({
-        note: item.note,
-        linkId: item.link?.id ?? null,
+      const linkIndex = new Map<string, string | null>();
+      for (const link of response.links ?? []) {
+        linkIndex.set(link.note_id, link.id ?? null);
+      }
+      const mapped: PanelNote[] = (response.notes ?? []).map((note) => ({
+        note,
+        linkId: linkIndex.get(note.id) ?? null,
       }));
       if (append) {
         const existingIds = new Set(currentNotes.map((entry) => entry.note.id));
         const merged = currentNotes.slice();
-        mapped.forEach((entry) => {
+        for (const entry of mapped) {
           if (!existingIds.has(entry.note.id)) {
             merged.push(entry);
           }
-        });
+        }
         currentNotes = merged;
       } else {
         currentNotes = mapped;
       }
-      currentOffset = currentNotes.length;
-      hasMore = mapped.length === PANEL_LIMIT;
+      currentCursor = response.next_cursor ?? null;
+      hasMore = Boolean(response.next_cursor);
       renderNotes();
     } catch (error) {
       console.error("Failed to load contextual notes", error);
@@ -397,21 +400,28 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
         console.warn("Quick-capture: proceed without event pre-persist", error);
       }
       const anchorId = currentAnchorId ?? noteAnchorId(currentEvent);
-      const note = await notesRepo.create(householdId, {
-        text,
-        color: "#FFF4B8",
-        x: 0,
-        y: 0,
-        category_id: categoryId,
-      });
-      const link = await notesRepo.link({
+      const note = await contextNotesRepo.quickCreate({
         householdId,
-        noteId: note.id,
         entityType: "event",
         entityId: anchorId,
+        categoryId,
+        text,
+        color: "#FFF4B8",
       });
+      let linkId: string | null = null;
+      try {
+        const link = await contextNotesRepo.getLinkForNote(
+          householdId,
+          note.id,
+          "event",
+          anchorId,
+        );
+        linkId = link.id ?? null;
+      } catch (linkError) {
+        console.warn("context-notes: unable to resolve link", linkError);
+      }
       const nextEntries = currentNotes
-        .concat({ note, linkId: link.id })
+        .concat({ note, linkId })
         .sort((a, b) => {
           if (a.note.created_at === b.note.created_at) {
             return a.note.id.localeCompare(b.note.id);
@@ -419,7 +429,8 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
           return a.note.created_at - b.note.created_at;
         });
       currentNotes = nextEntries;
-      currentOffset = currentNotes.length;
+      currentCursor = null;
+      hasMore = Boolean(currentCursor);
       renderNotes();
       emptyState.hidden = currentNotes.length === 0;
       quickInput.value = "";
@@ -452,7 +463,7 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
     currentEvent = event;
     currentAnchorId = event ? noteAnchorId(event) : null;
     currentNotes = [];
-    currentOffset = 0;
+    currentCursor = null;
     hasMore = false;
     currentError = null;
     fetchToken += 1;
