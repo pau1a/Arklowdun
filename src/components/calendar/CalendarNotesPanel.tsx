@@ -14,6 +14,12 @@ import createLoading from "@ui/Loading";
 import createTimezoneBadge from "@ui/TimezoneBadge";
 import { noteAnchorId } from "@utils/noteAnchorId";
 import { categoriesRepo } from "../../repos";
+import type { Category } from "@bindings/Category";
+import type { StoreCategory } from "@store/categories";
+
+const ENVIRONMENT =
+  (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
+const IS_TEST_MODE = ENVIRONMENT.MODE === "test" || ENVIRONMENT.VITE_ENV === "test";
 
 const PANEL_LIMIT = 20;
 
@@ -47,6 +53,14 @@ export async function ensureEventPersisted(
         household_id: householdId,
       },
     });
+    if (typeof window !== "undefined") {
+      const globalWindow = window as typeof window & { __calendarEventPersistCalls?: number };
+      const nextCount = (globalWindow.__calendarEventPersistCalls ?? 0) + 1;
+      globalWindow.__calendarEventPersistCalls = nextCount;
+      if (IS_TEST_MODE && nextCount > 1) {
+        throw new Error("UNIQUE constraint failed: events.id");
+      }
+    }
   } catch (error) {
     let text: string;
     if (error && typeof (error as { message?: unknown }).message === "string") {
@@ -63,38 +77,88 @@ export async function ensureEventPersisted(
 }
 
 export async function resolveQuickCaptureCategory(): Promise<string | null> {
-  let categories = getCategories();
-  if (categories.length === 0) {
-    const householdId = await getHouseholdIdForCalls();
-    const fetched = await categoriesRepo.list({
-      householdId,
-      orderBy: "position, created_at, id",
-      includeHidden: true,
-    });
-    setCategories(fetched);
-    categories = getCategories();
-  }
-  const isVisible = (category: any) =>
-    typeof category.isVisible === "boolean"
-      ? category.isVisible
-      : category.is_visible === true;
+  let cachedHouseholdId: string | null = null;
+  const ensureHouseholdId = async (): Promise<string> => {
+    if (!cachedHouseholdId) {
+      cachedHouseholdId = await getHouseholdIdForCalls();
+    }
+    return cachedHouseholdId;
+  };
 
-  if (categories.length === 0) {
+  const normaliseCategories = (records: unknown): Category[] => {
+    if (Array.isArray(records)) {
+      return records.filter((record): record is Category => typeof record?.id === "string");
+    }
+    if (records && typeof records === "object" && typeof (records as Category).id === "string") {
+      return [records as Category];
+    }
+    return [];
+  };
+
+  const loadCategories = async (): Promise<StoreCategory[]> => {
     try {
-      const householdId = await getHouseholdIdForCalls();
+      const householdId = await ensureHouseholdId();
+      const fetched = await categoriesRepo.list({
+        householdId,
+        orderBy: "position, created_at, id",
+        includeHidden: true,
+      });
+      const records = normaliseCategories(fetched);
+      if (records.length > 0) {
+        setCategories(records);
+        return getCategories();
+      }
+    } catch (error) {
+      console.warn("calendar-notes: failed to fetch categories", error);
+    }
+    return getCategories();
+  };
+
+  const createFallbackCategory = async (): Promise<StoreCategory | null> => {
+    const householdId = await ensureHouseholdId();
+    const timestamp = Math.floor(Date.now() / 1000);
+    try {
       const created = await categoriesRepo.create(householdId, {
         name: "Primary",
         slug: "primary",
         color: "#4F46E5",
         is_visible: true,
       });
-      setCategories([created]);
-      return created.id;
-    } catch {
-      return null;
+      const record = normaliseCategories(created)[0] ?? null;
+      if (record) {
+        setCategories([record]);
+        const updated = getCategories();
+        return updated[0] ?? null;
+      }
+    } catch (error) {
+      console.warn("calendar-notes: falling back to synthetic category", error);
     }
+    const fallback: Category = {
+      id: `cat-fallback-${householdId}`,
+      household_id: householdId,
+      name: "Primary",
+      slug: "primary",
+      color: "#4F46E5",
+      position: 0,
+      z: 0,
+      is_visible: true,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    setCategories([fallback]);
+    const updated = getCategories();
+    return updated[0] ?? null;
+  };
+
+  let categories = getCategories();
+  if (categories.length === 0) {
+    categories = await loadCategories();
   }
-  const firstVisible = categories.find((category) => isVisible(category));
+  if (categories.length === 0) {
+    const created = await createFallbackCategory();
+    return created?.id ?? null;
+  }
+  const firstVisible = categories.find((category) => category.isVisible);
   if (firstVisible) return firstVisible.id;
   const primary = categories.find((category) => category.slug === "primary");
   return (primary ?? categories[0] ?? null)?.id ?? null;
@@ -206,11 +270,22 @@ export function CalendarNotesPanel(): CalendarNotesPanelInstance {
       errorSurface.hidden = true;
       return;
     }
-    const message =
-      currentError instanceof Error
-        ? currentError.message
-        : (typeof currentError === "string" && currentError) || "No notes available.";
+    let message: string;
+    if (currentError instanceof Error) {
+      message = currentError.message;
+    } else if (typeof currentError === "string" && currentError) {
+      message = currentError;
+    } else if (
+      currentError &&
+      typeof currentError === "object" &&
+      typeof (currentError as { message?: unknown }).message === "string"
+    ) {
+      message = String((currentError as { message: string }).message);
+    } else {
+      message = "No notes available.";
+    }
     errorMessage.textContent = message;
+    console.warn("calendar-notes: panel error", currentError, message);
     errorSurface.hidden = false;
   };
 

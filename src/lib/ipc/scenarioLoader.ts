@@ -1,6 +1,7 @@
 import type { ContractRequest, ContractResponse, IpcCommand } from "./port";
 import type { Clock } from "@lib/runtime/clock";
 import type { Rng } from "@lib/runtime/rng";
+import type { Event } from "@bindings/Event";
 
 export interface ScenarioContext {
   clock: Clock;
@@ -79,20 +80,67 @@ if (registry.size === 0) {
       ],
       household_get_active: () => "fallback-household",
       events_list_range: () => ({ items: [], truncated: false, limit: 100 }),
+      event_create: (payload: unknown) => {
+        const args = (payload as { data?: Record<string, unknown> }).data ??
+          ((payload as Record<string, unknown>) ?? {});
+        const now = Math.floor(Date.now() / 1000);
+        return {
+          id:
+            typeof args?.id === "string" && args.id.length > 0
+              ? (args.id as string)
+              : `evt-fallback-${now}`,
+          household_id:
+            typeof args?.household_id === "string" && args.household_id.length > 0
+              ? (args.household_id as string)
+              : "fallback-household",
+          title:
+            typeof args?.title === "string" && args.title.length > 0
+              ? (args.title as string)
+              : "Fallback event",
+          tz:
+            typeof args?.tz === "string" && args.tz.length > 0
+              ? (args.tz as string)
+              : undefined,
+          start_at_utc:
+            typeof args?.start_at_utc === "number"
+              ? (args.start_at_utc as number)
+              : now,
+          end_at_utc:
+            typeof args?.end_at_utc === "number"
+              ? (args.end_at_utc as number)
+              : undefined,
+          rrule: typeof args?.rrule === "string" ? (args.rrule as string) : undefined,
+          exdates: typeof args?.exdates === "string" ? (args.exdates as string) : undefined,
+          reminder:
+            typeof args?.reminder === "number" ? (args.reminder as number) : undefined,
+          created_at: now,
+          updated_at: now,
+          deleted_at: undefined,
+          series_parent_id:
+            typeof args?.series_parent_id === "string"
+              ? (args.series_parent_id as string)
+              : undefined,
+        } satisfies Event;
+      },
       notes_list_cursor: () => ({ notes: [] }),
       notes_list_by_deadline_range: () => ({ items: [] }),
       notes_list_for_entity: () => ({ notes: [], links: [] }),
       notes_quick_create_for_entity: () => ({
-        id: `note-fallback-${Date.now().toString(36)}`,
-        household_id: "fallback-household",
-        category_id: undefined,
-        position: 0,
-        created_at: Math.floor(Date.now() / 1000),
-        updated_at: Math.floor(Date.now() / 1000),
-        text: "",
-        color: "#2563EB",
-        x: 0,
-        y: 0,
+        notes: [
+          {
+            id: `note-fallback-${Date.now().toString(36)}`,
+            household_id: "fallback-household",
+            category_id: undefined,
+            position: 0,
+            created_at: Math.floor(Date.now() / 1000),
+            updated_at: Math.floor(Date.now() / 1000),
+            text: "",
+            color: "#2563EB",
+            x: 0,
+            y: 0,
+          },
+        ],
+        links: [],
       }),
       note_links_list_by_entity: () => ({ items: [] }),
       note_links_get_for_note: () => ({ items: [] }),

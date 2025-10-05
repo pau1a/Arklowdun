@@ -86,7 +86,7 @@ const eventCreateData = z
     title: z.string().min(1),
     start_at_utc: z.number(),
     end_at_utc: z.number().nullable().optional(),
-    tz: z.string().optional(),
+    tz: z.string().nullable().optional(),
     rule: z.string().optional(),
     exdates: z.string().optional(),
     reminder: z.number().nullable().optional(),

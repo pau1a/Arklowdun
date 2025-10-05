@@ -236,7 +236,7 @@ export async function CalendarView(
       focusFilterControls();
     },
     refineLabel: "Refine filters",
-    refineAriaLabel: "Refine calendar filters",
+    refineAriaLabel: "Refine filters",
   });
 
   const notesPanel = notesPanelFactory();
