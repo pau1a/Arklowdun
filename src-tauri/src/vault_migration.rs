@@ -292,11 +292,9 @@ async fn execute_migration<R: tauri::Runtime + 'static>(
 
             counts.increment_processed();
 
-            let mut action = "skip".to_string();
             let mut status = "ok".to_string();
             let mut note = None;
             let mut source_hash = None;
-            let mut target_hash = None;
 
             let source = resolve_legacy_path(&app, legacy_root.as_deref(), &relative_path)?;
             if let Some(source) = source {
@@ -397,9 +395,9 @@ async fn execute_migration<R: tauri::Runtime + 'static>(
                         })?;
 
                     counts.record_copy(conflict);
-                    action = if conflict { "copy_renamed" } else { "copy" }.into();
                     status = "migrated".into();
-                    target_hash = Some(hash_path(&final_path));
+                    let target_hash = hash_path(&final_path);
+                    let action = if conflict { "copy_renamed" } else { "copy" };
                     if conflict {
                         note = Some("Renamed to avoid conflict".into());
                     }
@@ -410,8 +408,8 @@ async fn execute_migration<R: tauri::Runtime + 'static>(
                         household_id: household_id.clone(),
                         category: category.as_str().to_string(),
                         source_hash: source_hash.clone(),
-                        target_hash: target_hash.clone(),
-                        action: action.clone(),
+                        target_hash: Some(target_hash.clone()),
+                        action: action.into(),
                         status: status.clone(),
                         note: note.clone(),
                     });
@@ -433,16 +431,15 @@ async fn execute_migration<R: tauri::Runtime + 'static>(
                 }
             } else {
                 counts.record_copy(false);
-                action = "plan".into();
-                target_hash = Some(hash_path(&resolved));
+                let target_hash = hash_path(&resolved);
                 manifest.push(ManifestEntry {
                     table: table.to_string(),
                     id: id.clone(),
                     household_id: household_id.clone(),
                     category: category.as_str().to_string(),
                     source_hash,
-                    target_hash,
-                    action,
+                    target_hash: Some(target_hash.clone()),
+                    action: "plan".into(),
                     status: status.clone(),
                     note: note.clone(),
                 });
