@@ -43,8 +43,10 @@ highlights per-household totals.
 
 For quick access, use the bundled wrapper scripts:
 
-- **macOS/Linux:** `scripts/guards/household_stats.sh` (pass `--json` for JSON)
-- **Windows:** `scripts/guards/household_stats.ps1 -Json`
+- **macOS/Linux:** `scripts/dev/household_stats.sh` (pass `--json` for JSON)
+- **Windows:** `scripts/dev/household_stats.ps1 -Json`
+- **Support smoke:** `scripts/dev/household_stats.sh` mirrors the CLI, annotates
+  cascade/vacuum status, and exits non-zero when a household is unhealthy.
 
 Both scripts call the CLI command above, ensure the output is non-empty, and
 bubble up the exit status if the inspection fails.

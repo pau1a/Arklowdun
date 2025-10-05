@@ -1,5 +1,13 @@
 # Release
 
+## Household Management and Database Health
+
+- Cascading deletes now emit progress and can resume after interruption.
+- The default household cannot be removed.
+- A new Repair / Re-check option restores integrity if corruption occurs.
+- Diagnostics now show per-household entity counts.
+- Large deletions may lock writes temporarily; a “Reclaim space” button can perform manual VACUUM.
+
 ## Pending migrations check
 
 The release process verifies that the target database has applied all migrations found in `migrations/`.
