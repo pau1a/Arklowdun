@@ -511,9 +511,13 @@ fn resolve_legacy_path<R: tauri::Runtime + 'static>(
         return Ok(None);
     };
     let base = crate::security::fs_policy::base_for(key, app).map_err(|err| {
-        AppError::from(err)
-            .with_context("operation", "vault_migration_legacy_base")
-            .with_context("root_key", root.to_string())
+        AppError::new(
+            "VAULT/LEGACY_BASE", 
+            "Failed to resolve legacy attachment root.",
+        )
+        .with_context("operation", "vault_migration_legacy_base")
+        .with_context("root_key", root.to_string())
+        .with_context("error", err.to_string())
     })?;
     let mut p = base;
     p.push(relative);
@@ -618,13 +622,19 @@ fn emit_progress<R: tauri::Runtime + 'static>(
     }
 }
 
-pub fn ensure_housekeeping(
+pub async fn ensure_housekeeping(
     pool: &SqlitePool,
-    vault: &Vault,
-) -> impl std::future::Future<Output = AppResult<()>> + '_ {
-    async move {
-        for table in ATTACHMENT_TABLES {
-            let sql = format!(
+    vault: Option<&Vault>,
+) -> AppResult<()> {
+    let vault = vault.ok_or_else(|| {
+        AppError::new(
+            "VAULT/HOUSEKEEPING_VAULT_MISSING",
+            "Vault unavailable while verifying migration results.",
+        )
+    })?;
+
+    for table in ATTACHMENT_TABLES {
+        let sql = format!(
                 "SELECT COUNT(1) as missing FROM {table} WHERE deleted_at IS NULL AND (category IS NULL OR category = '')"
             );
             let row = sqlx::query(&sql)
@@ -697,7 +707,6 @@ pub fn ensure_housekeeping(
                     .with_context("path_hash", hash_path(&resolved).to_string()));
                 }
             }
-        }
-        Ok(())
     }
+    Ok(())
 }
