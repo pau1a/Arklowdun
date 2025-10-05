@@ -488,7 +488,7 @@ async fn execute_migration<R: tauri::Runtime + 'static>(
     async_fs::remove_file(checkpoint_path).await.ok();
 
     if mode.is_apply() {
-        ensure_housekeeping(pool, vault.as_ref()).await?;
+        ensure_housekeeping(pool, &vault).await?;
     }
 
     Ok(summary)
@@ -512,7 +512,7 @@ fn resolve_legacy_path<R: tauri::Runtime + 'static>(
     };
     let base = crate::security::fs_policy::base_for(key, app).map_err(|err| {
         AppError::new(
-            "VAULT/LEGACY_BASE", 
+            "VAULT/LEGACY_BASE",
             "Failed to resolve legacy attachment root.",
         )
         .with_context("operation", "vault_migration_legacy_base")
@@ -525,9 +525,8 @@ fn resolve_legacy_path<R: tauri::Runtime + 'static>(
 }
 
 async fn resolve_conflict(path: &Path) -> AppResult<(PathBuf, bool)> {
-    let mut candidate = path.to_path_buf();
-    if !candidate.exists() {
-        return Ok((candidate, false));
+    if !path.exists() {
+        return Ok((path.to_path_buf(), false));
     }
     let stem = path
         .file_stem()
@@ -622,91 +621,81 @@ fn emit_progress<R: tauri::Runtime + 'static>(
     }
 }
 
-pub async fn ensure_housekeeping(
-    pool: &SqlitePool,
-    vault: Option<&Vault>,
-) -> AppResult<()> {
-    let vault = vault.ok_or_else(|| {
-        AppError::new(
-            "VAULT/HOUSEKEEPING_VAULT_MISSING",
-            "Vault unavailable while verifying migration results.",
-        )
-    })?;
-
+pub async fn ensure_housekeeping(pool: &SqlitePool, vault: &Vault) -> AppResult<()> {
     for table in ATTACHMENT_TABLES {
         let sql = format!(
                 "SELECT COUNT(1) as missing FROM {table} WHERE deleted_at IS NULL AND (category IS NULL OR category = '')"
             );
-            let row = sqlx::query(&sql)
-                .fetch_one(pool)
-                .await
-                .map_err(|err| AppError::from(err).with_context("table", table.to_string()))?;
-            let missing: i64 = row.try_get("missing").unwrap_or(0);
-            if missing > 0 {
-                return Err(AppError::new(
-                    "VAULT/CATEGORY_MISSING",
-                    "Attachments without category remain after migration.",
-                )
-                .with_context("table", table.to_string())
-                .with_context("count", missing.to_string()));
-            }
+        let row = sqlx::query(&sql)
+            .fetch_one(pool)
+            .await
+            .map_err(|err| AppError::from(err).with_context("table", table.to_string()))?;
+        let missing: i64 = row.try_get("missing").unwrap_or(0);
+        if missing > 0 {
+            return Err(AppError::new(
+                "VAULT/CATEGORY_MISSING",
+                "Attachments without category remain after migration.",
+            )
+            .with_context("table", table.to_string())
+            .with_context("count", missing.to_string()));
+        }
 
-            let legacy_sql = format!(
+        let legacy_sql = format!(
                 "SELECT COUNT(1) as legacy FROM {table} WHERE deleted_at IS NULL AND root_key IS NOT NULL AND TRIM(root_key) != ''"
             );
-            let legacy_row = sqlx::query(&legacy_sql)
-                .fetch_one(pool)
-                .await
-                .map_err(|err| AppError::from(err).with_context("table", table.to_string()))?;
-            let legacy: i64 = legacy_row.try_get("legacy").unwrap_or(0);
-            if legacy > 0 {
-                return Err(AppError::new(
-                    "VAULT/LEGACY_ROOT_REMAINS",
-                    "Legacy attachment roots remain after migration.",
-                )
-                .with_context("table", table.to_string())
-                .with_context("count", legacy.to_string()));
-            }
+        let legacy_row = sqlx::query(&legacy_sql)
+            .fetch_one(pool)
+            .await
+            .map_err(|err| AppError::from(err).with_context("table", table.to_string()))?;
+        let legacy: i64 = legacy_row.try_get("legacy").unwrap_or(0);
+        if legacy > 0 {
+            return Err(AppError::new(
+                "VAULT/LEGACY_ROOT_REMAINS",
+                "Legacy attachment roots remain after migration.",
+            )
+            .with_context("table", table.to_string())
+            .with_context("count", legacy.to_string()));
+        }
 
-            let sql = format!(
+        let sql = format!(
                 "SELECT id, household_id, category, relative_path FROM {table} WHERE deleted_at IS NULL AND relative_path IS NOT NULL AND TRIM(relative_path) != ''"
             );
-            let mut rows = sqlx::query(&sql).fetch(pool);
-            while let Some(row) = rows.try_next().await.map_err(|err| {
-                AppError::from(err)
-                    .with_context("table", table.to_string())
-                    .with_context("operation", "housekeeping_stream")
-            })? {
-                let id: String = row.try_get("id").unwrap_or_default();
-                let household_id: String = row.try_get("household_id").unwrap_or_default();
-                let category_raw: String = row.try_get("category").unwrap_or_default();
-                let relative_path: String = row.try_get("relative_path").unwrap_or_default();
-                let category = AttachmentCategory::from_str(&category_raw).map_err(|_| {
-                    AppError::new(
-                        "VAULT/CATEGORY_INVALID",
-                        "Attachment category could not be parsed during housekeeping.",
-                    )
-                    .with_context("table", table.to_string())
-                    .with_context("id", id.clone())
-                    .with_context("category", category_raw.clone())
-                })?;
+        let mut rows = sqlx::query(&sql).fetch(pool);
+        while let Some(row) = rows.try_next().await.map_err(|err| {
+            AppError::from(err)
+                .with_context("table", table.to_string())
+                .with_context("operation", "housekeeping_stream")
+        })? {
+            let id: String = row.try_get("id").unwrap_or_default();
+            let household_id: String = row.try_get("household_id").unwrap_or_default();
+            let category_raw: String = row.try_get("category").unwrap_or_default();
+            let relative_path: String = row.try_get("relative_path").unwrap_or_default();
+            let category = AttachmentCategory::from_str(&category_raw).map_err(|_| {
+                AppError::new(
+                    "VAULT/CATEGORY_INVALID",
+                    "Attachment category could not be parsed during housekeeping.",
+                )
+                .with_context("table", table.to_string())
+                .with_context("id", id.clone())
+                .with_context("category", category_raw.clone())
+            })?;
 
-                let resolved = vault
-                    .resolve(&household_id, category, &relative_path)
-                    .map_err(|err| err.with_context("operation", "housekeeping_resolve"))?;
+            let resolved = vault
+                .resolve(&household_id, category, &relative_path)
+                .map_err(|err| err.with_context("operation", "housekeeping_resolve"))?;
 
-                if !resolved.exists() {
-                    return Err(AppError::new(
-                        "VAULT/FILE_MISSING",
-                        "Attachment file missing after migration.",
-                    )
-                    .with_context("table", table.to_string())
-                    .with_context("id", id)
-                    .with_context("household_id", household_id)
-                    .with_context("category", category.as_str().to_string())
-                    .with_context("path_hash", hash_path(&resolved).to_string()));
-                }
+            if !resolved.exists() {
+                return Err(AppError::new(
+                    "VAULT/FILE_MISSING",
+                    "Attachment file missing after migration.",
+                )
+                .with_context("table", table.to_string())
+                .with_context("id", id)
+                .with_context("household_id", household_id)
+                .with_context("category", category.as_str().to_string())
+                .with_context("path_hash", hash_path(&resolved).to_string()));
             }
+        }
     }
     Ok(())
 }

@@ -106,7 +106,7 @@ impl<'a> MakeWriter<'a> for RotatingFileWriter {
     }
 }
 
-mod attachment_category;
+pub mod attachment_category;
 mod attachments;
 mod categories;
 pub mod commands;
@@ -118,7 +118,6 @@ pub mod exdate;
 pub mod export;
 mod household; // declare module; avoid `use` to prevent name collision
 pub mod household_active;
-pub use attachment_category::{AttachmentCategory, AttachmentCategoryError};
 pub use household::{
     acknowledge_vacuum, assert_household_active, cascade_phase_tables, create_household,
     default_household_id, delete_household, ensure_household_invariants, get_household,
