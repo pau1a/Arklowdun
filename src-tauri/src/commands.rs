@@ -802,7 +802,8 @@ fn prepare_attachment_create(
                 vault::ERR_INVALID_HOUSEHOLD,
                 "Attachments require a household id.",
             )
-        })?;
+        })?
+        .to_string();
 
     let category_raw = data
         .get("category")
@@ -812,13 +813,14 @@ fn prepare_attachment_create(
                 vault::ERR_INVALID_CATEGORY,
                 "Attachment category is required.",
             )
-        })?;
-    let category = AttachmentCategory::from_str(category_raw).map_err(|_| {
+        })?
+        .to_string();
+    let category = AttachmentCategory::from_str(&category_raw).map_err(|_| {
         AppError::new(
             vault::ERR_INVALID_CATEGORY,
             "Attachment category is not supported.",
         )
-        .with_context("category", category_raw.to_string())
+        .with_context("category", category_raw.clone())
     })?;
 
     if let Some(relative) = data.get_mut("relative_path") {
@@ -829,10 +831,10 @@ fn prepare_attachment_create(
                     *relative = Value::Null;
                     return Ok(());
                 }
-                match vault.resolve(household, category, raw) {
+                match vault.resolve(&household, category, raw) {
                     Ok(resolved) => {
                         if let Some(normalized) =
-                            vault.relative_from_resolved(&resolved, household, category)
+                            vault.relative_from_resolved(&resolved, &household, category)
                         {
                             *relative = Value::String(normalized);
                         }

@@ -36,7 +36,6 @@ use crate::{
     household_active::ActiveSetError,
     ipc::guard,
     state::AppState,
-    vault::{self, Vault},
 };
 
 const FILES_INDEX_VERSION: i64 = 1;
@@ -147,6 +146,7 @@ pub mod time_invariants;
 pub mod time_shadow;
 pub mod util;
 pub mod vault;
+pub use self::vault::Vault;
 pub mod vault_migration;
 
 use categories::{
@@ -235,7 +235,6 @@ mod cascade_health_tests {
 }
 use security::{error_map::UiError, fs_policy, fs_policy::RootKey, hash_path};
 use util::dispatch_async_app_result;
-use vault::Vault;
 use vault_migration::{MigrationMode, MigrationProgress, VaultMigrationManager};
 
 // Simple count-based rotating writer that rotates before writing
@@ -2786,11 +2785,11 @@ async fn attachment_open(
                     &descriptor.household_id,
                     descriptor.category,
                     &descriptor.relative_path,
-                    vault::ERR_INVALID_HOUSEHOLD,
+                    crate::vault::ERR_INVALID_HOUSEHOLD,
                     "attachment household mismatch",
                 );
                 return Err(AppError::new(
-                    vault::ERR_INVALID_HOUSEHOLD,
+                    crate::vault::ERR_INVALID_HOUSEHOLD,
                     "Attachments belong to a different household.",
                 )
                 .with_context("operation", "attachment_open")
@@ -2842,11 +2841,11 @@ async fn attachment_reveal(
                     &descriptor.household_id,
                     descriptor.category,
                     &descriptor.relative_path,
-                    vault::ERR_INVALID_HOUSEHOLD,
+                    crate::vault::ERR_INVALID_HOUSEHOLD,
                     "attachment household mismatch",
                 );
                 return Err(AppError::new(
-                    vault::ERR_INVALID_HOUSEHOLD,
+                    crate::vault::ERR_INVALID_HOUSEHOLD,
                     "Attachments belong to a different household.",
                 )
                 .with_context("operation", "attachment_reveal")

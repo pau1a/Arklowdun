@@ -48,6 +48,12 @@ impl MigrationMode {
     }
 }
 
+impl Default for MigrationMode {
+    fn default() -> Self {
+        MigrationMode::DryRun
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MigrationCounts {
     pub processed: u64,
@@ -258,12 +264,12 @@ async fn execute_migration<R: tauri::Runtime + 'static>(
                 .with_context("table", table.to_string())
         })?;
 
-        let mut rows = sqlx::query(&format!(
+        let query = format!(
             "SELECT id, household_id, relative_path, root_key, category FROM {table} \
              WHERE deleted_at IS NULL AND relative_path IS NOT NULL AND relative_path != '' AND \
              ({LEGACY_ROOT_CONDITION} OR {CATEGORY_CHECK}) ORDER BY id"
-        ))
-        .fetch(pool);
+        );
+        let mut rows = sqlx::query(&query).fetch(pool);
 
         while let Some(row) = rows.try_next().await.map_err(|err| {
             AppError::from(err)
@@ -376,19 +382,19 @@ async fn execute_migration<R: tauri::Runtime + 'static>(
                             .with_context("id", id.clone())
                     })?;
 
-                    sqlx::query(&format!(
-                        "UPDATE {table} SET category = ?1, root_key = NULL WHERE id = ?2"
-                    ))
-                    .bind(category.as_str())
-                    .bind(&id)
-                    .execute(pool)
-                    .await
-                    .map_err(|err| {
-                        AppError::from(err)
-                            .with_context("operation", "vault_migration_update")
-                            .with_context("table", table.to_string())
-                            .with_context("id", id.clone())
-                    })?;
+                    let update_sql =
+                        format!("UPDATE {table} SET category = ?1, root_key = NULL WHERE id = ?2");
+                    sqlx::query(&update_sql)
+                        .bind(category.as_str())
+                        .bind(&id)
+                        .execute(pool)
+                        .await
+                        .map_err(|err| {
+                            AppError::from(err)
+                                .with_context("operation", "vault_migration_update")
+                                .with_context("table", table.to_string())
+                                .with_context("id", id.clone())
+                        })?;
 
                     counts.record_copy(conflict);
                     action = if conflict { "copy_renamed" } else { "copy" }.into();

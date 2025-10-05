@@ -343,7 +343,7 @@ pub async fn categories_delete(
     dispatch_async_app_result(move || {
         let household_id = household_id.clone();
         let id = id.clone();
-        async move { commands::delete_command(&pool, "categories", &household_id, &id).await }
+        async move { commands::delete_command(&pool, "categories", &household_id, &id, None).await }
     })
     .await
 }
