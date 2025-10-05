@@ -93,6 +93,15 @@ Override the diagnostics size cap with `ARK_MAX_FILE_MB=10` (default 10).
 - The full diagnostics guide (UI summary, CLI collectors, redaction policy, and sample bundles) lives in
   [docs/diagnostics.md](docs/diagnostics.md).
 
+## Diagnostics and Support
+
+- See the [Household database remediation playbook](docs/support/household-db-remediation.md) for the on-call checklist when a cascade pauses or health checks block writes.
+- Run the helper script to inspect per-household counts and health:
+  ```bash
+  scripts/dev/household_stats.sh
+  ```
+  PowerShell users can call `scripts/dev/household_stats.ps1` with the same semantics. Both wrappers exit non-zero when a household reports an unhealthy state.
+
 ## Licensing
 
 Arklowdun is distributed under the [Arklowdun – Proprietary License](LICENSE.txt). Third-party components

@@ -1,0 +1,61 @@
+name: nightly-household-stress
+
+on:
+  workflow_dispatch:
+    inputs:
+      rows:
+        description: 'Approx rows per secondary household'
+        required: false
+        default: '10000'
+      households:
+        description: 'Number of secondary households to seed'
+        required: false
+        default: '2'
+
+concurrency:
+  group: nightly-household-stress
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cascade_stress:
+    name: cascade-stress
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      - name: Install build tools for native Node deps
+        run: sudo apt-get update && sudo apt-get install -y build-essential python3
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+      - name: Install npm dependencies
+        run: npm ci
+      - name: Seed dataset and run cascade stress
+        run: |
+          set -euo pipefail
+          DB_PATH="$RUNNER_TEMP/com.paula.arklowdun-dev/nightly.sqlite3"
+          mkdir -p "$(dirname "$DB_PATH")"
+          cargo run --manifest-path src-tauri/Cargo.toml --bin migrate -- --db "$DB_PATH" up
+          VITE_ENV=development node --loader ts-node/esm scripts/dev/seed.ts --db "$DB_PATH" --households "${{ github.event.inputs.households || 2 }}" --rows "${{ github.event.inputs.rows || 10000 }}" --reset
+          node scripts/dev/household_stats.mjs --db "$DB_PATH" --json > nightly-household-stats-before.json
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --test household_cascade -- --nocapture > nightly-cascade.log
+          node scripts/dev/household_stats.mjs --db "$DB_PATH" --json > nightly-household-stats-after.json
+      - name: Upload nightly household stress logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-household-stress-${{ github.run_id }}
+          path: |
+            nightly-cascade.log
+            nightly-household-stats-before.json
+            nightly-household-stats-after.json
+          retention-days: 7

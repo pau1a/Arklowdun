@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="240" viewBox="0 0 640 240" role="img" aria-labelledby="title desc">
+  <title id="title">Cascade progress indicator</title>
+  <desc id="desc">A cascade deletion HUD showing phases and a paused/retry state.</desc>
+  <rect x="0" y="0" width="640" height="240" fill="#ffffff" stroke="#d1d8e2" rx="12" />
+  <text x="40" y="54" font-family="Inter,Arial,sans-serif" font-size="20" fill="#1f2933">Cascade delete · Household hhd-24722</text>
+  <text x="40" y="84" font-family="Inter,Arial,sans-serif" font-size="14" fill="#55606f">Streaming `household_delete_progress` events…</text>
+  <rect x="40" y="104" width="560" height="28" fill="#eef2f8" stroke="#cbd4e1" rx="14" />
+  <rect x="40" y="104" width="392" height="28" fill="#2563eb" rx="14" />
+  <rect x="432" y="104" width="100" height="28" fill="#fcd34d" rx="14" />
+  <rect x="540" y="104" width="60" height="28" fill="#cbd4e1" rx="14" />
+  <text x="80" y="124" font-family="Inter,Arial,sans-serif" font-size="13" fill="#f8fafc">notes</text>
+  <text x="168" y="124" font-family="Inter,Arial,sans-serif" font-size="13" fill="#f8fafc">events</text>
+  <text x="264" y="124" font-family="Inter,Arial,sans-serif" font-size="13" fill="#f8fafc">files</text>
+  <text x="358" y="124" font-family="Inter,Arial,sans-serif" font-size="13" fill="#f8fafc">bills</text>
+  <text x="446" y="124" font-family="Inter,Arial,sans-serif" font-size="13" fill="#1f2933">paused</text>
+  <text x="552" y="124" font-family="Inter,Arial,sans-serif" font-size="13" fill="#1f2933">pending</text>
+  <circle cx="80" cy="168" r="9" fill="#22c55e" />
+  <text x="96" y="172" font-family="Inter,Arial,sans-serif" font-size="14" fill="#1f2933">Deleted 742 / 980 rows</text>
+  <circle cx="80" cy="200" r="9" fill="#facc15" />
+  <text x="96" y="204" font-family="Inter,Arial,sans-serif" font-size="14" fill="#1f2933">Paused at phase `vehicle_maintenance` · resuming…</text>
+</svg>

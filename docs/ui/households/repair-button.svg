@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="220" viewBox="0 0 640 220" role="img" aria-labelledby="title desc">
+  <title id="title">Repair / Re-check button</title>
+  <desc id="desc">Settings panel showing the Run Repair / Re-check button beside the cascade status.</desc>
+  <rect x="0" y="0" width="640" height="220" fill="#ffffff" stroke="#d2d8e3" rx="12" />
+  <text x="36" y="56" font-family="Inter,Arial,sans-serif" font-size="22" fill="#1f2933">Household health</text>
+  <text x="36" y="86" font-family="Inter,Arial,sans-serif" font-size="14" fill="#5b6573">Automatic checks pause writes until cascades finish.</text>
+  <rect x="36" y="106" width="568" height="64" fill="#f9fafb" stroke="#d9dfe7" rx="10" />
+  <circle cx="68" cy="138" r="10" fill="#f97316" />
+  <text x="84" y="142" font-family="Inter,Arial,sans-serif" font-size="15" fill="#1f2933">Cascade paused · 742 rows remaining</text>
+  <rect x="380" y="122" width="204" height="38" rx="8" fill="#2563eb" />
+  <text x="396" y="146" font-family="Inter,Arial,sans-serif" font-size="16" fill="#f8fafc">Run Repair / Re-check</text>
+  <text x="36" y="176" font-family="Inter,Arial,sans-serif" font-size="13" fill="#5f6b7a">Repair resumes the cascade, refreshes DB health, and re-enables write operations.</text>
+</svg>

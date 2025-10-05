@@ -43,6 +43,13 @@ immediate feedback while mirroring the behaviour of the backend invariants.
   - `INVALID_COLOR` → "Please use a hex colour like #2563EB."
 - The default household always renders with a disabled "Delete" control and a
   tooltip explaining the guard so users understand why the action is blocked.
+- When cascade health gates activate, the banner surfaces progress copy and the
+  new "Run Repair / Re-check" button. Progress mirrors
+  `household_delete_progress` events so the HUD moves in lock-step with the
+  backend queue.
+  ![Default household delete disabled](ui/households/default-delete-disabled.svg)
+  ![Cascade progress indicator](ui/households/cascade-progress.svg)
+  ![Repair button in Settings](ui/households/repair-button.svg)
 - Success and error paths surface toast notifications so users receive feedback
   without leaving the page.
 - Colour selections update the chip immediately and persist through store
