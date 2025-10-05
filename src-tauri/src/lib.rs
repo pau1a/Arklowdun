@@ -26,6 +26,7 @@ use tracing_subscriber::{
 use ts_rs::TS;
 
 use crate::{
+    attachment_category::AttachmentCategory,
     db::{
         backup,
         hard_repair::{self, HardRepairOutcome},
