@@ -125,7 +125,7 @@ mod tests {
             .prefix("guard-test-attachments")
             .tempdir()
             .expect("temp attachments dir")
-            .into_path();
+            .keep();
         fs::create_dir_all(&attachments).expect("create attachments root");
         AppState {
             pool: Arc::new(RwLock::new(pool)),
