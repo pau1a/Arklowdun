@@ -35,7 +35,7 @@ async fn notes_delete_rejects_wrong_household() -> Result<()> {
     .execute(&pool)
     .await?;
 
-    let err = commands::delete_command(&pool, "notes", "wrong-household", "note-cross")
+    let err = commands::delete_command(&pool, "notes", "wrong-household", "note-cross", None)
         .await
         .expect_err("expected mismatched household delete to fail");
     assert_scope_violation(err);
@@ -56,7 +56,7 @@ async fn notes_delete_rejects_missing_household() -> Result<()> {
     .execute(&pool)
     .await?;
 
-    let err = commands::delete_command(&pool, "notes", "", "note-missing")
+    let err = commands::delete_command(&pool, "notes", "", "note-missing", None)
         .await
         .expect_err("expected delete without household id to fail");
     assert_scope_violation(err);
@@ -86,6 +86,7 @@ async fn events_update_rejects_wrong_household() -> Result<()> {
         "event-cross",
         data,
         Some("wrong-household"),
+        None,
     )
     .await
     .expect_err("expected mismatched event update to fail");
@@ -136,7 +137,7 @@ async fn notes_update_rejects_missing_household() -> Result<()> {
     let mut data = Map::new();
     data.insert("text".into(), Value::String("Updated".into()));
 
-    let err = commands::update_command(&pool, "notes", "note-update", data, Some(""))
+    let err = commands::update_command(&pool, "notes", "note-update", data, Some(""), None)
         .await
         .expect_err("expected update without household id to fail");
     assert_scope_violation(err);

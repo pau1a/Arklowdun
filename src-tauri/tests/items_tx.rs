@@ -54,7 +54,7 @@ async fn delete_commits_and_renumbers() -> Result<()> {
             .await?;
         }
 
-        commands::delete_command(&pool, table, "H", "b")
+        commands::delete_command(&pool, table, "H", "b", None)
             .await
             .unwrap();
 
@@ -141,7 +141,7 @@ async fn nonexistent_item_errors_and_no_change() -> Result<()> {
         .fetch_all(&pool)
         .await?;
 
-        let res = commands::delete_command(&pool, table, "H", "zzz").await;
+        let res = commands::delete_command(&pool, table, "H", "zzz", None).await;
         assert!(res.is_err());
         let after: Vec<(String, i64, Option<i64>)> = sqlx::query_as(&format!(
             "SELECT id, position, deleted_at FROM {table} ORDER BY id"

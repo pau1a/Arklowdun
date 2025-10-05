@@ -61,7 +61,8 @@ async fn categories_create_and_get_round_trip() -> Result<()> {
     payload.insert("z".into(), Value::from(3));
     payload.insert("is_visible".into(), Value::from(0));
 
-    let created = arklowdun_lib::commands::create_command(&pool, "categories", payload).await?;
+    let created =
+        arklowdun_lib::commands::create_command(&pool, "categories", payload, None).await?;
     let created_id = created
         .get("id")
         .and_then(Value::as_str)
@@ -94,14 +95,15 @@ async fn categories_delete_and_restore_softly() -> Result<()> {
     payload.insert("position".into(), Value::from(120));
     payload.insert("z".into(), Value::from(0));
 
-    let created = arklowdun_lib::commands::create_command(&pool, "categories", payload).await?;
+    let created =
+        arklowdun_lib::commands::create_command(&pool, "categories", payload, None).await?;
     let id = created
         .get("id")
         .and_then(Value::as_str)
         .expect("created category has id")
         .to_string();
 
-    arklowdun_lib::commands::delete_command(&pool, "categories", "default", &id).await?;
+    arklowdun_lib::commands::delete_command(&pool, "categories", "default", &id, None).await?;
 
     let after_delete =
         arklowdun_lib::commands::get_command(&pool, "categories", Some("default"), &id).await?;
@@ -139,7 +141,8 @@ async fn categories_toggle_updates_is_visible() -> Result<()> {
     payload.insert("position".into(), Value::from(130));
     payload.insert("z".into(), Value::from(0));
 
-    let created = arklowdun_lib::commands::create_command(&pool, "categories", payload).await?;
+    let created =
+        arklowdun_lib::commands::create_command(&pool, "categories", payload, None).await?;
     let id = created
         .get("id")
         .and_then(Value::as_str)
@@ -148,8 +151,15 @@ async fn categories_toggle_updates_is_visible() -> Result<()> {
 
     let mut hide_patch = Map::new();
     hide_patch.insert("is_visible".into(), Value::from(0));
-    arklowdun_lib::commands::update_command(&pool, "categories", &id, hide_patch, Some("default"))
-        .await?;
+    arklowdun_lib::commands::update_command(
+        &pool,
+        "categories",
+        &id,
+        hide_patch,
+        Some("default"),
+        None,
+    )
+    .await?;
 
     let hidden = arklowdun_lib::commands::get_command(&pool, "categories", Some("default"), &id)
         .await?
@@ -158,8 +168,15 @@ async fn categories_toggle_updates_is_visible() -> Result<()> {
 
     let mut show_patch = Map::new();
     show_patch.insert("is_visible".into(), Value::from(1));
-    arklowdun_lib::commands::update_command(&pool, "categories", &id, show_patch, Some("default"))
-        .await?;
+    arklowdun_lib::commands::update_command(
+        &pool,
+        "categories",
+        &id,
+        show_patch,
+        Some("default"),
+        None,
+    )
+    .await?;
 
     let shown = arklowdun_lib::commands::get_command(&pool, "categories", Some("default"), &id)
         .await?
@@ -181,7 +198,8 @@ async fn categories_toggle_roundtrip() -> Result<()> {
     payload.insert("position".into(), Value::from(140));
     payload.insert("z".into(), Value::from(0));
 
-    let created = arklowdun_lib::commands::create_command(&pool, "categories", payload).await?;
+    let created =
+        arklowdun_lib::commands::create_command(&pool, "categories", payload, None).await?;
     let id = created
         .get("id")
         .and_then(Value::as_str)
@@ -201,8 +219,15 @@ async fn categories_toggle_roundtrip() -> Result<()> {
 
     let mut hide_patch = Map::new();
     hide_patch.insert("is_visible".into(), Value::from(0));
-    arklowdun_lib::commands::update_command(&pool, "categories", &id, hide_patch, Some("default"))
-        .await?;
+    arklowdun_lib::commands::update_command(
+        &pool,
+        "categories",
+        &id,
+        hide_patch,
+        Some("default"),
+        None,
+    )
+    .await?;
 
     let visible_after_hide: Vec<String> = sqlx::query_scalar(
         "SELECT id FROM categories WHERE household_id = ? AND deleted_at IS NULL AND is_visible = 1 ORDER BY position, created_at, id",
@@ -217,8 +242,15 @@ async fn categories_toggle_roundtrip() -> Result<()> {
 
     let mut show_patch = Map::new();
     show_patch.insert("is_visible".into(), Value::from(1));
-    arklowdun_lib::commands::update_command(&pool, "categories", &id, show_patch, Some("default"))
-        .await?;
+    arklowdun_lib::commands::update_command(
+        &pool,
+        "categories",
+        &id,
+        show_patch,
+        Some("default"),
+        None,
+    )
+    .await?;
 
     let visible_after_show: Vec<String> = sqlx::query_scalar(
         "SELECT id FROM categories WHERE household_id = ? AND deleted_at IS NULL AND is_visible = 1 ORDER BY position, created_at, id",
@@ -247,7 +279,8 @@ async fn notes_hidden_category() -> Result<()> {
     category_payload.insert("z".into(), Value::from(0));
 
     let created_category =
-        arklowdun_lib::commands::create_command(&pool, "categories", category_payload).await?;
+        arklowdun_lib::commands::create_command(&pool, "categories", category_payload, None)
+            .await?;
     let category_id = created_category
         .get("id")
         .and_then(Value::as_str)
@@ -260,7 +293,7 @@ async fn notes_hidden_category() -> Result<()> {
     note_payload.insert("text".into(), Value::from("Pay insurance"));
 
     let created_note =
-        arklowdun_lib::commands::create_command(&pool, "notes", note_payload).await?;
+        arklowdun_lib::commands::create_command(&pool, "notes", note_payload, None).await?;
     let note_id = created_note
         .get("id")
         .and_then(Value::as_str)
@@ -286,6 +319,7 @@ async fn notes_hidden_category() -> Result<()> {
         &category_id,
         hide_patch,
         Some("default"),
+        None,
     )
     .await?;
 
@@ -314,6 +348,7 @@ async fn notes_hidden_category() -> Result<()> {
         &category_id,
         show_patch,
         Some("default"),
+        None,
     )
     .await?;
 

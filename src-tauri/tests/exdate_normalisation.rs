@@ -58,7 +58,7 @@ async fn create_normalises_and_deduplicates_exdates() {
         "exdates".into(),
         Value::String("2023-11-02T09:00:00Z, 2023-11-01T09:00:00Z,2023-11-02T09:00:00Z".into()),
     );
-    commands::create_command(&pool, "events", data)
+    commands::create_command(&pool, "events", data, None)
         .await
         .unwrap();
 
@@ -78,7 +78,7 @@ async fn create_rejects_invalid_format() {
     let pool = setup_pool().await;
     let mut data = base_event_payload();
     data.insert("exdates".into(), Value::String("2023-11-01".into()));
-    let err = commands::create_command(&pool, "events", data)
+    let err = commands::create_command(&pool, "events", data, None)
         .await
         .expect_err("invalid exdates should fail");
     assert_eq!(err.code, "E_EXDATE_INVALID_FORMAT");
@@ -92,7 +92,7 @@ async fn create_rejects_out_of_range_values() {
         "exdates".into(),
         Value::String("2023-10-25T09:00:00Z".into()),
     );
-    let err = commands::create_command(&pool, "events", data)
+    let err = commands::create_command(&pool, "events", data, None)
         .await
         .expect_err("out of range exdates should fail");
     assert_eq!(err.code, "E_EXDATE_OUT_OF_RANGE");
@@ -103,7 +103,7 @@ async fn update_normalises_and_sorts_exdates() {
     let pool = setup_pool().await;
     let mut data = base_event_payload();
     data.insert("exdates".into(), Value::Null);
-    let created = commands::create_command(&pool, "events", data)
+    let created = commands::create_command(&pool, "events", data, None)
         .await
         .unwrap();
     let event_id = created
@@ -117,7 +117,7 @@ async fn update_normalises_and_sorts_exdates() {
         "exdates".into(),
         Value::String("2023-11-04T09:00:00Z,2023-11-02T09:00:00Z".into()),
     );
-    commands::update_command(&pool, "events", &event_id, update, Some("HH"))
+    commands::update_command(&pool, "events", &event_id, update, Some("HH"), None)
         .await
         .unwrap();
 
@@ -138,7 +138,7 @@ async fn update_rejects_invalid_payloads() {
     let pool = setup_pool().await;
     let mut data = base_event_payload();
     data.insert("exdates".into(), Value::Null);
-    let created = commands::create_command(&pool, "events", data)
+    let created = commands::create_command(&pool, "events", data, None)
         .await
         .unwrap();
     let event_id = created
@@ -149,7 +149,7 @@ async fn update_rejects_invalid_payloads() {
 
     let mut update = Map::new();
     update.insert("exdates".into(), Value::String("bad".into()));
-    let err = commands::update_command(&pool, "events", &event_id, update, Some("HH"))
+    let err = commands::update_command(&pool, "events", &event_id, update, Some("HH"), None)
         .await
         .expect_err("invalid exdates should fail");
     assert_eq!(err.code, "E_EXDATE_INVALID_FORMAT");
