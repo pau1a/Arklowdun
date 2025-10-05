@@ -697,7 +697,7 @@ mod tests {
             payload.insert("deadline_tz".into(), Value::String(tz.into()));
         }
 
-        commands::create_command(pool, "notes", payload)
+        commands::create_command(pool, "notes", payload, None)
             .await
             .expect("create deadline note")
             .get("id")
