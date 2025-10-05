@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqlitePool};
+use tauri::Emitter;
 use tokio::fs as async_fs;
 use tokio::io::AsyncWriteExt;
 
@@ -631,7 +632,7 @@ pub fn ensure_housekeeping(
                     "Attachments without category remain after migration.",
                 )
                 .with_context("table", table.to_string())
-                .with_context("count", missing));
+                .with_context("count", missing.to_string()));
             }
 
             let legacy_sql = format!(
@@ -648,7 +649,7 @@ pub fn ensure_housekeeping(
                     "Legacy attachment roots remain after migration.",
                 )
                 .with_context("table", table.to_string())
-                .with_context("count", legacy));
+                .with_context("count", legacy.to_string()));
             }
 
             let sql = format!(
