@@ -106,19 +106,27 @@ mod tests {
     use crate::events_tz_backfill::BackfillCoordinator;
     use crate::household_active::StoreHandle;
     use crate::vault::Vault;
+    use crate::vault_migration::VaultMigrationManager;
     use sqlx::sqlite::SqlitePoolOptions;
     use std::{
+        fs,
         path::PathBuf,
         sync::atomic::AtomicBool,
         sync::{Arc, Mutex, RwLock},
     };
+    use tempfile::Builder;
 
     fn app_state_with_report(report: DbHealthReport) -> AppState {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
             .connect_lazy("sqlite::memory:")
             .expect("create sqlite pool");
-        let attachments = PathBuf::from("test.attachments");
+        let attachments = Builder::new()
+            .prefix("guard-test-attachments")
+            .tempdir()
+            .expect("temp attachments dir")
+            .into_path();
+        fs::create_dir_all(&attachments).expect("create attachments root");
         AppState {
             pool: Arc::new(RwLock::new(pool)),
             active_household_id: Arc::new(Mutex::new(String::new())),
@@ -127,7 +135,10 @@ mod tests {
             db_health: Arc::new(Mutex::new(report)),
             db_path: Arc::new(PathBuf::from("test.sqlite3")),
             attachments_root: Arc::new(attachments.clone()),
-            vault: Arc::new(Vault::new(attachments)),
+            vault: Arc::new(Vault::new(attachments.clone())),
+            vault_migration: Arc::new(
+                VaultMigrationManager::new(&attachments).expect("create vault migration manager"),
+            ),
             maintenance: Arc::new(AtomicBool::new(false)),
         }
     }
