@@ -102,6 +102,13 @@ Deliver a deterministic, household-scoped attachment vault rooted at `attachment
 - [x] Structured logs omit raw paths and include outcome codes.
 - [x] Performance budgets satisfied for migration and single-file operations.
 
+### Design Note: Vehicles and Notes Categories
+
+The `vehicles` and `notes` slugs remain part of `AttachmentCategory` even though attachments for those domains flow through
+related tables today. Maintaining the slugs prevents churn in on-disk directory names, keeps IPC validation forward-compatible
+with future attachment entry points, and ensures the database CHECK constraints continue to accept the complete category list
+so rows can migrate between categories without schema edits.
+
 ## Rollout & Backout
 
 * Ship guardrails immediately to protect new writes; expose migration controls in Settings.

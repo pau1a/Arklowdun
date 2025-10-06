@@ -6,6 +6,8 @@ use crate::AppError;
 
 use super::{ERR_FILENAME_INVALID, ERR_NAME_TOO_LONG, ERR_PATH_OUT_OF_VAULT};
 
+// Database constraints enforce category enumerations and nullability. This guard layer owns
+// filesystem hygiene: path shape, normalization, traversal prevention, and byte-length limits.
 pub const MAX_COMPONENT_BYTES: usize = 255;
 pub const MAX_PATH_BYTES: usize = 32 * 1024;
 
