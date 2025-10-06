@@ -40,6 +40,10 @@ use crate::{
         health::{DbHealthCheck, DbHealthReport, DbHealthStatus, STORAGE_SANITY_HEAL_NOTE},
         repair::{self, DbRepairEvent, DbRepairSummary},
     },
+    file_ops::{
+        attachments_repair as run_attachments_repair, file_move as run_file_move,
+        AttachmentsRepairRequest, AttachmentsRepairResponse, FileMoveRequest, FileMoveResponse,
+    },
     files_indexer::{IndexProgress, IndexerState, RebuildMode},
     household_active::ActiveSetError,
     ipc::guard,
@@ -126,6 +130,7 @@ pub mod error;
 pub mod events_tz_backfill;
 pub mod exdate;
 pub mod export;
+pub mod file_ops;
 pub mod files_indexer;
 mod household; // declare module; avoid `use` to prevent name collision
 pub mod household_active;
@@ -4114,6 +4119,28 @@ async fn db_hard_repair_run(state: State<'_, AppState>) -> AppResult<HardRepairO
 }
 
 #[tauri::command]
+async fn file_move<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+    request: FileMoveRequest,
+) -> AppResult<FileMoveResponse> {
+    let pool = state.pool_clone();
+    let vault = state.vault();
+    run_file_move(app, pool, vault, request).await
+}
+
+#[tauri::command]
+async fn attachments_repair<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+    request: AttachmentsRepairRequest,
+) -> AppResult<AttachmentsRepairResponse> {
+    let pool = state.pool_clone();
+    let vault = state.vault();
+    run_attachments_repair(app, pool, vault, request).await
+}
+
+#[tauri::command]
 #[allow(clippy::result_large_err)]
 async fn time_invariants_check(
     state: State<'_, AppState>,
@@ -4166,6 +4193,8 @@ macro_rules! app_commands {
             household_repair,
             household_vacuum_execute,
             household_restore,
+            file_move,
+            attachments_repair,
             bills_list,
             bills_get,
             bills_create,
