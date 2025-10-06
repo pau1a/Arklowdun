@@ -18,7 +18,6 @@ use super::bundle::{DataFileEntry, ImportBundle};
 use super::{
     collect_bundle_attachment_metadata, collect_bundle_attachment_updates, ATTACHMENT_TABLES,
 };
-use crate::attachment_category::AttachmentCategory;
 use crate::export::manifest::file_sha256;
 use crate::security::hash_path;
 use crate::vault::{Vault, ERR_FILENAME_INVALID, ERR_NAME_TOO_LONG, ERR_PATH_OUT_OF_VAULT};

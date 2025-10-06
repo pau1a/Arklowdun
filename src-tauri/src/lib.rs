@@ -28,7 +28,6 @@ use ts_rs::TS;
 
 use crate::{
     attachment_category::AttachmentCategory,
-    attachments,
     commands::AttachmentMutationGuard,
     db::{
         backup,
@@ -39,7 +38,6 @@ use crate::{
     household_active::ActiveSetError,
     ipc::guard,
     state::AppState,
-    vault,
     vault_migration::ATTACHMENT_TABLES,
 };
 
@@ -2799,11 +2797,11 @@ async fn resolve_attachment_for_ipc_read(
     id: &str,
     operation: &'static str,
 ) -> AppResult<PathBuf> {
-    let descriptor = attachments::load_attachment_descriptor(pool, table, id).await?;
+    let descriptor = crate::attachments::load_attachment_descriptor(pool, table, id).await?;
     let table_value = table.to_string();
     let id_value = id.to_string();
 
-    let attachments::AttachmentDescriptor {
+    let crate::attachments::AttachmentDescriptor {
         household_id,
         category,
         relative_path,
@@ -2848,12 +2846,12 @@ fn ensure_active_household_for_ipc(
             expected,
             category,
             relative_for_log,
-            vault::ERR_INVALID_HOUSEHOLD,
+            crate::vault::ERR_INVALID_HOUSEHOLD,
             "ensure_active_household",
         );
         let relative_hash = hash_path(Path::new(relative_for_log));
         let mut err = AppError::new(
-            vault::ERR_INVALID_HOUSEHOLD,
+            crate::vault::ERR_INVALID_HOUSEHOLD,
             "Attachments belong to a different household.",
         )
         .with_context("operation", operation)
@@ -2887,7 +2885,7 @@ fn resolve_attachment_for_ipc_create(
         .and_then(Value::as_str)
         .ok_or_else(|| {
             AppError::new(
-                vault::ERR_INVALID_HOUSEHOLD,
+                crate::vault::ERR_INVALID_HOUSEHOLD,
                 "Attachments require a household id.",
             )
             .with_context("operation", operation)
@@ -2900,7 +2898,7 @@ fn resolve_attachment_for_ipc_create(
         .and_then(Value::as_str)
         .ok_or_else(|| {
             AppError::new(
-                vault::ERR_INVALID_CATEGORY,
+                crate::vault::ERR_INVALID_CATEGORY,
                 "Attachment category is required.",
             )
             .with_context("operation", operation)
@@ -2909,7 +2907,7 @@ fn resolve_attachment_for_ipc_create(
         })?;
     let category = AttachmentCategory::from_str(category_value).map_err(|_| {
         AppError::new(
-            vault::ERR_INVALID_CATEGORY,
+            crate::vault::ERR_INVALID_CATEGORY,
             "Attachment category is not supported.",
         )
         .with_context("operation", operation)
@@ -2948,7 +2946,7 @@ fn resolve_attachment_for_ipc_create(
                     .relative_from_resolved(&resolved, &household_id, category)
                     .ok_or_else(|| {
                         AppError::new(
-                            vault::ERR_PATH_OUT_OF_VAULT,
+                            crate::vault::ERR_PATH_OUT_OF_VAULT,
                             "Attachment path must stay inside the vault.",
                         )
                         .with_context("operation", operation)
@@ -2960,7 +2958,7 @@ fn resolve_attachment_for_ipc_create(
         }
         Some(_) => {
             return Err(AppError::new(
-                vault::ERR_FILENAME_INVALID,
+                crate::vault::ERR_FILENAME_INVALID,
                 "Attachment path must be a string.",
             )
             .with_context("operation", operation)
@@ -2994,7 +2992,7 @@ async fn resolve_attachment_for_ipc_update(
     let table_value = table.to_string();
     let id_value = id.to_string();
 
-    let descriptor = attachments::load_attachment_descriptor(pool, table, id)
+    let descriptor = crate::attachments::load_attachment_descriptor(pool, table, id)
         .await
         .map_err(|err| {
             err.with_context("operation", operation)
@@ -3008,12 +3006,12 @@ async fn resolve_attachment_for_ipc_update(
                 &descriptor.household_id,
                 descriptor.category,
                 &descriptor.relative_path,
-                vault::ERR_INVALID_HOUSEHOLD,
+                crate::vault::ERR_INVALID_HOUSEHOLD,
                 "ensure_update_household",
             );
             let relative_hash = hash_path(Path::new(&descriptor.relative_path));
             return Err(AppError::new(
-                vault::ERR_INVALID_HOUSEHOLD,
+                crate::vault::ERR_INVALID_HOUSEHOLD,
                 "Attachments require a matching household id.",
             )
             .with_context("operation", operation)
@@ -3032,7 +3030,7 @@ async fn resolve_attachment_for_ipc_update(
             Value::String(raw) => {
                 category = AttachmentCategory::from_str(raw).map_err(|_| {
                     AppError::new(
-                        vault::ERR_INVALID_CATEGORY,
+                        crate::vault::ERR_INVALID_CATEGORY,
                         "Attachment category is not supported.",
                     )
                     .with_context("operation", operation)
@@ -3044,7 +3042,7 @@ async fn resolve_attachment_for_ipc_update(
             }
             Value::Null => {
                 return Err(AppError::new(
-                    vault::ERR_INVALID_CATEGORY,
+                    crate::vault::ERR_INVALID_CATEGORY,
                     "Attachment category is required.",
                 )
                 .with_context("operation", operation)
@@ -3054,7 +3052,7 @@ async fn resolve_attachment_for_ipc_update(
             }
             _ => {
                 return Err(AppError::new(
-                    vault::ERR_INVALID_CATEGORY,
+                    crate::vault::ERR_INVALID_CATEGORY,
                     "Attachment category must be a string.",
                 )
                 .with_context("operation", operation)
@@ -3098,7 +3096,7 @@ async fn resolve_attachment_for_ipc_update(
                     .relative_from_resolved(&resolved, &descriptor.household_id, category)
                     .ok_or_else(|| {
                         AppError::new(
-                            vault::ERR_PATH_OUT_OF_VAULT,
+                            crate::vault::ERR_PATH_OUT_OF_VAULT,
                             "Attachment path must stay inside the vault.",
                         )
                         .with_context("operation", operation)
@@ -3111,7 +3109,7 @@ async fn resolve_attachment_for_ipc_update(
         }
         Some(_) => {
             return Err(AppError::new(
-                vault::ERR_FILENAME_INVALID,
+                crate::vault::ERR_FILENAME_INVALID,
                 "Attachment path must be a string.",
             )
             .with_context("operation", operation)
@@ -3145,7 +3143,7 @@ async fn resolve_attachment_for_ipc_delete(
     let table_value = table.to_string();
     let id_value = id.to_string();
 
-    let descriptor = match attachments::load_attachment_descriptor(pool, table, id).await {
+    let descriptor = match crate::attachments::load_attachment_descriptor(pool, table, id).await {
         Ok(descriptor) => descriptor,
         Err(err) => {
             if err.code() == "IO/ENOENT" {
@@ -3163,12 +3161,12 @@ async fn resolve_attachment_for_ipc_delete(
             &descriptor.household_id,
             descriptor.category,
             &descriptor.relative_path,
-            vault::ERR_INVALID_HOUSEHOLD,
+            crate::vault::ERR_INVALID_HOUSEHOLD,
             "ensure_delete_household",
         );
         let relative_hash = hash_path(Path::new(&descriptor.relative_path));
         return Err(AppError::new(
-            vault::ERR_INVALID_HOUSEHOLD,
+            crate::vault::ERR_INVALID_HOUSEHOLD,
             "Attachments require a matching household id.",
         )
         .with_context("operation", operation)
@@ -3236,7 +3234,7 @@ async fn attachment_open(
                 "attachment_open",
             )
             .await?;
-            attachments::open_with_os(&resolved)
+            crate::attachments::open_with_os(&resolved)
         }
     })
     .await
@@ -3267,7 +3265,7 @@ async fn attachment_reveal(
                 "attachment_reveal",
             )
             .await?;
-            attachments::reveal_with_os(&resolved)
+            crate::attachments::reveal_with_os(&resolved)
         }
     })
     .await

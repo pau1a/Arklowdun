@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use fs2::available_space;
 use sha2::{Digest, Sha256};
@@ -14,13 +14,8 @@ use sqlx::{Row, SqlitePool};
 use tokio::task;
 
 use crate::{
-    attachment_category::AttachmentCategory,
-    db,
-    db::manifest as db_manifest,
-    repo,
-    security::hash_path,
-    vault::{self, Vault},
-    AppError, AppResult,
+    attachment_category::AttachmentCategory, db, db::manifest as db_manifest, repo,
+    security::hash_path, vault::Vault, AppError, AppResult,
 };
 
 use self::manifest::{file_sha256, ExportManifest, TableInfo};
@@ -405,8 +400,8 @@ async fn load_attachment_sources(pool: &SqlitePool) -> AppResult<Vec<ExportAttac
                 .with_context("table", table.to_string())
         })?;
         for row in rows {
-            let household: String = row.try_get("household_id").unwrap_or_default();
-            if household.trim().is_empty() {
+            let household_id: String = row.try_get("household_id").unwrap_or_default();
+            if household_id.trim().is_empty() {
                 continue;
             }
 
@@ -424,7 +419,7 @@ async fn load_attachment_sources(pool: &SqlitePool) -> AppResult<Vec<ExportAttac
                             target: "arklowdun",
                             event = "export_attachment_category_fallback",
                             table,
-                            household_id = household.as_str(),
+                            household_id = household_id.as_str(),
                             raw_category = raw,
                             "Falling back to table default for attachment category"
                         );
@@ -865,6 +860,6 @@ mod tests {
         .await
         .expect_err("export should fail for traversal path");
 
-        assert_eq!(err.code(), vault::ERR_PATH_OUT_OF_VAULT);
+        assert_eq!(err.code(), crate::vault::ERR_PATH_OUT_OF_VAULT);
     }
 }
