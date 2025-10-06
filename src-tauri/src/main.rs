@@ -183,14 +183,14 @@ fn handle_resume_migration() -> Result<i32> {
     match guard_cli_db_mutation(&db_path)? {
         Ok(pool) => {
             let outcome: Option<(MigrationMode, MigrationProgress)> =
-                tauri::async_runtime::block_on(async -> Result<Option<(MigrationMode, MigrationProgress)>> {
+                tauri::async_runtime::block_on(async {
                     let vault = Arc::new(Vault::new(&attachments_root));
                     let manager = Arc::new(VaultMigrationManager::new(&attachments_root)?);
                     let mode = match manager.resume_mode() {
                         Some(mode) => mode,
                         None => {
                             pool.close().await;
-                            return Ok(None);
+                            return Ok::<Option<(MigrationMode, MigrationProgress)>, anyhow::Error>(None);
                         }
                     };
                     let progress = run_vault_migration_headless(

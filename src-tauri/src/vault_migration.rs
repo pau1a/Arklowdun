@@ -1067,8 +1067,8 @@ struct LegacySource {
     path: PathBuf,
 }
 
-fn resolve_legacy_path(
-    roots: &impl LegacyRootProvider,
+fn resolve_legacy_path<R: LegacyRootProvider + ?Sized>(
+    roots: &R,
     root: Option<&str>,
     relative: &str,
 ) -> AppResult<LegacyResolution> {
