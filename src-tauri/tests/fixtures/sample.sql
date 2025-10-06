@@ -59,10 +59,11 @@ CREATE TABLE IF NOT EXISTS "bills" (
   deleted_at INTEGER,
   position INTEGER NOT NULL DEFAULT 0,
   root_key TEXT,
-  relative_path TEXT
+  relative_path TEXT,
+  category TEXT NOT NULL DEFAULT 'bills'
 );
-INSERT INTO bills VALUES('b1',1000,1000,NULL,NULL,'h1',0,0,NULL,0,NULL,NULL);
-INSERT INTO bills VALUES('b2',2000,1000,NULL,NULL,'h1',0,0,1,1,NULL,NULL);
+INSERT INTO bills VALUES('b1',1000,1000,NULL,NULL,'h1',0,0,NULL,0,NULL,NULL,'bills');
+INSERT INTO bills VALUES('b2',2000,1000,NULL,NULL,'h1',0,0,1,1,NULL,NULL,'bills');
 CREATE TABLE IF NOT EXISTS "policies" (
   id TEXT PRIMARY KEY,
   amount INTEGER NOT NULL,
@@ -75,7 +76,8 @@ CREATE TABLE IF NOT EXISTS "policies" (
   deleted_at INTEGER,
   position INTEGER NOT NULL DEFAULT 0,
   root_key TEXT,
-  relative_path TEXT
+  relative_path TEXT,
+  category TEXT NOT NULL DEFAULT 'policies'
 );
 CREATE TABLE IF NOT EXISTS "property_documents" (
   id TEXT PRIMARY KEY,
@@ -89,7 +91,8 @@ CREATE TABLE IF NOT EXISTS "property_documents" (
   deleted_at INTEGER,
   position INTEGER NOT NULL DEFAULT 0,
   root_key TEXT,
-  relative_path TEXT
+  relative_path TEXT,
+  category TEXT NOT NULL DEFAULT 'property_documents'
 );
 CREATE TABLE IF NOT EXISTS "inventory_items" (
   id TEXT PRIMARY KEY,
@@ -104,7 +107,8 @@ CREATE TABLE IF NOT EXISTS "inventory_items" (
   deleted_at INTEGER,
   position INTEGER NOT NULL DEFAULT 0,
   root_key TEXT,
-  relative_path TEXT
+  relative_path TEXT,
+  category TEXT NOT NULL DEFAULT 'inventory_items'
 );
 CREATE TABLE IF NOT EXISTS "vehicles" (
   id TEXT PRIMARY KEY,
@@ -156,9 +160,10 @@ CREATE TABLE IF NOT EXISTS "vehicle_maintenance" (
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER,
   root_key TEXT,
-  relative_path TEXT
+  relative_path TEXT,
+  category TEXT NOT NULL DEFAULT 'vehicle_maintenance'
 );
-INSERT INTO vehicle_maintenance VALUES('vm1','v1',1500,'oil',100,NULL,'h1',0,0,NULL,NULL,NULL);
+INSERT INTO vehicle_maintenance VALUES('vm1','v1',1500,'oil',100,NULL,'h1',0,0,NULL,NULL,NULL,'vehicle_maintenance');
 CREATE TABLE IF NOT EXISTS "pets" (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -181,7 +186,8 @@ CREATE TABLE IF NOT EXISTS "pet_medical" (
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER,
   root_key TEXT,
-  relative_path TEXT
+  relative_path TEXT,
+  category TEXT NOT NULL DEFAULT 'pet_medical'
 );
 CREATE TABLE IF NOT EXISTS "family_members" (
   id TEXT PRIMARY KEY,
@@ -292,29 +298,29 @@ CREATE INDEX events_household_updated_idx ON events(household_id, updated_at);
 CREATE INDEX idx_events_household_active ON events(household_id, updated_at) WHERE deleted_at IS NULL;
 CREATE INDEX bills_household_updated_idx ON bills(household_id, updated_at);
 CREATE UNIQUE INDEX bills_household_position_idx ON bills(household_id, position) WHERE deleted_at IS NULL;
-CREATE UNIQUE INDEX bills_household_file_idx ON bills(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
+CREATE UNIQUE INDEX bills_household_category_path_idx ON bills(household_id, category, relative_path) WHERE deleted_at IS NULL AND relative_path IS NOT NULL;
 CREATE INDEX idx_bills_household_due ON bills(household_id, due_date);
 CREATE INDEX policies_household_updated_idx ON policies(household_id, updated_at);
 CREATE UNIQUE INDEX policies_household_position_idx ON policies(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS notes_deadline_idx ON notes(household_id, deadline);
-CREATE UNIQUE INDEX policies_household_file_idx ON policies(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
+CREATE UNIQUE INDEX policies_household_category_path_idx ON policies(household_id, category, relative_path) WHERE deleted_at IS NULL AND relative_path IS NOT NULL;
 CREATE INDEX property_documents_household_updated_idx ON property_documents(household_id, updated_at);
 CREATE UNIQUE INDEX property_documents_household_position_idx ON property_documents(household_id, position) WHERE deleted_at IS NULL;
-CREATE UNIQUE INDEX property_documents_household_file_idx ON property_documents(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
+CREATE UNIQUE INDEX property_documents_household_category_path_idx ON property_documents(household_id, category, relative_path) WHERE deleted_at IS NULL AND relative_path IS NOT NULL;
 CREATE INDEX inventory_items_household_updated_idx ON inventory_items(household_id, updated_at);
 CREATE UNIQUE INDEX inventory_items_household_position_idx ON inventory_items(household_id, position) WHERE deleted_at IS NULL;
-CREATE UNIQUE INDEX inventory_items_household_file_idx ON inventory_items(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
+CREATE UNIQUE INDEX inventory_items_household_category_path_idx ON inventory_items(household_id, category, relative_path) WHERE deleted_at IS NULL AND relative_path IS NOT NULL;
 CREATE INDEX idx_vehicles_household_updated
   ON vehicles(household_id, updated_at);
 CREATE UNIQUE INDEX vehicles_household_position_idx ON vehicles(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX vehicle_maintenance_household_updated_idx ON vehicle_maintenance(household_id, updated_at);
 CREATE INDEX vehicle_maintenance_vehicle_date_idx ON vehicle_maintenance(vehicle_id, date);
-CREATE UNIQUE INDEX vehicle_maintenance_household_file_idx ON vehicle_maintenance(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
+CREATE UNIQUE INDEX vehicle_maintenance_household_category_path_idx ON vehicle_maintenance(household_id, category, relative_path) WHERE deleted_at IS NULL AND relative_path IS NOT NULL;
 CREATE INDEX pets_household_updated_idx ON pets(household_id, updated_at);
 CREATE UNIQUE INDEX pets_household_position_idx ON pets(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX pet_medical_household_updated_idx ON pet_medical(household_id, updated_at);
 CREATE INDEX pet_medical_pet_date_idx ON pet_medical(pet_id, date);
-CREATE UNIQUE INDEX pet_medical_household_file_idx ON pet_medical(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
+CREATE UNIQUE INDEX pet_medical_household_category_path_idx ON pet_medical(household_id, category, relative_path) WHERE deleted_at IS NULL AND relative_path IS NOT NULL;
 CREATE INDEX family_members_household_updated_idx ON family_members(household_id, updated_at);
 CREATE UNIQUE INDEX family_members_household_position_idx ON family_members(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX budget_categories_household_updated_idx ON budget_categories(household_id, updated_at);

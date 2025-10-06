@@ -1,6 +1,8 @@
 // src/PropertyView.ts
 import { open as openDialog } from "@lib/ipc/dialog";
 import { sanitizeRelativePath } from "./files/path";
+
+const PROPERTY_DOCUMENTS_CATEGORY = "property_documents" as const;
 import { isPermissionGranted, requestPermission, sendNotification } from "./notification";
 import type { PropertyDocument } from "./models";
 import { propertyDocsRepo } from "./repos";
@@ -54,7 +56,7 @@ async function renderDocs(listEl: HTMLUListElement, docs: PropertyDocument[]) {
       const revealBtn = document.createElement("button");
       revealBtn.textContent = revealLabel();
       revealBtn.addEventListener("click", () =>
-        revealAttachment("property_documents", String(d.id), d.root_key, d.relative_path!),
+        revealAttachment("property_documents", String(d.id)),
       );
       li.appendChild(revealBtn);
     }
@@ -155,8 +157,8 @@ export async function PropertyView(container: HTMLElement) {
     const created = await propertyDocsRepo.create(hh, {
       description: descInput.value,
       renewal_date: dueLocalNoon,
-      root_key: "appData",
       relative_path: sanitizeRelativePath(docInput?.value ?? ""),
+      category: PROPERTY_DOCUMENTS_CATEGORY,
       reminder: remTs,
       position: docs.length,
     });

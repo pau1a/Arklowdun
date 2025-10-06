@@ -1,4 +1,6 @@
 import { sanitizeRelativePath } from "./files/path";
+
+const BILLS_CATEGORY = "bills" as const;
 import {
   isPermissionGranted,
   requestPermission,
@@ -61,7 +63,7 @@ async function renderBills(listEl: HTMLUListElement, bills: Bill[]) {
       const revealBtn = document.createElement("button");
       revealBtn.textContent = revealLabel();
       revealBtn.addEventListener("click", () =>
-        revealAttachment("bills", String(b.id), b.root_key, b.relative_path),
+        revealAttachment("bills", String(b.id)),
       );
       li.appendChild(revealBtn);
     }
@@ -133,8 +135,8 @@ export async function BillsView(container: HTMLElement) {
     const bill = await billsRepo.create(hh, {
       amount: Math.round(parseFloat(amountInput.value) * 100),
       due_date: dueTs,
-      root_key: "appData",
       relative_path: sanitizeRelativePath(docInput.value),
+      category: BILLS_CATEGORY,
       reminder,
       position: bills.length,
     });

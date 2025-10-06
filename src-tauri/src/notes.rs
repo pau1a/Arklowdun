@@ -564,7 +564,7 @@ pub async fn notes_create(state: State<'_, AppState>, data: Map<String, Value>) 
                 data.insert("z".into(), Value::from(next_z));
             }
 
-            let value = commands::create_command(&pool, "notes", data).await?;
+            let value = commands::create_command(&pool, "notes", data, None).await?;
             let mut note: Note = serde_json::from_value(value).map_err(|err| {
                 AppError::new("NOTES/DECODE", "Failed to decode note")
                     .with_context("cause", err.to_string())
@@ -592,7 +592,8 @@ pub async fn notes_update(
         let data = data.clone();
         let household_id = household_id.clone();
         async move {
-            commands::update_command(&pool, "notes", &id, data, household_id.as_deref()).await?;
+            commands::update_command(&pool, "notes", &id, data, household_id.as_deref(), None)
+                .await?;
             fetch_note(&pool, household_id.as_deref(), &id)
                 .await?
                 .ok_or_else(|| AppError::new("NOTES/NOT_FOUND", "Note not found after update"))
@@ -612,7 +613,7 @@ pub async fn notes_delete(
     dispatch_async_app_result(move || {
         let household_id = household_id.clone();
         let id = id.clone();
-        async move { commands::delete_command(&pool, "notes", &household_id, &id).await }
+        async move { commands::delete_command(&pool, "notes", &household_id, &id, None).await }
     })
     .await
 }
@@ -696,7 +697,7 @@ mod tests {
             payload.insert("deadline_tz".into(), Value::String(tz.into()));
         }
 
-        commands::create_command(pool, "notes", payload)
+        commands::create_command(pool, "notes", payload, None)
             .await
             .expect("create deadline note")
             .get("id")
@@ -710,7 +711,7 @@ mod tests {
         let pool = setup_pool().await;
         for idx in 0..25 {
             let payload = note_payload(&format!("note-{idx}"), idx);
-            commands::create_command(&pool, "notes", payload)
+            commands::create_command(&pool, "notes", payload, None)
                 .await
                 .expect("create note");
         }
@@ -762,7 +763,7 @@ mod tests {
         let mut payload = note_payload("deadline-test", 0);
         payload.insert("deadline".into(), Value::from(1_700_000_000_000_i64));
         payload.insert("deadline_tz".into(), Value::String("UTC".into()));
-        let note_id = commands::create_command(&pool, "notes", payload)
+        let note_id = commands::create_command(&pool, "notes", payload, None)
             .await
             .expect("create note")
             .get("id")
@@ -827,7 +828,7 @@ mod tests {
         payload.insert("deadline".into(), Value::from(1_700_100_000_000_i64));
         payload.insert("deadline_tz".into(), Value::String("Europe/Dublin".into()));
 
-        let created = commands::create_command(&pool, "notes", payload)
+        let created = commands::create_command(&pool, "notes", payload, None)
             .await
             .expect("create quick note");
         let id = created

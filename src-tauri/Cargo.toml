@@ -69,6 +69,7 @@ thiserror = "1"
 file-rotate = "0.7"
 rusqlite = { version = "0.32", features = ["backup"] }
 fs2 = "0.4"
+unicode-normalization = "0.1"
 
 [dev-dependencies]
 libc = "0.2"

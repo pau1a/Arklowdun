@@ -52,13 +52,13 @@ Household data is protected by a combination of SQL triggers, SQLite foreign key
 Use `UNIQUE` constraints (or unique indexes) to prevent duplicate natural keys. Favor partial unique indexes that ignore soft-deleted rows.
 
 ```sql
--- Example: each file path is unique per household
-CREATE UNIQUE INDEX IF NOT EXISTS bills_household_file_idx
-  ON bills(household_id, root_key, relative_path)
-  WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
+-- Example: each file path is unique per household + category
+CREATE UNIQUE INDEX IF NOT EXISTS bills_household_category_path_idx
+  ON bills(household_id, category, relative_path)
+  WHERE deleted_at IS NULL AND relative_path IS NOT NULL;
 ```
 
-Apply similar indexes for other tables storing `root_key`/`relative_path` pairs.
+Apply similar indexes for other tables storing attachment `relative_path` values.
 
 ## CHECK
 

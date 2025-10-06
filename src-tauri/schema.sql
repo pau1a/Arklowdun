@@ -82,7 +82,8 @@ CREATE TABLE bills (
   deleted_at INTEGER,
   position INTEGER NOT NULL DEFAULT 0,
   root_key TEXT,
-  relative_path TEXT
+  relative_path TEXT,
+  category TEXT NOT NULL DEFAULT 'bills' CHECK (category IN ('bills','policies','property_documents','inventory_items','pet_medical','vehicles','vehicle_maintenance','notes','misc'))
 );
 CREATE TABLE budget_categories (
   id TEXT PRIMARY KEY,
@@ -136,7 +137,8 @@ CREATE TABLE inventory_items (
   deleted_at INTEGER,
   position INTEGER NOT NULL DEFAULT 0,
   root_key TEXT,
-  relative_path TEXT
+  relative_path TEXT,
+  category TEXT NOT NULL DEFAULT 'inventory_items' CHECK (category IN ('bills','policies','property_documents','inventory_items','pet_medical','vehicles','vehicle_maintenance','notes','misc'))
 );
 CREATE TABLE pets (
   id TEXT PRIMARY KEY,
@@ -160,7 +162,8 @@ CREATE TABLE pet_medical (
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER,
   root_key TEXT,
-  relative_path TEXT
+  relative_path TEXT,
+  category TEXT NOT NULL DEFAULT 'pet_medical' CHECK (category IN ('bills','policies','property_documents','inventory_items','pet_medical','vehicles','vehicle_maintenance','notes','misc'))
 );
 CREATE TABLE policies (
   id TEXT PRIMARY KEY,
@@ -174,7 +177,8 @@ CREATE TABLE policies (
   deleted_at INTEGER,
   position INTEGER NOT NULL DEFAULT 0,
   root_key TEXT,
-  relative_path TEXT
+  relative_path TEXT,
+  category TEXT NOT NULL DEFAULT 'policies' CHECK (category IN ('bills','policies','property_documents','inventory_items','pet_medical','vehicles','vehicle_maintenance','notes','misc'))
 );
 CREATE TABLE property_documents (
   id TEXT PRIMARY KEY,
@@ -188,7 +192,8 @@ CREATE TABLE property_documents (
   deleted_at INTEGER,
   position INTEGER NOT NULL DEFAULT 0,
   root_key TEXT,
-  relative_path TEXT
+  relative_path TEXT,
+  category TEXT NOT NULL DEFAULT 'property_documents' CHECK (category IN ('bills','policies','property_documents','inventory_items','pet_medical','vehicles','vehicle_maintenance','notes','misc'))
 );
 CREATE TABLE shadow_read_audit (
   id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -244,12 +249,13 @@ CREATE TABLE vehicle_maintenance (
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER,
   root_key TEXT,
-  relative_path TEXT
+  relative_path TEXT,
+  category TEXT NOT NULL DEFAULT 'vehicle_maintenance' CHECK (category IN ('bills','policies','property_documents','inventory_items','pet_medical','vehicles','vehicle_maintenance','notes','misc'))
 );
 CREATE VIEW shopping_live AS
   SELECT * FROM shopping_items WHERE deleted_at IS NULL
 /* shopping_live(id,household_id,position,created_at,updated_at,deleted_at) */;
-CREATE UNIQUE INDEX bills_household_file_idx ON bills(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
+CREATE UNIQUE INDEX bills_household_category_path_idx ON bills(household_id, category, relative_path) WHERE deleted_at IS NULL AND relative_path IS NOT NULL;
 CREATE UNIQUE INDEX bills_household_position_idx ON bills(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX bills_household_updated_idx ON bills(household_id, updated_at);
 CREATE UNIQUE INDEX budget_categories_household_position_idx ON budget_categories(household_id, position) WHERE deleted_at IS NULL;
@@ -269,7 +275,7 @@ CREATE INDEX idx_events_household_active ON events(household_id, updated_at) WHE
 CREATE INDEX idx_events_household_rrule ON events(household_id, rrule);
 CREATE INDEX idx_events_household_title ON events(household_id, title);
 CREATE INDEX idx_vehicles_household_updated ON vehicles(household_id, updated_at);
-CREATE UNIQUE INDEX inventory_items_household_file_idx ON inventory_items(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
+CREATE UNIQUE INDEX inventory_items_household_category_path_idx ON inventory_items(household_id, category, relative_path) WHERE deleted_at IS NULL AND relative_path IS NOT NULL;
 CREATE UNIQUE INDEX inventory_items_household_position_idx ON inventory_items(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX inventory_items_household_updated_idx ON inventory_items(household_id, updated_at);
 CREATE UNIQUE INDEX notes_household_position_idx ON notes(household_id, position) WHERE deleted_at IS NULL;
@@ -278,20 +284,20 @@ CREATE INDEX notes_scope_z_idx ON notes(household_id, deleted_at, z, position);
 CREATE INDEX IF NOT EXISTS notes_deadline_idx ON notes(household_id, deadline);
 CREATE INDEX notes_household_category_idx
   ON notes(household_id, category_id) WHERE deleted_at IS NULL;
-CREATE UNIQUE INDEX pet_medical_household_file_idx ON pet_medical(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
+CREATE UNIQUE INDEX pet_medical_household_category_path_idx ON pet_medical(household_id, category, relative_path) WHERE deleted_at IS NULL AND relative_path IS NOT NULL;
 CREATE INDEX pet_medical_household_updated_idx ON pet_medical(household_id, updated_at);
 CREATE INDEX pet_medical_pet_date_idx ON pet_medical(pet_id, date);
 CREATE UNIQUE INDEX pets_household_position_idx ON pets(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX pets_household_updated_idx ON pets(household_id, updated_at);
-CREATE UNIQUE INDEX policies_household_file_idx ON policies(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
+CREATE UNIQUE INDEX policies_household_category_path_idx ON policies(household_id, category, relative_path) WHERE deleted_at IS NULL AND relative_path IS NOT NULL;
 CREATE UNIQUE INDEX policies_household_position_idx ON policies(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX policies_household_updated_idx ON policies(household_id, updated_at);
-CREATE UNIQUE INDEX property_documents_household_file_idx ON property_documents(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
+CREATE UNIQUE INDEX property_documents_household_category_path_idx ON property_documents(household_id, category, relative_path) WHERE deleted_at IS NULL AND relative_path IS NOT NULL;
 CREATE UNIQUE INDEX property_documents_household_position_idx ON property_documents(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX property_documents_household_updated_idx ON property_documents(household_id, updated_at);
 CREATE UNIQUE INDEX shopping_household_position_idx ON shopping_items(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX shopping_scope_idx ON shopping_items(household_id, deleted_at, position);
-CREATE UNIQUE INDEX vehicle_maintenance_household_file_idx ON vehicle_maintenance(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
+CREATE UNIQUE INDEX vehicle_maintenance_household_category_path_idx ON vehicle_maintenance(household_id, category, relative_path) WHERE deleted_at IS NULL AND relative_path IS NOT NULL;
 CREATE INDEX vehicle_maintenance_household_updated_idx ON vehicle_maintenance(household_id, updated_at);
 CREATE INDEX vehicle_maintenance_vehicle_date_idx ON vehicle_maintenance(vehicle_id, date);
 CREATE UNIQUE INDEX vehicles_household_position_idx ON vehicles(household_id, position) WHERE deleted_at IS NULL;

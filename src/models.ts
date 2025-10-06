@@ -2,8 +2,9 @@ export interface Bill {
   id: string;
   amount: number; // minor currency units
   due_date: number; // timestamp ms
-  root_key: string;
+  root_key?: string | null;
   relative_path: string;
+  category: string;
   reminder?: number; // timestamp ms
   household_id?: string;
   position: number;
@@ -16,8 +17,9 @@ export interface Policy {
   id: string;
   amount: number; // minor currency units
   due_date: number; // timestamp ms
-  root_key: string;
+  root_key?: string | null;
   relative_path: string;
+  category: string;
   reminder?: number; // timestamp ms
   household_id?: string;
   position: number;
@@ -30,8 +32,9 @@ export interface PropertyDocument {
   id: string;
   description: string;
   renewal_date: number; // timestamp ms
-  root_key: string;
+  root_key?: string | null;
   relative_path: string;
+  category: string;
   reminder?: number; // timestamp ms
   household_id?: string;
   position: number;
@@ -46,8 +49,9 @@ export interface MaintenanceEntry {
   date: number; // timestamp ms
   type: string;
   cost: number;
-  root_key: string;
+  root_key?: string | null;
   relative_path: string;
+  category: string;
   household_id?: string;
   created_at: number;
   updated_at: number;
@@ -74,8 +78,9 @@ export interface PetMedicalRecord {
   pet_id: string;
   date: number; // timestamp ms
   description: string;
-  root_key: string;
+  root_key?: string | null;
   relative_path: string;
+  category: string;
   reminder?: number; // timestamp ms
   household_id?: string;
   created_at: number;
@@ -100,7 +105,7 @@ export interface FamilyMember {
   name: string;
   birthday: number; // timestamp ms
   notes: string;
-  documents: { root_key: string; relative_path: string }[];
+  documents: { root_key?: string | null; relative_path: string }[];
   household_id?: string;
   position: number;
   created_at: number;
@@ -113,8 +118,9 @@ export interface InventoryItem {
   name: string;
   purchase_date: number; // timestamp ms
   warranty_expiry: number; // timestamp ms
-  root_key: string;
+  root_key?: string | null;
   relative_path: string;
+  category: string;
   reminder?: number; // timestamp ms
   household_id?: string;
   position: number;

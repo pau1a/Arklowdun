@@ -26,6 +26,7 @@ use tracing_subscriber::{
 use ts_rs::TS;
 
 use crate::{
+    attachment_category::AttachmentCategory,
     db::{
         backup,
         hard_repair::{self, HardRepairOutcome},
@@ -106,6 +107,7 @@ impl<'a> MakeWriter<'a> for RotatingFileWriter {
     }
 }
 
+pub mod attachment_category;
 mod attachments;
 mod categories;
 pub mod commands;
@@ -142,6 +144,9 @@ pub mod time_errors;
 pub mod time_invariants;
 pub mod time_shadow;
 pub mod util;
+pub mod vault;
+pub use self::vault::Vault;
+pub mod vault_migration;
 
 use categories::{
     categories_create, categories_delete, categories_get, categories_list, categories_restore,
@@ -196,6 +201,7 @@ mod cascade_health_tests {
             generated_at: "2024-01-01T00:00:00Z".into(),
         };
 
+        let attachments = PathBuf::from("test.attachments");
         let state = AppState {
             pool: Arc::new(RwLock::new(pool.clone())),
             active_household_id: Arc::new(Mutex::new(String::new())),
@@ -203,6 +209,11 @@ mod cascade_health_tests {
             backfill: Arc::new(Mutex::new(BackfillCoordinator::new())),
             db_health: Arc::new(Mutex::new(report)),
             db_path: Arc::new(PathBuf::from("test.sqlite")),
+            attachments_root: Arc::new(attachments.clone()),
+            vault: Arc::new(crate::vault::Vault::new(attachments.clone())),
+            vault_migration: Arc::new(
+                crate::vault_migration::VaultMigrationManager::new(&attachments).unwrap(),
+            ),
             maintenance: Arc::new(AtomicBool::new(false)),
         };
 
@@ -223,6 +234,7 @@ mod cascade_health_tests {
 }
 use security::{error_map::UiError, fs_policy, fs_policy::RootKey, hash_path};
 use util::dispatch_async_app_result;
+use vault_migration::{MigrationMode, MigrationProgress, VaultMigrationManager};
 
 // Simple count-based rotating writer that rotates before writing
 // when the next write would exceed the size limit, ensuring whole-line writes
@@ -532,6 +544,25 @@ pub fn log_fs_deny(root: RootKey, e: &UiError, reason: &'static str) {
     );
 }
 
+pub fn log_vault_error(
+    household_id: &str,
+    category: AttachmentCategory,
+    relative_path: &str,
+    code: &str,
+    reason: &str,
+) {
+    tracing::warn!(
+        target: "arklowdun",
+        event = "vault_guard_check",
+        ok = false,
+        household_id,
+        category = category.as_str(),
+        relative_hash = %hash_path(Path::new(relative_path)),
+        code,
+        reason,
+    );
+}
+
 macro_rules! gen_domain_cmds {
     ( $( $table:ident ),+ $(,)? ) => {
         paste! {
@@ -594,13 +625,17 @@ macro_rules! gen_domain_cmds {
                 ) -> AppResult<serde_json::Value> {
                     let _permit = guard::ensure_db_writable(&state)?;
                     let pool = state.pool_clone();
+                    let vault = state.vault();
                     dispatch_async_app_result(move || {
                         let data = data;
+                        let vault = vault.clone();
+                        let pool = pool.clone();
                         async move {
                             commands::create_command(
                                 &pool,
                                 stringify!($table),
                                 data,
+                                Some(vault.as_ref()),
                             )
                             .await
                         }
@@ -617,10 +652,13 @@ macro_rules! gen_domain_cmds {
                 ) -> AppResult<()> {
                     let _permit = guard::ensure_db_writable(&state)?;
                     let pool = state.pool_clone();
+                    let vault = state.vault();
                     dispatch_async_app_result(move || {
                         let household_id = household_id;
                         let id = id;
                         let data = data;
+                        let vault = vault.clone();
+                        let pool = pool.clone();
                         async move {
                             let hh = household_id.as_deref();
                             commands::update_command(
@@ -629,6 +667,7 @@ macro_rules! gen_domain_cmds {
                                 &id,
                                 data,
                                 hh,
+                                Some(vault.as_ref()),
                             )
                             .await
                         }
@@ -644,15 +683,19 @@ macro_rules! gen_domain_cmds {
                 ) -> AppResult<()> {
                     let _permit = guard::ensure_db_writable(&state)?;
                     let pool = state.pool_clone();
+                    let vault = state.vault();
                     dispatch_async_app_result(move || {
                         let household_id = household_id;
                         let id = id;
+                        let pool = pool.clone();
+                        let vault = vault.clone();
                         async move {
                             commands::delete_command(
                                 &pool,
                                 stringify!($table),
                                 &household_id,
                                 &id,
+                                Some(vault.as_ref()),
                             )
                             .await
                         }
@@ -808,7 +851,7 @@ async fn vehicles_create(
     let pool = state.pool_clone();
     dispatch_async_app_result(move || {
         let data = data;
-        async move { commands::create_command(&pool, "vehicles", data).await }
+        async move { commands::create_command(&pool, "vehicles", data, None).await }
     })
     .await
 }
@@ -827,7 +870,8 @@ async fn vehicles_update(
         let data = data;
         let household_id = household_id;
         async move {
-            commands::update_command(&pool, "vehicles", &id, data, household_id.as_deref()).await
+            commands::update_command(&pool, "vehicles", &id, data, household_id.as_deref(), None)
+                .await
         }
     })
     .await
@@ -844,7 +888,7 @@ async fn vehicles_delete(
     dispatch_async_app_result(move || {
         let household_id = household_id;
         let id = id;
-        async move { commands::delete_command(&pool, "vehicles", &household_id, &id).await }
+        async move { commands::delete_command(&pool, "vehicles", &household_id, &id, None).await }
     })
     .await
 }
@@ -939,7 +983,7 @@ async fn event_create(
     let pool = state.pool_clone();
     dispatch_async_app_result(move || {
         let data = data;
-        async move { commands::create_command(&pool, "events", data).await }
+        async move { commands::create_command(&pool, "events", data, None).await }
     })
     .await
 }
@@ -957,7 +1001,9 @@ async fn event_update(
         let id = id;
         let data = data;
         let household_id = household_id;
-        async move { commands::update_command(&pool, "events", &id, data, Some(&household_id)).await }
+        async move {
+            commands::update_command(&pool, "events", &id, data, Some(&household_id), None).await
+        }
     })
     .await
 }
@@ -973,7 +1019,7 @@ async fn event_delete(
     dispatch_async_app_result(move || {
         let household_id = household_id;
         let id = id;
-        async move { commands::delete_command(&pool, "events", &household_id, &id).await }
+        async move { commands::delete_command(&pool, "events", &household_id, &id, None).await }
     })
     .await
 }
@@ -2713,46 +2759,55 @@ async fn search_entities(
 
 #[tauri::command]
 async fn attachment_open(
-    app: tauri::AppHandle,
+    _app: tauri::AppHandle,
     state: tauri::State<'_, crate::state::AppState>,
     table: String,
     id: String,
 ) -> AppResult<()> {
     let pool = state.pool_clone();
-    let app = app.clone();
+    let vault = state.vault();
+    let active_household = state.active_household_id.clone();
     dispatch_async_app_result(move || {
         let table = table;
         let id = id;
+        let vault = vault;
+        let active_household = active_household.clone();
         async move {
-            let (root_key, rel) = attachments::load_attachment_columns(&pool, &table, &id).await?;
-            let root = match root_key.as_str() {
-                "attachments" => RootKey::Attachments,
-                "appData" => RootKey::AppData,
-                _ => RootKey::AppData,
-            };
-            let res = match fs_policy::canonicalize_and_verify(&rel, root, &app) {
-                Ok(r) => r,
-                Err(e) => {
-                    let reason = e.name();
-                    let ui: UiError = e.into();
-                    log_fs_deny(root, &ui, reason);
-                    return Err(AppError::from(ui)
-                        .with_context("operation", "attachment_open")
-                        .with_context("table", table.clone())
-                        .with_context("id", id.clone()));
-                }
-            };
-            if let Err(e) = fs_policy::reject_symlinks(&res.real_path) {
-                let reason = e.name();
-                let ui: UiError = e.into();
-                log_fs_deny(root, &ui, reason);
-                return Err(AppError::from(ui)
-                    .with_context("operation", "attachment_open")
-                    .with_context("table", table.clone())
-                    .with_context("id", id.clone()));
+            let descriptor = attachments::load_attachment_descriptor(&pool, &table, &id).await?;
+
+            let current_household = active_household
+                .lock()
+                .map(|guard| guard.clone())
+                .unwrap_or_default();
+            if !current_household.is_empty() && current_household != descriptor.household_id {
+                log_vault_error(
+                    &descriptor.household_id,
+                    descriptor.category,
+                    &descriptor.relative_path,
+                    crate::vault::ERR_INVALID_HOUSEHOLD,
+                    "attachment household mismatch",
+                );
+                return Err(AppError::new(
+                    crate::vault::ERR_INVALID_HOUSEHOLD,
+                    "Attachments belong to a different household.",
+                )
+                .with_context("operation", "attachment_open")
+                .with_context("table", table.clone())
+                .with_context("id", id.clone()));
             }
-            log_fs_ok(root, &res.real_path);
-            attachments::open_with_os(&res.real_path)
+
+            let resolved = vault
+                .resolve(
+                    &descriptor.household_id,
+                    descriptor.category,
+                    &descriptor.relative_path,
+                )
+                .map_err(|err| {
+                    err.with_context("operation", "attachment_open")
+                        .with_context("table", table.clone())
+                        .with_context("id", id.clone())
+                })?;
+            attachments::open_with_os(&resolved)
         }
     })
     .await
@@ -2760,47 +2815,80 @@ async fn attachment_open(
 
 #[tauri::command]
 async fn attachment_reveal(
-    app: tauri::AppHandle,
+    _app: tauri::AppHandle,
     state: tauri::State<'_, crate::state::AppState>,
     table: String,
     id: String,
 ) -> AppResult<()> {
     let pool = state.pool_clone();
-    let app = app.clone();
+    let vault = state.vault();
+    let active_household = state.active_household_id.clone();
     dispatch_async_app_result(move || {
         let table = table;
         let id = id;
+        let vault = vault;
+        let active_household = active_household.clone();
         async move {
-            let (root_key, rel) = attachments::load_attachment_columns(&pool, &table, &id).await?;
-            let root = match root_key.as_str() {
-                "attachments" => RootKey::Attachments,
-                "appData" => RootKey::AppData,
-                _ => RootKey::AppData,
-            };
-            let res = match fs_policy::canonicalize_and_verify(&rel, root, &app) {
-                Ok(r) => r,
-                Err(e) => {
-                    let reason = e.name();
-                    let ui: UiError = e.into();
-                    log_fs_deny(root, &ui, reason);
-                    return Err(AppError::from(ui)
-                        .with_context("operation", "attachment_reveal")
-                        .with_context("table", table.clone())
-                        .with_context("id", id.clone()));
-                }
-            };
-            if let Err(e) = fs_policy::reject_symlinks(&res.real_path) {
-                let reason = e.name();
-                let ui: UiError = e.into();
-                log_fs_deny(root, &ui, reason);
-                return Err(AppError::from(ui)
-                    .with_context("operation", "attachment_reveal")
-                    .with_context("table", table.clone())
-                    .with_context("id", id.clone()));
+            let descriptor = attachments::load_attachment_descriptor(&pool, &table, &id).await?;
+
+            let current_household = active_household
+                .lock()
+                .map(|guard| guard.clone())
+                .unwrap_or_default();
+            if !current_household.is_empty() && current_household != descriptor.household_id {
+                log_vault_error(
+                    &descriptor.household_id,
+                    descriptor.category,
+                    &descriptor.relative_path,
+                    crate::vault::ERR_INVALID_HOUSEHOLD,
+                    "attachment household mismatch",
+                );
+                return Err(AppError::new(
+                    crate::vault::ERR_INVALID_HOUSEHOLD,
+                    "Attachments belong to a different household.",
+                )
+                .with_context("operation", "attachment_reveal")
+                .with_context("table", table.clone())
+                .with_context("id", id.clone()));
             }
-            log_fs_ok(root, &res.real_path);
-            attachments::reveal_with_os(&res.real_path)
+
+            let resolved = vault
+                .resolve(
+                    &descriptor.household_id,
+                    descriptor.category,
+                    &descriptor.relative_path,
+                )
+                .map_err(|err| {
+                    err.with_context("operation", "attachment_reveal")
+                        .with_context("table", table.clone())
+                        .with_context("id", id.clone())
+                })?;
+            attachments::reveal_with_os(&resolved)
         }
+    })
+    .await
+}
+
+#[tauri::command]
+async fn attachments_migration_status(
+    state: tauri::State<'_, crate::state::AppState>,
+) -> AppResult<MigrationProgress> {
+    Ok(state.vault_migration().status())
+}
+
+#[tauri::command]
+async fn attachments_migrate(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+    mode: MigrationMode,
+) -> AppResult<MigrationProgress> {
+    let pool = state.pool_clone();
+    let vault = state.vault();
+    let manager = state.vault_migration();
+    dispatch_async_app_result(move || {
+        let app = app.clone();
+        let manager = manager.clone();
+        async move { vault_migration::run_vault_migration(app, pool, vault, manager, mode).await }
     })
     .await
 }
@@ -3314,6 +3402,8 @@ macro_rules! app_commands {
             shopping_items_restore,
             attachment_open,
             attachment_reveal,
+            attachments_migration_status,
+            attachments_migrate,
             diagnostics_summary,
             diagnostics_household_stats,
             diagnostics_doc_path,
@@ -3411,8 +3501,20 @@ pub fn run() {
                 }
             };
             let db_health = Arc::new(Mutex::new(health_report));
+            let attachments_root = db_path
+                .parent()
+                .map(|p| p.join("attachments"))
+                .unwrap_or_else(|| PathBuf::from("attachments"));
+            std::fs::create_dir_all(&attachments_root)
+                .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
             let db_path = Arc::new(db_path);
             let pool_handle = Arc::new(RwLock::new(pool.clone()));
+            let attachments_root_arc = Arc::new(attachments_root.clone());
+            let vault = Arc::new(Vault::new(attachments_root.clone()));
+            let vault_migration = Arc::new(
+                VaultMigrationManager::new(&attachments_root)
+                    .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?,
+            );
             app.manage(crate::state::AppState {
                 pool: pool_handle,
                 active_household_id: Arc::new(Mutex::new(active_id.clone())),
@@ -3422,6 +3524,9 @@ pub fn run() {
                 )),
                 db_health,
                 db_path,
+                attachments_root: attachments_root_arc,
+                vault,
+                vault_migration,
                 maintenance: Arc::new(AtomicBool::new(false)),
             });
             Ok(())
@@ -3595,6 +3700,9 @@ mod db_health_command_tests {
         });
         drop(runtime);
 
+        let attachments_root = dir.path().join("attachments");
+        std::fs::create_dir_all(&attachments_root).expect("create attachments dir");
+        let attachments_root_arc = Arc::new(attachments_root.clone());
         let app_state = crate::state::AppState {
             pool: Arc::new(RwLock::new(pool.clone())),
             active_household_id: Arc::new(Mutex::new(String::from("test-household"))),
@@ -3604,6 +3712,11 @@ mod db_health_command_tests {
             )),
             db_health: Arc::new(Mutex::new(cached_report.clone())),
             db_path: Arc::new(db_path.clone()),
+            attachments_root: attachments_root_arc.clone(),
+            vault: Arc::new(Vault::new(attachments_root.clone())),
+            vault_migration: Arc::new(
+                crate::vault_migration::VaultMigrationManager::new(&attachments_root).unwrap(),
+            ),
             maintenance: Arc::new(AtomicBool::new(false)),
         };
 
@@ -3714,6 +3827,9 @@ mod write_guard_tests {
         });
         drop(runtime);
 
+        let attachments_root = dir.path().join("attachments");
+        std::fs::create_dir_all(&attachments_root).expect("create attachments dir");
+        let attachments_root_arc = Arc::new(attachments_root.clone());
         let app_state = crate::state::AppState {
             pool: Arc::new(RwLock::new(pool.clone())),
             active_household_id: Arc::new(Mutex::new(String::from("test"))),
@@ -3723,6 +3839,11 @@ mod write_guard_tests {
             )),
             db_health: Arc::new(Mutex::new(unhealthy_report.clone())),
             db_path: Arc::new(db_path.clone()),
+            attachments_root: attachments_root_arc.clone(),
+            vault: Arc::new(Vault::new(attachments_root.clone())),
+            vault_migration: Arc::new(
+                crate::vault_migration::VaultMigrationManager::new(&attachments_root).unwrap(),
+            ),
             maintenance: Arc::new(AtomicBool::new(false)),
         };
 

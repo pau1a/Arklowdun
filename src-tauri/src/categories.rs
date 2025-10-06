@@ -266,7 +266,7 @@ pub async fn categories_create(
         let data = data.clone();
         async move {
             require_household_field(&data)?;
-            let created = commands::create_command(&pool, "categories", data).await?;
+            let created = commands::create_command(&pool, "categories", data, None).await?;
             decode_category(created)
         }
     })
@@ -313,8 +313,15 @@ pub async fn categories_update(
 
             ensure_household_match(&household_id, data.get("household_id"))?;
 
-            commands::update_command(&pool, "categories", &id, data, Some(household_id.as_str()))
-                .await?;
+            commands::update_command(
+                &pool,
+                "categories",
+                &id,
+                data,
+                Some(household_id.as_str()),
+                None,
+            )
+            .await?;
             get_category(pool.clone(), Some(household_id.clone()), id_clone)
                 .await?
                 .ok_or_else(|| {
@@ -336,7 +343,7 @@ pub async fn categories_delete(
     dispatch_async_app_result(move || {
         let household_id = household_id.clone();
         let id = id.clone();
-        async move { commands::delete_command(&pool, "categories", &household_id, &id).await }
+        async move { commands::delete_command(&pool, "categories", &household_id, &id, None).await }
     })
     .await
 }
