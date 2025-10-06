@@ -1896,7 +1896,12 @@ async fn household_set_active<R: tauri::Runtime>(
             }
             let indexer = state.files_indexer();
             if indexer.current_state(&id) == IndexerState::Idle {
-                spawn_background_index_rebuild(app.clone(), indexer, id.clone(), RebuildMode::Incremental);
+                spawn_background_index_rebuild(
+                    app.clone(),
+                    indexer,
+                    id.clone(),
+                    RebuildMode::Incremental,
+                );
             }
             Ok(())
         }
@@ -2478,6 +2483,82 @@ fn spawn_background_index_rebuild<R: tauri::Runtime + 'static>(
                 event = "files_index_background_failed",
                 household_id = %household_id,
                 error = %err,
+            );
+        }
+    });
+}
+
+fn spawn_idle_index_scheduler<R: tauri::Runtime + 'static>(app: tauri::AppHandle<R>) {
+    tauri::async_runtime::spawn(async move {
+        let interval = TokioDuration::from_secs(15 * 60);
+        loop {
+            sleep(interval).await;
+
+            let state_guard = app.state::<crate::state::AppState>();
+            let Some(household_id) = snapshot_active_id(&state_guard) else {
+                drop(state_guard);
+                continue;
+            };
+            let indexer = state_guard.files_indexer();
+            if indexer.current_state(&household_id) != IndexerState::Idle {
+                drop(state_guard);
+                continue;
+            }
+
+            let pool = state_guard.pool_clone();
+            drop(state_guard);
+            if !table_exists(&pool, "files_index").await
+                || !table_exists(&pool, "files_index_meta").await
+            {
+                continue;
+            }
+            let should_run = match sqlx::query(
+                "SELECT last_built_at_utc, source_row_count FROM files_index_meta WHERE household_id=?1",
+            )
+            .bind(&household_id)
+            .fetch_optional(&pool)
+            .await
+            {
+                Ok(Some(row)) => {
+                    let row_count: i64 = row.try_get::<i64, _>("source_row_count").unwrap_or(0);
+                    let last_built = row.try_get::<String, _>("last_built_at_utc").ok();
+                    let is_empty = row_count == 0;
+                    let is_stale = last_built
+                        .as_deref()
+                        .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
+                        .map(|dt| {
+                            let built_utc = dt.with_timezone(&Utc);
+                            Utc::now() - built_utc >= ChronoDuration::minutes(15)
+                        })
+                        .unwrap_or(true);
+                    is_empty || is_stale
+                }
+                Ok(None) => true,
+                Err(err) => {
+                    tracing::warn!(
+                        target: "arklowdun",
+                        event = "files_index_idle_status_failed",
+                        household_id = %household_id,
+                        error = %err,
+                    );
+                    true
+                }
+            };
+
+            if !should_run {
+                continue;
+            }
+
+            tracing::info!(
+                target: "arklowdun",
+                event = "files_index_idle_trigger",
+                household_id = %household_id,
+            );
+            spawn_background_index_rebuild(
+                app.clone(),
+                indexer,
+                household_id,
+                RebuildMode::Incremental,
             );
         }
     });
@@ -4351,81 +4432,7 @@ pub fn run() {
                 files_indexer: files_indexer.clone(),
             });
 
-            let idle_app = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                let interval = TokioDuration::from_secs(15 * 60);
-                loop {
-                    sleep(interval).await;
-
-                    let state_guard = idle_app.state::<crate::state::AppState>();
-                    let Some(household_id) = snapshot_active_id(&state_guard) else {
-                        drop(state_guard);
-                        continue;
-                    };
-                    let indexer = state_guard.files_indexer();
-                    if indexer.current_state(&household_id) != IndexerState::Idle {
-                        drop(state_guard);
-                        continue;
-                    }
-
-                    let pool = state_guard.pool_clone();
-                    drop(state_guard);
-                    if !table_exists(&pool, "files_index").await
-                        || !table_exists(&pool, "files_index_meta").await
-                    {
-                        continue;
-                    }
-                    let should_run = match sqlx::query(
-                        "SELECT last_built_at_utc, source_row_count FROM files_index_meta WHERE household_id=?1",
-                    )
-                    .bind(&household_id)
-                    .fetch_optional(&pool)
-                    .await
-                    {
-                        Ok(Some(row)) => {
-                            let row_count: i64 =
-                                row.try_get::<i64, _>("source_row_count").unwrap_or(0);
-                            let last_built = row.try_get::<String, _>("last_built_at_utc").ok();
-                            let is_empty = row_count == 0;
-                            let is_stale = last_built
-                                .as_deref()
-                                .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
-                                .map(|dt| {
-                                    let built_utc = dt.with_timezone(&Utc);
-                                    Utc::now() - built_utc >= ChronoDuration::minutes(15)
-                                })
-                                .unwrap_or(true);
-                            is_empty || is_stale
-                        }
-                        Ok(None) => true,
-                        Err(err) => {
-                            tracing::warn!(
-                                target: "arklowdun",
-                                event = "files_index_idle_status_failed",
-                                household_id = %household_id,
-                                error = %err,
-                            );
-                            true
-                        }
-                    };
-
-                    if !should_run {
-                        continue;
-                    }
-
-                    tracing::info!(
-                        target: "arklowdun",
-                        event = "files_index_idle_trigger",
-                        household_id = %household_id,
-                    );
-                    spawn_background_index_rebuild(
-                        idle_app.clone(),
-                        indexer,
-                        household_id,
-                        RebuildMode::Incremental,
-                    );
-                }
-            });
+            spawn_idle_index_scheduler(app.handle().clone());
             Ok(())
         })
         .invoke_handler(app_commands![
