@@ -1896,7 +1896,7 @@ async fn household_set_active<R: tauri::Runtime>(
             }
             let indexer = state.files_indexer();
             if indexer.current_state(&id) == IndexerState::Idle {
-                spawn_background_index_rebuild(&app, indexer, id.clone(), RebuildMode::Incremental);
+                spawn_background_index_rebuild(app.clone(), indexer, id.clone(), RebuildMode::Incremental);
             }
             Ok(())
         }
@@ -2466,14 +2466,13 @@ async fn run_index_rebuild<R: tauri::Runtime>(
 }
 
 fn spawn_background_index_rebuild<R: tauri::Runtime + 'static>(
-    app: &tauri::AppHandle<R>,
+    app: tauri::AppHandle<R>,
     indexer: Arc<crate::files_indexer::FilesIndexer>,
     household_id: String,
     mode: RebuildMode,
 ) {
-    let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
-        if let Err(err) = run_index_rebuild(app_clone, indexer, household_id.clone(), mode).await {
+        if let Err(err) = run_index_rebuild(app, indexer, household_id.clone(), mode).await {
             tracing::error!(
                 target: "arklowdun",
                 event = "files_index_background_failed",
@@ -3607,7 +3606,12 @@ async fn attachments_migrate<R: tauri::Runtime>(
             if let Some(active) = snapshot_active_id(&state) {
                 let indexer = state.files_indexer();
                 if indexer.current_state(&active) == IndexerState::Idle {
-                    spawn_background_index_rebuild(&app_spawn, indexer, active, RebuildMode::Incremental);
+                    spawn_background_index_rebuild(
+                        app_spawn.clone(),
+                        indexer,
+                        active,
+                        RebuildMode::Incremental,
+                    );
                 }
             }
         }
@@ -3649,7 +3653,12 @@ async fn attachments_resume_migration<R: tauri::Runtime>(
             if let Some(active) = snapshot_active_id(&state) {
                 let indexer = state.files_indexer();
                 if indexer.current_state(&active) == IndexerState::Idle {
-                    spawn_background_index_rebuild(&app_spawn, indexer, active, RebuildMode::Incremental);
+                    spawn_background_index_rebuild(
+                        app_spawn.clone(),
+                        indexer,
+                        active,
+                        RebuildMode::Incremental,
+                    );
                 }
             }
         }
@@ -4342,7 +4351,7 @@ pub fn run() {
                 files_indexer: files_indexer.clone(),
             });
 
-            let idle_app = app.handle();
+            let idle_app = app.handle().clone();
             let idle_state = app.state::<crate::state::AppState>().clone();
             let idle_indexer = files_indexer.clone();
             tauri::async_runtime::spawn(async move {
@@ -4407,7 +4416,7 @@ pub fn run() {
                         household_id = %household_id,
                     );
                     spawn_background_index_rebuild(
-                        &idle_app,
+                        idle_app.clone(),
                         idle_indexer.clone(),
                         household_id,
                         RebuildMode::Incremental,
