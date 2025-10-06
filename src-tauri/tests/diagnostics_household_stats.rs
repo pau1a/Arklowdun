@@ -62,7 +62,7 @@ async fn household_stats_reports_counts_per_household() -> Result<()> {
     .await?;
 
     sqlx::query(
-        "INSERT INTO files_index (household_id, file_id, filename, updated_at_utc, ordinal, score_hint)\n         VALUES (?1, ?2, ?3, '2024-01-01T00:00:00Z', 0, 0)",
+        "INSERT INTO files_index (household_id, file_id, category, filename, updated_at_utc, ordinal, score_hint, size_bytes, mime, modified_at_utc, sha256)\n         VALUES (?1, ?2, 'misc', ?3, '2024-01-01T00:00:00Z', 0, 0, 0, 'application/octet-stream', NULL, NULL)",
     )
     .bind(&secondary.id)
     .bind("file-secondary")

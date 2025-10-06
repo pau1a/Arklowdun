@@ -260,15 +260,23 @@ CREATE TABLE IF NOT EXISTS "files_index" (
   id INTEGER PRIMARY KEY,
   household_id TEXT NOT NULL,
   file_id TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'misc',
   filename TEXT NOT NULL,
   updated_at_utc TEXT NOT NULL,
   ordinal INTEGER NOT NULL,
   score_hint INTEGER NOT NULL DEFAULT 0,
+  size_bytes INTEGER,
+  mime TEXT,
+  modified_at_utc INTEGER,
+  sha256 TEXT,
   UNIQUE (household_id, file_id),
   FOREIGN KEY (household_id) REFERENCES household(id)
     ON DELETE CASCADE
     ON UPDATE CASCADE
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS files_index_household_cat_filename
+  ON files_index(household_id, category, filename);
 CREATE TABLE IF NOT EXISTS "files_index_meta" (
   household_id TEXT PRIMARY KEY,
   last_built_at_utc TEXT NOT NULL,

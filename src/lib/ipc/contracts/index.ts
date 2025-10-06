@@ -74,6 +74,28 @@ const filesIndexRequest = filesIndexRequestBase.superRefine(
   },
 );
 
+const filesIndexMode = z.enum(["full", "incremental"]);
+const filesIndexState = z.enum(["Idle", "Building", "Cancelling", "Error"]);
+const filesIndexStatusResponse = z.object({
+  last_built_at: z.string().nullable(),
+  row_count: z.number(),
+  state: filesIndexState,
+});
+const filesIndexSummaryResponse = z.object({
+  total: z.number(),
+  updated: z.number(),
+  duration_ms: z.number(),
+});
+const filesIndexCancelResponse = z.object({ cancelled: z.boolean() });
+const filesIndexRebuildRequest = filesIndexRequestBase
+  .extend({ mode: filesIndexMode })
+  .superRefine((value, ctx) => {
+    if (typeof value.household_id === "string" || typeof value.householdId === "string") {
+      return;
+    }
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "household id required" });
+  });
+
 const householdDeleteResponse = z
   .object({ fallbackId: z.string().nullable().optional() })
   .passthrough();
@@ -264,6 +286,18 @@ export const contracts = {
   db_export_run: contract({ request: flexibleRequest, response: z.custom<ExportEntryDto>() }),
   db_files_index_ready: contract({ request: filesIndexRequest, response: z.boolean() }),
   db_has_files_index: contract({ request: flexibleRequest, response: z.boolean() }),
+  files_index_status: contract({
+    request: filesIndexRequest,
+    response: filesIndexStatusResponse,
+  }),
+  files_index_rebuild: contract({
+    request: filesIndexRebuildRequest,
+    response: filesIndexSummaryResponse,
+  }),
+  files_index_cancel: contract({
+    request: filesIndexRequest,
+    response: filesIndexCancelResponse,
+  }),
   db_get_health_report: contract({ request: dbRequest, response: z.custom<DbHealthReport>() }),
   db_hard_repair_run: contract({ request: flexibleRequest, response: z.custom<HardRepairOutcome>() }),
   db_has_pet_columns: contract({ request: flexibleRequest, response: z.boolean() }),

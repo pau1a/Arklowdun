@@ -101,17 +101,26 @@ async fn insert_file(
         "INSERT INTO files_index (
              household_id,
              file_id,
+             category,
              filename,
              updated_at_utc,
              ordinal,
-             score_hint
-         ) VALUES (?1, ?2, ?3, ?4, ?5, 0)",
+             score_hint,
+             size_bytes,
+             mime,
+             modified_at_utc,
+             sha256
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8, ?9, NULL)",
     )
     .bind(household_id)
     .bind(&file_id)
+    .bind("misc")
     .bind(filename)
     .bind("2024-01-01T00:00:00Z")
     .bind(ordinal)
+    .bind(0_i64)
+    .bind("application/octet-stream")
+    .bind(None::<i64>)
     .execute(pool)
     .await
     .expect("insert file");

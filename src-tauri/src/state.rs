@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use crate::{
     db::health::DbHealthReport, events_tz_backfill::BackfillCoordinator,
-    household_active::StoreHandle, vault::Vault, vault_migration::VaultMigrationManager, AppError,
-    AppResult,
+    files_indexer::FilesIndexer, household_active::StoreHandle, vault::Vault,
+    vault_migration::VaultMigrationManager, AppError, AppResult,
 };
 
 #[derive(Clone)]
@@ -20,6 +20,7 @@ pub struct AppState {
     pub vault: Arc<Vault>,
     pub vault_migration: Arc<VaultMigrationManager>,
     pub maintenance: Arc<AtomicBool>,
+    pub files_indexer: Arc<FilesIndexer>,
 }
 
 impl AppState {
@@ -46,6 +47,10 @@ impl AppState {
 
     pub fn vault_migration(&self) -> Arc<VaultMigrationManager> {
         self.vault_migration.clone()
+    }
+
+    pub fn files_indexer(&self) -> Arc<FilesIndexer> {
+        self.files_indexer.clone()
     }
 }
 
@@ -108,6 +113,7 @@ mod tests {
             vault: vault.clone(),
             vault_migration: Arc::new(VaultMigrationManager::new(tmp.path()).expect("manager")),
             maintenance: Arc::new(AtomicBool::new(false)),
+            files_indexer: Arc::new(FilesIndexer::new(pool.clone(), vault.clone())),
         };
 
         let first = state.vault();

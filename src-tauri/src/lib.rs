@@ -1,5 +1,6 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use anyhow::{Context, Result as AnyResult};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use once_cell::sync::OnceCell;
 use paste::paste;
 use semver::Version;
@@ -16,6 +17,10 @@ use std::{
 };
 use tauri::{Emitter, Manager, State};
 use thiserror::Error;
+use tokio::{
+    sync::mpsc,
+    time::{sleep, Duration as TokioDuration},
+};
 use tracing_appender::non_blocking::NonBlockingBuilder;
 use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
 use tracing_subscriber::{
@@ -35,13 +40,14 @@ use crate::{
         health::{DbHealthCheck, DbHealthReport, DbHealthStatus, STORAGE_SANITY_HEAL_NOTE},
         repair::{self, DbRepairEvent, DbRepairSummary},
     },
+    files_indexer::{IndexProgress, IndexerState, RebuildMode},
     household_active::ActiveSetError,
     ipc::guard,
     state::AppState,
     vault_migration::ATTACHMENT_TABLES,
 };
 
-const FILES_INDEX_VERSION: i64 = 1;
+pub(crate) const FILES_INDEX_VERSION: i64 = 2;
 
 const DEFAULT_LOG_MAX_SIZE_BYTES: u64 = 5_000_000;
 const DEFAULT_LOG_MAX_FILES: usize = 5;
@@ -120,6 +126,7 @@ pub mod error;
 pub mod events_tz_backfill;
 pub mod exdate;
 pub mod export;
+pub mod files_indexer;
 mod household; // declare module; avoid `use` to prevent name collision
 pub mod household_active;
 pub use household::{
@@ -205,6 +212,7 @@ mod cascade_health_tests {
         };
 
         let attachments = PathBuf::from("test.attachments");
+        let vault = Arc::new(crate::vault::Vault::new(attachments.clone()));
         let state = AppState {
             pool: Arc::new(RwLock::new(pool.clone())),
             active_household_id: Arc::new(Mutex::new(String::new())),
@@ -212,11 +220,12 @@ mod cascade_health_tests {
             backfill: Arc::new(Mutex::new(BackfillCoordinator::new())),
             db_health: Arc::new(Mutex::new(report)),
             db_path: Arc::new(PathBuf::from("test.sqlite")),
-            vault: Arc::new(crate::vault::Vault::new(attachments.clone())),
+            vault: vault.clone(),
             vault_migration: Arc::new(
                 crate::vault_migration::VaultMigrationManager::new(&attachments).unwrap(),
             ),
             maintenance: Arc::new(AtomicBool::new(false)),
+            files_indexer: Arc::new(crate::files_indexer::FilesIndexer::new(pool.clone(), vault)),
         };
 
         let household = crate::household::create_household(&pool, "Health", None).await?;
@@ -1885,6 +1894,15 @@ async fn household_set_active<R: tauri::Runtime>(
                     error = %err
                 );
             }
+            let indexer = state.files_indexer();
+            if indexer.current_state(&id) == IndexerState::Idle {
+                spawn_background_index_rebuild(
+                    app.clone(),
+                    indexer,
+                    id.clone(),
+                    RebuildMode::Incremental,
+                );
+            }
             Ok(())
         }
         Err(ActiveSetError::NotFound) => {
@@ -2220,6 +2238,18 @@ pub struct SearchErrorPayload {
     pub details: serde_json::Value,
 }
 
+#[derive(Serialize, Deserialize)]
+struct FilesIndexStatus {
+    pub last_built_at: Option<String>,
+    pub row_count: i64,
+    pub state: IndexerState,
+}
+
+#[derive(Serialize, Deserialize)]
+struct FilesIndexCancelResponse {
+    cancelled: bool,
+}
+
 async fn table_exists(pool: &sqlx::SqlitePool, name: &str) -> bool {
     sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name=?1",
@@ -2283,6 +2313,25 @@ async fn files_index_ready(pool: &sqlx::SqlitePool, household_id: &str) -> bool 
     meta.0 == count && meta.1 == max_updated
 }
 
+fn emit_index_state_event<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    household_id: &str,
+    state: IndexerState,
+) {
+    let payload = json!({
+        "household_id": household_id,
+        "state": state,
+    });
+    if let Err(err) = app.emit("files_index_state", payload) {
+        tracing::warn!(
+            target: "arklowdun",
+            event = "files_index_state_emit_failed",
+            error = %err,
+            household_id = %household_id,
+        );
+    }
+}
+
 #[tauri::command]
 async fn db_table_exists(state: State<'_, AppState>, name: String) -> AppResult<bool> {
     let pool = state.pool_clone();
@@ -2303,6 +2352,244 @@ async fn db_files_index_ready(state: State<'_, AppState>, household_id: String) 
         move || async move { Ok(files_index_ready(&pool, &household_id).await) },
     )
     .await
+}
+
+#[tauri::command]
+async fn files_index_status(
+    state: State<'_, AppState>,
+    household_id: String,
+) -> AppResult<FilesIndexStatus> {
+    let pool = state.pool_clone();
+    let indexer = state.files_indexer();
+    let state_snapshot = indexer.current_state(&household_id);
+    let hh = household_id.clone();
+
+    let (last_built_at, row_count) = dispatch_async_app_result(move || {
+        let pool = pool.clone();
+        let household = hh.clone();
+        async move {
+            let mut conn = pool.acquire().await?;
+            let mut last_built = None;
+            let mut row_count = 0_i64;
+
+            if let Some(row) = sqlx::query(
+                "SELECT last_built_at_utc, source_row_count FROM files_index_meta WHERE household_id=?1",
+            )
+            .bind(&household)
+            .fetch_optional(conn.as_mut())
+            .await?
+            {
+                last_built = row.try_get::<String, _>("last_built_at_utc").ok();
+                row_count = row.try_get::<i64, _>("source_row_count").unwrap_or(0);
+            }
+
+            if row_count == 0 {
+                row_count = sqlx::query_scalar::<_, i64>(
+                    "SELECT COUNT(*) FROM files_index WHERE household_id=?1",
+                )
+                .bind(&household)
+                .fetch_one(conn.as_mut())
+                .await
+                .unwrap_or(0);
+            }
+
+            Ok((last_built, row_count))
+        }
+    })
+    .await?;
+
+    Ok(FilesIndexStatus {
+        last_built_at,
+        row_count,
+        state: state_snapshot,
+    })
+}
+
+async fn run_index_rebuild<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    indexer: Arc<crate::files_indexer::FilesIndexer>,
+    household_id: String,
+    mode: RebuildMode,
+) -> AppResult<crate::files_indexer::IndexSummary> {
+    let (tx, mut rx) = mpsc::channel::<IndexProgress>(32);
+    let progress_household = household_id.clone();
+    let app_for_progress = app.clone();
+
+    tauri::async_runtime::spawn(async move {
+        while let Some(progress) = rx.recv().await {
+            let payload = json!({
+                "household_id": progress_household,
+                "scanned": progress.scanned,
+                "updated": progress.updated,
+                "skipped": progress.skipped,
+            });
+            if let Err(err) = app_for_progress.emit("files_index_progress", payload) {
+                tracing::warn!(
+                    target: "arklowdun",
+                    event = "files_index_progress_emit_failed",
+                    error = %err,
+                );
+                break;
+            }
+        }
+    });
+
+    emit_index_state_event(&app, &household_id, IndexerState::Building);
+    tracing::info!(
+        target: "arklowdun",
+        event = "files_index_started",
+        hh = %household_id,
+        mode = ?mode,
+    );
+
+    let summary = match indexer.rebuild(&household_id, mode, tx).await {
+        Ok(summary) => {
+            tracing::info!(
+                target: "arklowdun",
+                event = "files_index_completed",
+                hh = %household_id,
+                total = summary.total,
+                updated = summary.updated,
+                duration_ms = summary.duration_ms,
+            );
+            summary
+        }
+        Err(err) => {
+            tracing::error!(
+                target: "arklowdun",
+                event = "files_index_failed",
+                household_id = %household_id,
+                error = %err,
+            );
+            emit_index_state_event(&app, &household_id, IndexerState::Error);
+            return Err(err);
+        }
+    };
+
+    emit_index_state_event(&app, &household_id, indexer.current_state(&household_id));
+    Ok(summary)
+}
+
+fn spawn_background_index_rebuild<R: tauri::Runtime + 'static>(
+    app: tauri::AppHandle<R>,
+    indexer: Arc<crate::files_indexer::FilesIndexer>,
+    household_id: String,
+    mode: RebuildMode,
+) {
+    tauri::async_runtime::spawn(async move {
+        if let Err(err) = run_index_rebuild(app, indexer, household_id.clone(), mode).await {
+            tracing::error!(
+                target: "arklowdun",
+                event = "files_index_background_failed",
+                household_id = %household_id,
+                error = %err,
+            );
+        }
+    });
+}
+
+fn spawn_idle_index_scheduler<R: tauri::Runtime + 'static>(app: tauri::AppHandle<R>) {
+    tauri::async_runtime::spawn(async move {
+        let interval = TokioDuration::from_secs(15 * 60);
+        loop {
+            sleep(interval).await;
+
+            let state_guard = app.state::<crate::state::AppState>();
+            let Some(household_id) = snapshot_active_id(&state_guard) else {
+                drop(state_guard);
+                continue;
+            };
+            let indexer = state_guard.files_indexer();
+            if indexer.current_state(&household_id) != IndexerState::Idle {
+                drop(state_guard);
+                continue;
+            }
+
+            let pool = state_guard.pool_clone();
+            drop(state_guard);
+            if !table_exists(&pool, "files_index").await
+                || !table_exists(&pool, "files_index_meta").await
+            {
+                continue;
+            }
+            let should_run = match sqlx::query(
+                "SELECT last_built_at_utc, source_row_count FROM files_index_meta WHERE household_id=?1",
+            )
+            .bind(&household_id)
+            .fetch_optional(&pool)
+            .await
+            {
+                Ok(Some(row)) => {
+                    let row_count: i64 = row.try_get::<i64, _>("source_row_count").unwrap_or(0);
+                    let last_built = row.try_get::<String, _>("last_built_at_utc").ok();
+                    let is_empty = row_count == 0;
+                    let is_stale = last_built
+                        .as_deref()
+                        .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
+                        .map(|dt| {
+                            let built_utc = dt.with_timezone(&Utc);
+                            Utc::now() - built_utc >= ChronoDuration::minutes(15)
+                        })
+                        .unwrap_or(true);
+                    is_empty || is_stale
+                }
+                Ok(None) => true,
+                Err(err) => {
+                    tracing::warn!(
+                        target: "arklowdun",
+                        event = "files_index_idle_status_failed",
+                        household_id = %household_id,
+                        error = %err,
+                    );
+                    true
+                }
+            };
+
+            if !should_run {
+                continue;
+            }
+
+            tracing::info!(
+                target: "arklowdun",
+                event = "files_index_idle_trigger",
+                household_id = %household_id,
+            );
+            spawn_background_index_rebuild(
+                app.clone(),
+                indexer,
+                household_id,
+                RebuildMode::Incremental,
+            );
+        }
+    });
+}
+
+#[tauri::command]
+async fn files_index_cancel<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+    household_id: String,
+) -> AppResult<FilesIndexCancelResponse> {
+    let indexer = state.files_indexer();
+    indexer.cancel(&household_id).await;
+    emit_index_state_event(&app, &household_id, IndexerState::Cancelling);
+    tracing::info!(
+        target: "arklowdun",
+        event = "files_index_cancelled",
+        household_id = %household_id,
+    );
+    Ok(FilesIndexCancelResponse { cancelled: true })
+}
+
+#[tauri::command]
+async fn files_index_rebuild<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+    household_id: String,
+    mode: RebuildMode,
+) -> AppResult<crate::files_indexer::IndexSummary> {
+    let indexer = state.files_indexer();
+    run_index_rebuild(app, indexer, household_id, mode).await
 }
 
 #[tauri::command]
@@ -2455,6 +2742,15 @@ fn like_escape(s: &str) -> String {
         .replace('_', "\\_")
 }
 
+struct SearchHit {
+    score: i64,
+    ts: i64,
+    ordinal: usize,
+    filename_key: Option<String>,
+    id_key: Option<String>,
+    result: SearchResult,
+}
+
 #[tauri::command]
 async fn search_entities(
     state: State<'_, AppState>,
@@ -2475,7 +2771,7 @@ async fn search_entities(
             if household_id.trim().is_empty() {
                 return Err(AppError::new("BAD_REQUEST", "household_id is required"));
             }
-            if !(1..=100).contains(&limit) || offset < 0 {
+            if !(1..=10_000).contains(&limit) || offset < 0 {
                 return Err(AppError::new("BAD_REQUEST", "invalid limit/offset")
                     .with_context("limit", limit.to_string())
                     .with_context("offset", offset.to_string()));
@@ -2489,10 +2785,9 @@ async fn search_entities(
             let esc = like_escape(&q);
             let prefix = format!("{esc}%");
             let sub = format!("%{esc}%");
-            let branch_limit = (limit + offset).min(200);
+            let branch_limit = limit.saturating_add(offset).min(10_000);
 
             let index_ready = files_index_ready(pool, &household_id).await;
-            let has_files_table = table_exists(pool, "files").await;
 
             let has_events = table_exists(pool, "events").await;
             if !has_events {
@@ -2512,7 +2807,7 @@ async fn search_entities(
             }
 
             let short = q.len() < 2;
-            if short && !(index_ready || has_files_table) {
+            if short && !index_ready {
                 tracing::debug!(target: "arklowdun", q = %q, len = q.len(), "short_query_bypass");
                 return Ok(vec![]);
             }
@@ -2523,21 +2818,11 @@ async fn search_entities(
                     .with_context("branch", branch.to_string())
             };
 
-            let mut out: Vec<(i32, i64, usize, SearchResult)> = Vec::new();
+            let mut hits: Vec<SearchHit> = Vec::new();
             let mut ord: usize = 0;
 
-            if index_ready || has_files_table {
-                let (sql, branch_name) = if index_ready {
-                    (
-                        "SELECT file_id AS id, filename, strftime('%s', updated_at_utc) AS ts, ordinal AS ord FROM files_index\n     WHERE household_id=?1 AND filename LIKE ?2 ESCAPE '\\' COLLATE NOCASE LIMIT ?3 OFFSET ?4",
-                        "files_index",
-                    )
-                } else {
-                    (
-                        "SELECT id, filename, updated_at AS ts, rowid AS ord FROM files\n             WHERE household_id=?1 AND filename LIKE ?2 ESCAPE '\\' COLLATE NOCASE ORDER BY rowid ASC LIMIT ?3 OFFSET ?4",
-                        "files",
-                    )
-                };
+            if index_ready {
+                let sql = "SELECT file_id AS id, filename, strftime('%s', updated_at_utc) AS ts, ordinal AS ord, score_hint\n             FROM files_index\n             WHERE household_id=?1 AND filename LIKE ?2 ESCAPE '\\' COLLATE NOCASE\n             ORDER BY score_hint DESC, filename COLLATE NOCASE ASC, file_id ASC\n             LIMIT ?3 OFFSET ?4";
                 let start = std::time::Instant::now();
                 let rows = sqlx::query(sql)
                     .bind(&household_id)
@@ -2546,26 +2831,40 @@ async fn search_entities(
                     .bind(0)
                     .fetch_all(pool)
                     .await
-                    .map_err(|e| mapq(branch_name, e))?;
+                    .map_err(|e| mapq("files_index", e))?;
                 let elapsed = start.elapsed().as_millis() as i64;
-                tracing::debug!(target: "arklowdun", name = branch_name, rows = rows.len(), elapsed_ms = elapsed, "branch");
+                tracing::debug!(
+                    target: "arklowdun",
+                    name = "files_index",
+                    rows = rows.len(),
+                    elapsed_ms = elapsed,
+                    "branch"
+                );
                 for r in rows {
                     let filename: String = r.try_get("filename").unwrap_or_default();
                     let ts: i64 = r.try_get("ts").unwrap_or_default();
                     let ord_val: i64 = r.try_get("ord").unwrap_or_default();
-                    let score = if filename.eq_ignore_ascii_case(&q) { 2 } else { 1 };
+                    let score_hint: i64 = r.try_get("score_hint").unwrap_or(0);
                     let id: String = r.try_get("id").unwrap_or_default();
-                    out.push((
-                        score,
+                    hits.push(SearchHit {
+                        score: score_hint,
                         ts,
-                        ord_val as usize,
-                        SearchResult::File {
+                        ordinal: ord_val.max(0) as usize,
+                        filename_key: Some(filename.to_ascii_lowercase()),
+                        id_key: Some(id.clone()),
+                        result: SearchResult::File {
                             id,
                             filename,
                             updated_at: ts,
                         },
-                    ));
+                    });
                 }
+            } else {
+                tracing::debug!(
+                    target: "arklowdun",
+                    name = "files_index",
+                    "index_not_ready"
+                );
             }
 
             if !short {
@@ -2589,17 +2888,19 @@ async fn search_entities(
                         let tz: String = r.try_get("tz").unwrap_or_else(|_| "Europe/London".to_string());
                         let score = if title.eq_ignore_ascii_case(&q) { 2 } else { 1 };
                         let id: String = r.try_get("id").unwrap_or_default();
-                        out.push((
-                            score,
+                        hits.push(SearchHit {
+                            score: score as i64,
                             ts,
-                            ord,
-                            SearchResult::Event {
+                            ordinal: ord,
+                            filename_key: None,
+                            id_key: None,
+                            result: SearchResult::Event {
                                 id,
                                 title,
                                 start_at_utc: ts,
                                 tz,
                             },
-                        ));
+                        });
                         ord += 1;
                     }
                 }
@@ -2625,17 +2926,19 @@ async fn search_entities(
                         let score = if text.eq_ignore_ascii_case(&q) { 2 } else { 1 };
                         let snippet: String = text.chars().take(80).collect();
                         let id: String = r.try_get("id").unwrap_or_default();
-                        out.push((
-                            score,
+                        hits.push(SearchHit {
+                            score: score as i64,
                             ts,
-                            ord,
-                            SearchResult::Note {
+                            ordinal: ord,
+                            filename_key: None,
+                            id_key: None,
+                            result: SearchResult::Note {
                                 id,
                                 snippet,
                                 updated_at: ts,
                                 color,
                             },
-                        ));
+                        });
                         ord += 1;
                     }
                 }
@@ -2698,11 +3001,13 @@ async fn search_entities(
                             1
                         };
                         let id: String = r.try_get("id").unwrap_or_default();
-                        out.push((
-                            score,
+                        hits.push(SearchHit {
+                            score: score as i64,
                             ts,
-                            ord,
-                            SearchResult::Vehicle {
+                            ordinal: ord,
+                            filename_key: None,
+                            id_key: None,
+                            result: SearchResult::Vehicle {
                                 id,
                                 make,
                                 model,
@@ -2710,7 +3015,7 @@ async fn search_entities(
                                 updated_at: ts,
                                 nickname,
                             },
-                        ));
+                        });
                         ord += 1;
                     }
                 }
@@ -2759,32 +3064,48 @@ async fn search_entities(
                             1
                         };
                         let id: String = r.try_get("id").unwrap_or_default();
-                        out.push((
-                            score,
+                        hits.push(SearchHit {
+                            score: score as i64,
                             ts,
-                            ord,
-                            SearchResult::Pet {
+                            ordinal: ord,
+                            filename_key: None,
+                            id_key: None,
+                            result: SearchResult::Pet {
                                 id,
                                 name,
                                 species,
                                 updated_at: ts,
                             },
-                        ));
+                        });
                         ord += 1;
                     }
                 }
             }
 
-            out.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
-            let total_before = out.len();
-            let out = out
+            hits.sort_by(|a, b| match (a.filename_key.as_ref(), b.filename_key.as_ref()) {
+                (Some(a_name), Some(b_name)) => {
+                    let aid = a.id_key.as_deref().unwrap_or("");
+                    let bid = b.id_key.as_deref().unwrap_or("");
+                    b.score
+                        .cmp(&a.score)
+                        .then_with(|| a_name.cmp(b_name))
+                        .then_with(|| aid.cmp(bid))
+                }
+                _ => b
+                    .score
+                    .cmp(&a.score)
+                    .then(b.ts.cmp(&a.ts))
+                    .then(a.ordinal.cmp(&b.ordinal)),
+            });
+            let total_before = hits.len();
+            let hits = hits
                 .into_iter()
                 .skip(offset as usize)
                 .take(limit as usize)
                 .collect::<Vec<_>>();
-            tracing::debug!(target: "arklowdun", total_before, returned = out.len(), "result_summary");
+            tracing::debug!(target: "arklowdun", total_before, returned = hits.len(), "result_summary");
 
-            Ok(out.into_iter().map(|(_, _, _, v)| v).collect())
+            Ok(hits.into_iter().map(|hit| hit.result).collect())
         }
     })
     .await
@@ -3347,12 +3668,37 @@ async fn attachments_migrate<R: tauri::Runtime>(
     let pool = state.pool_clone();
     let vault = state.vault();
     let manager = state.vault_migration();
-    dispatch_async_app_result(move || {
-        let app = app.clone();
-        let manager = manager.clone();
+    let app_spawn = app.clone();
+    let app_for_task = app.clone();
+    let manager_for_task = manager.clone();
+    let pool_for_task = pool.clone();
+    let vault_for_task = vault.clone();
+    let result = dispatch_async_app_result(move || {
+        let app = app_for_task.clone();
+        let manager = manager_for_task.clone();
+        let pool = pool_for_task.clone();
+        let vault = vault_for_task.clone();
         async move { vault_migration::run_vault_migration(app, pool, vault, manager, mode).await }
     })
-    .await
+    .await;
+
+    if let Ok(progress) = &result {
+        if progress.completed {
+            if let Some(active) = snapshot_active_id(&state) {
+                let indexer = state.files_indexer();
+                if indexer.current_state(&active) == IndexerState::Idle {
+                    spawn_background_index_rebuild(
+                        app_spawn.clone(),
+                        indexer,
+                        active,
+                        RebuildMode::Incremental,
+                    );
+                }
+            }
+        }
+    }
+
+    result
 }
 
 #[tauri::command]
@@ -3369,12 +3715,37 @@ async fn attachments_resume_migration<R: tauri::Runtime>(
             "No vault migration checkpoint is available.",
         )
     })?;
-    dispatch_async_app_result(move || {
-        let app = app.clone();
-        let manager = manager.clone();
+    let app_spawn = app.clone();
+    let app_for_task = app.clone();
+    let manager_for_task = manager.clone();
+    let pool_for_task = pool.clone();
+    let vault_for_task = vault.clone();
+    let result = dispatch_async_app_result(move || {
+        let app = app_for_task.clone();
+        let manager = manager_for_task.clone();
+        let pool = pool_for_task.clone();
+        let vault = vault_for_task.clone();
         async move { vault_migration::run_vault_migration(app, pool, vault, manager, mode).await }
     })
-    .await
+    .await;
+
+    if let Ok(progress) = &result {
+        if progress.completed {
+            if let Some(active) = snapshot_active_id(&state) {
+                let indexer = state.files_indexer();
+                if indexer.current_state(&active) == IndexerState::Idle {
+                    spawn_background_index_rebuild(
+                        app_spawn.clone(),
+                        indexer,
+                        active,
+                        RebuildMode::Incremental,
+                    );
+                }
+            }
+        }
+    }
+
+    result
 }
 
 #[tauri::command]
@@ -4000,6 +4371,10 @@ pub fn run() {
                 VaultMigrationManager::new(&attachments_root)
                     .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?,
             );
+            let files_indexer = Arc::new(crate::files_indexer::FilesIndexer::new(
+                pool.clone(),
+                vault.clone(),
+            ));
 
             let sentinel_exists = vault_migration.last_apply_ok_path().exists();
             if sentinel_exists {
@@ -4054,7 +4429,10 @@ pub fn run() {
                 vault,
                 vault_migration,
                 maintenance: Arc::new(AtomicBool::new(false)),
+                files_indexer: files_indexer.clone(),
             });
+
+            spawn_idle_index_scheduler(app.handle().clone());
             Ok(())
         })
         .invoke_handler(app_commands![
@@ -4066,6 +4444,9 @@ pub fn run() {
             db_table_exists,
             db_has_files_index,
             db_files_index_ready,
+            files_index_status,
+            files_index_rebuild,
+            files_index_cancel,
             db_has_vehicle_columns,
             db_has_pet_columns,
             // Database health IPC commands consumed by the frontend shell.
@@ -4280,6 +4661,7 @@ mod db_health_command_tests {
 
         let attachments_root = crate::vault::paths::attachments_root_for_database(&db_path);
         std::fs::create_dir_all(&attachments_root).expect("create attachments dir");
+        let vault = Arc::new(Vault::new(attachments_root.clone()));
         let app_state = crate::state::AppState {
             pool: Arc::new(RwLock::new(pool.clone())),
             active_household_id: Arc::new(Mutex::new(String::from("test-household"))),
@@ -4289,11 +4671,12 @@ mod db_health_command_tests {
             )),
             db_health: Arc::new(Mutex::new(cached_report.clone())),
             db_path: Arc::new(db_path.clone()),
-            vault: Arc::new(Vault::new(attachments_root.clone())),
+            vault: vault.clone(),
             vault_migration: Arc::new(
                 crate::vault_migration::VaultMigrationManager::new(&attachments_root).unwrap(),
             ),
             maintenance: Arc::new(AtomicBool::new(false)),
+            files_indexer: Arc::new(crate::files_indexer::FilesIndexer::new(pool.clone(), vault)),
         };
 
         let app = mock_builder()
@@ -4738,6 +5121,10 @@ mod attachment_ipc_command_tests {
         let migration = Arc::new(
             VaultMigrationManager::new(attachments_root).expect("create vault migration manager"),
         );
+        let files_indexer = Arc::new(crate::files_indexer::FilesIndexer::new(
+            pool.clone(),
+            vault.clone(),
+        ));
         AppState {
             pool: Arc::new(RwLock::new(pool)),
             active_household_id: Arc::new(Mutex::new(active)),
@@ -4748,6 +5135,7 @@ mod attachment_ipc_command_tests {
             vault,
             vault_migration: migration,
             maintenance: Arc::new(AtomicBool::new(false)),
+            files_indexer,
         }
     }
 
@@ -4952,6 +5340,11 @@ mod write_guard_tests {
 
         let attachments_root = crate::vault::paths::attachments_root_for_appdata(dir.path());
         std::fs::create_dir_all(&attachments_root).expect("create attachments dir");
+        let vault = Arc::new(Vault::new(attachments_root.clone()));
+        let files_indexer = Arc::new(crate::files_indexer::FilesIndexer::new(
+            pool.clone(),
+            vault.clone(),
+        ));
         let app_state = crate::state::AppState {
             pool: Arc::new(RwLock::new(pool.clone())),
             active_household_id: Arc::new(Mutex::new(String::from("test"))),
@@ -4961,11 +5354,12 @@ mod write_guard_tests {
             )),
             db_health: Arc::new(Mutex::new(unhealthy_report.clone())),
             db_path: Arc::new(db_path.clone()),
-            vault: Arc::new(Vault::new(attachments_root.clone())),
+            vault,
             vault_migration: Arc::new(
                 crate::vault_migration::VaultMigrationManager::new(&attachments_root).unwrap(),
             ),
             maintenance: Arc::new(AtomicBool::new(false)),
+            files_indexer,
         };
 
         let app = mock_builder()

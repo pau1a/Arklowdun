@@ -60,6 +60,14 @@ for (const [path, mod] of Object.entries(scenarioModules)) {
 }
 
 if (registry.size === 0) {
+  const fallbackIndexSnapshots = new Map<string, { lastBuiltAt: string | null; rowCount: number }>();
+  const ensureFallbackIndex = (householdId: string) => {
+    if (!fallbackIndexSnapshots.has(householdId)) {
+      fallbackIndexSnapshots.set(householdId, { lastBuiltAt: null, rowCount: 0 });
+    }
+    return fallbackIndexSnapshots.get(householdId)!;
+  };
+
   registry.set("fallback", {
     name: "fallback",
     description: "Built-in fallback scenario used when Playwright fixtures are unavailable.",
@@ -204,6 +212,32 @@ if (registry.size === 0) {
         reportPath: "",
       }),
       db_files_index_ready: () => true,
+      files_index_status: (payload: { householdId?: string }) => {
+        const householdId = payload?.householdId ?? "fallback-household";
+        const snapshot = ensureFallbackIndex(householdId);
+        return {
+          last_built_at: snapshot.lastBuiltAt,
+          row_count: snapshot.rowCount,
+          state: "Idle",
+        };
+      },
+      files_index_rebuild: (payload: { householdId?: string }) => {
+        const householdId = payload?.householdId ?? "fallback-household";
+        const snapshot = ensureFallbackIndex(householdId);
+        const delta = snapshot.rowCount === 0 ? 5 : Math.max(1, Math.ceil(snapshot.rowCount * 0.2));
+        snapshot.rowCount += delta;
+        snapshot.lastBuiltAt = new Date().toISOString();
+        return {
+          total: snapshot.rowCount,
+          updated: delta,
+          duration_ms: 1_000,
+        };
+      },
+      files_index_cancel: (payload: { householdId?: string }) => {
+        const householdId = payload?.householdId ?? "fallback-household";
+        ensureFallbackIndex(householdId);
+        return { cancelled: true };
+      },
     },
   });
 }
