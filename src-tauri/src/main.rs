@@ -40,7 +40,7 @@ use arklowdun_lib::AppError;
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
-    #[arg(long, conflicts_with = "command")]
+    #[arg(long)]
     resume_migration: bool,
 }
 
@@ -129,6 +129,12 @@ fn main() {
     arklowdun_lib::init_logging();
 
     let cli = Cli::parse();
+    if cli.resume_migration && cli.command.is_some() {
+        eprintln!(
+            "Error: --resume-migration cannot be used together with a subcommand."
+        );
+        process::exit(2);
+    }
     if cli.resume_migration {
         match handle_resume_migration() {
             Ok(code) => process::exit(code),
