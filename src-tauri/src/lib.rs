@@ -5340,6 +5340,11 @@ mod write_guard_tests {
 
         let attachments_root = crate::vault::paths::attachments_root_for_appdata(dir.path());
         std::fs::create_dir_all(&attachments_root).expect("create attachments dir");
+        let vault = Arc::new(Vault::new(attachments_root.clone()));
+        let files_indexer = Arc::new(crate::files_indexer::FilesIndexer::new(
+            pool.clone(),
+            vault.clone(),
+        ));
         let app_state = crate::state::AppState {
             pool: Arc::new(RwLock::new(pool.clone())),
             active_household_id: Arc::new(Mutex::new(String::from("test"))),
@@ -5349,11 +5354,12 @@ mod write_guard_tests {
             )),
             db_health: Arc::new(Mutex::new(unhealthy_report.clone())),
             db_path: Arc::new(db_path.clone()),
-            vault: Arc::new(Vault::new(attachments_root.clone())),
+            vault,
             vault_migration: Arc::new(
                 crate::vault_migration::VaultMigrationManager::new(&attachments_root).unwrap(),
             ),
             maintenance: Arc::new(AtomicBool::new(false)),
+            files_indexer,
         };
 
         let app = mock_builder()

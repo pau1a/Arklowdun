@@ -129,6 +129,7 @@ mod tests {
             .keep();
         fs::create_dir_all(&attachments).expect("create attachments root");
         let vault = Arc::new(Vault::new(attachments.clone()));
+        let files_indexer = Arc::new(FilesIndexer::new(pool.clone(), vault.clone()));
         AppState {
             pool: Arc::new(RwLock::new(pool)),
             active_household_id: Arc::new(Mutex::new(String::new())),
@@ -141,7 +142,7 @@ mod tests {
                 VaultMigrationManager::new(&attachments).expect("create vault migration manager"),
             ),
             maintenance: Arc::new(AtomicBool::new(false)),
-            files_indexer: Arc::new(FilesIndexer::new(pool.clone(), vault)),
+            files_indexer,
         }
     }
 
