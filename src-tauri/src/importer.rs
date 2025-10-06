@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
     time::SystemTime,
 };
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 pub struct ImportLogger {
     file: File,
@@ -122,8 +122,8 @@ fn cleanup_logs(dir: &Path) {
     }
 }
 
-pub async fn run_import(
-    app: &AppHandle,
+pub async fn run_import<R: Runtime>(
+    app: &AppHandle<R>,
     household_id: String,
     dry_run: bool,
 ) -> Result<(), sqlx::Error> {
