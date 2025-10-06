@@ -27,3 +27,7 @@ export function fetchMigrationStatus(): Promise<MigrationProgress> {
 export function runMigration(mode: MigrationMode): Promise<MigrationProgress> {
   return call("attachments_migrate", { mode });
 }
+
+export function resumeMigration(): Promise<MigrationProgress> {
+  return call("attachments_resume_migration");
+}

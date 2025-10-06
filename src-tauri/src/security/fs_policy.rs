@@ -62,15 +62,10 @@ pub fn base_for<R: Runtime>(
             .app_data_dir()
             .map_err(|_| FsPolicyError::Invalid)?
     };
-    let base = match root {
-        RootKey::AppData => base,
-        RootKey::Attachments => {
-            let mut p = base;
-            p.push("attachments");
-            p
-        }
-    };
-    Ok(base)
+    match root {
+        RootKey::AppData => Ok(base),
+        RootKey::Attachments => Ok(crate::vault::paths::attachments_root_for_appdata(&base)),
+    }
 }
 
 /// Canonicalize user/provided path against `root`, normalize separators,

@@ -553,14 +553,15 @@ pub fn log_vault_error(
     code: &str,
     stage: &'static str,
 ) {
-    tracing::warn!(
-        target: "arklowdun",
-        event = "vault_guard_denied",
-        stage,
-        household_id,
+    crate::vault_log!(
+        level: warn,
+        event: "vault_guard",
+        outcome: "deny",
+        household_id = household_id,
         category = category.as_str(),
-        relative_hash = %hash_path(Path::new(relative_path)),
-        code,
+        path = Path::new(relative_path),
+        stage = stage,
+        code = code,
     );
 }
 
@@ -2921,6 +2922,27 @@ fn resolve_attachment_for_ipc_create(
         .and_then(Value::as_str)
         .unwrap_or_default();
 
+    if data.get("root_key").map_or(false, |value| !value.is_null()) {
+        let relative_hash = hash_path(Path::new(relative_for_log));
+        log_vault_error(
+            &household_id,
+            category,
+            relative_for_log,
+            crate::vault::ERR_ROOT_KEY_NOT_SUPPORTED,
+            "ensure_root_key_null",
+        );
+        return Err(AppError::new(
+            crate::vault::ERR_ROOT_KEY_NOT_SUPPORTED,
+            "Attachments must not supply a root key.",
+        )
+        .with_context("operation", operation)
+        .with_context("table", table_value.clone())
+        .with_context("household_id", household_id.clone())
+        .with_context("category", category.as_str().to_string())
+        .with_context("relative_path_hash", relative_hash)
+        .with_context("guard_stage", "ensure_root_key_null".to_string()));
+    }
+
     ensure_active_household_for_ipc(
         active_household,
         &household_id,
@@ -2991,6 +3013,44 @@ async fn resolve_attachment_for_ipc_update(
 
     let table_value = table.to_string();
     let id_value = id.to_string();
+
+    if data.get("root_key").map_or(false, |value| !value.is_null()) {
+        let category = AttachmentCategory::for_table(table).unwrap_or(AttachmentCategory::Misc);
+        let household_for_log = household_id
+            .map(|value| value.to_string())
+            .or_else(|| {
+                data.get("household_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .unwrap_or_default();
+        let relative_for_log = data
+            .get("relative_path")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let relative_hash = hash_path(Path::new(relative_for_log));
+        log_vault_error(
+            &household_for_log,
+            category,
+            relative_for_log,
+            crate::vault::ERR_ROOT_KEY_NOT_SUPPORTED,
+            "ensure_root_key_null",
+        );
+        let mut err = AppError::new(
+            crate::vault::ERR_ROOT_KEY_NOT_SUPPORTED,
+            "Attachments must not supply a root key.",
+        )
+        .with_context("operation", operation)
+        .with_context("table", table_value.clone())
+        .with_context("id", id_value.clone())
+        .with_context("category", category.as_str().to_string())
+        .with_context("relative_path_hash", relative_hash)
+        .with_context("guard_stage", "ensure_root_key_null".to_string());
+        if !household_for_log.is_empty() {
+            err = err.with_context("household_id", household_for_log);
+        }
+        return Err(err);
+    }
 
     let descriptor = crate::attachments::load_attachment_descriptor(pool, table, id)
         .await
@@ -3287,6 +3347,28 @@ async fn attachments_migrate<R: tauri::Runtime>(
     let pool = state.pool_clone();
     let vault = state.vault();
     let manager = state.vault_migration();
+    dispatch_async_app_result(move || {
+        let app = app.clone();
+        let manager = manager.clone();
+        async move { vault_migration::run_vault_migration(app, pool, vault, manager, mode).await }
+    })
+    .await
+}
+
+#[tauri::command]
+async fn attachments_resume_migration<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> AppResult<MigrationProgress> {
+    let pool = state.pool_clone();
+    let vault = state.vault();
+    let manager = state.vault_migration();
+    let mode = manager.resume_mode().ok_or_else(|| {
+        AppError::new(
+            "VAULT_MIGRATION_NO_CHECKPOINT",
+            "No vault migration checkpoint is available.",
+        )
+    })?;
     dispatch_async_app_result(move || {
         let app = app.clone();
         let manager = manager.clone();
@@ -3810,6 +3892,7 @@ macro_rules! app_commands {
             attachment_reveal,
             attachments_migration_status,
             attachments_migrate,
+            attachments_resume_migration,
             diagnostics_summary,
             diagnostics_household_stats,
             diagnostics_doc_path,
@@ -3907,10 +3990,7 @@ pub fn run() {
                 }
             };
             let db_health = Arc::new(Mutex::new(health_report));
-            let attachments_root = db_path
-                .parent()
-                .map(|p| p.join("attachments"))
-                .unwrap_or_else(|| PathBuf::from("attachments"));
+            let attachments_root = crate::vault::paths::attachments_root_for_database(&db_path);
             std::fs::create_dir_all(&attachments_root)
                 .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
             let db_path = Arc::new(db_path);
@@ -4020,6 +4100,58 @@ mod tests {
         });
         let ev: Event = serde_json::from_value(payload).unwrap();
         assert_eq!(ev.deleted_at, Some(999));
+    }
+}
+
+#[cfg(test)]
+mod vault_root_key_tests {
+    use super::*;
+    use serde_json::{Map, Value};
+    use sqlx::SqlitePool;
+    use std::sync::{Arc, Mutex};
+    use tempfile::tempdir;
+
+    #[test]
+    fn create_rejects_root_key_override() {
+        let dir = tempdir().expect("tempdir");
+        let vault = Arc::new(Vault::new(dir.path()));
+        let active = Arc::new(Mutex::new(String::new()));
+        let mut data = Map::new();
+        data.insert("household_id".into(), Value::String("hh1".into()));
+        data.insert("category".into(), Value::String("bills".into()));
+        data.insert("relative_path".into(), Value::String("doc.txt".into()));
+        data.insert("root_key".into(), Value::String("attachments".into()));
+
+        let err =
+            resolve_attachment_for_ipc_create(&vault, &active, "bills", &data, "bills_create")
+                .expect_err("root key override should be rejected");
+        assert_eq!(err.code(), crate::vault::ERR_ROOT_KEY_NOT_SUPPORTED);
+    }
+
+    #[tokio::test]
+    async fn update_rejects_root_key_override() {
+        let dir = tempdir().expect("tempdir");
+        let vault = Arc::new(Vault::new(dir.path()));
+        let active = Arc::new(Mutex::new(String::new()));
+        let pool = SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("connect memory pool");
+        let mut data = Map::new();
+        data.insert("root_key".into(), Value::String("attachments".into()));
+
+        let err = resolve_attachment_for_ipc_update(
+            &pool,
+            &vault,
+            &active,
+            "bills",
+            "bill1",
+            None,
+            &data,
+            "bills_update",
+        )
+        .await
+        .expect_err("root key override should be rejected");
+        assert_eq!(err.code(), crate::vault::ERR_ROOT_KEY_NOT_SUPPORTED);
     }
 }
 
@@ -4146,7 +4278,7 @@ mod db_health_command_tests {
         });
         drop(runtime);
 
-        let attachments_root = dir.path().join("attachments");
+        let attachments_root = crate::vault::paths::attachments_root_for_database(&db_path);
         std::fs::create_dir_all(&attachments_root).expect("create attachments dir");
         let app_state = crate::state::AppState {
             pool: Arc::new(RwLock::new(pool.clone())),
@@ -4622,7 +4754,7 @@ mod attachment_ipc_command_tests {
     #[test]
     fn bills_create_rejects_invalid_category_at_entrypoint() {
         let dir = tempdir().expect("tempdir");
-        let attachments_root = dir.path().join("attachments");
+        let attachments_root = crate::vault::paths::attachments_root_for_appdata(dir.path());
         std::fs::create_dir_all(&attachments_root).expect("create attachments root");
 
         let runtime = Runtime::new().expect("create runtime");
@@ -4675,7 +4807,7 @@ mod attachment_ipc_command_tests {
     #[test]
     fn attachment_open_rejects_active_household_mismatch() {
         let dir = tempdir().expect("tempdir");
-        let attachments_root = dir.path().join("attachments");
+        let attachments_root = crate::vault::paths::attachments_root_for_appdata(dir.path());
         std::fs::create_dir_all(&attachments_root).expect("create attachments root");
 
         let runtime = Runtime::new().expect("create runtime");
@@ -4818,7 +4950,7 @@ mod write_guard_tests {
         });
         drop(runtime);
 
-        let attachments_root = dir.path().join("attachments");
+        let attachments_root = crate::vault::paths::attachments_root_for_appdata(dir.path());
         std::fs::create_dir_all(&attachments_root).expect("create attachments dir");
         let app_state = crate::state::AppState {
             pool: Arc::new(RwLock::new(pool.clone())),

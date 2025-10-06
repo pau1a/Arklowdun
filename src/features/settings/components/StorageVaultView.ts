@@ -8,6 +8,7 @@ import toast from "@ui/Toast";
 import {
   fetchMigrationStatus,
   runMigration,
+  resumeMigration,
   type MigrationMode,
   type MigrationProgress,
 } from "../api/vaultMigration";
@@ -20,11 +21,17 @@ interface StorageVaultViewInstance {
   destroy: () => void;
 }
 
-const EVENT_NAME = "vault:migration_progress";
+const EVENT_PROGRESS = "vault:migration_progress";
+const EVENT_COMPLETE = "vault:migration_complete";
 
 const MODE_LABEL: Record<MigrationMode, string> = {
   dry_run: "Dry-run",
   apply: "Apply",
+};
+
+const MODE_STATUS: Record<MigrationMode, string> = {
+  dry_run: "Dry-run running",
+  apply: "Applying migration",
 };
 
 function formatCounts(counts: MigrationProgress["counts"]): string {
@@ -95,36 +102,47 @@ export function createStorageVaultView(): StorageVaultViewInstance {
     className: "storage__vault-apply",
   });
 
+  const resumeButton = createButton({
+    label: "Resume migration",
+    variant: "primary",
+    className: "storage__vault-resume",
+  });
+  resumeButton.hidden = true;
+
   const controls = document.createElement("div");
   controls.className = "storage__vault-controls";
-  controls.append(dryRunButton, applyButton, manifestLink);
+  controls.append(dryRunButton, applyButton, resumeButton, manifestLink);
 
   const state: {
     running: boolean;
     mode: MigrationMode | null;
     latest: MigrationProgress | null;
-    unlisten: null | (() => void | Promise<void>);
+    unlisten: Array<() => void | Promise<void>>;
   } = {
     running: false,
     mode: null,
     latest: null,
-    unlisten: null,
+    unlisten: [],
   };
 
   function updateUi(): void {
     const status = state.latest;
     const running = state.running;
+    const hasCheckpoint = Boolean(status?.checkpoint_path);
 
     dryRunButton.update({ disabled: running });
     applyButton.update({ disabled: running });
+    resumeButton.update({ disabled: running || !hasCheckpoint });
+    resumeButton.hidden = !hasCheckpoint;
 
-    if (running && state.mode) {
-      statusBadge.textContent = `${MODE_LABEL[state.mode]} in progress…`;
+    const activeMode: MigrationMode | null = state.mode ?? status?.mode ?? null;
+    if (running && activeMode) {
+      statusBadge.textContent = `${MODE_LABEL[activeMode]} in progress…`;
       statusBadge.dataset.status = "pending";
     } else if (status?.completed) {
       statusBadge.textContent = "Vault: configured";
       statusBadge.dataset.status = "success";
-    } else if (status?.checkpoint_path) {
+    } else if (hasCheckpoint) {
       statusBadge.textContent = "Migration paused";
       statusBadge.dataset.status = "warning";
     } else {
@@ -134,6 +152,9 @@ export function createStorageVaultView(): StorageVaultViewInstance {
 
     if (status) {
       summary.textContent = formatCounts(status.counts);
+      if (hasCheckpoint && !running) {
+        summary.textContent += " · Resume available";
+      }
     } else {
       summary.textContent = "No migration has been executed yet.";
     }
@@ -143,7 +164,13 @@ export function createStorageVaultView(): StorageVaultViewInstance {
       progressBar.value = Math.min(1, Math.max(0, status.counts.processed % 1000 / 1000));
       progressNote.hidden = false;
       const table = status.table ? `Current table: ${status.table}` : "";
-      progressNote.textContent = `${MODE_LABEL[status.mode]} running. ${table}`.trim();
+      const mode = state.mode ?? status.mode;
+      const message = mode ? MODE_STATUS[mode] : "Migration running";
+      progressNote.textContent = `${message}. ${table}`.trim();
+    } else if (!running && hasCheckpoint) {
+      progressBar.hidden = true;
+      progressNote.hidden = false;
+      progressNote.textContent = "Migration paused. Resume available from last checkpoint.";
     } else {
       progressBar.hidden = true;
       progressNote.hidden = true;
@@ -190,6 +217,27 @@ export function createStorageVaultView(): StorageVaultViewInstance {
     }
   }
 
+  async function resume(): Promise<void> {
+    if (state.running) return;
+    state.running = true;
+    state.mode = state.latest?.mode ?? null;
+    updateUi();
+    try {
+      await resumeMigration();
+      toast.show({
+        kind: "success",
+        message: "Migration resumed.",
+      });
+    } catch (error) {
+      const message = (error as { message?: string })?.message ?? "Unable to resume migration.";
+      toast.show({ kind: "error", message });
+    } finally {
+      state.running = false;
+      state.mode = null;
+      await refreshStatus();
+    }
+  }
+
   dryRunButton.addEventListener("click", (event) => {
     event.preventDefault();
     void run("dry_run");
@@ -200,9 +248,14 @@ export function createStorageVaultView(): StorageVaultViewInstance {
     void run("apply");
   });
 
+  resumeButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    void resume();
+  });
+
   void refreshStatus();
 
-  void listen<MigrationProgress>(EVENT_NAME, (event) => {
+  void listen<MigrationProgress>(EVENT_PROGRESS, (event) => {
     const payload = event.payload;
     if (!payload) return;
     state.latest = payload;
@@ -212,7 +265,18 @@ export function createStorageVaultView(): StorageVaultViewInstance {
     }
     updateUi();
   }).then((unlisten) => {
-    state.unlisten = unlisten;
+    state.unlisten.push(unlisten);
+  });
+
+  void listen<MigrationProgress>(EVENT_COMPLETE, (event) => {
+    const payload = event.payload;
+    if (!payload) return;
+    state.latest = payload;
+    state.running = false;
+    state.mode = null;
+    updateUi();
+  }).then((unlisten) => {
+    state.unlisten.push(unlisten);
   });
 
   section.append(statusWrapper, helper, controls, progressBar, progressNote, summary);
@@ -220,10 +284,10 @@ export function createStorageVaultView(): StorageVaultViewInstance {
   return {
     element: section,
     destroy: () => {
-      if (state.unlisten) {
-        void state.unlisten();
-        state.unlisten = null;
+      for (const unlisten of state.unlisten) {
+        void unlisten();
       }
+      state.unlisten = [];
     },
   };
 }

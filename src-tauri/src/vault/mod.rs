@@ -1,13 +1,14 @@
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-use tracing::{info, warn};
-
 use crate::attachment_category::AttachmentCategory;
 use crate::security::hash_path;
+use crate::vault_log;
 use crate::AppError;
 
 mod guard;
+pub mod logging;
+pub mod paths;
 
 pub use guard::{
     ensure_path_length, normalize_relative, reject_symlinks, validate_component,
@@ -20,6 +21,7 @@ pub const ERR_PATH_OUT_OF_VAULT: &str = "PATH_OUT_OF_VAULT";
 pub const ERR_SYMLINK_DENIED: &str = "SYMLINK_DENIED";
 pub const ERR_FILENAME_INVALID: &str = "FILENAME_INVALID";
 pub const ERR_NAME_TOO_LONG: &str = "NAME_TOO_LONG";
+pub const ERR_ROOT_KEY_NOT_SUPPORTED: &str = "ROOT_KEY_NOT_SUPPORTED";
 
 #[derive(Debug, Clone)]
 pub struct Vault {
@@ -111,13 +113,16 @@ impl Vault {
             ));
         }
 
-        info!(
-            target: "arklowdun",
-            event = "vault_guard_allowed",
-            household_id,
+        let relative_hash = hash_path(normalized.as_path());
+        vault_log!(
+            level: info,
+            event: "vault_guard",
+            outcome: "allow",
+            household_id = household_id,
             category = category.as_str(),
-            relative_hash = %hash_path(normalized.as_path()),
-            path_hash = %hash_path(&full),
+            path = &full,
+            stage = "resolve",
+            relative_hash = relative_hash.as_str(),
         );
 
         Ok(full)
@@ -207,14 +212,16 @@ impl Vault {
         let attempted = attempted.as_ref();
         let hashed = hash_path(Path::new(attempted));
         let code = err.code().to_string();
-        warn!(
-            target: "arklowdun",
-            event = "vault_guard_denied",
-            stage,
-            code = code.as_str(),
-            household_id,
+        vault_log!(
+            level: warn,
+            event: "vault_guard",
+            outcome: "deny",
+            household_id = household_id,
             category = category.as_str(),
-            relative_hash = %hashed,
+            path = attempted,
+            stage = stage,
+            code = code.as_str(),
+            relative_hash = hashed.as_str(),
         );
         err = err
             .with_context("household_id", household_id.to_string())
