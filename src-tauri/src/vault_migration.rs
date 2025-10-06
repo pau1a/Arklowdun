@@ -106,15 +106,10 @@ impl MigrationCounts {
         MigrationProgress {
             mode,
             table: table.into(),
-            processed: self.processed,
-            copied: self.copied,
-            skipped: self.skipped,
-            conflicts: self.conflicts,
-            unsupported: self.unsupported,
-            skipped_reasons: self.skipped_reasons.clone(),
+            counts: self.clone(),
             completed,
-            checkpoint_path,
             manifest_path,
+            checkpoint_path,
         }
     }
 }
@@ -145,16 +140,23 @@ pub struct ManifestEntry {
 pub struct MigrationProgress {
     pub mode: MigrationMode,
     pub table: String,
-    pub processed: u64,
-    pub copied: u64,
-    pub skipped: u64,
-    pub conflicts: u64,
-    pub unsupported: u64,
-    #[serde(default)]
-    pub skipped_reasons: BTreeMap<String, u64>,
+    pub counts: MigrationCounts,
     pub completed: bool,
     pub manifest_path: Option<String>,
     pub checkpoint_path: Option<String>,
+}
+
+impl Default for MigrationProgress {
+    fn default() -> Self {
+        Self {
+            mode: MigrationMode::DryRun,
+            table: String::new(),
+            counts: MigrationCounts::default(),
+            completed: false,
+            manifest_path: None,
+            checkpoint_path: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -256,19 +258,11 @@ impl VaultMigrationManager {
             return summary;
         }
 
-        MigrationProgress {
-            mode: MigrationMode::DryRun,
-            table: String::new(),
-            processed: 0,
-            copied: 0,
-            skipped: 0,
-            conflicts: 0,
-            unsupported: 0,
-            skipped_reasons: BTreeMap::new(),
-            completed: !guard.running,
-            manifest_path: manifest,
-            checkpoint_path: checkpoint,
-        }
+        let mut progress = MigrationProgress::default();
+        progress.completed = !guard.running;
+        progress.manifest_path = manifest;
+        progress.checkpoint_path = checkpoint;
+        progress
     }
 
     pub fn begin(&self) -> AppResult<()> {
