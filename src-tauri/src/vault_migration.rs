@@ -419,7 +419,7 @@ async fn run_vault_migration_with<Roots, Sink>(
     roots: &Roots,
 ) -> AppResult<MigrationProgress>
 where
-    Roots: LegacyRootProvider + ?Sized,
+    Roots: LegacyRootProvider,
     Sink: ProgressSink,
 {
     manager.begin()?;
@@ -465,7 +465,7 @@ async fn execute_migration_inner<Roots, Sink>(
     roots: &Roots,
 ) -> AppResult<MigrationProgress>
 where
-    Roots: LegacyRootProvider + ?Sized,
+    Roots: LegacyRootProvider,
     Sink: ProgressSink,
 {
     let mut counts = MigrationCounts::default();
