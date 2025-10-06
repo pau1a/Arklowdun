@@ -17,6 +17,7 @@
       "@ui/*": ["ui/*"],
       "@layout/*": ["layout/*"],
       "@lib/*": ["lib/*"],
+      "@api/*": ["api/*"],
       "@bindings/*": ["bindings/*"],
       "@store/*": ["store/*"],
       "@utils/*": ["utils/*"],

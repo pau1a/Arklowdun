@@ -8,8 +8,8 @@ use chrono::Utc;
 use futures::TryStreamExt;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use sqlx::{Executor, Row, Sqlite, SqlitePool, Transaction};
-use tauri::Emitter;
+use sqlx::{Row, Sqlite, SqlitePool, Transaction};
+use tauri::{Emitter, Manager};
 use tokio::fs::{self, File};
 use tokio::sync::mpsc;
 use tokio::task::yield_now;
@@ -23,6 +23,12 @@ use crate::vault::Vault;
 use crate::vault_migration::ATTACHMENT_TABLES;
 use crate::{AppError, AppResult};
 use uuid::Uuid;
+
+#[cfg(unix)]
+use libc::EXDEV;
+
+#[cfg(windows)]
+const ERROR_NOT_SAME_DEVICE: i32 = 17;
 
 const EVENT_FILE_MOVE_PROGRESS: &str = "file_move_progress";
 const EVENT_ATTACHMENTS_REPAIR_PROGRESS: &str = "attachments_repair_progress";
@@ -99,6 +105,12 @@ pub struct RepairAction {
 pub enum AttachmentsRepairMode {
     Scan,
     Apply,
+}
+
+impl Default for AttachmentsRepairMode {
+    fn default() -> Self {
+        AttachmentsRepairMode::Scan
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -646,7 +658,7 @@ fn staging_path_for(target: &Path) -> PathBuf {
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    parent.join(format!(".arkmove-{}", Uuid::new_v4()))
+    parent.join(format!(".arkmove-{}", Uuid::now_v7()))
 }
 
 enum PreparedMove {
@@ -691,7 +703,7 @@ async fn stage_move(source: &Path, staging: &Path) -> AppResult<PreparedMove> {
         Ok(_) => Ok(PreparedMove::Rename {
             staging: staging.to_path_buf(),
         }),
-        Err(err) if err.kind() == std::io::ErrorKind::CrossDeviceLink => {
+        Err(err) if is_cross_device_error(&err) => {
             fs::copy(source, staging).await.map_err(|copy_err| {
                 AppError::from(copy_err).with_context("operation", "copy_cross_volume")
             })?;
@@ -735,6 +747,16 @@ async fn verify_same_content(source: &Path, staged: &Path) -> AppResult<()> {
     }
 
     Ok(())
+}
+
+fn is_cross_device_error(err: &std::io::Error) -> bool {
+    match err.raw_os_error() {
+        #[cfg(unix)]
+        Some(code) if code == EXDEV => true,
+        #[cfg(windows)]
+        Some(code) if code == ERROR_NOT_SAME_DEVICE => true,
+        _ => false,
+    }
 }
 
 fn index_basename(relative: &str) -> String {

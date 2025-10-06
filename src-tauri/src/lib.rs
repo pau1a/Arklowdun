@@ -41,7 +41,7 @@ use crate::{
         repair::{self, DbRepairEvent, DbRepairSummary},
     },
     file_ops::{
-        attachments_repair as run_attachments_repair, file_move as run_file_move,
+        attachments_repair as run_attachments_repair, move_file as run_file_move,
         AttachmentsRepairRequest, AttachmentsRepairResponse, FileMoveRequest, FileMoveResponse,
     },
     files_indexer::{IndexProgress, IndexerState, RebuildMode},
