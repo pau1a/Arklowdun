@@ -1297,8 +1297,8 @@ async fn sync_cascade_health(state: &state::AppState, pool: &SqlitePool) -> AppR
     Ok(())
 }
 
-fn make_delete_progress_handler(
-    app: &tauri::AppHandle,
+fn make_delete_progress_handler<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     household_id: &str,
 ) -> CascadeProgressObserver {
     let emitter = app.clone();
@@ -1466,9 +1466,9 @@ async fn household_update(
 }
 
 #[tauri::command]
-async fn household_delete(
+async fn household_delete<R: tauri::Runtime>(
     id: String,
-    app: tauri::AppHandle,
+    app: tauri::AppHandle<R>,
     state: State<'_, AppState>,
 ) -> AppResult<HouseholdDeleteResponse> {
     let _permit = guard::ensure_db_writable(&state)?;
@@ -1563,9 +1563,9 @@ async fn household_delete(
 }
 
 #[tauri::command]
-async fn household_resume_delete(
+async fn household_resume_delete<R: tauri::Runtime>(
     id: String,
-    app: tauri::AppHandle,
+    app: tauri::AppHandle<R>,
     state: State<'_, AppState>,
 ) -> AppResult<HouseholdDeleteResponse> {
     let _permit = guard::ensure_db_writable(&state)?;
@@ -1661,9 +1661,9 @@ async fn household_resume_delete(
 }
 
 #[tauri::command]
-async fn household_repair(
+async fn household_repair<R: tauri::Runtime>(
     id: String,
-    app: tauri::AppHandle,
+    app: tauri::AppHandle<R>,
     state: State<'_, AppState>,
 ) -> AppResult<HouseholdDeleteResponse> {
     let _permit = guard::ensure_db_writable(&state)?;
@@ -1837,9 +1837,9 @@ async fn household_restore(
 }
 
 #[tauri::command]
-async fn household_set_active(
+async fn household_set_active<R: tauri::Runtime>(
     id: String,
-    app: tauri::AppHandle,
+    app: tauri::AppHandle<R>,
     state: tauri::State<'_, state::AppState>,
 ) -> AppResult<()> {
     let pool = state.pool_clone();
@@ -1966,8 +1966,8 @@ struct ImportExecuteArgs {
 }
 
 #[tauri::command]
-async fn import_run_legacy(
-    app: tauri::AppHandle,
+async fn import_run_legacy<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, AppState>,
     args: ImportArgs,
 ) -> AppResult<()> {
@@ -3210,8 +3210,8 @@ async fn resolve_attachment_for_ipc_delete(
 }
 
 #[tauri::command]
-async fn attachment_open(
-    _app: tauri::AppHandle,
+async fn attachment_open<R: tauri::Runtime>(
+    _app: tauri::AppHandle<R>,
     state: tauri::State<'_, crate::state::AppState>,
     table: String,
     id: String,
@@ -3241,8 +3241,8 @@ async fn attachment_open(
 }
 
 #[tauri::command]
-async fn attachment_reveal(
-    _app: tauri::AppHandle,
+async fn attachment_reveal<R: tauri::Runtime>(
+    _app: tauri::AppHandle<R>,
     state: tauri::State<'_, crate::state::AppState>,
     table: String,
     id: String,
@@ -3279,8 +3279,8 @@ async fn attachments_migration_status(
 }
 
 #[tauri::command]
-async fn attachments_migrate(
-    app: tauri::AppHandle,
+async fn attachments_migrate<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: tauri::State<'_, crate::state::AppState>,
     mode: MigrationMode,
 ) -> AppResult<MigrationProgress> {
@@ -3296,7 +3296,7 @@ async fn attachments_migrate(
 }
 
 #[tauri::command]
-async fn open_path(app: tauri::AppHandle, path: String) -> AppResult<()> {
+async fn open_path<R: tauri::Runtime>(app: tauri::AppHandle<R>, path: String) -> AppResult<()> {
     let app = app.clone();
     dispatch_async_app_result(move || {
         let path = path;
@@ -3329,7 +3329,9 @@ async fn open_path(app: tauri::AppHandle, path: String) -> AppResult<()> {
 }
 
 #[tauri::command]
-async fn diagnostics_summary(app: tauri::AppHandle) -> AppResult<diagnostics::Summary> {
+async fn diagnostics_summary<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> AppResult<diagnostics::Summary> {
     let app = app.clone();
     dispatch_async_app_result(move || {
         let app = app;
@@ -3378,12 +3380,14 @@ async fn diagnostics_household_stats(
 
 #[tauri::command]
 #[allow(clippy::result_large_err)]
-fn about_metadata(app: tauri::AppHandle) -> AppResult<diagnostics::AboutInfo> {
+fn about_metadata<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> AppResult<diagnostics::AboutInfo> {
     Ok(diagnostics::about_info(&app))
 }
 
 #[tauri::command]
-async fn diagnostics_doc_path(app: tauri::AppHandle) -> AppResult<String> {
+async fn diagnostics_doc_path<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> AppResult<String> {
     let app = app.clone();
     dispatch_async_app_result(move || {
         let app = app;
@@ -3393,7 +3397,7 @@ async fn diagnostics_doc_path(app: tauri::AppHandle) -> AppResult<String> {
 }
 
 #[tauri::command]
-async fn open_diagnostics_doc(app: tauri::AppHandle) -> AppResult<()> {
+async fn open_diagnostics_doc<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> AppResult<()> {
     let app = app.clone();
     dispatch_async_app_result(move || {
         let app = app;
@@ -3449,8 +3453,8 @@ async fn db_backup_reveal(state: State<'_, AppState>, path: String) -> AppResult
 }
 
 #[tauri::command]
-async fn db_export_run(
-    _app: tauri::AppHandle,
+async fn db_export_run<R: tauri::Runtime>(
+    _app: tauri::AppHandle<R>,
     state: State<'_, AppState>,
     out_parent: String,
 ) -> AppResult<export::ExportEntryDto> {
@@ -3473,8 +3477,8 @@ async fn db_export_run(
 }
 
 #[tauri::command]
-async fn db_repair_run(
-    app: tauri::AppHandle,
+async fn db_repair_run<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, AppState>,
 ) -> AppResult<DbRepairSummary> {
     let maintenance_guard = state.begin_maintenance()?;
