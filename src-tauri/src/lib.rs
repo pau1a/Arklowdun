@@ -3920,6 +3920,48 @@ pub fn run() {
                 VaultMigrationManager::new(&attachments_root)
                     .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?,
             );
+
+            let sentinel_exists = vault_migration.last_apply_ok_path().exists();
+            if sentinel_exists {
+                tracing::info!(
+                    target: "arklowdun",
+                    event = "vault_migration_startup_housekeeping",
+                    "Verifying vault housekeeping on startup (sentinel present)"
+                );
+                match tauri::async_runtime::block_on(crate::vault_migration::ensure_housekeeping(
+                    &pool, &vault,
+                )) {
+                    Ok(()) => {
+                        tracing::info!(
+                            target: "arklowdun",
+                            event = "vault_migration_housekeeping_ok",
+                            "Housekeeping passed; vault considered configured"
+                        );
+                    }
+                    Err(err) => {
+                        tracing::error!(
+                            target: "arklowdun",
+                            event = "vault_migration_housekeeping_failed",
+                            error = %err,
+                            "Housekeeping failed; clearing sentinel and leaving migration pending"
+                        );
+                        if let Err(clear_err) = vault_migration.clear_last_apply_ok() {
+                            tracing::error!(
+                                target: "arklowdun",
+                                event = "vault_migration_clear_sentinel_failed",
+                                error = %clear_err,
+                                "Failed to clear vault migration sentinel after housekeeping failure"
+                            );
+                        }
+                    }
+                }
+            } else {
+                tracing::info!(
+                    target: "arklowdun",
+                    event = "vault_migration_startup_skipped",
+                    "Skipping housekeeping: migration not yet applied (no sentinel)"
+                );
+            }
             app.manage(crate::state::AppState {
                 pool: pool_handle,
                 active_household_id: Arc::new(Mutex::new(active_id.clone())),

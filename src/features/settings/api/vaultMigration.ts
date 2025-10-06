@@ -8,6 +8,7 @@ export interface MigrationCounts {
   skipped: number;
   conflicts: number;
   unsupported: number;
+  skipped_reasons?: Record<string, number>;
 }
 
 export interface MigrationProgress {
