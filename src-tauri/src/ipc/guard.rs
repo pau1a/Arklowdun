@@ -104,6 +104,7 @@ mod tests {
     use super::*;
     use crate::db::health::DbHealthReport;
     use crate::events_tz_backfill::BackfillCoordinator;
+    use crate::files_indexer::FilesIndexer;
     use crate::household_active::StoreHandle;
     use crate::vault::Vault;
     use crate::vault_migration::VaultMigrationManager;
@@ -127,6 +128,7 @@ mod tests {
             .expect("temp attachments dir")
             .keep();
         fs::create_dir_all(&attachments).expect("create attachments root");
+        let vault = Arc::new(Vault::new(attachments.clone()));
         AppState {
             pool: Arc::new(RwLock::new(pool)),
             active_household_id: Arc::new(Mutex::new(String::new())),
@@ -134,11 +136,12 @@ mod tests {
             backfill: Arc::new(Mutex::new(BackfillCoordinator::new())),
             db_health: Arc::new(Mutex::new(report)),
             db_path: Arc::new(PathBuf::from("test.sqlite3")),
-            vault: Arc::new(Vault::new(attachments.clone())),
+            vault: vault.clone(),
             vault_migration: Arc::new(
                 VaultMigrationManager::new(&attachments).expect("create vault migration manager"),
             ),
             maintenance: Arc::new(AtomicBool::new(false)),
+            files_indexer: Arc::new(FilesIndexer::new(pool.clone(), vault)),
         }
     }
 

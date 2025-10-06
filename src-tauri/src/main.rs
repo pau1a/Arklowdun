@@ -130,9 +130,7 @@ fn main() {
 
     let cli = Cli::parse();
     if cli.resume_migration && cli.command.is_some() {
-        eprintln!(
-            "Error: --resume-migration cannot be used together with a subcommand."
-        );
+        eprintln!("Error: --resume-migration cannot be used together with a subcommand.");
         process::exit(2);
     }
     if cli.resume_migration {
@@ -196,7 +194,9 @@ fn handle_resume_migration() -> Result<i32> {
                         Some(mode) => mode,
                         None => {
                             pool.close().await;
-                            return Ok::<Option<(MigrationMode, MigrationProgress)>, anyhow::Error>(None);
+                            return Ok::<Option<(MigrationMode, MigrationProgress)>, anyhow::Error>(
+                                None,
+                            );
                         }
                     };
                     let progress = run_vault_migration_headless(

@@ -32,6 +32,12 @@ type HouseholdRecordRaw = {
   deleted_at: number | null;
 };
 
+type FilesIndexStatusSnapshot = {
+  lastBuiltAt: string | null;
+  rowCount: number;
+  state: "Idle" | "Building" | "Cancelling" | "Error";
+};
+
 type ScenarioData = {
   households: HouseholdRecordRaw[];
   activeHouseholdId: string;
@@ -55,10 +61,12 @@ type ScenarioData = {
     validation: ValidationReport;
     hard: HardRepairOutcome;
   };
+  filesIndex?: Record<string, FilesIndexStatusSnapshot>;
 };
 
 type MutableScenarioState = ScenarioData & {
   cursor: number;
+  filesIndex: Record<string, FilesIndexStatusSnapshot>;
 };
 
 function cloneData(data: ScenarioData): MutableScenarioState {
@@ -88,6 +96,12 @@ function cloneData(data: ScenarioData): MutableScenarioState {
       validation: { ...data.repair.validation },
       hard: { ...data.repair.hard },
     },
+    filesIndex: Object.fromEntries(
+      Object.entries(data.filesIndex ?? {}).map(([householdId, snapshot]) => [
+        householdId,
+        { ...snapshot },
+      ]),
+    ),
     cursor: 0,
   };
 }
@@ -161,6 +175,20 @@ export function createScenario(config: ScenarioConfig): ScenarioDefinition {
           (category.deleted_at === undefined || category.deleted_at === null),
       ) ?? null
     );
+  };
+
+  const ensureFilesIndexStatus = (householdId: string): FilesIndexStatusSnapshot => {
+    const existing = state.filesIndex[householdId];
+    if (existing) {
+      return existing;
+    }
+    const snapshot: FilesIndexStatusSnapshot = {
+      lastBuiltAt: null,
+      rowCount: 0,
+      state: "Idle",
+    };
+    state.filesIndex[householdId] = snapshot;
+    return snapshot;
   };
 
   const makeNote = (data: Partial<Note> | undefined, ctx: ScenarioContext): Note => {
@@ -247,6 +275,44 @@ export function createScenario(config: ScenarioConfig): ScenarioDefinition {
     db_backup_reveal_root: () => null,
     db_export_run: () => ({ ...state.backups.exportEntry }),
     db_files_index_ready: () => true,
+    files_index_status: (payload) => {
+      const args = (payload as { householdId?: string; args?: { householdId?: string } }) ?? {};
+      const householdId =
+        args.householdId ?? args.args?.householdId ?? state.activeHouseholdId;
+      const snapshot = ensureFilesIndexStatus(householdId);
+      return {
+        last_built_at: snapshot.lastBuiltAt,
+        row_count: snapshot.rowCount,
+        state: snapshot.state,
+      };
+    },
+    files_index_rebuild: (payload, ctx) => {
+      const args = (payload as { householdId?: string; mode?: string; args?: { householdId?: string } }) ?? {};
+      const householdId =
+        args.householdId ?? args.args?.householdId ?? state.activeHouseholdId;
+      const snapshot = ensureFilesIndexStatus(householdId);
+      snapshot.state = "Building";
+      const baseDelta = snapshot.rowCount === 0
+        ? 5
+        : Math.ceil(snapshot.rowCount * 0.2);
+      const updated = Math.max(1, baseDelta);
+      snapshot.rowCount += updated;
+      snapshot.lastBuiltAt = ctx.clock.now().toISOString();
+      snapshot.state = "Idle";
+      return {
+        total: snapshot.rowCount,
+        updated,
+        duration_ms: 1_000,
+      };
+    },
+    files_index_cancel: (payload) => {
+      const args = (payload as { householdId?: string; args?: { householdId?: string } }) ?? {};
+      const householdId =
+        args.householdId ?? args.args?.householdId ?? state.activeHouseholdId;
+      const snapshot = ensureFilesIndexStatus(householdId);
+      snapshot.state = "Idle";
+      return { cancelled: true };
+    },
     db_hard_repair_run: () => ({ ...state.repair.hard }),
     db_has_pet_columns: () => false,
     db_has_vehicle_columns: () => true,

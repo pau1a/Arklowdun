@@ -20,6 +20,7 @@ type EnsureParity = BackendAttachmentCategory extends AttachmentCategory
     : never
   : never;
 const _ensureAttachmentCategoryParity: EnsureParity = true;
+void _ensureAttachmentCategoryParity;
 
 export function isAttachmentCategory(value: string): value is AttachmentCategory {
   return (ATTACHMENT_CATEGORIES as readonly string[]).includes(value);
