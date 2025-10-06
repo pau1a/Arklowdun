@@ -3920,6 +3920,21 @@ pub fn run() {
                 VaultMigrationManager::new(&attachments_root)
                     .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?,
             );
+
+            if !vault_migration.last_apply_ok_path().exists() {
+                tracing::info!(
+                    target: "arklowdun",
+                    event = "vault_migration_startup_housekeeping",
+                    "Running vault housekeeping checks on startup"
+                );
+                tauri::async_runtime::block_on(crate::vault_migration::ensure_housekeeping(
+                    &pool, &vault,
+                ))
+                .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
+                vault_migration
+                    .mark_last_apply_ok()
+                    .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
+            }
             app.manage(crate::state::AppState {
                 pool: pool_handle,
                 active_household_id: Arc::new(Mutex::new(active_id.clone())),
