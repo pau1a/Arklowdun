@@ -28,7 +28,11 @@ use arklowdun_lib::import::{
     ValidationReport, MIN_SUPPORTED_APP_VERSION,
 };
 use arklowdun_lib::ipc::guard::{DB_UNHEALTHY_CLI_HINT, DB_UNHEALTHY_CODE, DB_UNHEALTHY_EXIT_CODE};
-use arklowdun_lib::vault::Vault;
+use arklowdun_lib::vault::{paths, Vault};
+use arklowdun_lib::vault_migration::{
+    run_vault_migration_headless, HeadlessLegacyRoots, MigrationMode, MigrationProgress,
+    VaultMigrationManager,
+};
 use arklowdun_lib::AppError;
 
 #[derive(Debug, Parser)]
@@ -36,6 +40,8 @@ use arklowdun_lib::AppError;
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
+    #[arg(long, conflicts_with = "command")]
+    resume_migration: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -123,6 +129,15 @@ fn main() {
     arklowdun_lib::init_logging();
 
     let cli = Cli::parse();
+    if cli.resume_migration {
+        match handle_resume_migration() {
+            Ok(code) => process::exit(code),
+            Err(err) => {
+                eprintln!("Error: {err:#}");
+                process::exit(1);
+            }
+        }
+    }
     if let Some(command) = cli.command {
         match handle_cli(command) {
             Ok(code) => process::exit(code),
@@ -141,6 +156,77 @@ fn handle_cli(command: Commands) -> Result<i32> {
     match command {
         Commands::Db(db) => handle_db_command(db),
         Commands::Diagnostics(diag) => handle_diagnostics_command(diag),
+    }
+}
+
+fn handle_resume_migration() -> Result<i32> {
+    let db_path = default_db_path().context("determine database path")?;
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create database parent directory {}", parent.display()))?;
+    }
+
+    let attachments_root = default_attachments_path().context("resolve attachments directory")?;
+    fs::create_dir_all(&attachments_root).with_context(|| {
+        format!(
+            "create attachments directory {}",
+            attachments_root.display()
+        )
+    })?;
+
+    let app_data_root = attachments_root
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| anyhow::anyhow!("failed to resolve app data root for attachments"))?;
+    let roots = HeadlessLegacyRoots::new(app_data_root, attachments_root.clone());
+
+    match guard_cli_db_mutation(&db_path)? {
+        Ok(pool) => {
+            let outcome: Option<(MigrationMode, MigrationProgress)> =
+                tauri::async_runtime::block_on(async {
+                    let vault = Arc::new(Vault::new(&attachments_root));
+                    let manager = Arc::new(VaultMigrationManager::new(&attachments_root)?);
+                    let mode = match manager.resume_mode() {
+                        Some(mode) => mode,
+                        None => {
+                            pool.close().await;
+                            return Ok(None);
+                        }
+                    };
+                    let progress = run_vault_migration_headless(
+                        pool.clone(),
+                        vault,
+                        manager,
+                        mode,
+                        roots.clone(),
+                    )
+                    .await?;
+                    pool.close().await;
+                    Ok(Some((mode, progress)))
+                })?;
+
+            if let Some((mode, progress)) = outcome {
+                println!(
+                    "Resumed {mode_label} migration: processed {processed}, copied {copied}, skipped {skipped}, unsupported {unsupported}",
+                    mode_label = match mode {
+                        MigrationMode::DryRun => "dry_run",
+                        MigrationMode::Apply => "apply",
+                    },
+                    processed = progress.counts.processed,
+                    copied = progress.counts.copied,
+                    skipped = progress.counts.skipped,
+                    unsupported = progress.counts.unsupported,
+                );
+                if let Some(path) = progress.manifest_path.as_deref() {
+                    println!("Manifest: {path}");
+                }
+                Ok(0)
+            } else {
+                println!("No vault migration checkpoint found; nothing to resume.");
+                Ok(0)
+            }
+        }
+        Err(code) => Ok(code),
     }
 }
 
@@ -826,13 +912,15 @@ fn default_db_path() -> Result<PathBuf> {
 
 fn default_attachments_path() -> Result<PathBuf> {
     if let Ok(fake) = std::env::var("ARK_FAKE_APPDATA") {
-        return Ok(PathBuf::from(fake).join("attachments"));
+        let base = PathBuf::from(fake);
+        return Ok(paths::attachments_root_for_appdata(&base));
     }
 
     let base = dirs::data_dir()
         .or_else(|| std::env::current_dir().ok())
         .ok_or_else(|| anyhow::anyhow!("failed to resolve application data directory"))?;
-    Ok(base.join("com.paula.arklowdun").join("attachments"))
+    let appdata = base.join("com.paula.arklowdun");
+    Ok(paths::attachments_root_for_appdata(&appdata))
 }
 
 async fn open_health_pool(db_path: &Path) -> Result<SqlitePool> {

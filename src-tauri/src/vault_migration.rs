@@ -23,6 +23,7 @@ const CHECKPOINT_FILE: &str = "checkpoint.json";
 const MANIFEST_FILE: &str = "manifest.json";
 const LAST_APPLY_SENTINEL: &str = "last-apply.ok";
 const EVENT_PROGRESS: &str = "vault:migration_progress";
+const EVENT_COMPLETE: &str = "vault:migration_complete";
 
 const CATEGORY_CHECK: &str =
     "category IS NULL OR category NOT IN ('bills','policies','property_documents','inventory_items','pet_medical','vehicles','vehicle_maintenance','notes','misc')";
@@ -172,6 +173,83 @@ struct ManagerState {
     last_summary: Option<MigrationProgress>,
 }
 
+trait LegacyRootProvider {
+    fn base_for(&self, key: RootKey) -> AppResult<PathBuf>;
+}
+
+trait ProgressSink {
+    fn emit(
+        &mut self,
+        counts: &MigrationCounts,
+        mode: MigrationMode,
+        table: &str,
+        completed: bool,
+        checkpoint_path: Option<&Path>,
+        manifest_path: Option<String>,
+    );
+}
+
+struct SilentProgressSink;
+
+impl ProgressSink for SilentProgressSink {
+    fn emit(
+        &mut self,
+        _counts: &MigrationCounts,
+        _mode: MigrationMode,
+        _table: &str,
+        _completed: bool,
+        _checkpoint_path: Option<&Path>,
+        _manifest_path: Option<String>,
+    ) {
+    }
+}
+
+#[derive(Clone)]
+pub struct HeadlessLegacyRoots {
+    app_data: PathBuf,
+    attachments: PathBuf,
+}
+
+impl HeadlessLegacyRoots {
+    pub fn new(app_data: PathBuf, attachments: PathBuf) -> Self {
+        Self {
+            app_data,
+            attachments,
+        }
+    }
+}
+
+impl LegacyRootProvider for HeadlessLegacyRoots {
+    fn base_for(&self, key: RootKey) -> AppResult<PathBuf> {
+        let path = match key {
+            RootKey::AppData => self.app_data.clone(),
+            RootKey::Attachments => self.attachments.clone(),
+        };
+        Ok(path)
+    }
+}
+
+fn root_key_label(key: RootKey) -> &'static str {
+    match key {
+        RootKey::AppData => "appData",
+        RootKey::Attachments => "attachments",
+    }
+}
+
+impl<R: tauri::Runtime> LegacyRootProvider for tauri::AppHandle<R> {
+    fn base_for(&self, key: RootKey) -> AppResult<PathBuf> {
+        fs_policy::base_for(key, self).map_err(|err| {
+            AppError::new(
+                "VAULT/LEGACY_BASE",
+                "Failed to resolve legacy attachment root.",
+            )
+            .with_context("operation", "vault_migration_legacy_base")
+            .with_context("root_key", root_key_label(key).to_string())
+            .with_context("error", err.name().to_string())
+        })
+    }
+}
+
 pub struct VaultMigrationManager {
     state_dir: PathBuf,
     state: Mutex<ManagerState>,
@@ -288,6 +366,10 @@ impl VaultMigrationManager {
         let mut guard = self.state.lock().expect("manager state poisoned");
         guard.running = false;
     }
+
+    pub fn resume_mode(&self) -> Option<MigrationMode> {
+        load_checkpoint(&self.checkpoint_path()).map(|checkpoint| checkpoint.mode)
+    }
 }
 
 pub async fn run_vault_migration<R: tauri::Runtime + 'static>(
@@ -297,6 +379,49 @@ pub async fn run_vault_migration<R: tauri::Runtime + 'static>(
     manager: std::sync::Arc<VaultMigrationManager>,
     mode: MigrationMode,
 ) -> AppResult<MigrationProgress> {
+    let mut emitter = EventProgressEmitter::new(app.clone());
+    let app_roots = app.clone();
+    let result =
+        run_vault_migration_with(pool, vault, manager.clone(), mode, &mut emitter, &app_roots)
+            .await;
+
+    if let Ok(summary) = &result {
+        if let Err(err) = app.emit(EVENT_COMPLETE, summary) {
+            tracing::warn!(
+                target: "arklowdun",
+                event = "vault_migration_complete_emit_failed",
+                error = %err,
+                "Failed to emit vault migration completion",
+            );
+        }
+    }
+
+    result
+}
+
+pub async fn run_vault_migration_headless(
+    pool: SqlitePool,
+    vault: std::sync::Arc<Vault>,
+    manager: std::sync::Arc<VaultMigrationManager>,
+    mode: MigrationMode,
+    roots: HeadlessLegacyRoots,
+) -> AppResult<MigrationProgress> {
+    let mut sink = SilentProgressSink;
+    run_vault_migration_with(pool, vault, manager, mode, &mut sink, &roots).await
+}
+
+async fn run_vault_migration_with<Roots, Sink>(
+    pool: SqlitePool,
+    vault: std::sync::Arc<Vault>,
+    manager: std::sync::Arc<VaultMigrationManager>,
+    mode: MigrationMode,
+    emitter: &mut Sink,
+    roots: &Roots,
+) -> AppResult<MigrationProgress>
+where
+    Roots: LegacyRootProvider + ?Sized,
+    Sink: ProgressSink,
+{
     manager.begin()?;
     let checkpoint_path = manager.checkpoint_path();
     let manifest_path = manager.manifest_path();
@@ -305,14 +430,15 @@ pub async fn run_vault_migration<R: tauri::Runtime + 'static>(
         manager.clear_last_apply_ok()?;
     }
 
-    let result = execute_migration(
-        app.clone(),
+    let result = execute_migration_inner(
         &pool,
         vault.clone(),
         manager.as_ref(),
         &checkpoint_path,
         &manifest_path,
         mode,
+        emitter,
+        roots,
     )
     .await;
 
@@ -328,15 +454,20 @@ pub async fn run_vault_migration<R: tauri::Runtime + 'static>(
     }
 }
 
-async fn execute_migration<R: tauri::Runtime + 'static>(
-    app: tauri::AppHandle<R>,
+async fn execute_migration_inner<Roots, Sink>(
     pool: &SqlitePool,
     vault: std::sync::Arc<Vault>,
     manager: &VaultMigrationManager,
     checkpoint_path: &Path,
     manifest_path: &Path,
     mode: MigrationMode,
-) -> AppResult<MigrationProgress> {
+    emitter: &mut Sink,
+    roots: &Roots,
+) -> AppResult<MigrationProgress>
+where
+    Roots: LegacyRootProvider + ?Sized,
+    Sink: ProgressSink,
+{
     let mut counts = MigrationCounts::default();
     let mut checkpoint = load_checkpoint(checkpoint_path).unwrap_or_else(|| Checkpoint {
         table_index: 0,
@@ -347,7 +478,6 @@ async fn execute_migration<R: tauri::Runtime + 'static>(
     checkpoint.mode = mode;
     save_checkpoint(checkpoint_path, &checkpoint).await?;
 
-    let mut emitter = ProgressEmitter::new(app.clone());
     let mut manifest_writer = ManifestWriter::new(manifest_path).await?;
 
     for (idx, table) in ATTACHMENT_TABLES
@@ -419,7 +549,7 @@ async fn execute_migration<R: tauri::Runtime + 'static>(
             let mut target_hash = Some(hash_path(&target_path));
 
             let legacy_resolution =
-                resolve_legacy_path(&app, legacy_root.as_deref(), &relative_path)?;
+                resolve_legacy_path(roots, legacy_root.as_deref(), &relative_path)?;
             let legacy_unsupported =
                 matches!(&legacy_resolution, LegacyResolution::Unsupported { .. });
 
@@ -639,13 +769,13 @@ async fn execute_migration<R: tauri::Runtime + 'static>(
     Ok(summary)
 }
 
-struct ProgressEmitter<R: tauri::Runtime + 'static> {
+struct EventProgressEmitter<R: tauri::Runtime + 'static> {
     app: tauri::AppHandle<R>,
     last_emit: Instant,
     interval: Duration,
 }
 
-impl<R: tauri::Runtime + 'static> ProgressEmitter<R> {
+impl<R: tauri::Runtime + 'static> EventProgressEmitter<R> {
     fn new(app: tauri::AppHandle<R>) -> Self {
         Self {
             app,
@@ -653,7 +783,9 @@ impl<R: tauri::Runtime + 'static> ProgressEmitter<R> {
             interval: Duration::from_millis(200),
         }
     }
+}
 
+impl<R: tauri::Runtime + 'static> ProgressSink for EventProgressEmitter<R> {
     fn emit(
         &mut self,
         counts: &MigrationCounts,
@@ -935,8 +1067,8 @@ struct LegacySource {
     path: PathBuf,
 }
 
-fn resolve_legacy_path<R: tauri::Runtime + 'static>(
-    app: &tauri::AppHandle<R>,
+fn resolve_legacy_path(
+    roots: &impl LegacyRootProvider,
     root: Option<&str>,
     relative: &str,
 ) -> AppResult<LegacyResolution> {
@@ -968,15 +1100,7 @@ fn resolve_legacy_path<R: tauri::Runtime + 'static>(
         });
     }
 
-    let base = fs_policy::base_for(key, app).map_err(|err| {
-        AppError::new(
-            "VAULT/LEGACY_BASE",
-            "Failed to resolve legacy attachment root.",
-        )
-        .with_context("operation", "vault_migration_legacy_base")
-        .with_context("root_key", root.to_string())
-        .with_context("error", err.name().to_string())
-    })?;
+    let base = roots.base_for(key)?;
 
     let mut candidate = base.clone();
     candidate.push(relative_path);
@@ -1118,6 +1242,29 @@ fn log_delete_decision(
         outcome,
         reason = reason.unwrap_or_default(),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn resume_mode_reads_checkpoint() {
+        let dir = tempdir().expect("tempdir");
+        let manager = VaultMigrationManager::new(dir.path()).expect("manager");
+        let checkpoint_path = manager.checkpoint_path();
+        let checkpoint = Checkpoint {
+            table_index: 3,
+            last_id: Some("item-42".into()),
+            mode: MigrationMode::Apply,
+        };
+        save_checkpoint(&checkpoint_path, &checkpoint)
+            .await
+            .expect("write checkpoint");
+
+        assert_eq!(manager.resume_mode(), Some(MigrationMode::Apply));
+    }
 }
 
 pub async fn ensure_housekeeping(pool: &SqlitePool, vault: &Vault) -> AppResult<()> {
