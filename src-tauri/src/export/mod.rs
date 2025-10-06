@@ -664,7 +664,7 @@ Write-Host 'OK'
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{db, vault};
+    use crate::db;
     use anyhow::Result;
     use sqlx::SqlitePool;
     use std::sync::Arc;
