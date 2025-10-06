@@ -1,11 +1,11 @@
 use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use fs2::available_space;
 use sha2::{Digest, Sha256};
@@ -13,15 +13,13 @@ use sqlx::{Row, SqlitePool};
 use tokio::task;
 
 use crate::{
-    db,
-    db::manifest as db_manifest,
-    repo,
-    security::fs_policy::{self, RootKey},
-    AppError, AppResult,
+    attachment_category::AttachmentCategory, db, db::manifest as db_manifest, repo,
+    security::hash_path, vault::Vault, AppError, AppResult,
 };
 
 use self::manifest::{file_sha256, ExportManifest, TableInfo};
 use serde::Serialize;
+use tracing::warn;
 use ts_rs::TS;
 
 pub mod manifest;
@@ -63,9 +61,9 @@ impl From<ExportEntry> for ExportEntryDto {
 }
 
 /// Create an export bundle under `<out_parent>/export-YYYYMMDD-HHMMSS[-NN]/...`.
-pub async fn create_export<R: tauri::Runtime>(
-    app: Option<&tauri::AppHandle<R>>,
+pub async fn create_export(
     pool: &SqlitePool,
+    vault: Arc<Vault>,
     opts: ExportOptions,
 ) -> AppResult<ExportEntry> {
     let out_parent = opts.out_parent;
@@ -73,11 +71,7 @@ pub async fn create_export<R: tauri::Runtime>(
         .await
         .map_err(|err| AppError::from(err).with_context("operation", "schema_version"))?;
 
-    let (attachments_base, app_version) = (
-        resolve_attachments_base(app)
-            .map_err(|e| AppError::from(e).with_context("operation", "resolve_attachments_base"))?,
-        env!("CARGO_PKG_VERSION").to_string(),
-    );
+    let app_version = env!("CARGO_PKG_VERSION").to_string();
 
     // Preflight: ensure parent exists and enough space is available.
     fs::create_dir_all(&out_parent).map_err(|err| {
@@ -87,8 +81,8 @@ pub async fn create_export<R: tauri::Runtime>(
     })?;
 
     let preflight = task::spawn_blocking({
-        let attachments_base = attachments_base.clone();
-        move || estimate_export_size(&attachments_base)
+        let vault = vault.clone();
+        move || estimate_export_size(&vault)
     })
     .await
     .map_err(|err| {
@@ -164,14 +158,9 @@ pub async fn create_export<R: tauri::Runtime>(
 
     // Copy attachments with deterministic order and build attachment manifests
     let (attachments_total_count, attachments_total_bytes, attachments_manifest_sha) =
-        copy_attachments_and_build_manifests(
-            pool,
-            &attachments_base,
-            &attachments_dir,
-            &export_dir,
-        )
-        .await
-        .map_err(|err| AppError::from(err).with_context("operation", "copy_attachments"))?;
+        copy_attachments_and_build_manifests(pool, vault.as_ref(), &attachments_dir, &export_dir)
+            .await
+            .map_err(|err| err.with_context("operation", "copy_attachments"))?;
 
     manifest.attachments.total_count = attachments_total_count as u64;
     manifest.attachments.total_bytes = attachments_total_bytes as u64;
@@ -206,8 +195,9 @@ struct SizeEstimate {
     required_bytes: u64,
 }
 
-fn estimate_export_size(attachments_base: &Path) -> AppResult<SizeEstimate> {
+fn estimate_export_size(vault: &Vault) -> AppResult<SizeEstimate> {
     let mut total: u64 = 20_000; // small overhead for metadata + scripts
+    let attachments_base = vault.base();
     if attachments_base.exists() {
         total = total.saturating_add(dir_size(attachments_base).unwrap_or(0));
     }
@@ -218,7 +208,7 @@ fn estimate_export_size(attachments_base: &Path) -> AppResult<SizeEstimate> {
     })
 }
 
-async fn current_schema_version(pool: &SqlitePool) -> Result<String> {
+async fn current_schema_version(pool: &SqlitePool) -> anyhow::Result<String> {
     if let Some(v) = sqlx::query_scalar::<_, String>(
         "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1",
     )
@@ -231,7 +221,11 @@ async fn current_schema_version(pool: &SqlitePool) -> Result<String> {
     db_manifest::schema_hash(pool).await
 }
 
-async fn dump_table_jsonl(pool: &SqlitePool, table: &str, path: &Path) -> Result<(u64, String)> {
+async fn dump_table_jsonl(
+    pool: &SqlitePool,
+    table: &str,
+    path: &Path,
+) -> anyhow::Result<(u64, String)> {
     // Dump SELECT * in stable order; only some tables have deleted_at
     let order = "id";
     let has_deleted = matches!(
@@ -275,80 +269,192 @@ async fn dump_table_jsonl(pool: &SqlitePool, table: &str, path: &Path) -> Result
 
 async fn copy_attachments_and_build_manifests(
     pool: &SqlitePool,
-    attach_base: &Path,
+    vault: &Vault,
     dest_root: &Path,
     export_root: &Path,
-) -> Result<(usize, u64, String)> {
-    let sources = load_attachment_rel_paths(pool).await?;
+) -> AppResult<(usize, u64, String)> {
+    let mut sources = load_attachment_sources(pool)
+        .await
+        .map_err(|err| err.with_context("operation", "load_attachment_sources"))?;
+    sources.sort_by(|a, b| {
+        a.household_id
+            .cmp(&b.household_id)
+            .then(a.category.as_str().cmp(b.category.as_str()))
+            .then(a.relative_path.cmp(&b.relative_path))
+            .then(a.table.cmp(&b.table))
+    });
+    sources.dedup_by(|a, b| {
+        a.household_id == b.household_id
+            && a.category == b.category
+            && a.relative_path == b.relative_path
+    });
 
     // Manifests: one that reflects exported files (for verification), one from DB references (log missing)
     let attach_manifest_path = export_root.join("attachments_manifest.txt");
     let db_list_path = export_root.join("attachments_db_manifest.txt");
-    let mut attach_manifest = fs::File::create(&attach_manifest_path)?;
-    let mut db_manifest = fs::File::create(&db_list_path)?;
+    let mut attach_manifest = fs::File::create(&attach_manifest_path).map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "create_attachments_manifest")
+            .with_context("path", attach_manifest_path.display().to_string())
+    })?;
+    let mut db_manifest = fs::File::create(&db_list_path).map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "create_db_manifest")
+            .with_context("path", db_list_path.display().to_string())
+    })?;
 
     let mut total_bytes: u64 = 0;
     let mut total_count: usize = 0;
 
-    for rel in &sources {
-        // DB manifest logging
-        let src_path = attach_base.join(rel);
-        if src_path.is_file() {
-            // Copy and hash
-            let dest_path = dest_root.join(rel);
+    for source in &sources {
+        let resolved = vault
+            .resolve(&source.household_id, source.category, &source.relative_path)
+            .map_err(|err| {
+                err.with_context("table", source.table.to_string())
+                    .with_context("household_id", source.household_id.clone())
+                    .with_context("operation", "export_resolve_attachment")
+            })?;
+
+        let manifest_key = format!(
+            "{}/{}/{}",
+            source.household_id,
+            source.category.as_str(),
+            source.relative_path
+        );
+
+        if resolved.is_file() {
+            let dest_path = dest_root.join(&manifest_key);
             if let Some(parent) = dest_path.parent() {
-                fs::create_dir_all(parent).ok();
+                fs::create_dir_all(parent).map_err(|err| {
+                    AppError::from(err)
+                        .with_context("operation", "ensure_export_directory")
+                        .with_context("path", parent.display().to_string())
+                })?;
             }
-            let hash = copy_and_hash(&src_path, &dest_path)?;
+            let hash = copy_and_hash(&resolved, &dest_path).map_err(|err| {
+                err.with_context("operation", "copy_export_attachment")
+                    .with_context("table", source.table.to_string())
+                    .with_context("household_id", source.household_id.clone())
+            })?;
             let size = fs::metadata(&dest_path).map(|m| m.len()).unwrap_or(0);
             total_bytes = total_bytes.saturating_add(size);
             total_count += 1;
-            writeln!(attach_manifest, "{}\t{}", rel, hash)?;
-            writeln!(db_manifest, "{}\t{}", rel, hash)?;
+            writeln!(attach_manifest, "{}\t{}", manifest_key, hash)?;
+            writeln!(db_manifest, "{}\t{}", manifest_key, hash)?;
         } else {
-            // Missing file; log as MISSING in DB manifest
-            writeln!(db_manifest, "{}\tMISSING", rel)?;
+            warn!(
+                target: "arklowdun",
+                event = "export_attachment_missing",
+                household_id = source.household_id.as_str(),
+                category = source.category.as_str(),
+                table = source.table,
+                relative_hash = %hash_path(Path::new(&manifest_key)),
+                path_hash = %hash_path(&resolved),
+                "Attachment missing during export"
+            );
+            writeln!(db_manifest, "{}\tMISSING", manifest_key)?;
         }
     }
     attach_manifest.flush().ok();
     db_manifest.flush().ok();
-    let sha = file_sha256(&attach_manifest_path)?;
+    let sha = file_sha256(&attach_manifest_path).map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "hash_attachments_manifest")
+            .with_context("path", attach_manifest_path.display().to_string())
+    })?;
     Ok((total_count, total_bytes, sha))
 }
 
-async fn load_attachment_rel_paths(pool: &SqlitePool) -> Result<Vec<String>> {
-    // Collect distinct relative_path across all tables that may carry attachments, where root_key='attachments'
-    let tables = [
-        "bills",
-        "policies",
-        "property_documents",
-        "inventory_items",
-        "vehicle_maintenance",
-        "pet_medical",
-    ];
-    let mut set: BTreeSet<String> = BTreeSet::new();
-    for t in tables {
-        let sql = format!(
-            "SELECT DISTINCT relative_path FROM {t} WHERE deleted_at IS NULL AND root_key = 'attachments' AND relative_path IS NOT NULL"
-        );
-        let rows = sqlx::query(&sql).fetch_all(pool).await?;
-        for row in rows {
-            let rel: Option<String> = row.try_get("relative_path").ok();
-            if let Some(rel) = rel {
-                if !rel.trim().is_empty() {
-                    set.insert(rel);
-                }
-            }
-        }
-    }
-    Ok(set.into_iter().collect())
+#[derive(Debug, Clone)]
+struct ExportAttachmentSource {
+    table: &'static str,
+    household_id: String,
+    category: AttachmentCategory,
+    relative_path: String,
 }
 
-fn copy_and_hash(src: &Path, dest: &Path) -> Result<String> {
-    let mut in_f =
-        fs::File::open(src).with_context(|| format!("open attachment: {}", src.display()))?;
-    let mut out_f =
-        fs::File::create(dest).with_context(|| format!("create attachment: {}", dest.display()))?;
+async fn load_attachment_sources(pool: &SqlitePool) -> AppResult<Vec<ExportAttachmentSource>> {
+    use std::str::FromStr;
+
+    // Collect attachment coordinates across all tables that reference the vault.
+    let tables: [(&str, AttachmentCategory); 6] = [
+        ("bills", AttachmentCategory::Bills),
+        ("policies", AttachmentCategory::Policies),
+        ("property_documents", AttachmentCategory::PropertyDocuments),
+        ("inventory_items", AttachmentCategory::InventoryItems),
+        (
+            "vehicle_maintenance",
+            AttachmentCategory::VehicleMaintenance,
+        ),
+        ("pet_medical", AttachmentCategory::PetMedical),
+    ];
+
+    let mut entries = Vec::new();
+
+    for (table, default_category) in tables {
+        let sql = format!(
+            "SELECT household_id, category, relative_path FROM {table} \
+             WHERE deleted_at IS NULL AND root_key = 'attachments' \
+             AND relative_path IS NOT NULL"
+        );
+        let rows = sqlx::query(&sql).fetch_all(pool).await.map_err(|err| {
+            AppError::from(err)
+                .with_context("operation", "load_attachment_sources")
+                .with_context("table", table.to_string())
+        })?;
+        for row in rows {
+            let household_id: String = row.try_get("household_id").unwrap_or_default();
+            if household_id.trim().is_empty() {
+                continue;
+            }
+
+            let rel: Option<String> = row.try_get("relative_path").ok();
+            let Some(rel) = rel.filter(|value| !value.trim().is_empty()) else {
+                continue;
+            };
+
+            let category_raw: Option<String> = row.try_get("category").ok();
+            let category = match category_raw.as_deref() {
+                Some(raw) => match AttachmentCategory::from_str(raw) {
+                    Ok(value) => value,
+                    Err(_) => {
+                        warn!(
+                            target: "arklowdun",
+                            event = "export_attachment_category_fallback",
+                            table,
+                            household_id = household_id.as_str(),
+                            raw_category = raw,
+                            "Falling back to table default for attachment category"
+                        );
+                        default_category
+                    }
+                },
+                None => default_category,
+            };
+
+            entries.push(ExportAttachmentSource {
+                table,
+                household_id,
+                category,
+                relative_path: rel,
+            });
+        }
+    }
+
+    Ok(entries)
+}
+
+fn copy_and_hash(src: &Path, dest: &Path) -> AppResult<String> {
+    let mut in_f = fs::File::open(src).map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "open_export_attachment")
+            .with_context("path", src.display().to_string())
+    })?;
+    let mut out_f = fs::File::create(dest).map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "create_export_attachment")
+            .with_context("path", dest.display().to_string())
+    })?;
     let mut hasher = Sha256::new();
     let mut buf = [0_u8; 131072];
     loop {
@@ -369,7 +475,7 @@ fn tmp_path(final_path: &Path) -> PathBuf {
     PathBuf::from(s)
 }
 
-fn free_disk_space(path: &Path) -> Result<u64> {
+fn free_disk_space(path: &Path) -> anyhow::Result<u64> {
     let target: Cow<'_, Path> = if path.exists() {
         Cow::Borrowed(path)
     } else if let Some(parent) = path.parent() {
@@ -380,7 +486,7 @@ fn free_disk_space(path: &Path) -> Result<u64> {
     available_space(target.as_ref()).map_err(|e| anyhow::anyhow!(e))
 }
 
-fn dir_size(path: &Path) -> Result<u64> {
+fn dir_size(path: &Path) -> anyhow::Result<u64> {
     let mut total = 0_u64;
     for entry in fs::read_dir(path)? {
         let entry = entry?;
@@ -429,7 +535,7 @@ fn write_verify_scripts(
     ps1_path: &Path,
     tables: &BTreeMap<String, TableInfo>,
     attachments_manifest_sha: &str,
-) -> Result<()> {
+) -> anyhow::Result<()> {
     // Extract expected table hashes if available
     let expect = |key: &str| {
         tables
@@ -561,6 +667,7 @@ mod tests {
     use crate::db;
     use anyhow::Result;
     use sqlx::SqlitePool;
+    use std::sync::Arc;
     use tempfile::TempDir;
 
     async fn setup_pool(dir: &TempDir, version: &str) -> Result<SqlitePool> {
@@ -609,6 +716,8 @@ mod tests {
                 "bills",
                 "CREATE TABLE bills (
                     id TEXT PRIMARY KEY,
+                    household_id TEXT,
+                    category TEXT,
                     relative_path TEXT,
                     root_key TEXT,
                     deleted_at INTEGER
@@ -618,6 +727,8 @@ mod tests {
                 "policies",
                 "CREATE TABLE policies (
                     id TEXT PRIMARY KEY,
+                    household_id TEXT,
+                    category TEXT,
                     relative_path TEXT,
                     root_key TEXT,
                     deleted_at INTEGER
@@ -627,6 +738,8 @@ mod tests {
                 "property_documents",
                 "CREATE TABLE property_documents (
                     id TEXT PRIMARY KEY,
+                    household_id TEXT,
+                    category TEXT,
                     relative_path TEXT,
                     root_key TEXT,
                     deleted_at INTEGER
@@ -636,6 +749,8 @@ mod tests {
                 "inventory_items",
                 "CREATE TABLE inventory_items (
                     id TEXT PRIMARY KEY,
+                    household_id TEXT,
+                    category TEXT,
                     relative_path TEXT,
                     root_key TEXT,
                     deleted_at INTEGER
@@ -645,6 +760,8 @@ mod tests {
                 "vehicle_maintenance",
                 "CREATE TABLE vehicle_maintenance (
                     id TEXT PRIMARY KEY,
+                    household_id TEXT,
+                    category TEXT,
                     relative_path TEXT,
                     root_key TEXT,
                     deleted_at INTEGER
@@ -654,6 +771,8 @@ mod tests {
                 "pet_medical",
                 "CREATE TABLE pet_medical (
                     id TEXT PRIMARY KEY,
+                    household_id TEXT,
+                    category TEXT,
                     relative_path TEXT,
                     root_key TEXT,
                     deleted_at INTEGER
@@ -681,12 +800,11 @@ mod tests {
         let attachments_dir = fake_appdata.path().join("attachments");
         std::fs::create_dir_all(&attachments_dir).expect("create attachments dir");
 
-        let prev = std::env::var_os("ARK_FAKE_APPDATA");
-        std::env::set_var("ARK_FAKE_APPDATA", fake_appdata.path());
+        let vault = Arc::new(Vault::new(&attachments_dir));
 
-        let entry = create_export::<tauri::Wry>(
-            None,
+        let entry = create_export(
             &pool,
+            vault,
             ExportOptions {
                 out_parent: export_dir.path().to_path_buf(),
             },
@@ -713,28 +831,38 @@ mod tests {
             .schema_version
             .to_ascii_lowercase()
             .ends_with(".up.sql"));
+    }
 
-        if let Some(prev) = prev {
-            std::env::set_var("ARK_FAKE_APPDATA", prev);
-        } else {
-            std::env::remove_var("ARK_FAKE_APPDATA");
-        }
-    }
-}
+    #[tokio::test]
+    async fn export_rejects_paths_outside_vault() {
+        let version = "0001_baseline.sql";
+        let db_dir = TempDir::new().expect("create db dir");
+        let pool = setup_pool(&db_dir, version)
+            .await
+            .expect("setup sqlite pool");
 
-fn resolve_attachments_base<R: tauri::Runtime>(
-    app: Option<&tauri::AppHandle<R>>,
-) -> Result<PathBuf> {
-    if let Ok(fake) = std::env::var("ARK_FAKE_APPDATA") {
-        return Ok(PathBuf::from(fake).join("attachments"));
+        sqlx::query(
+            "INSERT INTO bills (id, household_id, category, relative_path, root_key, deleted_at)
+             VALUES ('bill1', 'household_1', 'bills', '../escape.pdf', 'attachments', NULL)",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert attachment row");
+
+        let export_dir = TempDir::new().expect("create export dir");
+        let attachments_dir = TempDir::new().expect("attachments dir");
+        let vault = Arc::new(Vault::new(attachments_dir.path()));
+
+        let err = create_export(
+            &pool,
+            vault,
+            ExportOptions {
+                out_parent: export_dir.path().to_path_buf(),
+            },
+        )
+        .await
+        .expect_err("export should fail for traversal path");
+
+        assert_eq!(err.code(), crate::vault::ERR_PATH_OUT_OF_VAULT);
     }
-    if let Some(app) = app {
-        return fs_policy::base_for(RootKey::Attachments, app)
-            .map_err(|e| anyhow::anyhow!(e.to_string()));
-    }
-    // Fallback for CLI when no app handle exists
-    let base = dirs::data_dir()
-        .or_else(|| std::env::current_dir().ok())
-        .ok_or_else(|| anyhow::anyhow!("failed to resolve application data directory"))?;
-    Ok(base.join("com.paula.arklowdun").join("attachments"))
 }

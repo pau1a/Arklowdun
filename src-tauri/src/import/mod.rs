@@ -1,5 +1,6 @@
 pub mod bundle;
 pub mod execute;
+mod metadata;
 pub mod plan;
 pub mod report;
 mod rows;
@@ -17,6 +18,11 @@ pub use plan::{
 };
 pub use report::write_import_report;
 pub use validator::{validate_bundle, ValidationContext, ValidationError, ValidationReport};
+
+pub(crate) use metadata::{
+    collect_bundle_attachment_metadata, collect_bundle_attachment_updates,
+    BundleAttachmentMetadata, MetadataIssue,
+};
 
 pub const MIN_SUPPORTED_APP_VERSION: &str = "0.1.0";
 pub(crate) const ATTACHMENT_TABLES: &[&str] = &[

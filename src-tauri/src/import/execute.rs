@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, HashMap};
-use std::fs::{self, File};
+use std::fs;
 use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::Error as AnyError;
 use serde::de::Error as _;
@@ -16,24 +17,31 @@ use ts_rs::TS;
 use super::bundle::{AttachmentEntry, DataFileEntry, ImportBundle};
 use super::plan::{AttachmentConflict, ImportMode, ImportPlan, TableConflict, TablePlan};
 use super::rows::canonicalize_row;
-use super::ATTACHMENT_TABLES;
+use super::{
+    collect_bundle_attachment_metadata, collect_bundle_attachment_updates,
+    BundleAttachmentMetadata, MetadataIssue, ATTACHMENT_TABLES,
+};
 use crate::export::manifest::file_sha256;
 use crate::migrate;
+use crate::security::hash_path;
+use crate::vault::{Vault, ERR_FILENAME_INVALID, ERR_NAME_TOO_LONG, ERR_PATH_OUT_OF_VAULT};
+use crate::AppError;
+use tracing::{info, warn};
 
 const ROW_CHUNK_SIZE: usize = 500;
 
 #[derive(Debug, Clone)]
 pub struct ExecutionContext<'a> {
     pub pool: &'a SqlitePool,
-    pub attachments_root: &'a Path,
+    pub vault: Arc<Vault>,
     pub clear_attachments_on_replace: bool,
 }
 
 impl<'a> ExecutionContext<'a> {
-    pub fn new(pool: &'a SqlitePool, attachments_root: &'a Path) -> Self {
+    pub fn new(pool: &'a SqlitePool, vault: Arc<Vault>) -> Self {
         Self {
             pool,
-            attachments_root,
+            vault,
             clear_attachments_on_replace: true,
         }
     }
@@ -129,6 +137,12 @@ pub enum ExecutionError {
     },
     #[error("hash mismatch after copying attachment {path}")]
     AttachmentHashMismatch { path: String },
+    #[error("attachment {path} missing metadata in bundle")]
+    AttachmentMetadataMissing { path: String },
+    #[error("attachment {path} metadata is inconsistent across bundle rows")]
+    AttachmentMetadataConflict { path: String },
+    #[error("attachment {path} metadata has invalid category {category}")]
+    AttachmentMetadataInvalidCategory { path: String, category: String },
 }
 
 pub async fn execute_plan(
@@ -159,9 +173,16 @@ pub async fn execute_plan(
         }
     }
 
+    let metadata_index =
+        collect_bundle_attachment_metadata(bundle).map_err(metadata_error_to_execution)?;
+
     let attachments = match plan.mode {
-        ImportMode::Replace => execute_attachments_replace(bundle, &plan.attachments, ctx)?,
-        ImportMode::Merge => execute_attachments_merge(bundle, &plan.attachments, ctx).await?,
+        ImportMode::Replace => {
+            execute_attachments_replace(bundle, &plan.attachments, ctx, &metadata_index)?
+        }
+        ImportMode::Merge => {
+            execute_attachments_merge(bundle, &plan.attachments, ctx, &metadata_index).await?
+        }
     };
 
     Ok(ExecutionReport {
@@ -525,25 +546,33 @@ fn execute_attachments_replace(
     bundle: &ImportBundle,
     expected: &super::plan::AttachmentsPlan,
     ctx: &ExecutionContext<'_>,
+    metadata_index: &HashMap<String, BundleAttachmentMetadata>,
 ) -> Result<AttachmentExecutionSummary, ExecutionError> {
-    if ctx.clear_attachments_on_replace {
-        if ctx.attachments_root.exists() {
-            fs::remove_dir_all(ctx.attachments_root).map_err(|err| {
-                ExecutionError::AttachmentIo {
-                    path: ctx.attachments_root.display().to_string(),
-                    source: err.into(),
-                }
-            })?;
-        }
+    let base = ctx.vault.base();
+    if ctx.clear_attachments_on_replace && base.exists() {
+        warn!(
+            target: "arklowdun",
+            event = "import_replace_clear_base",
+            path_hash = %hash_path(base),
+        );
+        fs::remove_dir_all(base).map_err(|err| ExecutionError::AttachmentIo {
+            path: base.display().to_string(),
+            source: err.into(),
+        })?;
     }
-    fs::create_dir_all(ctx.attachments_root).map_err(|err| ExecutionError::AttachmentIo {
-        path: ctx.attachments_root.display().to_string(),
+    fs::create_dir_all(base).map_err(|err| ExecutionError::AttachmentIo {
+        path: base.display().to_string(),
         source: err.into(),
     })?;
 
     let mut summary = AttachmentExecutionSummary::default();
     for attachment in bundle.attachments() {
-        copy_attachment(bundle, attachment, ctx.attachments_root)?;
+        let metadata = metadata_index
+            .get(&attachment.relative_path)
+            .ok_or_else(|| ExecutionError::AttachmentMetadataMissing {
+                path: attachment.relative_path.clone(),
+            })?;
+        copy_attachment(bundle, attachment, ctx, metadata)?;
         summary.adds += 1;
     }
 
@@ -555,17 +584,23 @@ async fn execute_attachments_merge(
     bundle: &ImportBundle,
     expected: &super::plan::AttachmentsPlan,
     ctx: &ExecutionContext<'_>,
+    metadata_index: &HashMap<String, BundleAttachmentMetadata>,
 ) -> Result<AttachmentExecutionSummary, ExecutionError> {
     let mut summary = AttachmentExecutionSummary::default();
-    let bundle_updated_index = collect_bundle_attachment_updates(bundle)?;
+    let bundle_updated_index =
+        collect_bundle_attachment_updates(bundle).map_err(metadata_error_to_execution)?;
     for attachment in bundle.attachments() {
-        ensure_safe_relative_path(&attachment.relative_path)?;
-        let dest = ctx.attachments_root.join(&attachment.relative_path);
+        let metadata = metadata_index
+            .get(&attachment.relative_path)
+            .ok_or_else(|| ExecutionError::AttachmentMetadataMissing {
+                path: attachment.relative_path.clone(),
+            })?;
+        let dest = resolve_destination(ctx, metadata, &attachment.relative_path)?;
         let bundle_updated_at = bundle_updated_index.get(&attachment.relative_path).copied();
         let live_updated_at =
-            load_live_attachment_updated_at(ctx.pool, &attachment.relative_path).await?;
+            load_live_attachment_updated_at(ctx.pool, &attachment.relative_path, metadata).await?;
         if !dest.exists() {
-            copy_attachment(bundle, attachment, ctx.attachments_root)?;
+            copy_attachment(bundle, attachment, ctx, metadata)?;
             summary.adds += 1;
             continue;
         }
@@ -580,7 +615,7 @@ async fn execute_attachments_merge(
 
         match decide_attachment_action(bundle_updated_at, live_updated_at) {
             AttachmentAction::BundleWins { reason } => {
-                copy_attachment(bundle, attachment, ctx.attachments_root)?;
+                copy_attachment(bundle, attachment, ctx, metadata)?;
                 summary.updates += 1;
                 summary.conflicts.push(AttachmentConflict {
                     relative_path: attachment.relative_path.clone(),
@@ -639,11 +674,11 @@ fn verify_attachment_summary(
 fn copy_attachment(
     bundle: &ImportBundle,
     attachment: &AttachmentEntry,
-    dest_root: &Path,
+    ctx: &ExecutionContext<'_>,
+    metadata: &BundleAttachmentMetadata,
 ) -> Result<(), ExecutionError> {
-    ensure_safe_relative_path(&attachment.relative_path)?;
     let source = bundle.attachments_dir().join(&attachment.relative_path);
-    let dest = dest_root.join(&attachment.relative_path);
+    let dest = resolve_destination(ctx, metadata, &attachment.relative_path)?;
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent).map_err(|err| ExecutionError::AttachmentIo {
             path: parent.display().to_string(),
@@ -654,6 +689,14 @@ fn copy_attachment(
         path: dest.display().to_string(),
         source: err.into(),
     })?;
+    info!(
+        target: "arklowdun",
+        event = "import_copy_attachment",
+        household_id = metadata.household_id.as_str(),
+        category = metadata.category.as_str(),
+        relative_hash = %hash_path(Path::new(&attachment.relative_path)),
+        path_hash = %hash_path(&dest),
+    );
     let copied_hash = file_sha256(&dest).map_err(|err| ExecutionError::AttachmentIo {
         path: dest.display().to_string(),
         source: err,
@@ -666,70 +709,31 @@ fn copy_attachment(
     Ok(())
 }
 
-fn collect_bundle_attachment_updates(
-    bundle: &ImportBundle,
-) -> Result<HashMap<String, i64>, ExecutionError> {
-    let mut map = HashMap::new();
-    for entry in bundle.data_files() {
-        if !ATTACHMENT_TABLES
-            .iter()
-            .any(|table| *table == entry.logical_name.as_str())
-        {
-            continue;
-        }
-
-        let file = File::open(&entry.path).map_err(|err| ExecutionError::DataFileIo {
-            path: entry.path.display().to_string(),
-            source: err,
-        })?;
-        let reader = BufReader::new(file);
-        for line in reader.lines() {
-            let line = line.map_err(|err| ExecutionError::DataFileIo {
-                path: entry.path.display().to_string(),
-                source: err,
-            })?;
-            if line.trim().is_empty() {
-                continue;
-            }
-            let value: Value =
-                serde_json::from_str(&line).map_err(|err| ExecutionError::DataFileParse {
-                    path: entry.path.display().to_string(),
-                    source: err,
-                })?;
-            let root_key = value.get("root_key").and_then(|v| v.as_str());
-            if !matches!(root_key, Some("attachments")) {
-                continue;
-            }
-            let rel = match value.get("relative_path").and_then(|v| v.as_str()) {
-                Some(rel) if !rel.trim().is_empty() => rel,
-                _ => continue,
-            };
-            if let Some(updated_at) = value.get("updated_at").and_then(|v| v.as_i64()) {
-                map.entry(rel.to_string())
-                    .and_modify(|existing| {
-                        if updated_at > *existing {
-                            *existing = updated_at;
-                        }
-                    })
-                    .or_insert(updated_at);
-            }
-        }
-    }
-    Ok(map)
+fn resolve_destination(
+    ctx: &ExecutionContext<'_>,
+    metadata: &BundleAttachmentMetadata,
+    relative_path: &str,
+) -> Result<PathBuf, ExecutionError> {
+    ctx.vault
+        .resolve(&metadata.household_id, metadata.category, relative_path)
+        .map_err(|err| guard_error_to_execution(relative_path, err))
 }
 
 async fn load_live_attachment_updated_at(
     pool: &SqlitePool,
     rel: &str,
+    metadata: &BundleAttachmentMetadata,
 ) -> Result<Option<i64>, ExecutionError> {
     let mut max_ts: Option<i64> = None;
     let mut conn = pool.acquire().await.map_err(ExecutionError::Database)?;
     for table in ATTACHMENT_TABLES {
         let sql = format!(
-            "SELECT MAX(updated_at) FROM {table} WHERE root_key = 'attachments' AND relative_path = ?1 AND deleted_at IS NULL"
+            "SELECT MAX(updated_at) FROM {table} WHERE root_key = 'attachments' AND relative_path = ?1 AND household_id = ?2 AND category = ?3 AND deleted_at IS NULL"
         );
         let ts: Option<i64> = match sqlx::query_scalar(&sql)
             .bind(rel)
+            .bind(&metadata.household_id)
+            .bind(metadata.category.as_str())
             .fetch_one(conn.as_mut())
             .await
         {
@@ -890,16 +894,29 @@ fn resolve_physical_table(logical: &str) -> Result<&'static str, ExecutionError>
     }
 }
 
-fn ensure_safe_relative_path(rel: &str) -> Result<(), ExecutionError> {
-    let path = Path::new(rel);
-    if path.is_absolute()
-        || path
-            .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir))
-    {
-        return Err(ExecutionError::AttachmentPathTraversal(rel.to_string()));
+fn guard_error_to_execution(rel: &str, err: AppError) -> ExecutionError {
+    match err.code() {
+        ERR_PATH_OUT_OF_VAULT | ERR_FILENAME_INVALID | ERR_NAME_TOO_LONG => {
+            ExecutionError::AttachmentPathTraversal(format!("{rel} ({})", err.code()))
+        }
+        _ => ExecutionError::AttachmentPathTraversal(format!("{rel} ({})", err.code())),
     }
-    Ok(())
+}
+
+fn metadata_error_to_execution(err: MetadataIssue) -> ExecutionError {
+    match err {
+        MetadataIssue::DataFileIo { path, source } => ExecutionError::DataFileIo { path, source },
+        MetadataIssue::DataFileParse { path, source } => {
+            ExecutionError::DataFileParse { path, source }
+        }
+        MetadataIssue::MissingHousehold { path } | MetadataIssue::MissingCategory { path } => {
+            ExecutionError::AttachmentMetadataMissing { path }
+        }
+        MetadataIssue::InvalidCategory { path, category } => {
+            ExecutionError::AttachmentMetadataInvalidCategory { path, category }
+        }
+        MetadataIssue::Conflict { path } => ExecutionError::AttachmentMetadataConflict { path },
+    }
 }
 
 fn quote_ident(name: &str) -> String {
@@ -916,11 +933,14 @@ fn json_extract_for_column(column: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::attachment_category::AttachmentCategory;
     use crate::import::plan::{build_plan, ImportMode, PlanContext};
+    use crate::vault::Vault;
     use serde_json::json;
     use sqlx::sqlite::{
         SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
     };
+    use std::sync::Arc;
     use tempfile::TempDir;
 
     async fn setup_pool() -> (TempDir, SqlitePool) {
@@ -1053,15 +1073,16 @@ mod tests {
         ];
         let bundle = write_bundle(tmp.path(), "household", &rows, &[]);
         let attachments_root = TempDir::new().unwrap();
+        let vault = Arc::new(Vault::new(attachments_root.path()));
         let plan_ctx = PlanContext {
             pool: &pool,
-            attachments_root: attachments_root.path(),
+            vault: vault.clone(),
         };
         let plan = build_plan(&bundle, &plan_ctx, ImportMode::Replace)
             .await
             .unwrap();
 
-        let exec_ctx = ExecutionContext::new(&pool, attachments_root.path());
+        let exec_ctx = ExecutionContext::new(&pool, vault.clone());
         let report = execute_plan(&bundle, &plan, &exec_ctx).await.unwrap();
 
         let rows: Vec<(String, i64)> =
@@ -1091,15 +1112,16 @@ mod tests {
         ];
         let bundle = write_bundle(tmp.path(), "household", &rows, &[]);
         let attachments_root = TempDir::new().unwrap();
+        let vault = Arc::new(Vault::new(attachments_root.path()));
         let plan_ctx = PlanContext {
             pool: &pool,
-            attachments_root: attachments_root.path(),
+            vault: vault.clone(),
         };
         let plan = build_plan(&bundle, &plan_ctx, ImportMode::Merge)
             .await
             .unwrap();
 
-        let exec_ctx = ExecutionContext::new(&pool, attachments_root.path());
+        let exec_ctx = ExecutionContext::new(&pool, vault.clone());
         let report = execute_plan(&bundle, &plan, &exec_ctx).await.unwrap();
         let summary = report.tables.get("household").unwrap();
         assert_eq!(summary.adds, 1);
@@ -1167,15 +1189,16 @@ mod tests {
         );
 
         let attachments_root = TempDir::new().unwrap();
+        let vault = Arc::new(Vault::new(attachments_root.path()));
         let plan_ctx = PlanContext {
             pool: &pool,
-            attachments_root: attachments_root.path(),
+            vault: vault.clone(),
         };
         let plan = build_plan(&bundle, &plan_ctx, ImportMode::Replace)
             .await
             .unwrap();
 
-        let exec_ctx = ExecutionContext::new(&pool, attachments_root.path());
+        let exec_ctx = ExecutionContext::new(&pool, vault.clone());
         let report = execute_plan(&bundle, &plan, &exec_ctx).await.unwrap();
 
         let fk_violations: Vec<(String, i64, String, i64)> =
@@ -1212,23 +1235,50 @@ mod tests {
     async fn attachments_replace_overwrites_destination() {
         let (_db_dir, pool) = setup_pool().await;
         let tmp = TempDir::new().unwrap();
-        let rows = vec![household_row("hh_attach", "Has Attachment", 10)];
         let attachments = vec![("docs/file.txt".to_string(), b"bundle".to_vec())];
-        let bundle = write_bundle(tmp.path(), "household", &rows, &attachments);
+        let bundle = write_bundle_with_tables(
+            tmp.path(),
+            &[
+                (
+                    "household",
+                    vec![household_row("hh_attach", "Has Attachment", 10)],
+                ),
+                (
+                    "bills",
+                    vec![json!({
+                        "id": "bill_attach",
+                        "amount": 100,
+                        "due_date": 0,
+                        "household_id": "hh_attach",
+                        "created_at": 10,
+                        "updated_at": 20,
+                        "deleted_at": null,
+                        "position": 0,
+                        "root_key": "attachments",
+                        "relative_path": "docs/file.txt",
+                        "category": "bills",
+                    })],
+                ),
+            ],
+            &attachments,
+        );
         let attachments_root = TempDir::new().unwrap();
+        let vault = Arc::new(Vault::new(attachments_root.path()));
         let plan_ctx = PlanContext {
             pool: &pool,
-            attachments_root: attachments_root.path(),
+            vault: vault.clone(),
         };
         let plan = build_plan(&bundle, &plan_ctx, ImportMode::Replace)
             .await
             .unwrap();
 
-        let existing_path = attachments_root.path().join("docs/file.txt");
+        let existing_path = vault
+            .resolve("hh_attach", AttachmentCategory::Bills, "docs/file.txt")
+            .unwrap();
         std::fs::create_dir_all(existing_path.parent().unwrap()).unwrap();
         std::fs::write(&existing_path, b"old").unwrap();
 
-        let exec_ctx = ExecutionContext::new(&pool, attachments_root.path());
+        let exec_ctx = ExecutionContext::new(&pool, vault.clone());
         let report = execute_plan(&bundle, &plan, &exec_ctx).await.unwrap();
         assert_eq!(report.attachments.adds, 1);
         let contents = std::fs::read(&existing_path).unwrap();
@@ -1239,7 +1289,7 @@ mod tests {
     async fn attachments_merge_overwrites_when_bundle_newer() {
         let (_db_dir, pool) = setup_pool().await;
         insert_household(&pool, "hh1", "Home", 100).await;
-        sqlx::query("INSERT INTO bills (id, amount, due_date, document, reminder, household_id, created_at, updated_at, deleted_at, position, root_key, relative_path) VALUES (?1, ?2, ?3, NULL, NULL, ?4, ?5, ?6, NULL, 0, 'attachments', ?7)")
+        sqlx::query("INSERT INTO bills (id, amount, due_date, document, reminder, household_id, created_at, updated_at, deleted_at, position, root_key, relative_path, category) VALUES (?1, ?2, ?3, NULL, NULL, ?4, ?5, ?6, NULL, 0, 'attachments', ?7, 'bills')")
             .bind("bill1")
             .bind(100_i64)
             .bind(0_i64)
@@ -1262,17 +1312,28 @@ mod tests {
             "deleted_at": null,
             "root_key": "attachments",
             "relative_path": "docs/file.txt",
+            "category": "bills",
         })];
         let attachments = vec![("docs/file.txt".to_string(), b"bundle".to_vec())];
-        let bundle = write_bundle(tmp.path(), "bills", &rows, &attachments);
+        let bundle = write_bundle_with_tables(
+            tmp.path(),
+            &[
+                ("household", vec![household_row("hh1", "Home", 100)]),
+                ("bills", rows.clone()),
+            ],
+            &attachments,
+        );
         let attachments_root = TempDir::new().unwrap();
-        let existing_path = attachments_root.path().join("docs/file.txt");
+        let vault = Arc::new(Vault::new(attachments_root.path()));
+        let existing_path = vault
+            .resolve("hh1", AttachmentCategory::Bills, "docs/file.txt")
+            .unwrap();
         std::fs::create_dir_all(existing_path.parent().unwrap()).unwrap();
         std::fs::write(&existing_path, b"local").unwrap();
 
         let plan_ctx = PlanContext {
             pool: &pool,
-            attachments_root: attachments_root.path(),
+            vault: vault.clone(),
         };
         let plan = build_plan(&bundle, &plan_ctx, ImportMode::Merge)
             .await
@@ -1284,7 +1345,7 @@ mod tests {
             .reason
             .contains("bundle newer"));
 
-        let exec_ctx = ExecutionContext::new(&pool, attachments_root.path());
+        let exec_ctx = ExecutionContext::new(&pool, vault.clone());
         let report = execute_plan(&bundle, &plan, &exec_ctx).await.unwrap();
         assert_eq!(report.attachments.updates, 1);
         assert_eq!(report.attachments.skips, 0);
@@ -1297,7 +1358,7 @@ mod tests {
     async fn attachments_merge_skips_when_live_newer() {
         let (_db_dir, pool) = setup_pool().await;
         insert_household(&pool, "hh1", "Home", 100).await;
-        sqlx::query("INSERT INTO bills (id, amount, due_date, document, reminder, household_id, created_at, updated_at, deleted_at, position, root_key, relative_path) VALUES (?1, ?2, ?3, NULL, NULL, ?4, ?5, ?6, NULL, 0, 'attachments', ?7)")
+        sqlx::query("INSERT INTO bills (id, amount, due_date, document, reminder, household_id, created_at, updated_at, deleted_at, position, root_key, relative_path, category) VALUES (?1, ?2, ?3, NULL, NULL, ?4, ?5, ?6, NULL, 0, 'attachments', ?7, 'bills')")
             .bind("bill2")
             .bind(100_i64)
             .bind(0_i64)
@@ -1320,17 +1381,28 @@ mod tests {
             "deleted_at": null,
             "root_key": "attachments",
             "relative_path": "docs/file.txt",
+            "category": "bills",
         })];
         let attachments = vec![("docs/file.txt".to_string(), b"bundle".to_vec())];
-        let bundle = write_bundle(tmp.path(), "bills", &rows, &attachments);
+        let bundle = write_bundle_with_tables(
+            tmp.path(),
+            &[
+                ("household", vec![household_row("hh1", "Home", 100)]),
+                ("bills", rows.clone()),
+            ],
+            &attachments,
+        );
         let attachments_root = TempDir::new().unwrap();
-        let existing_path = attachments_root.path().join("docs/file.txt");
+        let vault = Arc::new(Vault::new(attachments_root.path()));
+        let existing_path = vault
+            .resolve("hh1", AttachmentCategory::Bills, "docs/file.txt")
+            .unwrap();
         std::fs::create_dir_all(existing_path.parent().unwrap()).unwrap();
         std::fs::write(&existing_path, b"local").unwrap();
 
         let plan_ctx = PlanContext {
             pool: &pool,
-            attachments_root: attachments_root.path(),
+            vault: vault.clone(),
         };
         let plan = build_plan(&bundle, &plan_ctx, ImportMode::Merge)
             .await
@@ -1340,7 +1412,7 @@ mod tests {
         assert_eq!(plan.attachments.conflicts.len(), 1);
         assert!(plan.attachments.conflicts[0].reason.contains("local newer"));
 
-        let exec_ctx = ExecutionContext::new(&pool, attachments_root.path());
+        let exec_ctx = ExecutionContext::new(&pool, vault.clone());
         let report = execute_plan(&bundle, &plan, &exec_ctx).await.unwrap();
         assert_eq!(report.attachments.updates, 0);
         assert_eq!(report.attachments.skips, 1);
@@ -1366,15 +1438,16 @@ mod tests {
         let rows = vec![household_row("hh_new", "Restored", 42)];
         let bundle = write_bundle(tmp.path(), "household", &rows, &[]);
         let attachments_root = TempDir::new().unwrap();
+        let vault = Arc::new(Vault::new(attachments_root.path()));
         let plan_ctx = PlanContext {
             pool: &pool,
-            attachments_root: attachments_root.path(),
+            vault: vault.clone(),
         };
         let plan = build_plan(&bundle, &plan_ctx, ImportMode::Replace)
             .await
             .unwrap();
 
-        let exec_ctx = ExecutionContext::new(&pool, attachments_root.path());
+        let exec_ctx = ExecutionContext::new(&pool, vault.clone());
         let report = execute_plan(&bundle, &plan, &exec_ctx).await.unwrap();
 
         let households: Vec<(String, i64)> =
@@ -1411,9 +1484,10 @@ mod tests {
         let rows = vec![household_row("hh", "One", 10)];
         let bundle = write_bundle(tmp.path(), "household", &rows, &[]);
         let attachments_root = TempDir::new().unwrap();
+        let vault = Arc::new(Vault::new(attachments_root.path()));
         let plan_ctx = PlanContext {
             pool: &pool,
-            attachments_root: attachments_root.path(),
+            vault: vault.clone(),
         };
         let mut plan = build_plan(&bundle, &plan_ctx, ImportMode::Replace)
             .await
@@ -1422,7 +1496,7 @@ mod tests {
         let household = plan.tables.get_mut("household").unwrap();
         household.adds += 1;
 
-        let exec_ctx = ExecutionContext::new(&pool, attachments_root.path());
+        let exec_ctx = ExecutionContext::new(&pool, vault.clone());
         let err = execute_plan(&bundle, &plan, &exec_ctx).await.unwrap_err();
         matches!(err, ExecutionError::PlanDrift { table, field, .. } if table == "household" && field == "adds")
             .then_some(())
@@ -1433,13 +1507,35 @@ mod tests {
     async fn plan_drift_in_attachments_is_detected() {
         let (_db_dir, pool) = setup_pool().await;
         let tmp = TempDir::new().unwrap();
-        let rows = vec![household_row("hh_attach", "Attach", 1)];
         let attachments = vec![("docs/file.txt".to_string(), b"bundle".to_vec())];
-        let bundle = write_bundle(tmp.path(), "household", &rows, &attachments);
+        let bundle = write_bundle_with_tables(
+            tmp.path(),
+            &[
+                ("household", vec![household_row("hh_attach", "Attach", 1)]),
+                (
+                    "bills",
+                    vec![json!({
+                        "id": "bill_attach",
+                        "amount": 100,
+                        "due_date": 0,
+                        "household_id": "hh_attach",
+                        "created_at": 1,
+                        "updated_at": 1,
+                        "deleted_at": null,
+                        "position": 0,
+                        "root_key": "attachments",
+                        "relative_path": "docs/file.txt",
+                        "category": "bills",
+                    })],
+                ),
+            ],
+            &attachments,
+        );
         let attachments_root = TempDir::new().unwrap();
+        let vault = Arc::new(Vault::new(attachments_root.path()));
         let plan_ctx = PlanContext {
             pool: &pool,
-            attachments_root: attachments_root.path(),
+            vault: vault.clone(),
         };
         let mut plan = build_plan(&bundle, &plan_ctx, ImportMode::Replace)
             .await
@@ -1447,7 +1543,7 @@ mod tests {
 
         plan.attachments.adds += 1;
 
-        let exec_ctx = ExecutionContext::new(&pool, attachments_root.path());
+        let exec_ctx = ExecutionContext::new(&pool, vault.clone());
         let err = execute_plan(&bundle, &plan, &exec_ctx).await.unwrap_err();
         matches!(err, ExecutionError::AttachmentPlanDrift { field, .. } if field == "adds")
             .then_some(())

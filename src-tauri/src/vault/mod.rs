@@ -1,11 +1,18 @@
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
 use tracing::{info, warn};
-use unicode_normalization::UnicodeNormalization;
 
 use crate::attachment_category::AttachmentCategory;
 use crate::security::hash_path;
 use crate::AppError;
+
+mod guard;
+
+pub use guard::{
+    ensure_path_length, normalize_relative, reject_symlinks, validate_component,
+    MAX_COMPONENT_BYTES, MAX_PATH_BYTES,
+};
 
 pub const ERR_INVALID_CATEGORY: &str = "INVALID_CATEGORY";
 pub const ERR_INVALID_HOUSEHOLD: &str = "INVALID_HOUSEHOLD";
@@ -14,21 +21,24 @@ pub const ERR_SYMLINK_DENIED: &str = "SYMLINK_DENIED";
 pub const ERR_FILENAME_INVALID: &str = "FILENAME_INVALID";
 pub const ERR_NAME_TOO_LONG: &str = "NAME_TOO_LONG";
 
-const MAX_COMPONENT_BYTES: usize = 255;
-const MAX_PATH_BYTES: usize = 32 * 1024;
-
 #[derive(Debug, Clone)]
 pub struct Vault {
-    base: PathBuf,
+    base: Arc<PathBuf>,
 }
 
 impl Vault {
     pub fn new(base: impl Into<PathBuf>) -> Self {
-        Self { base: base.into() }
+        Self {
+            base: Arc::new(base.into()),
+        }
     }
 
     pub fn base(&self) -> &Path {
-        &self.base
+        self.base.as_path()
+    }
+
+    pub fn base_arc(&self) -> Arc<PathBuf> {
+        self.base.clone()
     }
 
     pub fn resolve(
@@ -37,18 +47,51 @@ impl Vault {
         category: AttachmentCategory,
         relative_path: &str,
     ) -> Result<PathBuf, AppError> {
-        self.ensure_household(household_id)?;
-        self.ensure_category(category)?;
+        self.ensure_household(household_id).map_err(|err| {
+            self.log_guard_failure(
+                err,
+                relative_path,
+                household_id,
+                category,
+                "ensure_household",
+            )
+        })?;
+        self.ensure_category(category).map_err(|err| {
+            self.log_guard_failure(
+                err,
+                relative_path,
+                household_id,
+                category,
+                "ensure_category",
+            )
+        })?;
 
-        let normalized = self.normalize_relative(relative_path)?;
-        self.ensure_path_length(&normalized)?;
+        let normalized = normalize_relative(relative_path).map_err(|err| {
+            self.log_guard_failure(
+                err,
+                relative_path,
+                household_id,
+                category,
+                "normalize_relative",
+            )
+        })?;
+        let normalized_string = normalized.to_string_lossy().into_owned();
+        ensure_path_length(&normalized).map_err(|err| {
+            self.log_guard_failure(
+                err,
+                &normalized_string,
+                household_id,
+                category,
+                "ensure_path_length",
+            )
+        })?;
 
-        let mut full = self.base.clone();
+        let mut full = self.base.as_ref().clone();
         full.push(household_id);
         full.push(category.as_str());
         full.push(&normalized);
 
-        if !full.starts_with(&self.base) {
+        if !full.starts_with(self.base.as_path()) {
             return self.deny(
                 relative_path,
                 household_id,
@@ -58,7 +101,7 @@ impl Vault {
             );
         }
 
-        if let Err(reason) = self.reject_symlinks(&full) {
+        if let Err(reason) = reject_symlinks(self.base.as_path(), &full) {
             return Err(self.guard_error(
                 relative_path,
                 household_id,
@@ -73,7 +116,7 @@ impl Vault {
             event = "vault_guard_allowed",
             household_id,
             category = category.as_str(),
-            relative_hash = %hash_path(Path::new(&normalized)),
+            relative_hash = %hash_path(normalized.as_path()),
             path_hash = %hash_path(&full),
         );
 
@@ -86,7 +129,7 @@ impl Vault {
         household_id: &str,
         category: AttachmentCategory,
     ) -> Option<String> {
-        let mut prefix = self.base.clone();
+        let mut prefix = self.base.as_ref().clone();
         prefix.push(household_id);
         prefix.push(category.as_str());
         let remainder = resolved.strip_prefix(prefix).ok()?;
@@ -132,144 +175,6 @@ impl Vault {
         }
     }
 
-    fn normalize_relative(&self, relative: &str) -> Result<PathBuf, AppError> {
-        if relative.is_empty() {
-            return Err(AppError::new(
-                ERR_FILENAME_INVALID,
-                "Attachment filename cannot be empty.",
-            ));
-        }
-
-        if self.is_windows_drive(relative)
-            || relative.starts_with('/')
-            || relative.starts_with('\\')
-        {
-            return Err(AppError::new(
-                ERR_PATH_OUT_OF_VAULT,
-                "Absolute paths are not allowed for attachments.",
-            ));
-        }
-
-        let mut buf = PathBuf::new();
-        for raw in relative.replace('\\', "/").split('/') {
-            if raw.is_empty() {
-                return Err(AppError::new(
-                    ERR_FILENAME_INVALID,
-                    "Attachment path segments cannot be empty.",
-                ));
-            }
-            if raw == "." || raw == ".." {
-                return Err(AppError::new(
-                    ERR_PATH_OUT_OF_VAULT,
-                    "Attachment paths may not include traversal segments.",
-                ));
-            }
-            let segment = raw.nfc().collect::<String>();
-            self.validate_component(&segment)?;
-            buf.push(segment);
-        }
-
-        Ok(buf)
-    }
-
-    fn validate_component(&self, segment: &str) -> Result<(), AppError> {
-        let bytes = segment.as_bytes();
-        if bytes.len() > MAX_COMPONENT_BYTES {
-            return Err(AppError::new(
-                ERR_NAME_TOO_LONG,
-                "Attachment path segment is too long.",
-            ));
-        }
-        if segment.trim_end_matches([' ', '.']).len() != segment.len() {
-            return Err(AppError::new(
-                ERR_FILENAME_INVALID,
-                "Attachment names may not end with spaces or dots.",
-            ));
-        }
-        if segment.chars().any(|c| {
-            c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
-        }) {
-            return Err(AppError::new(
-                ERR_FILENAME_INVALID,
-                "Attachment names contain unsupported characters.",
-            ));
-        }
-
-        if self.is_reserved_windows_name(segment) {
-            return Err(AppError::new(
-                ERR_FILENAME_INVALID,
-                "Attachment names may not use reserved Windows names.",
-            ));
-        }
-
-        Ok(())
-    }
-
-    fn ensure_path_length(&self, path: &Path) -> Result<(), AppError> {
-        let bytes = path
-            .components()
-            .map(|c| c.as_os_str().to_string_lossy().as_bytes().len())
-            .sum::<usize>();
-        if bytes > MAX_PATH_BYTES {
-            return Err(AppError::new(
-                ERR_NAME_TOO_LONG,
-                "Attachment path is too long.",
-            ));
-        }
-        Ok(())
-    }
-
-    fn reject_symlinks(&self, path: &Path) -> Result<(), &'static str> {
-        // We walk each realized component that already exists on disk and check the
-        // filesystem metadata for a symlink. This is inherently a best-effort guard:
-        // a malicious actor with concurrent filesystem access could introduce a
-        // symlink after this check succeeds but before the caller opens the file
-        // (classic TOCTOU). That race is acceptable because the vault only ever
-        // operates within application-controlled roots and the resolver performs a
-        // fresh guard pass on every access.
-        let mut cur = self.base.clone();
-        for comp in path
-            .strip_prefix(&self.base)
-            .unwrap_or(path)
-            .components()
-            .filter(|c| matches!(c, Component::Normal(_)))
-        {
-            cur.push(comp.as_os_str());
-            match std::fs::symlink_metadata(&cur) {
-                Ok(meta) if meta.file_type().is_symlink() => return Err("symlink encountered"),
-                Ok(_) => {}
-                Err(err) => {
-                    if err.kind() == std::io::ErrorKind::NotFound {
-                        // Future segments do not exist yet. This is normal during create
-                        // flows and we deliberately stop here to avoid probing paths that
-                        // are still being created in-memory.
-                        break;
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn is_windows_drive(&self, candidate: &str) -> bool {
-        let bytes = candidate.as_bytes();
-        if bytes.len() < 2 {
-            return false;
-        }
-        let drive = bytes[0] as char;
-        bytes[1] == b':' && drive.is_ascii_alphabetic()
-    }
-
-    fn is_reserved_windows_name(&self, segment: &str) -> bool {
-        const RESERVED: [&str; 22] = [
-            "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
-            "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-        ];
-        RESERVED
-            .iter()
-            .any(|name| segment.eq_ignore_ascii_case(name))
-    }
-
     fn guard_error(
         &self,
         attempted: &str,
@@ -278,7 +183,6 @@ impl Vault {
         code: &'static str,
         reason: &'static str,
     ) -> AppError {
-        let hashed = hash_path(Path::new(attempted));
         let message = match code {
             ERR_PATH_OUT_OF_VAULT => "Attachment path must stay inside the vault.",
             ERR_SYMLINK_DENIED => "Attachments cannot traverse through symlinks.",
@@ -288,19 +192,36 @@ impl Vault {
             ERR_NAME_TOO_LONG => "Attachment path is too long.",
             _ => "Attachment path was rejected.",
         };
+        let err = AppError::new(code, message);
+        self.log_guard_failure(err, attempted, household_id, category, reason)
+    }
+
+    fn log_guard_failure(
+        &self,
+        mut err: AppError,
+        attempted: impl AsRef<str>,
+        household_id: &str,
+        category: AttachmentCategory,
+        stage: &'static str,
+    ) -> AppError {
+        let attempted = attempted.as_ref();
+        let hashed = hash_path(Path::new(attempted));
+        let code = err.code().to_string();
         warn!(
             target: "arklowdun",
             event = "vault_guard_denied",
-            reason,
-            code,
+            stage,
+            code = code.as_str(),
             household_id,
             category = category.as_str(),
             relative_hash = %hashed,
         );
-        AppError::new(code, message)
+        err = err
             .with_context("household_id", household_id.to_string())
             .with_context("category", category.as_str().to_string())
             .with_context("relative_path_hash", hashed)
+            .with_context("guard_stage", stage.to_string());
+        err
     }
 
     fn deny(
@@ -319,6 +240,10 @@ impl Vault {
 mod tests {
     use super::*;
     use crate::attachment_category::AttachmentCategory;
+    use std::path::{Path, PathBuf};
+    use std::sync::{Arc, Barrier, Mutex};
+    use std::thread;
+    use std::time::Instant;
     use tempfile::tempdir;
 
     #[test]
@@ -399,5 +324,53 @@ mod tests {
             .resolve("household", AttachmentCategory::Notes, "alias/file.txt")
             .expect_err("symlink rejected");
         assert_eq!(err.code(), ERR_SYMLINK_DENIED);
+    }
+
+    #[test]
+    fn resolve_meets_concurrent_latency_budget() {
+        let dir = tempdir().expect("tempdir");
+        let vault = Arc::new(Vault::new(dir.path()));
+        let concurrency = 100;
+        let barrier = Arc::new(Barrier::new(concurrency + 1));
+        let durations = Arc::new(Mutex::new(Vec::with_capacity(concurrency)));
+        let mut handles = Vec::with_capacity(concurrency);
+
+        for idx in 0..concurrency {
+            let vault = Arc::clone(&vault);
+            let barrier = Arc::clone(&barrier);
+            let durations = Arc::clone(&durations);
+            handles.push(thread::spawn(move || {
+                let relative = format!("docs/file-{idx}.pdf");
+                barrier.wait();
+                let start = Instant::now();
+                let resolved = vault
+                    .resolve("hh1", AttachmentCategory::Notes, &relative)
+                    .expect("resolve path");
+                let elapsed = start.elapsed();
+                assert!(resolved.starts_with(vault.base()));
+                let mut expected_suffix = PathBuf::from("hh1");
+                expected_suffix.push(AttachmentCategory::Notes.as_str());
+                expected_suffix.push(&relative);
+                assert!(resolved.ends_with(&expected_suffix));
+                durations.lock().expect("lock durations").push(elapsed);
+            }));
+        }
+
+        let start = Instant::now();
+        barrier.wait();
+        for handle in handles {
+            handle.join().expect("join worker");
+        }
+        let total_elapsed = start.elapsed();
+        let durations = durations.lock().expect("lock durations after");
+        assert_eq!(durations.len(), concurrency);
+        let avg_ms = durations.iter().map(|d| d.as_secs_f64()).sum::<f64>()
+            / durations.len() as f64
+            * 1000.0;
+        assert!(
+            avg_ms <= 5.0,
+            "expected <= 5ms average resolve, observed {avg_ms}ms over {:?}",
+            total_elapsed
+        );
     }
 }

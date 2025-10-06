@@ -134,7 +134,6 @@ mod tests {
             backfill: Arc::new(Mutex::new(BackfillCoordinator::new())),
             db_health: Arc::new(Mutex::new(report)),
             db_path: Arc::new(PathBuf::from("test.sqlite3")),
-            attachments_root: Arc::new(attachments.clone()),
             vault: Arc::new(Vault::new(attachments.clone())),
             vault_migration: Arc::new(
                 VaultMigrationManager::new(&attachments).expect("create vault migration manager"),
