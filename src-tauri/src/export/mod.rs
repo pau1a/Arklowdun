@@ -6,7 +6,6 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::Result;
 use chrono::{DateTime, Utc};
 use fs2::available_space;
 use sha2::{Digest, Sha256};
@@ -209,7 +208,7 @@ fn estimate_export_size(vault: &Vault) -> AppResult<SizeEstimate> {
     })
 }
 
-async fn current_schema_version(pool: &SqlitePool) -> Result<String> {
+async fn current_schema_version(pool: &SqlitePool) -> anyhow::Result<String> {
     if let Some(v) = sqlx::query_scalar::<_, String>(
         "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1",
     )
@@ -222,7 +221,11 @@ async fn current_schema_version(pool: &SqlitePool) -> Result<String> {
     db_manifest::schema_hash(pool).await
 }
 
-async fn dump_table_jsonl(pool: &SqlitePool, table: &str, path: &Path) -> Result<(u64, String)> {
+async fn dump_table_jsonl(
+    pool: &SqlitePool,
+    table: &str,
+    path: &Path,
+) -> anyhow::Result<(u64, String)> {
     // Dump SELECT * in stable order; only some tables have deleted_at
     let order = "id";
     let has_deleted = matches!(
@@ -472,7 +475,7 @@ fn tmp_path(final_path: &Path) -> PathBuf {
     PathBuf::from(s)
 }
 
-fn free_disk_space(path: &Path) -> Result<u64> {
+fn free_disk_space(path: &Path) -> anyhow::Result<u64> {
     let target: Cow<'_, Path> = if path.exists() {
         Cow::Borrowed(path)
     } else if let Some(parent) = path.parent() {
@@ -483,7 +486,7 @@ fn free_disk_space(path: &Path) -> Result<u64> {
     available_space(target.as_ref()).map_err(|e| anyhow::anyhow!(e))
 }
 
-fn dir_size(path: &Path) -> Result<u64> {
+fn dir_size(path: &Path) -> anyhow::Result<u64> {
     let mut total = 0_u64;
     for entry in fs::read_dir(path)? {
         let entry = entry?;
@@ -532,7 +535,7 @@ fn write_verify_scripts(
     ps1_path: &Path,
     tables: &BTreeMap<String, TableInfo>,
     attachments_manifest_sha: &str,
-) -> Result<()> {
+) -> anyhow::Result<()> {
     // Extract expected table hashes if available
     let expect = |key: &str| {
         tables
