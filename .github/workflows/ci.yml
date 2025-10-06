@@ -322,6 +322,7 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - run: npm run check:models
+      - run: npm run check:attachment-categories
 
   gate_recurrence_perf_budget:
     name: gate/recurrence-perf-budget
