@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::Error as AnyError;
 use serde::{Deserialize, Serialize};
@@ -14,8 +15,15 @@ use thiserror::Error;
 use ts_rs::TS;
 
 use super::bundle::{DataFileEntry, ImportBundle};
-use super::ATTACHMENT_TABLES;
+use super::{
+    collect_bundle_attachment_metadata, collect_bundle_attachment_updates, ATTACHMENT_TABLES,
+};
+use crate::attachment_category::AttachmentCategory;
 use crate::export::manifest::file_sha256;
+use crate::security::hash_path;
+use crate::vault::{Vault, ERR_FILENAME_INVALID, ERR_NAME_TOO_LONG, ERR_PATH_OUT_OF_VAULT};
+use crate::AppError;
+use tracing::info;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
@@ -87,7 +95,7 @@ pub struct ImportPlan {
 #[derive(Debug, Clone)]
 pub struct PlanContext<'a> {
     pub pool: &'a SqlitePool,
-    pub attachments_root: &'a Path,
+    pub vault: Arc<Vault>,
 }
 
 #[derive(Debug, Clone)]
@@ -124,6 +132,12 @@ pub enum PlanError {
         #[source]
         source: AnyError,
     },
+    #[error("attachment {path} missing metadata in bundle")]
+    AttachmentMetadataMissing { path: String },
+    #[error("attachment {path} metadata is inconsistent across bundle rows")]
+    AttachmentMetadataConflict { path: String },
+    #[error("attachment {path} metadata has invalid category {category}")]
+    AttachmentMetadataInvalidCategory { path: String, category: String },
 }
 
 pub async fn build_plan(
@@ -132,6 +146,8 @@ pub async fn build_plan(
     mode: ImportMode,
 ) -> Result<ImportPlan, PlanError> {
     let mut tables = BTreeMap::new();
+    let metadata_index =
+        collect_bundle_attachment_metadata(bundle).map_err(metadata_error_to_plan)?;
 
     for data_entry in bundle.data_files() {
         let plan = match mode {
@@ -143,7 +159,11 @@ pub async fn build_plan(
 
     let attachments = match mode {
         ImportMode::Replace => plan_attachments_replace(bundle),
-        ImportMode::Merge => plan_attachments_merge(bundle, ctx).await?,
+        ImportMode::Merge => {
+            let bundle_updated_index =
+                collect_bundle_attachment_updates(bundle).map_err(metadata_error_to_plan)?;
+            plan_attachments_merge(bundle, ctx, &metadata_index, &bundle_updated_index).await?
+        }
     };
 
     Ok(ImportPlan {
@@ -295,16 +315,30 @@ fn plan_attachments_replace(bundle: &ImportBundle) -> AttachmentsPlan {
 async fn plan_attachments_merge(
     bundle: &ImportBundle,
     ctx: &PlanContext<'_>,
+    metadata_index: &HashMap<String, super::BundleAttachmentMetadata>,
+    bundle_updated_index: &HashMap<String, i64>,
 ) -> Result<AttachmentsPlan, PlanError> {
     let mut plan = AttachmentsPlan::default();
-    let bundle_updated_index = collect_bundle_attachment_updates(bundle)?;
 
     for attachment in bundle.attachments() {
         let rel = &attachment.relative_path;
-        ensure_safe_relative_path(rel)?;
-        let target = ctx.attachments_root.join(rel);
+        let metadata = metadata_index
+            .get(rel)
+            .ok_or_else(|| PlanError::AttachmentMetadataMissing { path: rel.clone() })?;
+        let target = ctx
+            .vault
+            .resolve(&metadata.household_id, metadata.category, rel)
+            .map_err(|err| guard_error_to_plan(rel, err))?;
+        info!(
+            target: "arklowdun",
+            event = "import_plan_resolved",
+            household_id = metadata.household_id.as_str(),
+            category = metadata.category.as_str(),
+            relative_hash = %hash_path(Path::new(rel)),
+            path_hash = %hash_path(&target),
+        );
         let bundle_updated_at = bundle_updated_index.get(rel).copied();
-        let live_updated_at = load_live_attachment_updated_at(ctx.pool, rel).await?;
+        let live_updated_at = load_live_attachment_updated_at(ctx.pool, rel, metadata).await?;
         if !target.exists() {
             plan.adds += 1;
             continue;
@@ -343,61 +377,10 @@ async fn plan_attachments_merge(
     Ok(plan)
 }
 
-fn collect_bundle_attachment_updates(
-    bundle: &ImportBundle,
-) -> Result<HashMap<String, i64>, PlanError> {
-    let mut map = HashMap::new();
-    for entry in bundle.data_files() {
-        if !ATTACHMENT_TABLES
-            .iter()
-            .any(|table| *table == entry.logical_name.as_str())
-        {
-            continue;
-        }
-
-        let file = File::open(&entry.path).map_err(|err| PlanError::DataFileIo {
-            path: entry.path.display().to_string(),
-            source: err,
-        })?;
-        let reader = BufReader::new(file);
-        for line in reader.lines() {
-            let line = line.map_err(|err| PlanError::DataFileIo {
-                path: entry.path.display().to_string(),
-                source: err,
-            })?;
-            if line.trim().is_empty() {
-                continue;
-            }
-            let value: Value =
-                serde_json::from_str(&line).map_err(|err| PlanError::DataFileParse {
-                    path: entry.path.display().to_string(),
-                    source: err,
-                })?;
-            let root_key = value.get("root_key").and_then(|v| v.as_str());
-            if !matches!(root_key, Some("attachments")) {
-                continue;
-            }
-            let rel = match value.get("relative_path").and_then(|v| v.as_str()) {
-                Some(rel) if !rel.trim().is_empty() => rel,
-                _ => continue,
-            };
-            if let Some(updated_at) = value.get("updated_at").and_then(|v| v.as_i64()) {
-                map.entry(rel.to_string())
-                    .and_modify(|existing| {
-                        if updated_at > *existing {
-                            *existing = updated_at;
-                        }
-                    })
-                    .or_insert(updated_at);
-            }
-        }
-    }
-    Ok(map)
-}
-
 async fn load_live_attachment_updated_at(
     pool: &SqlitePool,
     rel: &str,
+    metadata: &super::BundleAttachmentMetadata,
 ) -> Result<Option<i64>, PlanError> {
     let mut max_ts: Option<i64> = None;
     let mut conn = pool.acquire().await.map_err(PlanError::Database)?;
@@ -406,10 +389,12 @@ async fn load_live_attachment_updated_at(
             continue;
         }
         let sql = format!(
-            "SELECT MAX(updated_at) FROM {table} WHERE root_key = 'attachments' AND relative_path = ?1 AND deleted_at IS NULL"
+            "SELECT MAX(updated_at) FROM {table} WHERE root_key = 'attachments' AND relative_path = ?1 AND household_id = ?2 AND category = ?3 AND deleted_at IS NULL"
         );
         let ts: Option<i64> = sqlx::query_scalar(&sql)
             .bind(rel)
+            .bind(&metadata.household_id)
+            .bind(metadata.category.as_str())
             .fetch_optional(conn.as_mut())
             .await
             .map_err(PlanError::Database)?;
@@ -517,16 +502,30 @@ fn resolve_physical_table(logical: &str) -> Result<&'static str, PlanError> {
     }
 }
 
-fn ensure_safe_relative_path(rel: &str) -> Result<(), PlanError> {
-    let path = Path::new(rel);
-    if path.is_absolute()
-        || path
-            .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir))
-    {
-        return Err(PlanError::AttachmentPathTraversal(rel.to_string()));
+fn guard_error_to_plan(rel: &str, err: AppError) -> PlanError {
+    match err.code() {
+        ERR_PATH_OUT_OF_VAULT | ERR_FILENAME_INVALID | ERR_NAME_TOO_LONG => {
+            PlanError::AttachmentPathTraversal(format!("{rel} ({})", err.code()))
+        }
+        _ => PlanError::AttachmentPathTraversal(format!("{rel} ({})", err.code())),
     }
-    Ok(())
+}
+
+fn metadata_error_to_plan(err: super::MetadataIssue) -> PlanError {
+    match err {
+        super::MetadataIssue::DataFileIo { path, source } => PlanError::DataFileIo { path, source },
+        super::MetadataIssue::DataFileParse { path, source } => {
+            PlanError::DataFileParse { path, source }
+        }
+        super::MetadataIssue::MissingHousehold { path }
+        | super::MetadataIssue::MissingCategory { path } => {
+            PlanError::AttachmentMetadataMissing { path }
+        }
+        super::MetadataIssue::InvalidCategory { path, category } => {
+            PlanError::AttachmentMetadataInvalidCategory { path, category }
+        }
+        super::MetadataIssue::Conflict { path } => PlanError::AttachmentMetadataConflict { path },
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -564,8 +563,11 @@ fn extract_id(table: &str, value: &Value) -> Result<IdValue, PlanError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::attachment_category::AttachmentCategory;
     use crate::export::manifest::file_sha256;
+    use crate::vault::Vault;
     use serde_json::json;
+    use std::sync::Arc;
     use tempfile::TempDir;
 
     async fn setup_pool() -> SqlitePool {
@@ -665,9 +667,10 @@ mod tests {
         ];
         let bundle = write_bundle(tmp.path(), "events", &rows, &[]);
         let attachments_root = TempDir::new().unwrap();
+        let vault = Arc::new(Vault::new(attachments_root.path()));
         let ctx = PlanContext {
             pool: &pool,
-            attachments_root: attachments_root.path(),
+            vault: vault.clone(),
         };
 
         let plan = build_plan(&bundle, &ctx, ImportMode::Merge).await.unwrap();
@@ -697,9 +700,10 @@ mod tests {
         let attachments = vec![("docs/file.txt".to_string(), b"hello".to_vec())];
         let bundle = write_bundle(tmp.path(), "notes", &rows, &attachments);
         let attachments_root = TempDir::new().unwrap();
+        let vault = Arc::new(Vault::new(attachments_root.path()));
         let ctx = PlanContext {
             pool: &pool,
-            attachments_root: attachments_root.path(),
+            vault: vault.clone(),
         };
 
         let plan = build_plan(&bundle, &ctx, ImportMode::Replace)
@@ -718,7 +722,7 @@ mod tests {
     async fn attachment_plan_detects_updates() {
         let pool = setup_pool().await;
         sqlx::query(
-            "CREATE TABLE bills (id TEXT PRIMARY KEY, household_id TEXT, updated_at INTEGER, deleted_at INTEGER, root_key TEXT, relative_path TEXT)",
+            "CREATE TABLE bills (id TEXT PRIMARY KEY, household_id TEXT, updated_at INTEGER, deleted_at INTEGER, root_key TEXT, relative_path TEXT, category TEXT)",
         )
             .execute(&pool)
             .await
@@ -727,9 +731,11 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let rows = vec![json!({
             "id": "bill1",
+            "household_id": "default",
             "updated_at": 200,
             "root_key": "attachments",
             "relative_path": "diff/file.txt",
+            "category": "bills",
         })];
         let attachments = vec![
             ("same/file.txt".to_string(), b"abc".to_vec()),
@@ -738,10 +744,15 @@ mod tests {
         let bundle = write_bundle(tmp.path(), "bills", &rows, &attachments);
 
         let attachments_root = TempDir::new().unwrap();
-        let same_path = attachments_root.path().join("same/file.txt");
+        let vault = Arc::new(Vault::new(attachments_root.path()));
+        let same_path = vault
+            .resolve("default", AttachmentCategory::Bills, "same/file.txt")
+            .unwrap();
         std::fs::create_dir_all(same_path.parent().unwrap()).unwrap();
         std::fs::write(&same_path, b"abc").unwrap();
-        let diff_path = attachments_root.path().join("diff/file.txt");
+        let diff_path = vault
+            .resolve("default", AttachmentCategory::Bills, "diff/file.txt")
+            .unwrap();
         std::fs::create_dir_all(diff_path.parent().unwrap()).unwrap();
         std::fs::write(&diff_path, b"local").unwrap();
 
@@ -752,7 +763,7 @@ mod tests {
             .await
             .unwrap();
         sqlx::query(
-            "UPDATE bills SET root_key = 'attachments', relative_path = 'diff/file.txt' WHERE id = ?1",
+            "UPDATE bills SET root_key = 'attachments', relative_path = 'diff/file.txt', category = 'bills' WHERE id = ?1",
         )
         .bind("bill1")
         .execute(&pool)
@@ -761,7 +772,7 @@ mod tests {
 
         let ctx = PlanContext {
             pool: &pool,
-            attachments_root: attachments_root.path(),
+            vault: vault.clone(),
         };
 
         let plan = build_plan(&bundle, &ctx, ImportMode::Merge).await.unwrap();
@@ -779,7 +790,7 @@ mod tests {
     async fn attachment_plan_skips_when_live_newer() {
         let pool = setup_pool().await;
         sqlx::query(
-            "CREATE TABLE bills (id TEXT PRIMARY KEY, household_id TEXT, updated_at INTEGER, deleted_at INTEGER, root_key TEXT, relative_path TEXT)",
+            "CREATE TABLE bills (id TEXT PRIMARY KEY, household_id TEXT, updated_at INTEGER, deleted_at INTEGER, root_key TEXT, relative_path TEXT, category TEXT)",
         )
         .execute(&pool)
         .await
@@ -788,19 +799,24 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let rows = vec![json!({
             "id": "bill2",
+            "household_id": "default",
             "updated_at": 150,
             "root_key": "attachments",
             "relative_path": "docs/file.txt",
+            "category": "bills",
         })];
         let attachments = vec![("docs/file.txt".to_string(), b"bundle".to_vec())];
         let bundle = write_bundle(tmp.path(), "bills", &rows, &attachments);
 
         let attachments_root = TempDir::new().unwrap();
-        let dest_path = attachments_root.path().join("docs/file.txt");
+        let vault = Arc::new(Vault::new(attachments_root.path()));
+        let dest_path = vault
+            .resolve("default", AttachmentCategory::Bills, "docs/file.txt")
+            .unwrap();
         std::fs::create_dir_all(dest_path.parent().unwrap()).unwrap();
         std::fs::write(&dest_path, b"local").unwrap();
 
-        sqlx::query("INSERT INTO bills (id, household_id, updated_at, deleted_at, root_key, relative_path) VALUES (?1, 'default', ?2, NULL, 'attachments', ?3)")
+        sqlx::query("INSERT INTO bills (id, household_id, updated_at, deleted_at, root_key, relative_path, category) VALUES (?1, 'default', ?2, NULL, 'attachments', ?3, 'bills')")
             .bind("bill2")
             .bind(300_i64)
             .bind("docs/file.txt")
@@ -810,7 +826,7 @@ mod tests {
 
         let ctx = PlanContext {
             pool: &pool,
-            attachments_root: attachments_root.path(),
+            vault: vault.clone(),
         };
 
         let plan = build_plan(&bundle, &ctx, ImportMode::Merge).await.unwrap();

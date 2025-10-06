@@ -4,13 +4,14 @@ use once_cell::sync::OnceCell;
 use paste::paste;
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use sqlx::{Row, SqlitePool};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     io::{self, Write},
     path::{Path, PathBuf},
+    str::FromStr,
     sync::{Arc, Mutex, RwLock},
 };
 use tauri::{Emitter, Manager, State};
@@ -27,6 +28,8 @@ use ts_rs::TS;
 
 use crate::{
     attachment_category::AttachmentCategory,
+    attachments,
+    commands::AttachmentMutationGuard,
     db::{
         backup,
         hard_repair::{self, HardRepairOutcome},
@@ -36,6 +39,8 @@ use crate::{
     household_active::ActiveSetError,
     ipc::guard,
     state::AppState,
+    vault,
+    vault_migration::ATTACHMENT_TABLES,
 };
 
 const FILES_INDEX_VERSION: i64 = 1;
@@ -209,7 +214,6 @@ mod cascade_health_tests {
             backfill: Arc::new(Mutex::new(BackfillCoordinator::new())),
             db_health: Arc::new(Mutex::new(report)),
             db_path: Arc::new(PathBuf::from("test.sqlite")),
-            attachments_root: Arc::new(attachments.clone()),
             vault: Arc::new(crate::vault::Vault::new(attachments.clone())),
             vault_migration: Arc::new(
                 crate::vault_migration::VaultMigrationManager::new(&attachments).unwrap(),
@@ -549,17 +553,16 @@ pub fn log_vault_error(
     category: AttachmentCategory,
     relative_path: &str,
     code: &str,
-    reason: &str,
+    stage: &'static str,
 ) {
     tracing::warn!(
         target: "arklowdun",
-        event = "vault_guard_check",
-        ok = false,
+        event = "vault_guard_denied",
+        stage,
         household_id,
         category = category.as_str(),
         relative_hash = %hash_path(Path::new(relative_path)),
         code,
-        reason,
     );
 }
 
@@ -626,16 +629,25 @@ macro_rules! gen_domain_cmds {
                     let _permit = guard::ensure_db_writable(&state)?;
                     let pool = state.pool_clone();
                     let vault = state.vault();
+                    let active_household = state.active_household_id.clone();
                     dispatch_async_app_result(move || {
                         let data = data;
                         let vault = vault.clone();
                         let pool = pool.clone();
+                        let active_household = active_household.clone();
                         async move {
+                            let guard = resolve_attachment_for_ipc_create(
+                                &vault,
+                                &active_household,
+                                stringify!($table),
+                                &data,
+                                concat!(stringify!($table), "_create"),
+                            )?;
                             commands::create_command(
                                 &pool,
                                 stringify!($table),
                                 data,
-                                Some(vault.as_ref()),
+                                guard,
                             )
                             .await
                         }
@@ -653,21 +665,34 @@ macro_rules! gen_domain_cmds {
                     let _permit = guard::ensure_db_writable(&state)?;
                     let pool = state.pool_clone();
                     let vault = state.vault();
+                    let active_household = state.active_household_id.clone();
                     dispatch_async_app_result(move || {
                         let household_id = household_id;
                         let id = id;
                         let data = data;
                         let vault = vault.clone();
                         let pool = pool.clone();
+                        let active_household = active_household.clone();
                         async move {
                             let hh = household_id.as_deref();
+                            let guard = resolve_attachment_for_ipc_update(
+                                &pool,
+                                &vault,
+                                &active_household,
+                                stringify!($table),
+                                &id,
+                                hh,
+                                &data,
+                                concat!(stringify!($table), "_update"),
+                            )
+                            .await?;
                             commands::update_command(
                                 &pool,
                                 stringify!($table),
                                 &id,
                                 data,
                                 hh,
-                                Some(vault.as_ref()),
+                                guard,
                             )
                             .await
                         }
@@ -684,18 +709,30 @@ macro_rules! gen_domain_cmds {
                     let _permit = guard::ensure_db_writable(&state)?;
                     let pool = state.pool_clone();
                     let vault = state.vault();
+                    let active_household = state.active_household_id.clone();
                     dispatch_async_app_result(move || {
                         let household_id = household_id;
                         let id = id;
                         let pool = pool.clone();
                         let vault = vault.clone();
+                        let active_household = active_household.clone();
                         async move {
+                            let guard = resolve_attachment_for_ipc_delete(
+                                &pool,
+                                &vault,
+                                &active_household,
+                                stringify!($table),
+                                &household_id,
+                                &id,
+                                concat!(stringify!($table), "_delete"),
+                            )
+                            .await?;
                             commands::delete_command(
                                 &pool,
                                 stringify!($table),
                                 &household_id,
                                 &id,
-                                Some(vault.as_ref()),
+                                guard,
                             )
                             .await
                         }
@@ -1985,11 +2022,12 @@ async fn db_import_preview(
     let ImportPreviewArgs { bundle_path, mode } = args;
     let pool = state.pool_clone();
     let db_path = (*state.db_path).clone();
-    let (target_root, attachments_root, _) = resolve_import_paths(&db_path);
+    let (target_root, _) = resolve_import_paths(&db_path);
+    let vault = state.vault();
     dispatch_async_app_result(move || {
         let pool = pool.clone();
         let target_root = target_root.clone();
-        let attachments_root = attachments_root.clone();
+        let vault = vault.clone();
         let bundle_path_buf = PathBuf::from(bundle_path.clone());
         async move {
             let result: AnyResult<ImportPreviewDto> = async {
@@ -2010,7 +2048,7 @@ async fn db_import_preview(
                     .context("validate import bundle")?;
                 let plan_ctx = import::plan::PlanContext {
                     pool: &pool,
-                    attachments_root: attachments_root.as_path(),
+                    vault: vault.clone(),
                 };
                 let plan = import::build_plan(&bundle, &plan_ctx, mode)
                     .await
@@ -2045,11 +2083,12 @@ async fn db_import_execute(
     } = args;
     let pool = state.pool_clone();
     let db_path = (*state.db_path).clone();
-    let (target_root, attachments_root, reports_dir) = resolve_import_paths(&db_path);
+    let (target_root, reports_dir) = resolve_import_paths(&db_path);
+    let vault = state.vault();
     dispatch_async_app_result(move || {
         let pool = pool.clone();
         let target_root = target_root.clone();
-        let attachments_root = attachments_root.clone();
+        let vault = vault.clone();
         let reports_dir = reports_dir.clone();
         let expected_digest = expected_plan_digest.clone();
         let bundle_path_buf = PathBuf::from(bundle_path.clone());
@@ -2072,7 +2111,7 @@ async fn db_import_execute(
                     .context("validate import bundle")?;
                 let plan_ctx = import::plan::PlanContext {
                     pool: &pool,
-                    attachments_root: attachments_root.as_path(),
+                    vault: vault.clone(),
                 };
                 let plan = import::build_plan(&bundle, &plan_ctx, mode)
                     .await
@@ -2084,14 +2123,10 @@ async fn db_import_execute(
                         "Import plan changed after preview. Run a new dry-run before importing."
                     );
                 }
-                std::fs::create_dir_all(&attachments_root).with_context(|| {
-                    format!(
-                        "create attachments directory {}",
-                        attachments_root.display()
-                    )
+                std::fs::create_dir_all(vault.base()).with_context(|| {
+                    format!("create attachments directory {}", vault.base().display())
                 })?;
-                let exec_ctx =
-                    import::execute::ExecutionContext::new(&pool, attachments_root.as_path());
+                let exec_ctx = import::execute::ExecutionContext::new(&pool, vault.clone());
                 let execution = import::execute::execute_plan(&bundle, &plan, &exec_ctx)
                     .await
                     .map_err(anyhow::Error::new)
@@ -2121,14 +2156,13 @@ async fn db_import_execute(
     .await
 }
 
-fn resolve_import_paths(db_path: &Path) -> (PathBuf, PathBuf, PathBuf) {
+fn resolve_import_paths(db_path: &Path) -> (PathBuf, PathBuf) {
     let target_root = db_path
         .parent()
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."));
-    let attachments_root = target_root.join("attachments");
     let reports_dir = target_root.join("reports");
-    (target_root, attachments_root, reports_dir)
+    (target_root, reports_dir)
 }
 
 fn compute_plan_digest(plan: &import::plan::ImportPlan) -> AnyResult<String> {
@@ -2757,6 +2791,426 @@ async fn search_entities(
     .await
 }
 
+async fn resolve_attachment_for_ipc_read(
+    pool: &SqlitePool,
+    active_household: &Arc<Mutex<String>>,
+    vault: &Arc<Vault>,
+    table: &str,
+    id: &str,
+    operation: &'static str,
+) -> AppResult<PathBuf> {
+    let descriptor = attachments::load_attachment_descriptor(pool, table, id).await?;
+    let table_value = table.to_string();
+    let id_value = id.to_string();
+
+    let attachments::AttachmentDescriptor {
+        household_id,
+        category,
+        relative_path,
+    } = descriptor;
+
+    ensure_active_household_for_ipc(
+        active_household,
+        &household_id,
+        category,
+        &relative_path,
+        operation,
+        table,
+        Some(id),
+    )?;
+
+    let household_for_context = household_id.clone();
+    vault
+        .resolve(&household_id, category, &relative_path)
+        .map_err(|err| {
+            err.with_context("operation", operation)
+                .with_context("table", table_value)
+                .with_context("id", id_value)
+                .with_context("household_id", household_for_context)
+        })
+}
+
+fn ensure_active_household_for_ipc(
+    active_household: &Arc<Mutex<String>>,
+    expected: &str,
+    category: AttachmentCategory,
+    relative_for_log: &str,
+    operation: &'static str,
+    table: &str,
+    id: Option<&str>,
+) -> AppResult<()> {
+    let current = active_household
+        .lock()
+        .map(|guard| guard.clone())
+        .unwrap_or_default();
+    if !current.is_empty() && current != expected {
+        log_vault_error(
+            expected,
+            category,
+            relative_for_log,
+            vault::ERR_INVALID_HOUSEHOLD,
+            "ensure_active_household",
+        );
+        let relative_hash = hash_path(Path::new(relative_for_log));
+        let mut err = AppError::new(
+            vault::ERR_INVALID_HOUSEHOLD,
+            "Attachments belong to a different household.",
+        )
+        .with_context("operation", operation)
+        .with_context("table", table.to_string())
+        .with_context("household_id", expected.to_string())
+        .with_context("category", category.as_str().to_string())
+        .with_context("relative_path_hash", relative_hash)
+        .with_context("guard_stage", "ensure_active_household".to_string());
+        if let Some(id) = id {
+            err = err.with_context("id", id.to_string());
+        }
+        return Err(err);
+    }
+    Ok(())
+}
+
+fn resolve_attachment_for_ipc_create(
+    vault: &Arc<Vault>,
+    active_household: &Arc<Mutex<String>>,
+    table: &str,
+    data: &Map<String, Value>,
+    operation: &'static str,
+) -> AppResult<Option<AttachmentMutationGuard>> {
+    if !ATTACHMENT_TABLES.contains(&table) {
+        return Ok(None);
+    }
+
+    let table_value = table.to_string();
+    let household_raw = data
+        .get("household_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            AppError::new(
+                vault::ERR_INVALID_HOUSEHOLD,
+                "Attachments require a household id.",
+            )
+            .with_context("operation", operation)
+            .with_context("table", table_value.clone())
+        })?;
+    let household_id = household_raw.to_string();
+
+    let category_value = data
+        .get("category")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            AppError::new(
+                vault::ERR_INVALID_CATEGORY,
+                "Attachment category is required.",
+            )
+            .with_context("operation", operation)
+            .with_context("table", table_value.clone())
+            .with_context("household_id", household_id.clone())
+        })?;
+    let category = AttachmentCategory::from_str(category_value).map_err(|_| {
+        AppError::new(
+            vault::ERR_INVALID_CATEGORY,
+            "Attachment category is not supported.",
+        )
+        .with_context("operation", operation)
+        .with_context("table", table_value.clone())
+        .with_context("household_id", household_id.clone())
+        .with_context("category", category_value.to_string())
+    })?;
+
+    let relative_for_log = data
+        .get("relative_path")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+
+    ensure_active_household_for_ipc(
+        active_household,
+        &household_id,
+        category,
+        relative_for_log,
+        operation,
+        &table_value,
+        None,
+    )?;
+
+    let (normalized, resolved_path) = match data.get("relative_path") {
+        Some(Value::Null) | None => (None, None),
+        Some(Value::String(raw)) => {
+            if raw.trim().is_empty() {
+                (None, None)
+            } else {
+                let resolved = vault.resolve(&household_id, category, raw).map_err(|err| {
+                    err.with_context("operation", operation)
+                        .with_context("table", table_value.clone())
+                        .with_context("household_id", household_id.clone())
+                })?;
+                let normalized = vault
+                    .relative_from_resolved(&resolved, &household_id, category)
+                    .ok_or_else(|| {
+                        AppError::new(
+                            vault::ERR_PATH_OUT_OF_VAULT,
+                            "Attachment path must stay inside the vault.",
+                        )
+                        .with_context("operation", operation)
+                        .with_context("table", table_value.clone())
+                        .with_context("household_id", household_id.clone())
+                    })?;
+                (Some(normalized), Some(resolved))
+            }
+        }
+        Some(_) => {
+            return Err(AppError::new(
+                vault::ERR_FILENAME_INVALID,
+                "Attachment path must be a string.",
+            )
+            .with_context("operation", operation)
+            .with_context("table", table_value)
+            .with_context("household_id", household_id));
+        }
+    };
+
+    Ok(Some(AttachmentMutationGuard::new(
+        household_id,
+        category,
+        normalized,
+        resolved_path,
+    )))
+}
+
+async fn resolve_attachment_for_ipc_update(
+    pool: &SqlitePool,
+    vault: &Arc<Vault>,
+    active_household: &Arc<Mutex<String>>,
+    table: &str,
+    id: &str,
+    household_id: Option<&str>,
+    data: &Map<String, Value>,
+    operation: &'static str,
+) -> AppResult<Option<AttachmentMutationGuard>> {
+    if !ATTACHMENT_TABLES.contains(&table) {
+        return Ok(None);
+    }
+
+    let table_value = table.to_string();
+    let id_value = id.to_string();
+
+    let descriptor = attachments::load_attachment_descriptor(pool, table, id)
+        .await
+        .map_err(|err| {
+            err.with_context("operation", operation)
+                .with_context("table", table_value.clone())
+                .with_context("id", id_value.clone())
+        })?;
+
+    if let Some(expected) = household_id {
+        if expected != descriptor.household_id {
+            log_vault_error(
+                &descriptor.household_id,
+                descriptor.category,
+                &descriptor.relative_path,
+                vault::ERR_INVALID_HOUSEHOLD,
+                "ensure_update_household",
+            );
+            let relative_hash = hash_path(Path::new(&descriptor.relative_path));
+            return Err(AppError::new(
+                vault::ERR_INVALID_HOUSEHOLD,
+                "Attachments require a matching household id.",
+            )
+            .with_context("operation", operation)
+            .with_context("table", table_value.clone())
+            .with_context("id", id_value.clone())
+            .with_context("household_id", expected.to_string())
+            .with_context("category", descriptor.category.as_str().to_string())
+            .with_context("relative_path_hash", relative_hash)
+            .with_context("guard_stage", "ensure_update_household".to_string()));
+        }
+    }
+
+    let mut category = descriptor.category;
+    if let Some(value) = data.get("category") {
+        match value {
+            Value::String(raw) => {
+                category = AttachmentCategory::from_str(raw).map_err(|_| {
+                    AppError::new(
+                        vault::ERR_INVALID_CATEGORY,
+                        "Attachment category is not supported.",
+                    )
+                    .with_context("operation", operation)
+                    .with_context("table", table_value.clone())
+                    .with_context("id", id_value.clone())
+                    .with_context("household_id", descriptor.household_id.clone())
+                    .with_context("category", raw.to_string())
+                })?;
+            }
+            Value::Null => {
+                return Err(AppError::new(
+                    vault::ERR_INVALID_CATEGORY,
+                    "Attachment category is required.",
+                )
+                .with_context("operation", operation)
+                .with_context("table", table_value.clone())
+                .with_context("id", id_value.clone())
+                .with_context("household_id", descriptor.household_id.clone()));
+            }
+            _ => {
+                return Err(AppError::new(
+                    vault::ERR_INVALID_CATEGORY,
+                    "Attachment category must be a string.",
+                )
+                .with_context("operation", operation)
+                .with_context("table", table_value.clone())
+                .with_context("id", id_value.clone())
+                .with_context("household_id", descriptor.household_id.clone()));
+            }
+        }
+    }
+
+    let relative_for_log = data
+        .get("relative_path")
+        .and_then(Value::as_str)
+        .unwrap_or(&descriptor.relative_path);
+
+    ensure_active_household_for_ipc(
+        active_household,
+        &descriptor.household_id,
+        category,
+        relative_for_log,
+        operation,
+        &table_value,
+        Some(&id_value),
+    )?;
+
+    let (normalized, resolved_path) = match data.get("relative_path") {
+        Some(Value::Null) | None => (None, None),
+        Some(Value::String(raw)) => {
+            if raw.trim().is_empty() {
+                (None, None)
+            } else {
+                let resolved = vault
+                    .resolve(&descriptor.household_id, category, raw)
+                    .map_err(|err| {
+                        err.with_context("operation", operation)
+                            .with_context("table", table_value.clone())
+                            .with_context("id", id_value.clone())
+                            .with_context("household_id", descriptor.household_id.clone())
+                    })?;
+                let normalized = vault
+                    .relative_from_resolved(&resolved, &descriptor.household_id, category)
+                    .ok_or_else(|| {
+                        AppError::new(
+                            vault::ERR_PATH_OUT_OF_VAULT,
+                            "Attachment path must stay inside the vault.",
+                        )
+                        .with_context("operation", operation)
+                        .with_context("table", table_value.clone())
+                        .with_context("id", id_value.clone())
+                        .with_context("household_id", descriptor.household_id.clone())
+                    })?;
+                (Some(normalized), Some(resolved))
+            }
+        }
+        Some(_) => {
+            return Err(AppError::new(
+                vault::ERR_FILENAME_INVALID,
+                "Attachment path must be a string.",
+            )
+            .with_context("operation", operation)
+            .with_context("table", table_value.clone())
+            .with_context("id", id_value.clone())
+            .with_context("household_id", descriptor.household_id.clone()));
+        }
+    };
+
+    Ok(Some(AttachmentMutationGuard::new(
+        descriptor.household_id,
+        category,
+        normalized,
+        resolved_path,
+    )))
+}
+
+async fn resolve_attachment_for_ipc_delete(
+    pool: &SqlitePool,
+    vault: &Arc<Vault>,
+    active_household: &Arc<Mutex<String>>,
+    table: &str,
+    household_id: &str,
+    id: &str,
+    operation: &'static str,
+) -> AppResult<Option<AttachmentMutationGuard>> {
+    if !ATTACHMENT_TABLES.contains(&table) {
+        return Ok(None);
+    }
+
+    let table_value = table.to_string();
+    let id_value = id.to_string();
+
+    let descriptor = match attachments::load_attachment_descriptor(pool, table, id).await {
+        Ok(descriptor) => descriptor,
+        Err(err) => {
+            if err.code() == "IO/ENOENT" {
+                return Ok(None);
+            }
+            return Err(err
+                .with_context("operation", operation)
+                .with_context("table", table_value)
+                .with_context("id", id_value));
+        }
+    };
+
+    if descriptor.household_id != household_id {
+        log_vault_error(
+            &descriptor.household_id,
+            descriptor.category,
+            &descriptor.relative_path,
+            vault::ERR_INVALID_HOUSEHOLD,
+            "ensure_delete_household",
+        );
+        let relative_hash = hash_path(Path::new(&descriptor.relative_path));
+        return Err(AppError::new(
+            vault::ERR_INVALID_HOUSEHOLD,
+            "Attachments require a matching household id.",
+        )
+        .with_context("operation", operation)
+        .with_context("table", table.to_string())
+        .with_context("id", id.to_string())
+        .with_context("household_id", household_id.to_string())
+        .with_context("category", descriptor.category.as_str().to_string())
+        .with_context("relative_path_hash", relative_hash)
+        .with_context("guard_stage", "ensure_delete_household".to_string()));
+    }
+
+    ensure_active_household_for_ipc(
+        active_household,
+        &descriptor.household_id,
+        descriptor.category,
+        &descriptor.relative_path,
+        operation,
+        table,
+        Some(id),
+    )?;
+
+    let resolved = vault
+        .resolve(
+            &descriptor.household_id,
+            descriptor.category,
+            &descriptor.relative_path,
+        )
+        .map_err(|err| {
+            err.with_context("operation", operation)
+                .with_context("table", table.to_string())
+                .with_context("id", id.to_string())
+                .with_context("household_id", descriptor.household_id.clone())
+        })?;
+
+    Ok(Some(AttachmentMutationGuard::new(
+        descriptor.household_id,
+        descriptor.category,
+        Some(descriptor.relative_path),
+        Some(resolved),
+    )))
+}
+
 #[tauri::command]
 async fn attachment_open(
     _app: tauri::AppHandle,
@@ -2773,40 +3227,15 @@ async fn attachment_open(
         let vault = vault;
         let active_household = active_household.clone();
         async move {
-            let descriptor = attachments::load_attachment_descriptor(&pool, &table, &id).await?;
-
-            let current_household = active_household
-                .lock()
-                .map(|guard| guard.clone())
-                .unwrap_or_default();
-            if !current_household.is_empty() && current_household != descriptor.household_id {
-                log_vault_error(
-                    &descriptor.household_id,
-                    descriptor.category,
-                    &descriptor.relative_path,
-                    crate::vault::ERR_INVALID_HOUSEHOLD,
-                    "attachment household mismatch",
-                );
-                return Err(AppError::new(
-                    crate::vault::ERR_INVALID_HOUSEHOLD,
-                    "Attachments belong to a different household.",
-                )
-                .with_context("operation", "attachment_open")
-                .with_context("table", table.clone())
-                .with_context("id", id.clone()));
-            }
-
-            let resolved = vault
-                .resolve(
-                    &descriptor.household_id,
-                    descriptor.category,
-                    &descriptor.relative_path,
-                )
-                .map_err(|err| {
-                    err.with_context("operation", "attachment_open")
-                        .with_context("table", table.clone())
-                        .with_context("id", id.clone())
-                })?;
+            let resolved = resolve_attachment_for_ipc_read(
+                &pool,
+                &active_household,
+                &vault,
+                &table,
+                &id,
+                "attachment_open",
+            )
+            .await?;
             attachments::open_with_os(&resolved)
         }
     })
@@ -2829,40 +3258,15 @@ async fn attachment_reveal(
         let vault = vault;
         let active_household = active_household.clone();
         async move {
-            let descriptor = attachments::load_attachment_descriptor(&pool, &table, &id).await?;
-
-            let current_household = active_household
-                .lock()
-                .map(|guard| guard.clone())
-                .unwrap_or_default();
-            if !current_household.is_empty() && current_household != descriptor.household_id {
-                log_vault_error(
-                    &descriptor.household_id,
-                    descriptor.category,
-                    &descriptor.relative_path,
-                    crate::vault::ERR_INVALID_HOUSEHOLD,
-                    "attachment household mismatch",
-                );
-                return Err(AppError::new(
-                    crate::vault::ERR_INVALID_HOUSEHOLD,
-                    "Attachments belong to a different household.",
-                )
-                .with_context("operation", "attachment_reveal")
-                .with_context("table", table.clone())
-                .with_context("id", id.clone()));
-            }
-
-            let resolved = vault
-                .resolve(
-                    &descriptor.household_id,
-                    descriptor.category,
-                    &descriptor.relative_path,
-                )
-                .map_err(|err| {
-                    err.with_context("operation", "attachment_reveal")
-                        .with_context("table", table.clone())
-                        .with_context("id", id.clone())
-                })?;
+            let resolved = resolve_attachment_for_ipc_read(
+                &pool,
+                &active_household,
+                &vault,
+                &table,
+                &id,
+                "attachment_reveal",
+            )
+            .await?;
             attachments::reveal_with_os(&resolved)
         }
     })
@@ -3048,19 +3452,19 @@ async fn db_backup_reveal(state: State<'_, AppState>, path: String) -> AppResult
 
 #[tauri::command]
 async fn db_export_run(
-    app: tauri::AppHandle,
+    _app: tauri::AppHandle,
     state: State<'_, AppState>,
     out_parent: String,
 ) -> AppResult<export::ExportEntryDto> {
     let pool = state.pool_clone();
     let out = std::path::PathBuf::from(out_parent);
-    let app = app.clone();
+    let vault = state.vault();
     let result = dispatch_async_app_result(move || {
         let pool = pool.clone();
-        let app = app.clone();
+        let vault = vault.clone();
         async move {
             let entry =
-                export::create_export(Some(&app), &pool, export::ExportOptions { out_parent: out })
+                export::create_export(&pool, vault, export::ExportOptions { out_parent: out })
                     .await
                     .map_err(|err| err.with_context("operation", "export_run"))?;
             Ok::<_, crate::AppError>(export::ExportEntryDto::from(entry))
@@ -3509,7 +3913,6 @@ pub fn run() {
                 .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
             let db_path = Arc::new(db_path);
             let pool_handle = Arc::new(RwLock::new(pool.clone()));
-            let attachments_root_arc = Arc::new(attachments_root.clone());
             let vault = Arc::new(Vault::new(attachments_root.clone()));
             let vault_migration = Arc::new(
                 VaultMigrationManager::new(&attachments_root)
@@ -3524,7 +3927,6 @@ pub fn run() {
                 )),
                 db_health,
                 db_path,
-                attachments_root: attachments_root_arc,
                 vault,
                 vault_migration,
                 maintenance: Arc::new(AtomicBool::new(false)),
@@ -3702,7 +4104,6 @@ mod db_health_command_tests {
 
         let attachments_root = dir.path().join("attachments");
         std::fs::create_dir_all(&attachments_root).expect("create attachments dir");
-        let attachments_root_arc = Arc::new(attachments_root.clone());
         let app_state = crate::state::AppState {
             pool: Arc::new(RwLock::new(pool.clone())),
             active_household_id: Arc::new(Mutex::new(String::from("test-household"))),
@@ -3712,7 +4113,6 @@ mod db_health_command_tests {
             )),
             db_health: Arc::new(Mutex::new(cached_report.clone())),
             db_path: Arc::new(db_path.clone()),
-            attachments_root: attachments_root_arc.clone(),
             vault: Arc::new(Vault::new(attachments_root.clone())),
             vault_migration: Arc::new(
                 crate::vault_migration::VaultMigrationManager::new(&attachments_root).unwrap(),
@@ -3752,6 +4152,553 @@ mod db_health_command_tests {
         let cached_after: DbHealthReport =
             response.deserialize().expect("deserialize cached report");
         assert_eq!(cached_after.generated_at, refreshed.generated_at);
+    }
+}
+
+#[cfg(test)]
+mod attachment_ipc_read_tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use std::sync::{Arc, Mutex};
+    use tempfile::tempdir;
+
+    async fn setup_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("connect sqlite memory");
+        sqlx::query(
+            "CREATE TABLE files (
+                id TEXT PRIMARY KEY,
+                household_id TEXT NOT NULL,
+                category TEXT NOT NULL,
+                relative_path TEXT NOT NULL,
+                deleted_at INTEGER
+            )",
+        )
+        .execute(&pool)
+        .await
+        .expect("create files table");
+        pool
+    }
+
+    async fn insert_descriptor(pool: &SqlitePool, id: &str, relative: &str) {
+        sqlx::query(
+            "INSERT INTO files (id, household_id, category, relative_path, deleted_at)
+             VALUES (?1, ?2, ?3, ?4, NULL)",
+        )
+        .bind(id)
+        .bind("hh1")
+        .bind("notes")
+        .bind(relative)
+        .execute(pool)
+        .await
+        .expect("insert attachment row");
+    }
+
+    #[tokio::test]
+    async fn rejects_traversal_paths() {
+        let pool = setup_pool().await;
+        insert_descriptor(&pool, "a1", "../escape.txt").await;
+        let active = Arc::new(Mutex::new(String::new()));
+        let vault_dir = tempdir().expect("tempdir");
+        let vault = Arc::new(Vault::new(vault_dir.path()));
+
+        let err = resolve_attachment_for_ipc_read(
+            &pool,
+            &active,
+            &vault,
+            "files",
+            "a1",
+            "attachment_open",
+        )
+        .await
+        .expect_err("expected traversal guard to reject");
+        assert_eq!(err.code(), crate::vault::ERR_PATH_OUT_OF_VAULT);
+    }
+
+    #[tokio::test]
+    async fn rejects_absolute_paths() {
+        let pool = setup_pool().await;
+        insert_descriptor(&pool, "a2", "/etc/passwd").await;
+        let active = Arc::new(Mutex::new(String::new()));
+        let vault_dir = tempdir().expect("tempdir");
+        let vault = Arc::new(Vault::new(vault_dir.path()));
+
+        let err = resolve_attachment_for_ipc_read(
+            &pool,
+            &active,
+            &vault,
+            "files",
+            "a2",
+            "attachment_reveal",
+        )
+        .await
+        .expect_err("expected absolute guard to reject");
+        assert_eq!(err.code(), crate::vault::ERR_PATH_OUT_OF_VAULT);
+    }
+}
+
+#[cfg(test)]
+mod attachment_ipc_mutation_tests {
+    use super::*;
+    use crate::security::hash_path;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use std::path::{Path, PathBuf};
+    use std::sync::{Arc, Mutex};
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn create_guard_rejects_invalid_category() {
+        let vault_dir = tempdir().expect("tempdir");
+        let vault = Arc::new(Vault::new(vault_dir.path()));
+        let active = Arc::new(Mutex::new(String::new()));
+
+        let mut data = Map::new();
+        data.insert("household_id".into(), Value::String("hh1".into()));
+        data.insert("category".into(), Value::String("invalid".into()));
+        data.insert("relative_path".into(), Value::String("docs/a.txt".into()));
+
+        let err =
+            resolve_attachment_for_ipc_create(&vault, &active, "bills", &data, "bills_create")
+                .expect_err("expected invalid category");
+        assert_eq!(err.code(), crate::vault::ERR_INVALID_CATEGORY);
+        assert_eq!(
+            err.context.get("category").map(String::as_str),
+            Some("invalid")
+        );
+        assert_eq!(
+            err.context.get("guard_stage").map(String::as_str),
+            Some("ensure_category")
+        );
+    }
+
+    #[tokio::test]
+    async fn create_guard_rejects_traversal_path() {
+        let vault_dir = tempdir().expect("tempdir");
+        let vault = Arc::new(Vault::new(vault_dir.path()));
+        let active = Arc::new(Mutex::new(String::new()));
+
+        let mut data = Map::new();
+        data.insert("household_id".into(), Value::String("hh1".into()));
+        data.insert("category".into(), Value::String("bills".into()));
+        data.insert(
+            "relative_path".into(),
+            Value::String("../escape.txt".into()),
+        );
+
+        let err =
+            resolve_attachment_for_ipc_create(&vault, &active, "bills", &data, "bills_create")
+                .expect_err("expected traversal rejection");
+        assert_eq!(err.code(), crate::vault::ERR_PATH_OUT_OF_VAULT);
+        let expected_hash = hash_path(Path::new("../escape.txt"));
+        assert_eq!(
+            err.context.get("relative_path_hash").map(String::as_str),
+            Some(expected_hash.as_str())
+        );
+        assert_eq!(
+            err.context.get("guard_stage").map(String::as_str),
+            Some("normalize_relative")
+        );
+    }
+
+    #[tokio::test]
+    async fn update_guard_rejects_active_household_mismatch() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("connect sqlite memory");
+        sqlx::query(
+            "CREATE TABLE bills (
+                id TEXT PRIMARY KEY,
+                household_id TEXT NOT NULL,
+                category TEXT NOT NULL,
+                relative_path TEXT NOT NULL,
+                deleted_at INTEGER
+            )",
+        )
+        .execute(&pool)
+        .await
+        .expect("create bills table");
+        sqlx::query(
+            "INSERT INTO bills (id, household_id, category, relative_path, deleted_at) VALUES (?1, 'hh1', 'bills', 'docs/file.txt', NULL)",
+        )
+        .bind("bill1")
+        .execute(&pool)
+        .await
+        .expect("insert attachment row");
+
+        let vault_dir = tempdir().expect("tempdir");
+        let vault = Arc::new(Vault::new(vault_dir.path()));
+        let active = Arc::new(Mutex::new(String::from("hh2")));
+        let data = Map::new();
+
+        let err = resolve_attachment_for_ipc_update(
+            &pool,
+            &vault,
+            &active,
+            "bills",
+            "bill1",
+            Some("hh1"),
+            &data,
+            "bills_update",
+        )
+        .await
+        .expect_err("expected household mismatch");
+        assert_eq!(err.code(), crate::vault::ERR_INVALID_HOUSEHOLD);
+        assert_eq!(
+            err.context.get("guard_stage").map(String::as_str),
+            Some("ensure_active_household")
+        );
+        let expected_hash = hash_path(Path::new("docs/file.txt"));
+        assert_eq!(
+            err.context.get("relative_path_hash").map(String::as_str),
+            Some(expected_hash.as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn mutation_guards_cover_supported_tables() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("connect sqlite memory");
+
+        let mut descriptors = Vec::new();
+        for &table in ATTACHMENT_TABLES {
+            let create_sql = format!(
+                "CREATE TABLE {table} (\n                    id TEXT PRIMARY KEY,\n                    household_id TEXT NOT NULL,\n                    category TEXT NOT NULL,\n                    relative_path TEXT NOT NULL,\n                    deleted_at INTEGER\n                )"
+            );
+            sqlx::query(&create_sql)
+                .execute(&pool)
+                .await
+                .unwrap_or_else(|_| panic!("create table {table}"));
+
+            let id = format!("{table}_existing");
+            let initial_relative = format!("{table}/existing.pdf");
+            sqlx::query(&format!(
+                "INSERT INTO {table} (id, household_id, category, relative_path, deleted_at)\n                 VALUES (?1, ?2, ?3, ?4, NULL)"
+            ))
+            .bind(&id)
+            .bind("hh1")
+            .bind(
+                AttachmentCategory::for_table(table)
+                    .expect("category for table")
+                    .as_str(),
+            )
+            .bind(&initial_relative)
+            .execute(&pool)
+            .await
+            .unwrap_or_else(|_| panic!("insert descriptor for {table}"));
+
+            descriptors.push((table, id));
+        }
+
+        let vault_dir = tempdir().expect("tempdir");
+        let vault = Arc::new(Vault::new(vault_dir.path()));
+        let active = Arc::new(Mutex::new(String::from("hh1")));
+
+        for (table, id) in descriptors {
+            let category = AttachmentCategory::for_table(table).expect("category for table");
+
+            let create_relative = format!("incoming/{table}.pdf");
+            let mut create_data = Map::new();
+            create_data.insert("household_id".into(), Value::String("hh1".into()));
+            create_data.insert(
+                "category".into(),
+                Value::String(category.as_str().to_string()),
+            );
+            create_data.insert(
+                "relative_path".into(),
+                Value::String(create_relative.clone()),
+            );
+
+            let create_guard = resolve_attachment_for_ipc_create(
+                &vault,
+                &active,
+                table,
+                &create_data,
+                "integration_create",
+            )
+            .expect("create guard succeeds")
+            .expect("guard present for attachment table");
+            assert_eq!(create_guard.household_id(), "hh1");
+            assert_eq!(create_guard.category(), category);
+            assert_eq!(
+                create_guard.normalized_relative_path(),
+                Some(create_relative.as_str())
+            );
+            let resolved = create_guard.resolved_path().expect("resolved path");
+            assert!(resolved.starts_with(vault_dir.path()));
+            let mut expected_suffix = PathBuf::from("hh1");
+            expected_suffix.push(category.as_str());
+            expected_suffix.push(Path::new(&create_relative));
+            assert!(resolved.ends_with(&expected_suffix));
+
+            let update_relative = format!("updated/{table}.pdf");
+            let mut update_data = Map::new();
+            update_data.insert(
+                "relative_path".into(),
+                Value::String(update_relative.clone()),
+            );
+
+            let update_guard = resolve_attachment_for_ipc_update(
+                &pool,
+                &vault,
+                &active,
+                table,
+                &id,
+                Some("hh1"),
+                &update_data,
+                "integration_update",
+            )
+            .await
+            .expect("update guard succeeds")
+            .expect("guard present for attachment table");
+            assert_eq!(update_guard.household_id(), "hh1");
+            assert_eq!(update_guard.category(), category);
+            assert_eq!(
+                update_guard.normalized_relative_path(),
+                Some(update_relative.as_str())
+            );
+            let resolved = update_guard.resolved_path().expect("resolved path");
+            assert!(resolved.starts_with(vault_dir.path()));
+            let mut expected_suffix = PathBuf::from("hh1");
+            expected_suffix.push(category.as_str());
+            expected_suffix.push(Path::new(&update_relative));
+            assert!(resolved.ends_with(&expected_suffix));
+
+            sqlx::query(&format!(
+                "UPDATE {table} SET relative_path = ?1, category = ?2 WHERE id = ?3"
+            ))
+            .bind(&update_relative)
+            .bind(category.as_str())
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .unwrap_or_else(|_| panic!("update descriptor for {table}"));
+
+            let delete_guard = resolve_attachment_for_ipc_delete(
+                &pool,
+                &vault,
+                &active,
+                table,
+                "hh1",
+                &id,
+                "integration_delete",
+            )
+            .await
+            .expect("delete guard succeeds")
+            .expect("guard present for attachment table");
+            assert_eq!(delete_guard.household_id(), "hh1");
+            assert_eq!(delete_guard.category(), category);
+            assert_eq!(
+                delete_guard.normalized_relative_path(),
+                Some(update_relative.as_str())
+            );
+            let resolved = delete_guard.resolved_path().expect("resolved path");
+            assert!(resolved.starts_with(vault_dir.path()));
+            let mut expected_suffix = PathBuf::from("hh1");
+            expected_suffix.push(category.as_str());
+            expected_suffix.push(Path::new(&update_relative));
+            assert!(resolved.ends_with(&expected_suffix));
+        }
+    }
+}
+
+#[cfg(test)]
+mod attachment_ipc_command_tests {
+    use super::*;
+    use crate::db::health::{DbHealthReport, DbHealthStatus};
+    use crate::events_tz_backfill::BackfillCoordinator;
+    use crate::household_active::StoreHandle;
+    use log::LevelFilter;
+    use sqlx::sqlite::{
+        SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
+    };
+    use sqlx::ConnectOptions;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, Mutex, RwLock};
+    use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
+    use tauri::webview::InvokeRequest;
+    use tauri::WebviewWindowBuilder;
+    use tempfile::tempdir;
+    use tokio::runtime::Runtime;
+
+    fn invoke_request_with_payload(cmd: &str, payload: serde_json::Value) -> InvokeRequest {
+        InvokeRequest {
+            cmd: cmd.into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: "http://tauri.localhost".parse().expect("valid url"),
+            body: tauri::ipc::InvokeBody::from(payload),
+            headers: Default::default(),
+            invoke_key: INVOKE_KEY.to_string(),
+        }
+    }
+
+    fn ok_health_report() -> DbHealthReport {
+        DbHealthReport {
+            status: DbHealthStatus::Ok,
+            checks: Vec::new(),
+            offenders: Vec::new(),
+            schema_hash: String::new(),
+            app_version: String::new(),
+            generated_at: String::new(),
+        }
+    }
+
+    fn build_app_state(
+        pool: SqlitePool,
+        attachments_root: &Path,
+        active: String,
+        db_path: PathBuf,
+    ) -> AppState {
+        let vault = Arc::new(Vault::new(attachments_root));
+        let migration = Arc::new(
+            VaultMigrationManager::new(attachments_root).expect("create vault migration manager"),
+        );
+        AppState {
+            pool: Arc::new(RwLock::new(pool)),
+            active_household_id: Arc::new(Mutex::new(active)),
+            store: StoreHandle::in_memory(),
+            backfill: Arc::new(Mutex::new(BackfillCoordinator::new())),
+            db_health: Arc::new(Mutex::new(ok_health_report())),
+            db_path: Arc::new(db_path),
+            vault,
+            vault_migration: migration,
+            maintenance: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    #[test]
+    fn bills_create_rejects_invalid_category_at_entrypoint() {
+        let dir = tempdir().expect("tempdir");
+        let attachments_root = dir.path().join("attachments");
+        std::fs::create_dir_all(&attachments_root).expect("create attachments root");
+
+        let runtime = Runtime::new().expect("create runtime");
+        let pool = runtime.block_on(async {
+            SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .expect("connect sqlite")
+        });
+        drop(runtime);
+
+        let state = build_app_state(
+            pool.clone(),
+            &attachments_root,
+            String::new(),
+            attachments_root.join("ipc-create.sqlite3"),
+        );
+
+        let app = mock_builder()
+            .manage(state)
+            .invoke_handler(tauri::generate_handler![super::bills_create])
+            .build(mock_context(noop_assets()))
+            .expect("build tauri app");
+
+        let window = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("create window");
+
+        let payload = serde_json::json!({
+            "data": {
+                "household_id": "hh1",
+                "category": "invalid",
+                "relative_path": "docs/a.txt"
+            }
+        });
+
+        let response = get_ipc_response(
+            &window,
+            invoke_request_with_payload("bills_create", payload),
+        );
+        let err = response.expect_err("expected invalid category error");
+        let obj = err.as_object().expect("error payload is object");
+        assert_eq!(
+            obj.get("code").and_then(|v| v.as_str()),
+            Some(crate::vault::ERR_INVALID_CATEGORY)
+        );
+    }
+
+    #[test]
+    fn attachment_open_rejects_active_household_mismatch() {
+        let dir = tempdir().expect("tempdir");
+        let attachments_root = dir.path().join("attachments");
+        std::fs::create_dir_all(&attachments_root).expect("create attachments root");
+
+        let runtime = Runtime::new().expect("create runtime");
+        let db_path = dir.path().join("ipc-open.sqlite3");
+        let pool = runtime
+            .block_on(async {
+                let options = SqliteConnectOptions::new()
+                    .filename(&db_path)
+                    .create_if_missing(true)
+                    .journal_mode(SqliteJournalMode::Wal)
+                    .synchronous(SqliteSynchronous::Full)
+                    .foreign_keys(true)
+                    .log_statements(LevelFilter::Off);
+                let pool = SqlitePoolOptions::new()
+                    .max_connections(1)
+                    .connect_with(options)
+                    .await
+                    .expect("connect sqlite");
+                sqlx::query(
+                    "CREATE TABLE bills (\n                        id TEXT PRIMARY KEY,\n                        household_id TEXT NOT NULL,\n                        category TEXT NOT NULL,\n                        relative_path TEXT NOT NULL,\n                        deleted_at INTEGER\n                    )",
+                )
+                .execute(&pool)
+                .await
+                .expect("create bills table");
+                sqlx::query(
+                    "INSERT INTO bills (id, household_id, category, relative_path, deleted_at) VALUES (?1, 'hh1', 'bills', 'docs/file.txt', NULL)",
+                )
+                .bind("bill1")
+                .execute(&pool)
+                .await
+                .expect("insert attachment");
+                pool
+            });
+        drop(runtime);
+
+        let state = build_app_state(
+            pool.clone(),
+            &attachments_root,
+            String::from("hh2"),
+            db_path,
+        );
+
+        let app = mock_builder()
+            .manage(state)
+            .invoke_handler(tauri::generate_handler![super::attachment_open])
+            .build(mock_context(noop_assets()))
+            .expect("build tauri app");
+
+        let window = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("create window");
+
+        let payload = serde_json::json!({
+            "table": "bills",
+            "id": "bill1"
+        });
+
+        let response = get_ipc_response(
+            &window,
+            invoke_request_with_payload("attachment_open", payload),
+        );
+        let err = response.expect_err("expected household guard error");
+        let obj = err.as_object().expect("error payload is object");
+        assert_eq!(
+            obj.get("code").and_then(|v| v.as_str()),
+            Some(crate::vault::ERR_INVALID_HOUSEHOLD)
+        );
     }
 }
 
@@ -3829,7 +4776,6 @@ mod write_guard_tests {
 
         let attachments_root = dir.path().join("attachments");
         std::fs::create_dir_all(&attachments_root).expect("create attachments dir");
-        let attachments_root_arc = Arc::new(attachments_root.clone());
         let app_state = crate::state::AppState {
             pool: Arc::new(RwLock::new(pool.clone())),
             active_household_id: Arc::new(Mutex::new(String::from("test"))),
@@ -3839,7 +4785,6 @@ mod write_guard_tests {
             )),
             db_health: Arc::new(Mutex::new(unhealthy_report.clone())),
             db_path: Arc::new(db_path.clone()),
-            attachments_root: attachments_root_arc.clone(),
             vault: Arc::new(Vault::new(attachments_root.clone())),
             vault_migration: Arc::new(
                 crate::vault_migration::VaultMigrationManager::new(&attachments_root).unwrap(),

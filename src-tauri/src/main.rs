@@ -28,6 +28,7 @@ use arklowdun_lib::import::{
     ValidationReport, MIN_SUPPORTED_APP_VERSION,
 };
 use arklowdun_lib::ipc::guard::{DB_UNHEALTHY_CLI_HINT, DB_UNHEALTHY_CODE, DB_UNHEALTHY_EXIT_CODE};
+use arklowdun_lib::vault::Vault;
 use arklowdun_lib::AppError;
 
 #[derive(Debug, Parser)]
@@ -354,14 +355,26 @@ fn handle_db_export(out_parent: std::path::PathBuf) -> Result<i32> {
             .with_context(|| format!("create database parent directory {}", parent.display()))?;
     }
 
+    let attachments_root = default_attachments_path().context("resolve attachments directory")?;
+    fs::create_dir_all(&attachments_root).with_context(|| {
+        format!(
+            "create attachments directory {}",
+            attachments_root.display()
+        )
+    })?;
+
     match guard_cli_db_mutation(&db_path)? {
         Ok(pool) => {
-            let entry = tauri::async_runtime::block_on(async move {
-                let res = create_export::<tauri::Wry>(None, &pool, ExportOptions { out_parent })
-                    .await
-                    .context("create export package");
-                pool.close().await;
-                res
+            let vault = Arc::new(Vault::new(&attachments_root));
+            let entry = tauri::async_runtime::block_on({
+                let vault = vault.clone();
+                async move {
+                    let res = create_export(&pool, vault, ExportOptions { out_parent })
+                        .await
+                        .context("create export package");
+                    pool.close().await;
+                    res
+                }
             })?;
             println!("Export created at {}", entry.directory.display());
             println!("Manifest: {}", entry.manifest_path.display());
@@ -556,10 +569,11 @@ fn handle_db_import(input: PathBuf, mode: ImportModeArg, dry_run: bool) -> Resul
                 .parent()
                 .map(|p| p.to_path_buf())
                 .unwrap_or_else(|| PathBuf::from("."));
+            let vault = Arc::new(Vault::new(&attachments_root));
             match tauri::async_runtime::block_on(run_cli_import(
                 pool,
                 input,
-                attachments_root,
+                vault,
                 target_root,
                 reports_dir,
                 mode.into(),
@@ -605,7 +619,7 @@ enum ImportResult {
 async fn run_cli_import(
     pool: SqlitePool,
     bundle_path: PathBuf,
-    attachments_root: PathBuf,
+    vault: Arc<Vault>,
     target_root: PathBuf,
     reports_dir: PathBuf,
     mode: ImportMode,
@@ -635,7 +649,7 @@ async fn run_cli_import(
 
         let plan_ctx = PlanContext {
             pool: &pool,
-            attachments_root: attachments_root.as_path(),
+            vault: vault.clone(),
         };
         let plan = build_plan(&bundle, &plan_ctx, mode)
             .await
@@ -651,7 +665,7 @@ async fn run_cli_import(
             });
         }
 
-        let exec_ctx = ExecutionContext::new(&pool, attachments_root.as_path());
+        let exec_ctx = ExecutionContext::new(&pool, vault.clone());
         let execution = execute_plan(&bundle, &plan, &exec_ctx)
             .await
             .map_err(anyhow::Error::new)
