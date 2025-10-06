@@ -426,6 +426,8 @@ async fn execute_migration<R: tauri::Runtime + 'static>(
 
             let legacy_resolution =
                 resolve_legacy_path(&app, legacy_root.as_deref(), &relative_path)?;
+            let legacy_unsupported =
+                matches!(&legacy_resolution, LegacyResolution::Unsupported { .. });
 
             if let LegacyResolution::Supported(ref source) = legacy_resolution {
                 source_hash = Some(hash_path(&source.path));
@@ -580,10 +582,8 @@ async fn execute_migration<R: tauri::Runtime + 'static>(
                 }
             }
 
-            if !mode.is_apply() {
-                if matches!(&legacy_resolution, LegacyResolution::Unsupported { .. }) {
-                    manifest_action = ManifestAction::Skip;
-                }
+            if !mode.is_apply() && legacy_unsupported {
+                manifest_action = ManifestAction::Skip;
             }
 
             manifest_writer.push(ManifestEntry {
