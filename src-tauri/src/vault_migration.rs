@@ -432,10 +432,11 @@ async fn execute_migration<R: tauri::Runtime + 'static>(
             }
 
             if mode.is_apply() {
-                match legacy_resolution {
+                match &legacy_resolution {
                     LegacyResolution::Unsupported {
                         reason: legacy_reason,
                     } => {
+                        let legacy_reason = *legacy_reason;
                         counts.record_unsupported(legacy_reason);
                         reason = Some(legacy_reason.to_string());
                         manifest_action = ManifestAction::Skip;
@@ -448,7 +449,7 @@ async fn execute_migration<R: tauri::Runtime + 'static>(
                         );
                     }
                     LegacyResolution::Supported(source) => {
-                        let source_path = source.path;
+                        let source_path = source.path.clone();
                         if !source_path.exists() {
                             counts.record_skip(SKIP_REASON_SOURCE_MISSING);
                             reason = Some(SKIP_REASON_SOURCE_MISSING.to_string());
@@ -571,6 +572,7 @@ async fn execute_migration<R: tauri::Runtime + 'static>(
                     reason: legacy_reason,
                 } = &legacy_resolution
                 {
+                    let legacy_reason = *legacy_reason;
                     counts.record_unsupported(legacy_reason);
                     reason = Some(legacy_reason.to_string());
                 } else {
@@ -579,7 +581,7 @@ async fn execute_migration<R: tauri::Runtime + 'static>(
             }
 
             if !mode.is_apply() {
-                if matches!(legacy_resolution, LegacyResolution::Unsupported { .. }) {
+                if matches!(&legacy_resolution, LegacyResolution::Unsupported { .. }) {
                     manifest_action = ManifestAction::Skip;
                 }
             }
