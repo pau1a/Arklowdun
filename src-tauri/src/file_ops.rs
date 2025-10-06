@@ -24,12 +24,6 @@ use crate::vault_migration::ATTACHMENT_TABLES;
 use crate::{AppError, AppResult};
 use uuid::Uuid;
 
-#[cfg(unix)]
-use libc::EXDEV;
-
-#[cfg(windows)]
-const ERROR_NOT_SAME_DEVICE: i32 = 17;
-
 const EVENT_FILE_MOVE_PROGRESS: &str = "file_move_progress";
 const EVENT_ATTACHMENTS_REPAIR_PROGRESS: &str = "attachments_repair_progress";
 
@@ -703,12 +697,14 @@ async fn stage_move(source: &Path, staging: &Path) -> AppResult<PreparedMove> {
         Ok(_) => Ok(PreparedMove::Rename {
             staging: staging.to_path_buf(),
         }),
-        Err(err) if is_cross_device_error(&err) => {
-            fs::copy(source, staging).await.map_err(|copy_err| {
-                AppError::from(copy_err).with_context("operation", "copy_cross_volume")
-            })?;
+        Err(rename_err) => {
+            if let Err(copy_err) = fs::copy(source, staging).await {
+                return Err(AppError::from(rename_err)
+                    .with_context("operation", "rename_attachment")
+                    .with_context("fallback_copy_error", copy_err.to_string()));
+            }
             verify_same_content(source, staging).await?;
-            let mut handle = File::open(staging).await.map_err(|io_err| {
+            let handle = File::open(staging).await.map_err(|io_err| {
                 AppError::from(io_err).with_context("operation", "open_stage_file")
             })?;
             handle.sync_all().await.map_err(|io_err| {
@@ -718,7 +714,6 @@ async fn stage_move(source: &Path, staging: &Path) -> AppResult<PreparedMove> {
                 staging: staging.to_path_buf(),
             })
         }
-        Err(err) => Err(AppError::from(err).with_context("operation", "rename_attachment")),
     }
 }
 
@@ -747,16 +742,6 @@ async fn verify_same_content(source: &Path, staged: &Path) -> AppResult<()> {
     }
 
     Ok(())
-}
-
-fn is_cross_device_error(err: &std::io::Error) -> bool {
-    match err.raw_os_error() {
-        #[cfg(unix)]
-        Some(code) if code == EXDEV => true,
-        #[cfg(windows)]
-        Some(code) if code == ERROR_NOT_SAME_DEVICE => true,
-        _ => false,
-    }
 }
 
 fn index_basename(relative: &str) -> String {
