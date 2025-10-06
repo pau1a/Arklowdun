@@ -2371,7 +2371,7 @@ async fn files_index_status(
                 "SELECT last_built_at_utc, source_row_count FROM files_index_meta WHERE household_id=?1",
             )
             .bind(&household)
-            .fetch_optional(&mut conn)
+            .fetch_optional(conn.as_mut())
             .await?
             {
                 last_built = row.try_get::<String, _>("last_built_at_utc").ok();
@@ -2383,7 +2383,7 @@ async fn files_index_status(
                     "SELECT COUNT(*) FROM files_index WHERE household_id=?1",
                 )
                 .bind(&household)
-                .fetch_one(&mut conn)
+                .fetch_one(conn.as_mut())
                 .await
                 .unwrap_or(0);
             }
@@ -3588,9 +3588,16 @@ async fn attachments_migrate<R: tauri::Runtime>(
     let pool = state.pool_clone();
     let vault = state.vault();
     let manager = state.vault_migration();
+    let app_spawn = app.clone();
+    let app_for_task = app.clone();
+    let manager_for_task = manager.clone();
+    let pool_for_task = pool.clone();
+    let vault_for_task = vault.clone();
     let result = dispatch_async_app_result(move || {
-        let app = app.clone();
-        let manager = manager.clone();
+        let app = app_for_task.clone();
+        let manager = manager_for_task.clone();
+        let pool = pool_for_task.clone();
+        let vault = vault_for_task.clone();
         async move { vault_migration::run_vault_migration(app, pool, vault, manager, mode).await }
     })
     .await;
@@ -3600,7 +3607,7 @@ async fn attachments_migrate<R: tauri::Runtime>(
             if let Some(active) = snapshot_active_id(&state) {
                 let indexer = state.files_indexer();
                 if indexer.current_state(&active) == IndexerState::Idle {
-                    spawn_background_index_rebuild(&app, indexer, active, RebuildMode::Incremental);
+                    spawn_background_index_rebuild(&app_spawn, indexer, active, RebuildMode::Incremental);
                 }
             }
         }
@@ -3623,9 +3630,16 @@ async fn attachments_resume_migration<R: tauri::Runtime>(
             "No vault migration checkpoint is available.",
         )
     })?;
+    let app_spawn = app.clone();
+    let app_for_task = app.clone();
+    let manager_for_task = manager.clone();
+    let pool_for_task = pool.clone();
+    let vault_for_task = vault.clone();
     let result = dispatch_async_app_result(move || {
-        let app = app.clone();
-        let manager = manager.clone();
+        let app = app_for_task.clone();
+        let manager = manager_for_task.clone();
+        let pool = pool_for_task.clone();
+        let vault = vault_for_task.clone();
         async move { vault_migration::run_vault_migration(app, pool, vault, manager, mode).await }
     })
     .await;
@@ -3635,7 +3649,7 @@ async fn attachments_resume_migration<R: tauri::Runtime>(
             if let Some(active) = snapshot_active_id(&state) {
                 let indexer = state.files_indexer();
                 if indexer.current_state(&active) == IndexerState::Idle {
-                    spawn_background_index_rebuild(&app, indexer, active, RebuildMode::Incremental);
+                    spawn_background_index_rebuild(&app_spawn, indexer, active, RebuildMode::Incremental);
                 }
             }
         }

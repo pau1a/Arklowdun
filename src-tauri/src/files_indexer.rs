@@ -137,7 +137,7 @@ impl FilesIndexer {
             "SELECT file_id, category, filename, size_bytes, modified_at_utc\n             FROM files_index WHERE household_id=?1",
         )
         .bind(&household)
-        .fetch_all(&mut conn)
+        .fetch_all(conn.as_mut())
         .await?;
         for row in rows {
             let file_id: String = row.try_get("file_id")?;
@@ -301,7 +301,7 @@ impl FilesIndexer {
                 .bind(&mime)
                 .bind(modified_at)
                 .bind(&sha256)
-                .execute(&mut conn)
+                .execute(conn.as_mut())
                 .await?;
                 drop(conn);
 
@@ -327,7 +327,7 @@ impl FilesIndexer {
                 sqlx::query("DELETE FROM files_index WHERE household_id=?1 AND file_id=?2")
                     .bind(&household)
                     .bind(&existing_row.file_id)
-                    .execute(&mut conn)
+                    .execute(conn.as_mut())
                     .await?;
             }
         }
@@ -347,7 +347,7 @@ impl FilesIndexer {
         .bind(total as i64)
         .bind(&max_updated_iso)
         .bind(crate::FILES_INDEX_VERSION)
-        .execute(&mut conn)
+        .execute(conn.as_mut())
         .await?;
         drop(conn);
 
