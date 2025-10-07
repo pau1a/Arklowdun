@@ -1747,6 +1747,7 @@ async fn household_repair<R: tauri::Runtime>(
                 crate::household::HouseholdCrudError::NotFound => "not_found",
                 crate::household::HouseholdCrudError::Deleted => "already_deleted",
                 crate::household::HouseholdCrudError::InvalidColor => "invalid_color",
+                crate::household::HouseholdCrudError::CascadeDbNotEmpty => "db_not_empty",
                 crate::household::HouseholdCrudError::Unexpected(_) => "unexpected",
             };
             tracing::warn!(
