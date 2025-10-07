@@ -1,5 +1,7 @@
 export type LogLevel = "error" | "warn" | "info" | "debug" | "trace";
 
+export type LogWriteStatus = "ok" | "io_error" | (string & {});
+
 export interface RawLogLine {
   [k: string]: unknown;
 }
