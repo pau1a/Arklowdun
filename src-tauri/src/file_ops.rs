@@ -508,7 +508,9 @@ pub async fn attachments_repair_manifest_export<R: tauri::Runtime>(
     .await
     .map_err(|err| AppError::from(err).with_context("operation", "attachments_repair_manifest_header"))?;
 
-    for row in records {
+    let row_count = records.len();
+
+    for row in &records {
         let table_name: String = row.try_get("table_name").unwrap_or_default();
         let row_id: i64 = row.try_get("row_id").unwrap_or_default();
         let category: String = row.try_get("category").unwrap_or_default();
@@ -552,7 +554,7 @@ pub async fn attachments_repair_manifest_export<R: tauri::Runtime>(
         event = "attachments_repair_manifest_exported",
         household_id = %household_id,
         manifest_hash = %manifest_hash,
-        row_count = records.len(),
+        row_count = row_count,
     );
 
     Ok(file_path.to_string_lossy().into_owned())
