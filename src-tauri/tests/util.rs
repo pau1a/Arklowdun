@@ -5,6 +5,7 @@ use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 use std::fs;
 use tempfile::TempDir;
 
+#[allow(dead_code)]
 pub async fn temp_pool() -> SqlitePool {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
@@ -18,6 +19,7 @@ pub async fn temp_pool() -> SqlitePool {
     pool
 }
 
+#[allow(dead_code)]
 pub fn temp_vault() -> (TempDir, Vault) {
     let dir = TempDir::new().expect("create temp vault dir");
     let base = dir.path().join("vault");

@@ -276,14 +276,12 @@ pub type CascadeProgressObserver = Arc<dyn Fn(CascadeProgress) + Send + Sync + '
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CascadePhase {
-    DbDeletes,
     FilesCleanup,
 }
 
 impl CascadePhase {
     fn as_str(&self) -> &'static str {
         match self {
-            CascadePhase::DbDeletes => "db_deletes",
             CascadePhase::FilesCleanup => "files_cleanup",
         }
     }
