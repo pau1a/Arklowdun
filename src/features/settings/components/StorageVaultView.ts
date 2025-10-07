@@ -12,7 +12,6 @@ import type {
   ConflictStrategy,
 } from "@api/fileOps";
 import type { AttachmentCategory } from "@bindings/AttachmentCategory";
-import type { AppError } from "@bindings/AppError";
 import {
   cancelIndexRebuild,
   getIndexStatus,
@@ -25,6 +24,8 @@ import {
 import createButton from "@ui/Button";
 import createInput from "@ui/Input";
 import toast from "@ui/Toast";
+
+import { toUserMessage } from "@files/safe-fs";
 
 import {
   fetchMigrationStatus,
@@ -413,43 +414,6 @@ export function createStorageVaultView(): StorageVaultViewInstance {
     },
   };
 
-  const ERROR_MESSAGES: Record<string, string> = {
-    FILE_MISSING: "The source file is missing from the vault.",
-    DIRECTORY_MOVE_UNSUPPORTED: "Moving directories is not supported yet.",
-    COPY_VERIFICATION_FAILED:
-      "The copied file could not be verified. Check the vault before retrying.",
-    FILE_MOVE_IN_PROGRESS: "Another move for this attachment is already running.",
-    FILE_MOVE_LOCK_FAILED: "Unable to coordinate the move. Please try again.",
-    REPAIR_ACTIONS_REQUIRED: "Provide at least one repair action before applying.",
-    REPAIR_TABLE_UNSUPPORTED:
-      "One of the repair actions references an unsupported table.",
-    REPAIR_ROW_MISSING: "The targeted attachment row no longer exists.",
-    REPAIR_MANIFEST_MISSING:
-      "The manifest entry could not be found. Run another scan to refresh it.",
-    REPAIR_RELINK_CATEGORY_REQUIRED:
-      "Relink actions must include the destination category.",
-    REPAIR_RELINK_RELATIVE_REQUIRED:
-      "Relink actions must include the new relative path.",
-    REPAIR_RELINK_TARGET_MISSING:
-      "The relink target file could not be found in the vault.",
-    REPAIR_RELINK_TARGET_INVALID: "The relink target must be a file.",
-  };
-
-  const toMaintenanceMessage = (error: unknown): string => {
-    const candidate = error as Partial<AppError> | undefined;
-    const code = typeof candidate?.code === "string" ? candidate.code : undefined;
-    if (code) {
-      if (Object.prototype.hasOwnProperty.call(ERROR_MESSAGES, code)) {
-        return ERROR_MESSAGES[code];
-      }
-      if (code.startsWith("REPAIR_")) {
-        return "Attachment repair failed. Review the manifest for details.";
-      }
-    }
-    const message = typeof candidate?.message === "string" ? candidate.message : undefined;
-    return message ?? "Operation failed.";
-  };
-
   const updateRepairActionsSummary = (): void => {
     const { actions, manifestName } = state.maintenance.repair;
     if (actions.length > 0) {
@@ -686,7 +650,7 @@ export function createStorageVaultView(): StorageVaultViewInstance {
         message: `Exported manifest to ${path}.`,
       });
     } catch (error) {
-      const message = toMaintenanceMessage(error) || "Unable to export manifest.";
+      const message = toUserMessage(error) || "Unable to export manifest.";
       toast.show({ kind: "error", message });
     } finally {
       repairExportButton.update({
@@ -731,7 +695,7 @@ export function createStorageVaultView(): StorageVaultViewInstance {
       updateRepairStatus("Cancellation requested. Finishing current batch…", "warning");
       toast.show({ kind: "info", message: "Cancellation requested." });
     } catch (error) {
-      const message = toMaintenanceMessage(error) || "Unable to cancel repair.";
+      const message = toUserMessage(error) || "Unable to cancel repair.";
       toast.show({ kind: "error", message });
       repairCancelButton.update({ disabled: false });
     }
@@ -781,7 +745,7 @@ export function createStorageVaultView(): StorageVaultViewInstance {
       );
       toast.show({ kind: "success", message: "File move completed." });
     } catch (error) {
-      const message = toMaintenanceMessage(error) || "File move failed.";
+      const message = toUserMessage(error) || "File move failed.";
       updateMoveStatus(message, true);
       toast.show({ kind: "error", message });
     } finally {
@@ -860,7 +824,7 @@ export function createStorageVaultView(): StorageVaultViewInstance {
         }
       }
     } catch (error) {
-      const message = toMaintenanceMessage(error) || "Repair run failed.";
+      const message = toUserMessage(error) || "Repair run failed.";
       updateRepairStatus(message, "error");
       toast.show({ kind: "error", message });
     } finally {

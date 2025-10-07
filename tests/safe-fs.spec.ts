@@ -41,6 +41,21 @@ test("absolute path denied", async () => {
   assert.equal(msg, "That location isn’t allowed.");
 });
 
+test("toUserMessage maps maintenance error codes", () => {
+  assert.equal(
+    safeFs.toUserMessage({ code: "FILE_MISSING" }),
+    "The source file is missing from the vault.",
+  );
+  assert.equal(
+    safeFs.toUserMessage({ code: "REPAIR_UNSUPPORTED_ACTION" }),
+    "Attachment repair failed. Review the manifest for details.",
+  );
+  assert.equal(
+    safeFs.toUserMessage({ code: "SOMETHING", message: "Custom message" }),
+    "Custom message",
+  );
+});
+
 test("exists true when lstat resolves", async () => {
   safeFs.__setMocks({
     fs: {
