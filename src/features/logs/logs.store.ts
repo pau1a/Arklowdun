@@ -1,17 +1,19 @@
 import { getTail } from "./logs.api";
 import { parseLogLine } from "./logs.parse";
-import type { LogEntry, LogLevel } from "./logs.types";
+import type { LogEntry, LogLevel, LogWriteStatus } from "./logs.types";
 
 export interface LogsState {
   status: "idle" | "loading" | "ready" | "error";
   error?: string;
   entries: LogEntry[];
   fetchedAtUtc?: string;
+  droppedCount: number;
+  logWriteStatus: LogWriteStatus;
 }
 
 type Listener = (state: LogsState) => void;
 
-type TailFetcher = () => Promise<(string | Record<string, unknown>)[]>;
+type TailFetcher = () => Promise<unknown>;
 
 const MAX_ENTRIES = 200;
 
@@ -20,6 +22,8 @@ const listeners = new Set<Listener>();
 const state: LogsState = {
   status: "idle",
   entries: [],
+  droppedCount: 0,
+  logWriteStatus: "ok",
 };
 
 let tailFetcher: TailFetcher = getTail;
@@ -30,6 +34,8 @@ function snapshot(): LogsState {
     error: state.error,
     entries: state.entries.slice(),
     fetchedAtUtc: state.fetchedAtUtc,
+    droppedCount: state.droppedCount,
+    logWriteStatus: state.logWriteStatus,
   };
 }
 
@@ -62,15 +68,18 @@ function formatError(error: unknown): string {
 function setLoading(): void {
   state.status = "loading";
   state.error = undefined;
-  state.entries = [];
-  state.fetchedAtUtc = undefined;
   notify();
 }
 
-function setReady(entries: LogEntry[]): void {
+function setReady(
+  entries: LogEntry[],
+  meta: { droppedCount: number; logWriteStatus: LogWriteStatus },
+): void {
   state.status = "ready";
   state.error = undefined;
   state.entries = entries;
+  state.droppedCount = meta.droppedCount;
+  state.logWriteStatus = meta.logWriteStatus;
   state.fetchedAtUtc = new Date().toISOString();
   notify();
 }
@@ -80,7 +89,28 @@ function setError(message: string): void {
   state.error = message;
   state.entries = [];
   state.fetchedAtUtc = undefined;
+  state.droppedCount = 0;
+  state.logWriteStatus = "ok";
   notify();
+}
+
+interface TailResponse {
+  lines?: (string | Record<string, unknown>)[];
+  dropped_count?: unknown;
+  log_write_status?: unknown;
+}
+
+function toFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
 }
 
 function normalizeTail(
@@ -108,6 +138,39 @@ function normalizeTail(
   return entries;
 }
 
+function normalizeResponse(
+  response: unknown,
+): { entries: LogEntry[]; droppedCount: number; logWriteStatus: LogWriteStatus } {
+  let lines: (string | Record<string, unknown>)[] | unknown = response;
+  let droppedCount = state.droppedCount ?? 0;
+  let logWriteStatus: LogWriteStatus = state.logWriteStatus ?? "ok";
+
+  if (response && typeof response === "object" && !Array.isArray(response)) {
+    const record = response as TailResponse;
+    if (Array.isArray(record.lines)) {
+      lines = record.lines;
+    }
+    const dropped = toFiniteNumber(record.dropped_count);
+    if (dropped !== null) {
+      droppedCount = Math.max(0, dropped);
+    } else if (Array.isArray(record.lines)) {
+      droppedCount = 0;
+    }
+    if (typeof record.log_write_status === "string") {
+      const normalized = record.log_write_status.trim();
+      logWriteStatus = (normalized || "ok") as LogWriteStatus;
+    } else if (Array.isArray(record.lines)) {
+      logWriteStatus = "ok";
+    }
+  } else if (Array.isArray(response)) {
+    droppedCount = 0;
+    logWriteStatus = "ok";
+  }
+
+  const entries = normalizeTail(lines);
+  return { entries, droppedCount, logWriteStatus };
+}
+
 export const logsStore = {
   state,
   subscribe(listener: Listener): () => void {
@@ -120,9 +183,12 @@ export const logsStore = {
   async fetchTail(): Promise<void> {
     setLoading();
     try {
-      const lines = await tailFetcher();
-      const entries = normalizeTail(lines);
-      setReady(entries);
+      const response = await tailFetcher();
+      const result = normalizeResponse(response);
+      setReady(result.entries, {
+        droppedCount: result.droppedCount,
+        logWriteStatus: result.logWriteStatus,
+      });
     } catch (error) {
       const message = formatError(error);
       setError(message);
@@ -133,6 +199,8 @@ export const logsStore = {
     state.error = undefined;
     state.entries = [];
     state.fetchedAtUtc = undefined;
+    state.droppedCount = 0;
+    state.logWriteStatus = "ok";
     notify();
   },
 };

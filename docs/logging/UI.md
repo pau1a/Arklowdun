@@ -34,6 +34,10 @@ Frontend engineers implementing the Logs page presentation and interactive behav
 * IPC failures render a structured error block within the main pane, offering retry without crashing the shell.
 * Malformed lines are skipped gracefully and optionally reported through a non-blocking toast or console log.
 
+## Screenshot
+
+> **Screenshot placeholder:** Add `docs/logging/images/logs-view.png` manually to include the updated Logs view capture.
+
 ## Related references
 * [SPEC](./SPEC.md)
 * [IPC](./IPC.md)

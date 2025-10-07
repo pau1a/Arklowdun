@@ -1,0 +1,26 @@
+{
+  "lines": [
+    {
+      "ts": "2025-10-07T18:24:12Z",
+      "level": "info",
+      "event": "app_start",
+      "message": "Application launched",
+      "household_id": "house-001"
+    },
+    {
+      "ts": "2025-10-07T18:24:37Z",
+      "level": "warn",
+      "event": "fs_guard",
+      "message": "Disk pressure crossing threshold"
+    },
+    {
+      "ts": "2025-10-07T18:25:04Z",
+      "level": "error",
+      "event": "sync_failed",
+      "message": "Unable to write to backup disk",
+      "crash_id": "crash-9c7"
+    }
+  ],
+  "dropped_count": 2,
+  "log_write_status": "io_error"
+}
