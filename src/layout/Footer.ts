@@ -82,13 +82,33 @@ export function Footer(items: FooterItemConfig[]): FooterInstance {
 
   const diagnostics = document.createElement("button");
   diagnostics.type = "button";
-  diagnostics.title = "Diagnostics / Logs";
-  diagnostics.setAttribute("aria-label", "Diagnostics and logs");
+  diagnostics.id = "footer-logs";
+  diagnostics.title = "Open logs";
+  diagnostics.setAttribute("aria-label", "Open logs");
+  diagnostics.classList.add("footer__logs");
   const bug = document.createElement("i");
   bug.className = "fa-regular fa-bug";
   bug.setAttribute("aria-hidden", "true");
   diagnostics.appendChild(bug);
   utilities.appendChild(diagnostics);
+
+  const focusableDiagnostics = diagnostics as HTMLButtonElement;
+
+  const navigateToLogs = () => {
+    if (location.hash === "#/logs") return;
+    location.hash = "#/logs";
+  };
+
+  focusableDiagnostics.addEventListener("click", (event) => {
+    event.preventDefault();
+    navigateToLogs();
+  });
+
+  focusableDiagnostics.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    navigateToLogs();
+  });
 
   const help = document.createElement("button");
   help.type = "button";
@@ -113,6 +133,11 @@ export function Footer(items: FooterItemConfig[]): FooterInstance {
       if (isActive) entry.link.setAttribute("aria-current", "page");
       else entry.link.removeAttribute("aria-current");
     });
+
+    const isLogs = id === "logs";
+    diagnostics.classList.toggle("is-current", isLogs);
+    if (isLogs) diagnostics.setAttribute("aria-current", "page");
+    else diagnostics.removeAttribute("aria-current");
   }
 
   function getLink(id: AppPane): HTMLAnchorElement | undefined {
