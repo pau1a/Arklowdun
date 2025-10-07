@@ -219,14 +219,13 @@ async fn move_cross_category_same_volume() -> Result<()> {
             .await?;
     assert_eq!(updated_category.as_deref(), Some(to_category.as_str()));
 
-    let index_row: Option<(String, String)> = sqlx::query_as(
+    let (category, filename): (String, String) = sqlx::query_as(
         "SELECT category, filename FROM files_index WHERE household_id = ?1 AND file_id = ?2",
     )
     .bind(household_id)
     .bind(&file_id)
     .fetch_one(&pool)
     .await?;
-    let (category, filename) = index_row.expect("index row present");
     assert_eq!(category, to_category.as_str());
     assert_eq!(
         filename,
