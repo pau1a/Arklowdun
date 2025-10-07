@@ -1112,7 +1112,7 @@ fn csv_escape(value: Option<&str>) -> String {
 }
 
 #[cfg(test)]
-mod tests;
+mod tests_unit;
 
 async fn record_missing(
     pool: &SqlitePool,
