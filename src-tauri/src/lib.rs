@@ -238,7 +238,7 @@ mod cascade_health_tests {
         let household = crate::household::create_household(&pool, "Health", None).await?;
         let _ = crate::household::pending_cascades(&pool).await?;
         sqlx::query(
-            "INSERT INTO cascade_checkpoints (household_id, phase_index, deleted_count, total, phase, updated_at, vacuum_pending)\n             VALUES (?1, 0, 0, 1, 'note_links', 1, 0)",
+            "INSERT INTO cascade_checkpoints (household_id, phase_index, deleted_count, total, phase, updated_at_utc, vacuum_pending, remaining_paths)\n             VALUES (?1, 0, 0, 1, 'note_links', 1, 0, 0)",
         )
         .bind(&household.id)
         .execute(&pool)
@@ -1208,6 +1208,10 @@ fn map_household_crud_error(err: crate::household::HouseholdCrudError) -> AppErr
         crate::household::HouseholdCrudError::InvalidColor => {
             AppError::new("INVALID_COLOR", "Please use a hex colour like #2563EB.")
         }
+        crate::household::HouseholdCrudError::CascadeDbNotEmpty => AppError::new(
+            "CASCADE_DB_NOT_EMPTY",
+            "Unable to remove files while data remains in the database.",
+        ),
         crate::household::HouseholdCrudError::Unexpected(err) => AppError::from(err),
     }
 }
@@ -1490,35 +1494,44 @@ async fn household_delete<R: tauri::Runtime>(
 ) -> AppResult<HouseholdDeleteResponse> {
     let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool_clone();
+    let vault = state.vault();
     update_cascade_health_cache(&state, &[id.clone()])?;
     let active = snapshot_active_id(&state);
     let progress_handler = make_delete_progress_handler(&app, &id);
     let mut options = CascadeDeleteOptions::default();
     options.progress = Some(progress_handler);
     options.max_duration_ms = Some(2_000);
-    let outcome =
-        match crate::household::delete_household(&pool, &id, active.as_deref(), options).await {
-            Ok(outcome) => outcome,
-            Err(err) => {
-                let reason = match &err {
-                    crate::household::HouseholdCrudError::DefaultUndeletable => "default",
-                    crate::household::HouseholdCrudError::NotFound => "not_found",
-                    crate::household::HouseholdCrudError::Deleted => "already_deleted",
-                    crate::household::HouseholdCrudError::InvalidColor => "invalid_color",
-                    crate::household::HouseholdCrudError::Unexpected(_) => "unexpected",
-                };
-                let app_error = map_household_crud_error(err);
-                tracing::warn!(
-                    target: "arklowdun",
-                    event = "household_delete",
-                    household_id = %id,
-                    result = "error",
-                    reason,
-                    error_code = %app_error.code()
-                );
-                return Err(app_error);
-            }
-        };
+    let outcome = match crate::household::delete_household(
+        &pool,
+        vault.as_ref(),
+        &id,
+        active.as_deref(),
+        options,
+    )
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            let reason = match &err {
+                crate::household::HouseholdCrudError::DefaultUndeletable => "default",
+                crate::household::HouseholdCrudError::NotFound => "not_found",
+                crate::household::HouseholdCrudError::Deleted => "already_deleted",
+                crate::household::HouseholdCrudError::InvalidColor => "invalid_color",
+                crate::household::HouseholdCrudError::CascadeDbNotEmpty => "db_not_empty",
+                crate::household::HouseholdCrudError::Unexpected(_) => "unexpected",
+            };
+            let app_error = map_household_crud_error(err);
+            tracing::warn!(
+                target: "arklowdun",
+                event = "household_delete",
+                household_id = %id,
+                result = "error",
+                reason,
+                error_code = %app_error.code()
+            );
+            return Err(app_error);
+        }
+    };
 
     sync_cascade_health(&state, &pool).await?;
 
@@ -1587,6 +1600,7 @@ async fn household_resume_delete<R: tauri::Runtime>(
 ) -> AppResult<HouseholdDeleteResponse> {
     let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool_clone();
+    let vault = state.vault();
     update_cascade_health_cache(&state, &[id.clone()])?;
     let active = snapshot_active_id(&state);
     let progress_handler = make_delete_progress_handler(&app, &id);
@@ -1594,29 +1608,35 @@ async fn household_resume_delete<R: tauri::Runtime>(
     options.progress = Some(progress_handler);
     options.resume = true;
     options.max_duration_ms = Some(2_000);
-    let outcome =
-        match crate::household::resume_household_delete(&pool, &id, active.as_deref(), options)
-            .await
-        {
-            Ok(outcome) => outcome,
-            Err(err) => {
-                let reason = match &err {
-                    crate::household::HouseholdCrudError::DefaultUndeletable => "default",
-                    crate::household::HouseholdCrudError::NotFound => "not_found",
-                    crate::household::HouseholdCrudError::Deleted => "already_deleted",
-                    crate::household::HouseholdCrudError::InvalidColor => "invalid_color",
-                    crate::household::HouseholdCrudError::Unexpected(_) => "unexpected",
-                };
-                tracing::warn!(
-                    target: "arklowdun",
-                    event = "household_resume_failed",
-                    household_id = %id,
-                    result = "error",
-                    reason
-                );
-                return Err(map_household_crud_error(err));
-            }
-        };
+    let outcome = match crate::household::resume_household_delete(
+        &pool,
+        vault.as_ref(),
+        &id,
+        active.as_deref(),
+        options,
+    )
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            let reason = match &err {
+                crate::household::HouseholdCrudError::DefaultUndeletable => "default",
+                crate::household::HouseholdCrudError::NotFound => "not_found",
+                crate::household::HouseholdCrudError::Deleted => "already_deleted",
+                crate::household::HouseholdCrudError::InvalidColor => "invalid_color",
+                crate::household::HouseholdCrudError::CascadeDbNotEmpty => "db_not_empty",
+                crate::household::HouseholdCrudError::Unexpected(_) => "unexpected",
+            };
+            tracing::warn!(
+                target: "arklowdun",
+                event = "household_resume_failed",
+                household_id = %id,
+                result = "error",
+                reason
+            );
+            return Err(map_household_crud_error(err));
+        }
+    };
 
     sync_cascade_health(&state, &pool).await?;
 
@@ -1685,6 +1705,7 @@ async fn household_repair<R: tauri::Runtime>(
 ) -> AppResult<HouseholdDeleteResponse> {
     let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool_clone();
+    let vault = state.vault();
     let fk_rows = sqlx::query("PRAGMA foreign_key_check;")
         .fetch_all(&pool)
         .await
@@ -1710,29 +1731,35 @@ async fn household_repair<R: tauri::Runtime>(
     options.progress = Some(progress_handler);
     options.max_duration_ms = Some(2_000);
     options.resume = true;
-    let outcome =
-        match crate::household::resume_household_delete(&pool, &id, active.as_deref(), options)
-            .await
-        {
-            Ok(outcome) => outcome,
-            Err(err) => {
-                let reason = match &err {
-                    crate::household::HouseholdCrudError::DefaultUndeletable => "default",
-                    crate::household::HouseholdCrudError::NotFound => "not_found",
-                    crate::household::HouseholdCrudError::Deleted => "already_deleted",
-                    crate::household::HouseholdCrudError::InvalidColor => "invalid_color",
-                    crate::household::HouseholdCrudError::Unexpected(_) => "unexpected",
-                };
-                tracing::warn!(
-                    target: "arklowdun",
-                    event = "household_repair_failed",
-                    household_id = %id,
-                    result = "error",
-                    reason
-                );
-                return Err(map_household_crud_error(err));
-            }
-        };
+    let outcome = match crate::household::resume_household_delete(
+        &pool,
+        vault.as_ref(),
+        &id,
+        active.as_deref(),
+        options,
+    )
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            let reason = match &err {
+                crate::household::HouseholdCrudError::DefaultUndeletable => "default",
+                crate::household::HouseholdCrudError::NotFound => "not_found",
+                crate::household::HouseholdCrudError::Deleted => "already_deleted",
+                crate::household::HouseholdCrudError::InvalidColor => "invalid_color",
+                crate::household::HouseholdCrudError::CascadeDbNotEmpty => "db_not_empty",
+                crate::household::HouseholdCrudError::Unexpected(_) => "unexpected",
+            };
+            tracing::warn!(
+                target: "arklowdun",
+                event = "household_repair_failed",
+                household_id = %id,
+                result = "error",
+                reason
+            );
+            return Err(map_household_crud_error(err));
+        }
+    };
 
     sync_cascade_health(&state, &pool).await?;
 

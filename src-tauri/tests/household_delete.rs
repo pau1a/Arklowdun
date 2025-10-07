@@ -9,6 +9,8 @@ use arklowdun_lib::{
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::SqlitePool;
 use tempfile::tempdir;
+#[path = "util.rs"]
+mod util;
 
 async fn open_pool(path: &Path) -> Result<SqlitePool> {
     let options = SqliteConnectOptions::new()
@@ -30,10 +32,12 @@ async fn default_delete_does_not_dirty_cascade_state() -> Result<()> {
     let dir = tempdir()?;
     let db_path = dir.path().join("households.sqlite3");
     let pool = open_pool(&db_path).await?;
+    let (_vault_guard, vault) = util::temp_vault();
 
     let default_id = default_household_id(&pool).await?;
     let err = delete_household(
         &pool,
+        &vault,
         &default_id,
         Some(&default_id),
         CascadeDeleteOptions::default(),

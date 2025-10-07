@@ -10,6 +10,8 @@ use arklowdun_lib::{
     CascadeDeleteOptions, CascadeProgress, CascadeProgressObserver,
 };
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+#[path = "util.rs"]
+mod util;
 
 async fn memory_pool() -> Result<SqlitePool> {
     let pool = SqlitePoolOptions::new()
@@ -83,12 +85,13 @@ async fn table_count(pool: &SqlitePool, table: &str, household_id: &str) -> Resu
 async fn cascade_deletes_related_rows_and_queues_vacuum() -> Result<()> {
     let pool = memory_pool().await?;
     let household_id = seed_household(&pool).await?;
+    let (_vault_guard, vault) = util::temp_vault();
     let (observer, records) = progress_collector();
     let mut options = CascadeDeleteOptions::default();
     options.chunk_size = NonZeroU32::new(1).unwrap();
     options.progress = Some(observer);
 
-    let outcome = delete_household(&pool, &household_id, None, options).await?;
+    let outcome = delete_household(&pool, &vault, &household_id, None, options).await?;
     assert!(outcome.total_deleted >= 4);
     assert!(outcome.vacuum_recommended);
     assert!(outcome.completed);
@@ -119,6 +122,7 @@ async fn cascade_deletes_related_rows_and_queues_vacuum() -> Result<()> {
 async fn resume_household_delete_completes_from_checkpoint() -> Result<()> {
     let pool = memory_pool().await?;
     let household_id = seed_household(&pool).await?;
+    let (_vault_guard, vault) = util::temp_vault();
 
     // Ensure cascade tables exist.
     let _ = pending_cascades(&pool).await?;
@@ -134,7 +138,7 @@ async fn resume_household_delete_completes_from_checkpoint() -> Result<()> {
         + 1; // household row
 
     sqlx::query(
-        "INSERT INTO cascade_checkpoints (household_id, phase_index, deleted_count, total, phase, updated_at, vacuum_pending)\n         VALUES (?1, 0, 0, ?2, 'note_links', 1, 0)",
+        "INSERT INTO cascade_checkpoints (household_id, phase_index, deleted_count, total, phase, updated_at_utc, vacuum_pending, remaining_paths)\n         VALUES (?1, 0, 0, ?2, 'note_links', 1, 0, 0)",
     )
     .bind(&household_id)
     .bind(total)
@@ -145,7 +149,7 @@ async fn resume_household_delete_completes_from_checkpoint() -> Result<()> {
     let mut options = CascadeDeleteOptions::default();
     options.chunk_size = NonZeroU32::new(1).unwrap();
     options.progress = Some(observer);
-    let outcome = resume_household_delete(&pool, &household_id, None, options).await?;
+    let outcome = resume_household_delete(&pool, &vault, &household_id, None, options).await?;
     assert!(outcome.total_deleted >= 4);
     assert!(outcome.completed);
 
@@ -165,13 +169,14 @@ async fn resume_household_delete_completes_from_checkpoint() -> Result<()> {
 async fn cascade_pause_emits_paused_progress() -> Result<()> {
     let pool = memory_pool().await?;
     let household_id = seed_household(&pool).await?;
+    let (_vault_guard, vault) = util::temp_vault();
     let (observer, records) = progress_collector();
     let mut options = CascadeDeleteOptions::default();
     options.chunk_size = NonZeroU32::new(1).unwrap();
     options.progress = Some(observer);
     options.max_duration_ms = Some(0);
 
-    let outcome = delete_household(&pool, &household_id, None, options).await?;
+    let outcome = delete_household(&pool, &vault, &household_id, None, options).await?;
     assert!(!outcome.completed);
     assert!(!outcome.vacuum_recommended);
 
@@ -187,7 +192,8 @@ async fn cascade_pause_emits_paused_progress() -> Result<()> {
     resume_options.progress = Some(resume_observer);
     resume_options.resume = true;
 
-    let resumed = resume_household_delete(&pool, &household_id, None, resume_options).await?;
+    let resumed =
+        resume_household_delete(&pool, &vault, &household_id, None, resume_options).await?;
     assert!(resumed.completed);
     assert!(resumed.vacuum_recommended);
 

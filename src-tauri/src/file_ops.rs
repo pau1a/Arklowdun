@@ -48,7 +48,9 @@ pub fn __take_last_move_used_copy() -> bool {
 }
 
 #[cfg(test)]
-pub struct TestMoveGuard(MoveLockGuard);
+pub struct TestMoveGuard {
+    _guard: MoveLockGuard,
+}
 
 #[cfg(test)]
 pub fn __acquire_move_lock_for_test(
@@ -56,7 +58,8 @@ pub fn __acquire_move_lock_for_test(
     category: AttachmentCategory,
     relative: &str,
 ) -> AppResult<TestMoveGuard> {
-    MoveLockGuard::acquire(move_lock_key(household_id, category, relative)).map(TestMoveGuard)
+    MoveLockGuard::acquire(move_lock_key(household_id, category, relative))
+        .map(|guard| TestMoveGuard { _guard: guard })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

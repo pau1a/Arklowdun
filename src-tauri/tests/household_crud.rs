@@ -6,6 +6,8 @@ use arklowdun_lib::{
     HouseholdCrudError, HouseholdUpdateInput,
 };
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+#[path = "util.rs"]
+mod util;
 
 async fn memory_pool() -> Result<SqlitePool> {
     let pool = SqlitePoolOptions::new()
@@ -27,9 +29,11 @@ async fn delete_active_falls_back_to_default() -> Result<()> {
 
     let created = create_household(&pool, "Secondary", None).await?;
     household_active::set_active_household_id(&pool, &store, &created.id).await?;
+    let (_vault_guard, vault) = util::temp_vault();
 
     let outcome = delete_household(
         &pool,
+        &vault,
         &created.id,
         Some(&created.id),
         CascadeDeleteOptions::default(),
@@ -56,8 +60,10 @@ async fn delete_active_falls_back_to_default() -> Result<()> {
 async fn delete_default_is_rejected() -> Result<()> {
     let pool = memory_pool().await?;
     let default_id = default_household_id(&pool).await?;
+    let (_vault_guard, vault) = util::temp_vault();
     let err = delete_household(
         &pool,
+        &vault,
         &default_id,
         Some(&default_id),
         CascadeDeleteOptions::default(),
@@ -72,7 +78,15 @@ async fn delete_default_is_rejected() -> Result<()> {
 async fn restore_soft_deleted_household() -> Result<()> {
     let pool = memory_pool().await?;
     let created = create_household(&pool, "Restore", None).await?;
-    delete_household(&pool, &created.id, None, CascadeDeleteOptions::default()).await?;
+    let (_vault_guard, vault) = util::temp_vault();
+    delete_household(
+        &pool,
+        &vault,
+        &created.id,
+        None,
+        CascadeDeleteOptions::default(),
+    )
+    .await?;
 
     let restored = restore_household(&pool, &created.id).await?;
     assert!(restored.deleted_at.is_none());
@@ -85,9 +99,11 @@ async fn restore_allows_reactivation() -> Result<()> {
     let store = StoreHandle::in_memory();
     let created = create_household(&pool, "Reactivating", None).await?;
     household_active::set_active_household_id(&pool, &store, &created.id).await?;
+    let (_vault_guard, vault) = util::temp_vault();
 
     delete_household(
         &pool,
+        &vault,
         &created.id,
         Some(&created.id),
         CascadeDeleteOptions::default(),
@@ -110,7 +126,15 @@ async fn restore_allows_reactivation() -> Result<()> {
 async fn update_rejected_when_deleted() -> Result<()> {
     let pool = memory_pool().await?;
     let created = create_household(&pool, "Target", None).await?;
-    delete_household(&pool, &created.id, None, CascadeDeleteOptions::default()).await?;
+    let (_vault_guard, vault) = util::temp_vault();
+    delete_household(
+        &pool,
+        &vault,
+        &created.id,
+        None,
+        CascadeDeleteOptions::default(),
+    )
+    .await?;
 
     let err = update_household(
         &pool,
@@ -130,11 +154,25 @@ async fn update_rejected_when_deleted() -> Result<()> {
 async fn double_delete_and_restore_idempotent() -> Result<()> {
     let pool = memory_pool().await?;
     let created = create_household(&pool, "Archive", None).await?;
+    let (_vault_guard, vault) = util::temp_vault();
 
-    delete_household(&pool, &created.id, None, CascadeDeleteOptions::default()).await?;
-    let second = delete_household(&pool, &created.id, None, CascadeDeleteOptions::default())
-        .await
-        .expect_err("second delete should fail");
+    delete_household(
+        &pool,
+        &vault,
+        &created.id,
+        None,
+        CascadeDeleteOptions::default(),
+    )
+    .await?;
+    let second = delete_household(
+        &pool,
+        &vault,
+        &created.id,
+        None,
+        CascadeDeleteOptions::default(),
+    )
+    .await
+    .expect_err("second delete should fail");
     assert!(matches!(second, HouseholdCrudError::Deleted));
 
     let restored = restore_household(&pool, &created.id).await?;
@@ -150,7 +188,15 @@ async fn list_includes_deleted_when_requested() -> Result<()> {
     let pool = memory_pool().await?;
     let active = create_household(&pool, "Active", None).await?;
     let archived = create_household(&pool, "Archived", None).await?;
-    delete_household(&pool, &archived.id, None, CascadeDeleteOptions::default()).await?;
+    let (_vault_guard, vault) = util::temp_vault();
+    delete_household(
+        &pool,
+        &vault,
+        &archived.id,
+        None,
+        CascadeDeleteOptions::default(),
+    )
+    .await?;
 
     let active_only = list_households(&pool, false).await?;
     assert!(active_only.iter().any(|row| row.id == active.id));
