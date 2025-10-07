@@ -20,6 +20,13 @@ Frontend engineers implementing the Logs page presentation and interactive behav
 * **Live Tail toggle:** Start polling `diagnostics_summary` every 3–5 seconds while active; stop polling when toggled off or on navigation away.
 * **Export button:** Visible at all times to trigger JSONL export per the specification.
 
+## Time Display & Toggle
+* The header contains a single pill button labelled `Time: Local (BST/GMT) ↔ UTC`. Clicking swaps the displayed timestamps between London local time and UTC without additional data fetches.
+* Tooltips on each timestamp reveal the alternate representation so both formats remain one hover away.
+* Local output follows the `yyyy-MM-dd HH:mm:ss BST/GMT` pattern, automatically switching between BST and GMT using Luxon’s zone data. UTC output uses the same layout with a trailing `UTC` suffix to preserve lexical ordering.
+* Sorting and filtering always rely on the raw UTC epoch supplied by the backend, so toggling formats never reorders the rows.
+* Add an updated capture of the toggle placement to `docs/logging/images/logs-view.png` when available.
+
 ## Table structure
 * Columns display `timestamp`, `level`, `event`, and `message`. Messages may truncate with ellipsis while preserving access to raw content.
 * Row click may open an optional detail surface showing full JSON for the selected line; if implemented, it must not block core interactions.

@@ -43,28 +43,29 @@
 
 .logs-time-toggle {
   display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0.35rem 0.85rem;
   border: 1px solid var(--color-border-subtle, rgba(15, 23, 42, 0.12));
   border-radius: var(--radius-full, 9999px);
-  overflow: hidden;
   background: var(--color-surface-elevated, var(--color-surface, #fff));
-}
-
-.logs-time-toggle__button {
-  border: none;
-  background: transparent;
   color: var(--color-text-muted, rgba(71, 85, 105, 0.9));
   font-size: 0.8125rem;
   font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  padding: 0.35rem 0.9rem;
+  line-height: 1.2;
   cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
 }
 
-.logs-time-toggle__button.is-active {
-  background: var(--color-accent-soft, color-mix(in srgb, var(--color-accent, #2563eb) 18%, transparent));
+.logs-time-toggle[aria-pressed="true"] {
   color: var(--color-accent, #2563eb);
+  border-color: color-mix(in srgb, var(--color-accent, #2563eb) 45%, transparent);
+  background: color-mix(in srgb, var(--color-accent, #2563eb) 18%, transparent);
+}
+
+.logs-time-toggle:focus-visible {
+  outline: 2px solid var(--color-focus-ring, var(--color-accent, #2563eb));
+  outline-offset: 2px;
 }
 
 .logs-toolbar {
