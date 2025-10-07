@@ -1,5 +1,6 @@
 import { logsStore } from "@features/logs/logs.store";
 import type { LogEntry, LogLevel } from "@features/logs/logs.types";
+import { formatTimestamp, getZoneLabel } from "@features/logs/time";
 import { toast } from "@ui/Toast";
 
 const severityOrder: LogLevel[] = ["trace", "debug", "info", "warn", "error"];
@@ -10,10 +11,6 @@ const severityRank: Record<LogLevel, number> = {
   warn: 3,
   error: 4,
 };
-
-type TimezoneMode = "local" | "utc";
-
-const LOCAL_TIME_ZONE = "Europe/London";
 
 function renderSummary(
   visibleCount: number,
@@ -29,21 +26,6 @@ function renderSummary(
     return `${prefix}.`;
   }
   return `${prefix} (fetched ${fetchedAtUtc}).`;
-}
-
-function formatTimestamp(entry: LogEntry, mode: TimezoneMode): string {
-  if (mode === "utc") {
-    return entry.tsUtc;
-  }
-  try {
-    const date = new Date(entry.tsUtc);
-    if (Number.isNaN(date.getTime())) {
-      return entry.tsUtc;
-    }
-    return date.toLocaleString("en-GB", { timeZone: LOCAL_TIME_ZONE });
-  } catch {
-    return entry.tsUtc;
-  }
 }
 
 function createCategoryOption(value: string, checked: boolean): HTMLLabelElement {
@@ -91,7 +73,7 @@ function applyFilters(
 function renderRows(
   tbody: HTMLTableSectionElement,
   entries: LogEntry[],
-  timezone: TimezoneMode,
+  showLocal: boolean,
 ): void {
   const fragment = document.createDocumentFragment();
   if (entries.length === 0) {
@@ -109,8 +91,8 @@ function renderRows(
 
       const timestampCell = document.createElement("td");
       timestampCell.className = "logs-table__cell logs-table__cell--timestamp";
-      timestampCell.textContent = formatTimestamp(entry, timezone);
-      timestampCell.title = entry.tsUtc;
+      timestampCell.textContent = formatTimestamp(entry.tsUtc, showLocal);
+      timestampCell.title = formatTimestamp(entry.tsUtc, !showLocal);
       row.appendChild(timestampCell);
 
       const levelCell = document.createElement("td");
@@ -148,10 +130,13 @@ export function mountLogsView(container: HTMLElement): () => void {
       <header class="logs-header">
         <div class="logs-header__title">
           <h1 id="logs-title" class="logs-title">Logs</h1>
-          <div class="logs-time-toggle" role="group" aria-label="Timestamp display">
-            <button type="button" class="logs-time-toggle__button is-active" data-timezone="local">Local</button>
-            <button type="button" class="logs-time-toggle__button" data-timezone="utc">UTC</button>
-          </div>
+          <button
+            type="button"
+            class="logs-time-toggle"
+            data-testid="logs-time-toggle"
+            title="Switch between UTC and Local (Europe/London)"
+            aria-pressed="true"
+          ></button>
         </div>
         <div class="logs-header__actions">
           <span class="logs-summary" aria-live="polite" aria-atomic="true"></span>
@@ -237,8 +222,8 @@ export function mountLogsView(container: HTMLElement): () => void {
     ".logs-table tbody",
   );
   const summaryEl = container.querySelector<HTMLElement>(".logs-summary");
-  const timeButtons = Array.from(
-    container.querySelectorAll<HTMLButtonElement>(".logs-time-toggle__button"),
+  const timeToggleButton = container.querySelector<HTMLButtonElement>(
+    "[data-testid='logs-time-toggle']",
   );
   const bannersContainer = container.querySelector<HTMLElement>(".logs-banners");
   const backlogBanner = container.querySelector<HTMLElement>("[data-banner='backlog']");
@@ -258,6 +243,7 @@ export function mountLogsView(container: HTMLElement): () => void {
     !tableWrapper ||
     !tableBody ||
     !summaryEl ||
+    !timeToggleButton ||
     !bannersContainer ||
     !backlogBanner ||
     !ioBanner
@@ -265,7 +251,7 @@ export function mountLogsView(container: HTMLElement): () => void {
     throw new Error("Logs view failed to initialize required elements");
   }
 
-  let timezone: TimezoneMode = "local";
+  let showLocal = true;
   let selectedSeverity: LogLevel = "info";
   let selectedCategories = new Set<string>();
   let searchTerm = "";
@@ -277,11 +263,15 @@ export function mountLogsView(container: HTMLElement): () => void {
   let liveTailTimer: number | null = null;
   let lastErrorToast: string | null = null;
 
-  for (const button of timeButtons) {
-    const isActive = button.dataset.timezone === timezone;
-    button.classList.toggle("is-active", isActive);
-    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  function updateTimeToggle(): void {
+    const zoneLabel = getZoneLabel(true);
+    const primaryLabel = showLocal ? `Local (${zoneLabel})` : "UTC";
+    const secondaryLabel = showLocal ? "UTC" : `Local (${zoneLabel})`;
+    timeToggleButton.textContent = `Time: ${primaryLabel} \u21C4 ${secondaryLabel}`;
+    timeToggleButton.setAttribute("aria-pressed", showLocal ? "true" : "false");
   }
+
+  updateTimeToggle();
 
   function updateCategoryLabel(): void {
     if (selectedCategories.size === 0) {
@@ -342,25 +332,15 @@ export function mountLogsView(container: HTMLElement): () => void {
   }
 
   function refreshRows(): void {
+    updateTimeToggle();
     filteredEntries = applyFilters(
       allEntries,
       selectedSeverity,
       selectedCategories,
       searchTerm,
     );
-    renderRows(tableBody, filteredEntries, timezone);
+    renderRows(tableBody, filteredEntries, showLocal);
     updateSummary();
-  }
-
-  function setTimezone(next: TimezoneMode): void {
-    if (timezone === next) return;
-    timezone = next;
-    for (const button of timeButtons) {
-      const isActive = button.dataset.timezone === timezone;
-      button.classList.toggle("is-active", isActive);
-      button.setAttribute("aria-pressed", isActive ? "true" : "false");
-    }
-    renderRows(tableBody, filteredEntries, timezone);
   }
 
   function startLiveTail(): void {
@@ -415,13 +395,11 @@ export function mountLogsView(container: HTMLElement): () => void {
     void logsStore.fetchTail();
   });
 
-  for (const button of timeButtons) {
-    button.addEventListener("click", () => {
-      const next = button.dataset.timezone as TimezoneMode | undefined;
-      if (!next) return;
-      setTimezone(next);
-    });
-  }
+  timeToggleButton.addEventListener("click", () => {
+    showLocal = !showLocal;
+    updateTimeToggle();
+    renderRows(tableBody, filteredEntries, showLocal);
+  });
 
   const unsubscribe = logsStore.subscribe((state) => {
     const status = state.status === "idle" ? "loading" : state.status;
