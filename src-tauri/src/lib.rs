@@ -41,8 +41,10 @@ use crate::{
         repair::{self, DbRepairEvent, DbRepairSummary},
     },
     file_ops::{
-        attachments_repair as run_attachments_repair, move_file as run_file_move,
-        AttachmentsRepairRequest, AttachmentsRepairResponse, FileMoveRequest, FileMoveResponse,
+        attachments_repair as run_attachments_repair,
+        attachments_repair_manifest_export as run_attachments_repair_manifest_export,
+        move_file as run_file_move, AttachmentsRepairRequest, AttachmentsRepairResponse,
+        FileMoveRequest, FileMoveResponse,
     },
     files_indexer::{IndexProgress, IndexerState, RebuildMode},
     household_active::ActiveSetError,
@@ -4141,6 +4143,17 @@ async fn attachments_repair<R: tauri::Runtime>(
 }
 
 #[tauri::command]
+async fn attachments_repair_manifest_export<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+    household_id: String,
+) -> AppResult<String> {
+    let pool = state.pool_clone();
+    let vault = state.vault();
+    run_attachments_repair_manifest_export(app, pool, vault, household_id).await
+}
+
+#[tauri::command]
 #[allow(clippy::result_large_err)]
 async fn time_invariants_check(
     state: State<'_, AppState>,
@@ -4195,6 +4208,7 @@ macro_rules! app_commands {
             household_restore,
             file_move,
             attachments_repair,
+            attachments_repair_manifest_export,
             bills_list,
             bills_get,
             bills_create,

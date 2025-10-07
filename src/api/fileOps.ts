@@ -39,6 +39,7 @@ export interface AttachmentsRepairResult {
   scanned: number;
   missing: number;
   repaired: number;
+  cancelled: boolean;
 }
 
 export function moveFile(params: MoveFileParams): Promise<MoveFileResult> {
@@ -77,4 +78,10 @@ export function cancelAttachmentsRepair(householdId: string): Promise<void> {
     mode: "scan",
     cancel: true,
   }) as Promise<void>;
+}
+
+export function exportAttachmentsRepairManifest(householdId: string): Promise<string> {
+  return call("attachments_repair_manifest_export", {
+    household_id: householdId,
+  }) as Promise<string>;
 }

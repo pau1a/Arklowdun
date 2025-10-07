@@ -138,7 +138,14 @@ const attachmentsRepairResponse = z.object({
   scanned: z.number(),
   missing: z.number(),
   repaired: z.number(),
+  cancelled: z.boolean(),
 });
+
+const attachmentsRepairManifestExportRequest = z
+  .object({
+    household_id: z.string(),
+  })
+  .passthrough();
 
 const householdDeleteResponse = z
   .object({ fallbackId: z.string().nullable().optional() })
@@ -319,6 +326,10 @@ export const contracts = {
   attachments_repair: contract({
     request: attachmentsRepairRequest,
     response: attachmentsRepairResponse,
+  }),
+  attachments_repair_manifest_export: contract({
+    request: attachmentsRepairManifestExportRequest,
+    response: z.string(),
   }),
   bills_list: contract({ request: flexibleRequest, response: z.array(flexibleRequest) }),
   bills_get: contract({ request: flexibleRequest, response: flexibleRequest.nullable() }),

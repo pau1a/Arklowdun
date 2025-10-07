@@ -318,6 +318,20 @@ export const settingsInitStub = `(() => {
             logTruncated: false,
             logLinesReturned: 0,
           });
+        case 'file_move':
+          return Promise.resolve({ moved: 1, renamed: false });
+        case 'attachments_repair': {
+          const cancel = Boolean(args?.cancel);
+          const mode = args?.mode ?? 'scan';
+          return Promise.resolve({
+            scanned: 5,
+            missing: cancel ? 0 : 2,
+            repaired: mode === 'apply' ? 2 : 0,
+            cancelled: cancel,
+          });
+        }
+        case 'attachments_repair_manifest_export':
+          return Promise.resolve('/tmp/missing.csv');
         case 'open_diagnostics_doc':
           return Promise.resolve();
         case 'diagnostics_doc_path':

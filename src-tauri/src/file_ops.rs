@@ -1,8 +1,9 @@
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
 use futures::TryStreamExt;
@@ -11,7 +12,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 use tauri::{Emitter, Manager};
 use tokio::fs::{self, File};
-use tokio::sync::mpsc;
+use tokio::io::AsyncWriteExt;
+use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore, TryAcquireError};
 use tokio::task::yield_now;
 use tokio::time::{sleep, Duration};
 
@@ -28,6 +30,34 @@ const EVENT_FILE_MOVE_PROGRESS: &str = "file_move_progress";
 const EVENT_ATTACHMENTS_REPAIR_PROGRESS: &str = "attachments_repair_progress";
 
 static REPAIR_CANCEL_FLAG: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
+static MOVE_LOCKS: Lazy<Mutex<HashMap<String, Arc<Semaphore>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+#[cfg(test)]
+static FORCE_COPY_FALLBACK: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
+#[cfg(test)]
+static LAST_MOVE_USED_COPY: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
+
+#[cfg(test)]
+pub fn __force_copy_fallback(value: bool) {
+    FORCE_COPY_FALLBACK.store(value, Ordering::SeqCst);
+}
+
+#[cfg(test)]
+pub fn __take_last_move_used_copy() -> bool {
+    LAST_MOVE_USED_COPY.swap(false, Ordering::SeqCst)
+}
+
+#[cfg(test)]
+pub struct TestMoveGuard(MoveLockGuard);
+
+#[cfg(test)]
+pub fn __acquire_move_lock_for_test(
+    household_id: &str,
+    category: AttachmentCategory,
+    relative: &str,
+) -> AppResult<TestMoveGuard> {
+    MoveLockGuard::acquire(move_lock_key(household_id, category, relative)).map(TestMoveGuard)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -57,6 +87,79 @@ impl ConflictStrategy {
                 Ok((resolved, true))
             }
         }
+    }
+}
+
+struct MoveLockGuard {
+    key: String,
+    semaphore: Arc<Semaphore>,
+    permit: Option<OwnedSemaphorePermit>,
+}
+
+impl MoveLockGuard {
+    fn acquire(key: String) -> AppResult<Self> {
+        let semaphore = {
+            let mut guard = MOVE_LOCKS.lock().unwrap_or_else(|err| err.into_inner());
+            guard
+                .entry(key.clone())
+                .or_insert_with(|| Arc::new(Semaphore::new(1)))
+                .clone()
+        };
+
+        let permit = match semaphore.clone().try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(TryAcquireError::NoPermits) => {
+                return Err(AppError::new(
+                    "FILE_MOVE_IN_PROGRESS",
+                    "Another move or rename is already running for this attachment.",
+                ));
+            }
+            Err(TryAcquireError::Closed) => {
+                return Err(AppError::new(
+                    "FILE_MOVE_LOCK_FAILED",
+                    "Unable to reserve the move lock for this attachment.",
+                ));
+            }
+        };
+
+        Ok(Self {
+            key,
+            semaphore,
+            permit: Some(permit),
+        })
+    }
+}
+
+impl Drop for MoveLockGuard {
+    fn drop(&mut self) {
+        self.permit.take();
+        let mut guard = MOVE_LOCKS.lock().unwrap_or_else(|err| err.into_inner());
+        if let Some(existing) = guard.get(&self.key) {
+            if Arc::ptr_eq(existing, &self.semaphore) {
+                guard.remove(&self.key);
+            }
+        }
+    }
+}
+
+fn move_lock_key(household_id: &str, category: AttachmentCategory, relative: &str) -> String {
+    if cfg!(target_os = "windows") {
+        format!(
+            "{}::{}::{}",
+            household_id,
+            category.as_str(),
+            relative.to_lowercase()
+        )
+    } else {
+        format!("{}::{}::{}", household_id, category.as_str(), relative)
+    }
+}
+
+fn os_eq_clause(column: &str, param: &str) -> String {
+    if cfg!(target_os = "windows") {
+        format!("LOWER({column}) = LOWER({param})")
+    } else {
+        format!("{column} = {param}")
     }
 }
 
@@ -122,6 +225,7 @@ pub struct AttachmentsRepairResponse {
     pub scanned: u64,
     pub missing: u64,
     pub repaired: u64,
+    pub cancelled: bool,
 }
 
 pub async fn move_file<R: tauri::Runtime>(
@@ -171,6 +275,12 @@ pub async fn move_file<R: tauri::Runtime>(
     })?;
     let from_relative = normalized_from.to_string_lossy().replace('\\', "/");
 
+    let _move_lock = MoveLockGuard::acquire(move_lock_key(
+        &request.household_id,
+        request.from_category,
+        &from_relative,
+    ))?;
+
     let mut target_path =
         vault.resolve(&request.household_id, request.to_category, &request.to_rel)?;
 
@@ -186,6 +296,8 @@ pub async fn move_file<R: tauri::Runtime>(
     let staging_path = staging_path_for(&target_path);
     emit_move_progress(&app, "moving", &request.to_rel, 0, 1);
 
+    #[cfg(test)]
+    LAST_MOVE_USED_COPY.store(false, Ordering::SeqCst);
     let prepared_move = match stage_move(&source_path, &staging_path).await {
         Ok(prepared) => prepared,
         Err(err) => {
@@ -223,11 +335,10 @@ pub async fn move_file<R: tauri::Runtime>(
 
             let mut updated_rows = 0_u32;
             for table in ATTACHMENT_TABLES {
-                let sql = if cfg!(target_os = "windows") {
-                    format!("UPDATE {table} SET category = ?1, relative_path = ?2 WHERE household_id = ?3 AND category = ?4 AND LOWER(relative_path) = LOWER(?5)")
-                } else {
-                    format!("UPDATE {table} SET category = ?1, relative_path = ?2 WHERE household_id = ?3 AND category = ?4 AND relative_path = ?5")
-                };
+                let clause = os_eq_clause("relative_path", "?5");
+                let sql = format!(
+                    "UPDATE {table} SET category = ?1, relative_path = ?2 WHERE household_id = ?3 AND category = ?4 AND {clause}"
+                );
                 let result = sqlx::query(&sql)
                     .bind(request.to_category.as_str())
                     .bind(&new_relative)
@@ -245,12 +356,11 @@ pub async fn move_file<R: tauri::Runtime>(
 
             let new_index_name = index_basename(&new_relative);
             let from_index_name = index_basename(&from_relative);
-            let files_index_sql = if cfg!(target_os = "windows") {
-                "UPDATE files_index SET category = ?1, filename = ?2 WHERE household_id = ?3 AND category = ?4 AND LOWER(filename) = LOWER(?5)"
-            } else {
-                "UPDATE files_index SET category = ?1, filename = ?2 WHERE household_id = ?3 AND category = ?4 AND filename = ?5"
-            };
-            let files_index_result = sqlx::query(files_index_sql)
+            let files_index_clause = os_eq_clause("filename", "?5");
+            let files_index_sql = format!(
+                "UPDATE files_index SET category = ?1, filename = ?2 WHERE household_id = ?3 AND category = ?4 AND {files_index_clause}"
+            );
+            let files_index_result = sqlx::query(&files_index_sql)
                 .bind(request.to_category.as_str())
                 .bind(&new_index_name)
                 .bind(&request.household_id)
@@ -328,7 +438,9 @@ pub async fn attachments_repair<R: tauri::Runtime>(
             event = "attachments_repair_cancel_requested",
             household_id = %request.household_id,
         );
-        return Ok(AttachmentsRepairResponse::default());
+        let mut response = AttachmentsRepairResponse::default();
+        response.cancelled = true;
+        return Ok(response);
     }
 
     REPAIR_CANCEL_FLAG.store(false, Ordering::SeqCst);
@@ -360,6 +472,92 @@ pub async fn attachments_repair<R: tauri::Runtime>(
     Ok(response)
 }
 
+pub async fn attachments_repair_manifest_export<R: tauri::Runtime>(
+    _app: tauri::AppHandle<R>,
+    pool: SqlitePool,
+    vault: Arc<Vault>,
+    household_id: String,
+) -> AppResult<String> {
+    let records = sqlx::query(
+        "SELECT table_name, row_id, category, relative_path, action, new_category, new_relative_path, detected_at_utc, repaired_at_utc FROM missing_attachments WHERE household_id = ?1 ORDER BY table_name, row_id",
+    )
+    .bind(&household_id)
+    .fetch_all(&pool)
+    .await
+    .map_err(|err| {
+        AppError::from(err).with_context("operation", "attachments_repair_manifest_query")
+    })?;
+
+    let export_dir = vault.base().join(&household_id).join("maintenance");
+    fs::create_dir_all(&export_dir).await.map_err(|err| {
+        AppError::from(err).with_context("operation", "attachments_repair_manifest_dir")
+    })?;
+
+    let filename = format!(
+        "missing-attachments-{}.csv",
+        Utc::now().format("%Y%m%dT%H%M%SZ")
+    );
+    let file_path = export_dir.join(filename);
+    let mut file = File::create(&file_path).await.map_err(|err| {
+        AppError::from(err).with_context("operation", "attachments_repair_manifest_create")
+    })?;
+
+    file.write_all(
+        b"table_name,row_id,category,relative_path,action,new_category,new_relative_path,detected_at_utc,repaired_at_utc\n",
+    )
+    .await
+    .map_err(|err| AppError::from(err).with_context("operation", "attachments_repair_manifest_header"))?;
+
+    for row in records {
+        let table_name: String = row.try_get("table_name").unwrap_or_default();
+        let row_id: i64 = row.try_get("row_id").unwrap_or_default();
+        let category: String = row.try_get("category").unwrap_or_default();
+        let relative_path: String = row.try_get("relative_path").unwrap_or_default();
+        let action: Option<String> = row.try_get("action").ok();
+        let new_category: Option<String> = row.try_get("new_category").ok();
+        let new_relative_path: Option<String> = row.try_get("new_relative_path").ok();
+        let detected_at: i64 = row.try_get("detected_at_utc").unwrap_or_default();
+        let repaired_at: Option<i64> = row.try_get("repaired_at_utc").ok();
+
+        let line = format!(
+            "{},{},{},{},{},{},{},{},{}\n",
+            csv_escape(Some(&table_name)),
+            row_id,
+            csv_escape(Some(&category)),
+            csv_escape(Some(&relative_path)),
+            csv_escape(action.as_deref()),
+            csv_escape(new_category.as_deref()),
+            csv_escape(new_relative_path.as_deref()),
+            detected_at,
+            repaired_at
+                .map(|value| value.to_string())
+                .unwrap_or_default()
+        );
+
+        file.write_all(line.as_bytes()).await.map_err(|err| {
+            AppError::from(err).with_context("operation", "attachments_repair_manifest_row")
+        })?;
+    }
+
+    file.flush().await.map_err(|err| {
+        AppError::from(err).with_context("operation", "attachments_repair_manifest_flush")
+    })?;
+    file.sync_all().await.map_err(|err| {
+        AppError::from(err).with_context("operation", "attachments_repair_manifest_sync")
+    })?;
+
+    let manifest_hash = hash_path(file_path.as_path());
+    tracing::info!(
+        target = "arklowdun",
+        event = "attachments_repair_manifest_exported",
+        household_id = %household_id,
+        manifest_hash = %manifest_hash,
+        row_count = records.len(),
+    );
+
+    Ok(file_path.to_string_lossy().into_owned())
+}
+
 async fn run_repair_scan<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     pool: &SqlitePool,
@@ -368,6 +566,7 @@ async fn run_repair_scan<R: tauri::Runtime>(
 ) -> AppResult<AttachmentsRepairResponse> {
     let mut scanned = 0_u64;
     let mut missing = 0_u64;
+    let mut cancelled = false;
 
     let mut conn = pool.acquire().await.map_err(|err| {
         AppError::from(err).with_context("operation", "attachments_repair_acquire")
@@ -384,6 +583,7 @@ async fn run_repair_scan<R: tauri::Runtime>(
                 .with_context("operation", format!("attachments_repair_scan_{table}"))
         })? {
             if REPAIR_CANCEL_FLAG.load(Ordering::SeqCst) {
+                cancelled = true;
                 break 'tables;
             }
             scanned += 1;
@@ -428,6 +628,7 @@ async fn run_repair_scan<R: tauri::Runtime>(
         scanned,
         missing,
         repaired: 0,
+        cancelled,
     })
 }
 
@@ -608,6 +809,7 @@ async fn run_repair_apply<R: tauri::Runtime>(
         scanned: processed,
         missing: remaining_missing as u64,
         repaired,
+        cancelled: false,
     })
 }
 
@@ -693,28 +895,51 @@ impl PreparedMove {
 }
 
 async fn stage_move(source: &Path, staging: &Path) -> AppResult<PreparedMove> {
+    #[cfg(test)]
+    if FORCE_COPY_FALLBACK.load(Ordering::SeqCst) {
+        return perform_copy_stage(source, staging, None).await;
+    }
+
     match fs::rename(source, staging).await {
         Ok(_) => Ok(PreparedMove::Rename {
             staging: staging.to_path_buf(),
         }),
-        Err(rename_err) => {
-            if let Err(copy_err) = fs::copy(source, staging).await {
-                return Err(AppError::from(rename_err)
-                    .with_context("operation", "rename_attachment")
-                    .with_context("fallback_copy_error", copy_err.to_string()));
-            }
-            verify_same_content(source, staging).await?;
-            let handle = File::open(staging).await.map_err(|io_err| {
-                AppError::from(io_err).with_context("operation", "open_stage_file")
-            })?;
-            handle.sync_all().await.map_err(|io_err| {
-                AppError::from(io_err).with_context("operation", "sync_stage_file")
-            })?;
-            Ok(PreparedMove::Copy {
-                staging: staging.to_path_buf(),
-            })
-        }
+        Err(rename_err) => perform_copy_stage(source, staging, Some(rename_err)).await,
     }
+}
+
+async fn perform_copy_stage(
+    source: &Path,
+    staging: &Path,
+    rename_err: Option<std::io::Error>,
+) -> AppResult<PreparedMove> {
+    #[cfg(test)]
+    {
+        LAST_MOVE_USED_COPY.store(true, Ordering::SeqCst);
+    }
+
+    if let Err(copy_err) = fs::copy(source, staging).await {
+        let err = match rename_err {
+            Some(rename_err) => AppError::from(rename_err)
+                .with_context("operation", "rename_attachment")
+                .with_context("fallback_copy_error", copy_err.to_string()),
+            None => AppError::from(copy_err).with_context("operation", "rename_attachment"),
+        };
+        return Err(err);
+    }
+
+    verify_same_content(source, staging).await?;
+    let handle = File::open(staging)
+        .await
+        .map_err(|io_err| AppError::from(io_err).with_context("operation", "open_stage_file"))?;
+    handle
+        .sync_all()
+        .await
+        .map_err(|io_err| AppError::from(io_err).with_context("operation", "sync_stage_file"))?;
+
+    Ok(PreparedMove::Copy {
+        staging: staging.to_path_buf(),
+    })
 }
 
 async fn verify_same_content(source: &Path, staged: &Path) -> AppResult<()> {
@@ -871,6 +1096,68 @@ fn resolve_conflict_name(target: &Path) -> AppResult<PathBuf> {
         "CONFLICT_RESOLUTION_FAILED",
         "Unable to resolve a unique filename for the destination.",
     ))
+}
+
+fn csv_escape(value: Option<&str>) -> String {
+    let raw = value.unwrap_or("");
+    if raw.is_empty() {
+        String::new()
+    } else if raw.contains(['"', ',', '\n', '\r']) {
+        format!("\"{}\"", raw.replace('"', "\"\""))
+    } else {
+        raw.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn resolve_conflict_name_advances_suffix() {
+        let dir = tempdir().expect("tempdir");
+        let base = dir.path().join("report.pdf");
+        std::fs::write(&base, b"a").expect("write base");
+        std::fs::write(dir.path().join("report (1).pdf"), b"b").expect("write suffix 1");
+        std::fs::write(dir.path().join("report (2).pdf"), b"c").expect("write suffix 2");
+
+        let resolved = resolve_conflict_name(&base).expect("resolve conflict");
+        assert_eq!(
+            resolved.file_name().unwrap().to_string_lossy(),
+            "report (3).pdf"
+        );
+    }
+
+    #[test]
+    fn resolve_conflict_name_returns_original_when_free() {
+        let dir = tempdir().expect("tempdir");
+        let base = dir.path().join("note.txt");
+        let resolved = resolve_conflict_name(&base).expect("resolve");
+        assert_eq!(resolved, base);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn os_eq_clause_windows_lowercases() {
+        assert_eq!(
+            os_eq_clause("relative_path", "?1"),
+            "LOWER(relative_path) = LOWER(?1)"
+        );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn os_eq_clause_unix_matches_exact() {
+        assert_eq!(os_eq_clause("relative_path", "?1"), "relative_path = ?1");
+    }
+
+    #[test]
+    fn csv_escape_quotes_fields() {
+        assert_eq!(csv_escape(Some("plain")), "plain");
+        assert_eq!(csv_escape(Some("with,comma")), "\"with,comma\"");
+        assert_eq!(csv_escape(Some("with""quote")), "\"with""quote\"");
+    }
 }
 
 async fn record_missing(

@@ -9,5 +9,8 @@ CREATE TABLE IF NOT EXISTS missing_attachments (
   action TEXT,
   new_category TEXT,
   new_relative_path TEXT,
-  PRIMARY KEY (table_name, row_id)
+  PRIMARY KEY (household_id, table_name, row_id)
 );
+
+CREATE INDEX IF NOT EXISTS missing_attachments_hh
+  ON missing_attachments (household_id, table_name);
