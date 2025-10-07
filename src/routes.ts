@@ -13,7 +13,9 @@ import { InventoryView } from "./InventoryView";
 import { BudgetView } from "./BudgetView";
 import { NotesView } from "./NotesView";
 import { ManageView } from "./ManageView";
+import { mountLogsView } from "./ui/views/logsView";
 import type { AppPane } from "./store";
+import { registerViewCleanup } from "./utils/viewLifecycle";
 import { ImportModal } from "@ui/ImportModal";
 
 const envRecord =
@@ -152,6 +154,22 @@ const ROUTE_DEFINITIONS: RouteDefinition[] = [
       ariaLabel: "Settings",
       className: "footer__settings",
       icon: { name: "fa-gear", defaultVariant: "solid", activeVariant: "solid", fixed: true },
+    },
+  },
+  {
+    id: "logs",
+    hash: "#/logs",
+    legacyHashes: ["#logs"],
+    mount: (container) => {
+      const cleanup = mountLogsView(container);
+      registerViewCleanup(container, cleanup);
+      return cleanup;
+    },
+    display: {
+      placement: "hidden",
+      label: "Logs",
+      ariaLabel: "Logs",
+      icon: { name: "fa-bug", defaultVariant: "regular", activeVariant: "solid", fixed: true },
     },
   },
   {

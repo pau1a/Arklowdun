@@ -26,6 +26,7 @@ export type AppPane =
   | "budget"
   | "notes"
   | "settings"
+  | "logs"
   | "manage";
 
 export type AppError = {
