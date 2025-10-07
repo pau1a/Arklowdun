@@ -415,7 +415,14 @@
   background: var(--color-surface-elevated, var(--color-surface, #fff));
 }
 
-.logs-table__header--timestamp {
+.logs-table th {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.logs-table__header--timestamp,
+.logs-table__cell--timestamp {
   width: 220px;
 }
 
@@ -439,8 +446,12 @@
 }
 
 .logs-table__header--message,
-.logs-table td:last-child {
-  width: 100%;
+.logs-table__cell--message {
+  width: auto;
+}
+
+.logs-table__header--message {
+  white-space: normal;
 }
 
 .logs-table__cell {
@@ -449,18 +460,27 @@
   color: var(--color-text, #0f172a);
   font-size: 0.875rem;
   vertical-align: top;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .logs-table__cell--timestamp {
-  white-space: nowrap;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);
 }
 
+.logs-table__header--level,
 .logs-table__cell--level {
   width: 120px;
 }
 
+.logs-table__header--event,
+.logs-table__cell--event {
+  width: 220px;
+}
+
 .logs-table__cell--message {
+  white-space: normal;
   word-break: break-word;
 }
 
@@ -541,12 +561,17 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 3.5rem;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
   padding: 0.2rem 0.5rem;
   border-radius: 9999px;
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .logs-level--error {
