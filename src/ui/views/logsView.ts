@@ -96,9 +96,12 @@ function renderRows(
     emptyRow.appendChild(cell);
     fragment.appendChild(emptyRow);
   } else {
-    for (const entry of entries) {
+    entries.forEach((entry, i) => {
       const row = document.createElement("tr");
+      row.className = "logs-row";
+      row.tabIndex = 0;
       row.dataset.level = entry.level;
+      row.dataset.index = String(i);
 
       const timestampCell = document.createElement("td");
       timestampCell.className = "logs-table__cell logs-table__cell--timestamp";
@@ -129,10 +132,53 @@ function renderRows(
       row.appendChild(messageCell);
 
       fragment.appendChild(row);
-    }
+    });
   }
 
   tbody.replaceChildren(fragment);
+}
+
+function renderDetailRow(afterRow: HTMLTableRowElement, entry: LogEntry) {
+  const open = afterRow.parentElement?.querySelector<HTMLTableRowElement>(
+    ".logs-row--detail.open",
+  );
+  open?.remove();
+
+  const detail = document.createElement("tr");
+  detail.className = "logs-row--detail open";
+  const cell = document.createElement("td");
+  cell.colSpan = 4;
+  cell.innerHTML = `
+    <div class="logs-detail">
+      <pre class="logs-detail__json">${escapeHtml(
+        JSON.stringify((entry as any)._raw ?? entry, null, 2),
+      )}</pre>
+      <button type="button" class="btn btn--secondary btn--xs logs-detail__copy">Copy JSON</button>
+    </div>`;
+  detail.appendChild(cell);
+
+  afterRow.insertAdjacentElement("afterend", detail);
+
+  const copyBtn = cell.querySelector<HTMLButtonElement>(
+    ".logs-detail__copy",
+  )!;
+  copyBtn.addEventListener("click", async () => {
+    const txt = JSON.stringify((entry as any)._raw ?? entry, null, 2);
+    await navigator.clipboard.writeText(txt);
+    toast.show({ kind: "success", message: "Copied JSON" });
+  });
+}
+
+function escapeHtml(s: string) {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    }[c]!),
+  );
 }
 
 export function mountLogsView(container: HTMLElement): () => void {
@@ -443,6 +489,39 @@ export function mountLogsView(container: HTMLElement): () => void {
     void logsStore.fetchTail();
   });
 
+  function onRowToggle(event: Event): void {
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+    const tr = target.closest<HTMLTableRowElement>("tr.logs-row");
+    if (!tr) return;
+    const idx = Number(tr.dataset.index ?? -1);
+    if (Number.isNaN(idx) || idx < 0 || idx >= filteredEntries.length) {
+      return;
+    }
+
+    const next = tr.nextElementSibling as HTMLTableRowElement | null;
+    if (next?.classList.contains("logs-row--detail")) {
+      next.remove();
+    } else {
+      renderDetailRow(tr, filteredEntries[idx]);
+    }
+  }
+
+  function onRowKeydown(event: KeyboardEvent): void {
+    if (event.key === "Enter" || event.key === " ") {
+      const tr = (event.target as HTMLElement | null)?.closest<HTMLTableRowElement>(
+        "tr.logs-row",
+      );
+      if (tr) {
+        event.preventDefault();
+        onRowToggle(event);
+      }
+    }
+  }
+
+  tableBody.addEventListener("click", onRowToggle);
+  tableBody.addEventListener("keydown", onRowKeydown);
+
   timeToggleButton.addEventListener("click", () => {
     showLocal = !showLocal;
     refreshRows();
@@ -518,6 +597,8 @@ export function mountLogsView(container: HTMLElement): () => void {
   void logsStore.fetchTail();
 
   const cleanup = () => {
+    tableBody.removeEventListener("click", onRowToggle);
+    tableBody.removeEventListener("keydown", onRowKeydown);
     unsubscribe();
     stopLiveTail();
     logsStore.clear();
