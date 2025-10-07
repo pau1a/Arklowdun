@@ -77,7 +77,7 @@ export function cancelAttachmentsRepair(householdId: string): Promise<void> {
     household_id: householdId,
     mode: "scan",
     cancel: true,
-  }) as Promise<void>;
+  }).then(() => undefined);
 }
 
 export function exportAttachmentsRepairManifest(householdId: string): Promise<string> {

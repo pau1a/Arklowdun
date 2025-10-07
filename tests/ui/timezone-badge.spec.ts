@@ -116,7 +116,7 @@ test.describe('Timezone badge integrations', () => {
       },
     );
 
-    const row = page.locator('.files__table tbody tr').first();
+    const row = page.locator('.files__rows .files__row').first();
     await expect(row).toBeVisible();
     await row.click();
 

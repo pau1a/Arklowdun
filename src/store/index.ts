@@ -53,6 +53,26 @@ export type FileSnapshot = {
   source?: string;
 };
 
+export type FilesScanStatus =
+  | "idle"
+  | "scanning"
+  | "timeout"
+  | "error"
+  | "done";
+
+export interface FilesErrorState {
+  message: string;
+  detail?: string;
+}
+
+export interface FilesState {
+  snapshot: FileSnapshot | null;
+  scanStatus: FilesScanStatus;
+  scanStartedAt: number | null;
+  scanDuration: number | null;
+  error: FilesErrorState | null;
+}
+
 export type EventsSnapshot = {
   items: Event[];
   ts: number;
@@ -75,9 +95,7 @@ export interface AppState {
     isAppReady: boolean;
     errors: AppError[];
   };
-  files: {
-    snapshot: FileSnapshot | null;
-  };
+  files: FilesState;
   events: {
     snapshot: EventsSnapshot | null;
   };
@@ -95,7 +113,13 @@ const initialState: AppState = {
     isAppReady: false,
     errors: [],
   },
-  files: { snapshot: null },
+  files: {
+    snapshot: null,
+    scanStatus: "idle",
+    scanStartedAt: null,
+    scanDuration: null,
+    error: null,
+  },
   events: { snapshot: null },
   notes: { snapshot: null },
   db: {
@@ -199,6 +223,10 @@ export const selectors = {
     items: (s: AppState) => s.files.snapshot?.items ?? [],
     ts: (s: AppState) => s.files.snapshot?.ts ?? 0,
     path: (s: AppState) => s.files.snapshot?.path ?? null,
+    scanStatus: (s: AppState) => s.files.scanStatus,
+    scanStartedAt: (s: AppState) => s.files.scanStartedAt,
+    scanDuration: (s: AppState) => s.files.scanDuration,
+    error: (s: AppState) => s.files.error,
   },
   events: {
     snapshot: (s: AppState) => s.events.snapshot,
@@ -221,14 +249,22 @@ export const selectors = {
   },
 };
 
-function withFilesSnapshot(snapshot: FileSnapshot | null): AppState {
-  const cloned = snapshot
-    ? { ...snapshot, items: cloneEntries(snapshot.items) }
-    : null;
+function cloneFileSnapshot(snapshot: FileSnapshot | null): FileSnapshot | null {
+  if (!snapshot) return null;
+  return { ...snapshot, items: cloneEntries(snapshot.items) };
+}
+
+function withFilesState(partial: Partial<FilesState>): AppState {
+  const nextSnapshot =
+    partial.snapshot !== undefined
+      ? setSnapshot(state.files.snapshot, cloneFileSnapshot(partial.snapshot))
+      : state.files.snapshot;
   return {
     ...state,
     files: {
-      snapshot: setSnapshot(state.files.snapshot, cloned),
+      ...state.files,
+      ...partial,
+      snapshot: nextSnapshot,
     },
   };
 }
@@ -315,11 +351,66 @@ export const actions = {
     });
   },
   files: {
+    beginScan(): void {
+      const startedAt = Date.now();
+      setState(() =>
+        withFilesState({
+          scanStatus: "scanning",
+          scanStartedAt: startedAt,
+          scanDuration: null,
+          error: null,
+        }),
+      );
+    },
     updateSnapshot(snapshot: FileSnapshot | null): FilesUpdatedPayload {
-      setState(() => withFilesSnapshot(snapshot));
+      const completedAt = Date.now();
+      const startedAt = state.files.scanStartedAt;
+      setState(() =>
+        withFilesState({
+          snapshot,
+          scanStatus: snapshot ? "done" : "idle",
+          scanDuration:
+            typeof startedAt === "number" ? completedAt - startedAt : null,
+          scanStartedAt: startedAt,
+          error: null,
+        }),
+      );
       const count = snapshot?.items.length ?? 0;
-      const ts = snapshot?.ts ?? Date.now();
+      const ts = snapshot?.ts ?? completedAt;
       return { count, ts };
+    },
+    failScan(error: FilesErrorState): void {
+      const completedAt = Date.now();
+      const startedAt = state.files.scanStartedAt;
+      setState(() =>
+        withFilesState({
+          scanStatus: "error",
+          scanDuration:
+            typeof startedAt === "number" ? completedAt - startedAt : null,
+          error,
+        }),
+      );
+    },
+    timeoutScan(): void {
+      const completedAt = Date.now();
+      const startedAt = state.files.scanStartedAt;
+      setState(() =>
+        withFilesState({
+          scanStatus: "timeout",
+          scanDuration:
+            typeof startedAt === "number" ? completedAt - startedAt : null,
+        }),
+      );
+    },
+    resetScan(): void {
+      setState(() =>
+        withFilesState({
+          scanStatus: "idle",
+          scanStartedAt: null,
+          scanDuration: null,
+          error: null,
+        }),
+      );
     },
   },
   events: {

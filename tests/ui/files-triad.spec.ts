@@ -48,7 +48,7 @@ test.describe('Files view triad', () => {
     });
 
     await expect(errorBanner).toHaveCount(0);
-    const rows = page.locator('.files__table tbody tr');
+    const rows = page.locator('.files__rows .files__row');
     await expect(rows.first()).toContainText('report.pdf');
   });
 });

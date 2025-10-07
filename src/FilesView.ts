@@ -6,12 +6,12 @@ import {
   mkdir,
   toUserMessage,
   type RootKey,
+  readText,
 } from './files/safe-fs';
 import { canonicalizeAndVerify, rejectSymlinks } from './files/path';
 import { convertFileSrc } from '@lib/ipc/core';
 import { STR } from '@ui/strings';
 import { showError } from '@ui/errors';
-import createLoading from '@ui/Loading';
 import createErrorBanner from '@ui/ErrorBanner';
 import createTimezoneBadge from '@ui/TimezoneBadge';
 import {
@@ -20,6 +20,7 @@ import {
   subscribe,
   getState,
   type FileSnapshot,
+  type FilesScanStatus,
 } from './store';
 import { emit, on } from './store/events';
 import { runViewCleanups, registerViewCleanup } from './utils/viewLifecycle';
@@ -28,10 +29,60 @@ import {
   createFilesToolbar,
   type FilesListItem,
   type FilesListRowAction,
+  VIRTUALIZE_THRESHOLD,
 } from '@features/files';
 import createButton from '@ui/Button';
+import { createFilesLoaderSkeleton } from '@features/files/components/FilesLoaderSkeleton';
+import {
+  logScanAborted,
+  logScanCompleted,
+  logScanStarted,
+  logPreviewBlocked,
+} from './logging/files_ui';
+import { decidePreview, isPreviewAllowed } from '@features/files/previewGate';
 
 const ROOT: RootKey = 'attachments';
+const IS_DEV = import.meta.env?.DEV === true;
+const TEXT_PREVIEW_LIMIT = 20_000;
+
+async function openFileExternally(path: string): Promise<boolean> {
+  try {
+    const mod = await import('@tauri-apps/plugin-opener');
+    const open = (mod as { open?: (target: string) => Promise<void> }).open;
+    if (typeof open === 'function') {
+      await open(path);
+      return true;
+    }
+  } catch {
+    // fall through
+  }
+  return false;
+}
+
+function formatBytes(value?: number | null): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return '';
+  }
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let index = 0;
+  let bytes = Math.max(0, value);
+  while (bytes >= 1024 && index < units.length - 1) {
+    bytes /= 1024;
+    index += 1;
+  }
+  const precision = index === 0 || bytes >= 10 ? 0 : 1;
+  return `${bytes.toFixed(precision)} ${units[index]}`;
+}
+
+function formatModified(value?: string | number | null): string {
+  if (value === null || value === undefined) return '';
+  const date = typeof value === 'number' ? new Date(value) : new Date(String(value));
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date);
+}
 
 function renderBreadcrumb(
   path: string,
@@ -69,6 +120,88 @@ function renderBreadcrumb(
   });
 }
 
+interface ScanNoticeOptions {
+  onCancel: () => void;
+  onRetry: () => void;
+  onDismiss: () => void;
+}
+
+interface ScanNoticeInstance {
+  element: HTMLDivElement;
+  showScanning: () => void;
+  showTimeout: () => void;
+  hide: () => void;
+}
+
+function createScanNotice(options: ScanNoticeOptions): ScanNoticeInstance {
+  const element = document.createElement('div');
+  element.className = 'files__scan-status';
+  element.hidden = true;
+  element.setAttribute('role', 'status');
+
+  const message = document.createElement('p');
+  message.className = 'files__scan-message';
+  message.setAttribute('aria-live', 'polite');
+  message.setAttribute('aria-atomic', 'true');
+
+  const actions = document.createElement('div');
+  actions.className = 'files__scan-actions';
+
+  const cancelButton = createButton({
+    label: 'Cancel',
+    variant: 'ghost',
+    size: 'sm',
+    onClick: (event) => {
+      event.preventDefault();
+      options.onCancel();
+    },
+  });
+
+  const retryButton = createButton({
+    label: 'Retry',
+    variant: 'primary',
+    size: 'sm',
+    onClick: (event) => {
+      event.preventDefault();
+      options.onRetry();
+    },
+  });
+
+  const dismissButton = createButton({
+    label: 'Dismiss',
+    variant: 'ghost',
+    size: 'sm',
+    onClick: (event) => {
+      event.preventDefault();
+      options.onDismiss();
+    },
+  });
+
+  actions.append(cancelButton, retryButton, dismissButton);
+  element.append(message, actions);
+
+  return {
+    element,
+    showScanning() {
+      element.hidden = false;
+      message.textContent = 'Scanning files…';
+      cancelButton.hidden = false;
+      retryButton.hidden = true;
+      dismissButton.hidden = true;
+    },
+    showTimeout() {
+      element.hidden = false;
+      message.textContent = 'Folder scan took too long. Try Retry or Dismiss to keep browsing.';
+      cancelButton.hidden = true;
+      retryButton.hidden = false;
+      dismissButton.hidden = false;
+    },
+    hide() {
+      element.hidden = true;
+    },
+  };
+}
+
 export async function FilesView(container: HTMLElement) {
   runViewCleanups(container);
 
@@ -84,7 +217,12 @@ export async function FilesView(container: HTMLElement) {
   const breadcrumbNav = document.createElement('nav');
   breadcrumbNav.className = 'breadcrumb';
   breadcrumbNav.setAttribute('aria-label', 'Current path');
-  headerInfo.append(breadcrumbNav);
+  const scanDebug = document.createElement('div');
+  scanDebug.className = 'files__scan-debug';
+  if (!IS_DEV) {
+    scanDebug.hidden = true;
+  }
+  headerInfo.append(breadcrumbNav, scanDebug);
 
   const preview = document.createElement('div');
   preview.id = 'preview';
@@ -102,8 +240,28 @@ export async function FilesView(container: HTMLElement) {
 
   let currentDir: string | null = selectors.files.path(getState());
   let previewToken = 0;
+  let currentScan: {
+    controller: AbortController;
+    path: string;
+    reason?: 'navigation' | 'timeout';
+  } | null = null;
+  let skeletonTimer: number | null = null;
 
   const appTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC';
+
+  const abortCurrentScan = (
+    reason: 'navigation' | 'timeout',
+    options: { log?: boolean } = {},
+  ) => {
+    if (!currentScan) return;
+    currentScan.reason = reason;
+    if (!currentScan.controller.signal.aborted) {
+      currentScan.controller.abort();
+    }
+    if (options.log === true) {
+      void logScanAborted(currentScan.path, reason);
+    }
+  };
 
   const renderReminderDetail = (item: FilesListItem | null) => {
     reminderDetail.innerHTML = '';
@@ -211,12 +369,28 @@ export async function FilesView(container: HTMLElement) {
     onEmptyAction: () => toolbar.openCreateFile(),
   });
 
-  const loadingIndicator = createLoading({
-    variant: 'list',
-    label: 'Loading files…',
-    rows: 6,
+  const loaderSkeleton = createFilesLoaderSkeleton({ rows: 8 });
+  loaderSkeleton.classList.add('files__loading');
+  loaderSkeleton.hidden = true;
+
+  const scanNotice = createScanNotice({
+    onCancel: () => {
+      abortCurrentScan('navigation');
+    },
+    onRetry: () => {
+      if (currentDir) {
+        void refreshDirectory(currentDir, 'retry');
+      }
+    },
+    onDismiss: () => {
+      actions.files.resetScan();
+      loaderSkeleton.hidden = true;
+      filesList.element.hidden = false;
+      filesList.element.setAttribute('aria-busy', 'false');
+      scanNotice.hide();
+      setListBusy(false);
+    },
   });
-  loadingIndicator.classList.add('files__loading');
 
   header.append(headerInfo, toolbar.element);
 
@@ -227,7 +401,7 @@ export async function FilesView(container: HTMLElement) {
   errorRegion.setAttribute('aria-live', 'polite');
   errorRegion.setAttribute('aria-atomic', 'true');
   errorRegion.hidden = true;
-  panel.append(errorRegion, loadingIndicator, filesList.element);
+  panel.append(errorRegion, loaderSkeleton, scanNotice.element, filesList.element);
 
   section.append(header, panel, preview);
   container.innerHTML = '';
@@ -235,7 +409,6 @@ export async function FilesView(container: HTMLElement) {
 
   const initialSnapshot = selectors.files.snapshot(getState());
   let inlineError: ReturnType<typeof createErrorBanner> | null = null;
-  let isLoading = false;
 
   const clearInlineError = () => {
     if (inlineError) {
@@ -245,21 +418,106 @@ export async function FilesView(container: HTMLElement) {
     errorRegion.hidden = true;
   };
 
-  const setLoading = (active: boolean) => {
-    if (isLoading === active) return;
-    isLoading = active;
-    loadingIndicator.hidden = !active;
-    if (active) {
+  const setListBusy = (busy: boolean) => {
+    if (busy) {
       filesList.element.hidden = true;
       filesList.element.setAttribute('aria-hidden', 'true');
+      filesList.element.setAttribute('aria-busy', 'true');
     } else {
       filesList.element.hidden = false;
       filesList.element.removeAttribute('aria-hidden');
+      filesList.element.setAttribute('aria-busy', 'false');
+    }
+  };
+
+  const clearScanDebug = () => {
+    if (!IS_DEV) return;
+    scanDebug.textContent = '';
+    scanDebug.hidden = true;
+  };
+
+  const applyScanDebug = (entryCount: number) => {
+    if (!IS_DEV) return;
+    const status = selectors.files.scanStatus(getState());
+    if (status === 'scanning') {
+      scanDebug.textContent = 'Scanning…';
+      scanDebug.hidden = false;
+      return;
+    }
+    const duration = selectors.files.scanDuration(getState());
+    const parts: string[] = [];
+    if (duration !== null) {
+      parts.push(`scan: ${duration} ms`);
+    }
+    parts.push(`entries: ${entryCount}`);
+    parts.push(`virtualized: ${entryCount > VIRTUALIZE_THRESHOLD ? 'yes' : 'no'}`);
+    scanDebug.textContent = parts.join(' • ');
+    scanDebug.hidden = false;
+  };
+
+  const stopSkeletonDelay = () => {
+    if (skeletonTimer !== null) {
+      window.clearTimeout(skeletonTimer);
+      skeletonTimer = null;
+    }
+  };
+
+  const updateScanUi = (status: FilesScanStatus) => {
+    if (status === 'scanning') {
+      setListBusy(true);
+      loaderSkeleton.hidden = false;
+      scanNotice.hide();
+      stopSkeletonDelay();
+      if (IS_DEV) {
+        scanDebug.textContent = 'Scanning…';
+        scanDebug.hidden = false;
+      }
+      skeletonTimer = window.setTimeout(() => {
+        if (selectors.files.scanStatus(getState()) !== 'scanning') return;
+        loaderSkeleton.hidden = true;
+        scanNotice.showScanning();
+      }, 2000);
+      return;
+    }
+
+    stopSkeletonDelay();
+
+    if (status === 'timeout') {
+      setListBusy(false);
+      loaderSkeleton.hidden = true;
+      scanNotice.showTimeout();
+      if (IS_DEV) {
+        scanDebug.textContent = 'Scan timed out';
+        scanDebug.hidden = false;
+      }
+      return;
+    }
+
+    if (status === 'error') {
+      setListBusy(false);
+      loaderSkeleton.hidden = true;
+      scanNotice.hide();
+      if (IS_DEV) {
+        scanDebug.textContent = 'Scan failed';
+        scanDebug.hidden = false;
+      }
+      return;
+    }
+
+    // idle or done
+    setListBusy(false);
+    loaderSkeleton.hidden = true;
+    scanNotice.hide();
+    if (status === 'idle') {
+      clearScanDebug();
     }
   };
 
   const showInlineError = (message: string, detail?: string) => {
-    setLoading(false);
+    setListBusy(false);
+    loaderSkeleton.hidden = true;
+    scanNotice.hide();
+    clearScanDebug();
     if (!inlineError) {
       inlineError = createErrorBanner({
         message,
@@ -276,21 +534,40 @@ export async function FilesView(container: HTMLElement) {
   };
 
   if (initialSnapshot) {
-    setLoading(false);
-  } else {
-    setLoading(true);
+    setListBusy(false);
   }
 
   function setDir(dir: string | null) {
     currentDir = dir;
     toolbar.setDirectoryAvailable(Boolean(dir));
+    toolbar.setDirectoryContext(dir);
   }
 
   async function refreshDirectory(dir: string, source: string): Promise<void> {
-    setLoading(true);
     clearInlineError();
+    abortCurrentScan('navigation', { log: true });
+    const controller = new AbortController();
+    currentScan = { controller, path: dir };
+    actions.files.beginScan();
+    void logScanStarted(dir);
+
+    const abortPromise = new Promise<never>((_, reject) => {
+      controller.signal.addEventListener('abort', () => {
+        reject(new DOMException('Aborted', 'AbortError'));
+      });
+    });
+
+    const timeoutId = window.setTimeout(() => {
+      if (controller.signal.aborted) return;
+      if (currentScan) currentScan.reason = 'timeout';
+      actions.files.timeoutScan();
+      void logScanAborted(dir, 'timeout');
+      abortCurrentScan('timeout');
+    }, 10_000);
+
     try {
-      const entries = await readDir(dir, ROOT);
+      const entries = await Promise.race([readDir(dir, ROOT), abortPromise]);
+      if (controller.signal.aborted) return;
       const ts = Date.now();
       const payload = actions.files.updateSnapshot({
         items: entries,
@@ -299,13 +576,28 @@ export async function FilesView(container: HTMLElement) {
         source,
       });
       emit('files:updated', payload);
+      const duration = selectors.files.scanDuration(getState());
+      void logScanCompleted({
+        path: dir,
+        scanTimeMs: duration,
+        entryCount: entries.length,
+        virtualized: entries.length > VIRTUALIZE_THRESHOLD,
+      });
     } catch (error) {
+      if (controller.signal.aborted) {
+        return;
+      }
+      const detail = toUserMessage(error);
+      actions.files.failScan({ message: 'Unable to load files', detail });
       emit('files:load-error', {
         message: 'Unable to load files',
-        detail: toUserMessage(error),
+        detail,
       });
     } finally {
-      setLoading(false);
+      window.clearTimeout(timeoutId);
+      if (currentScan?.controller === controller) {
+        currentScan = null;
+      }
     }
   }
 
@@ -322,6 +614,113 @@ export async function FilesView(container: HTMLElement) {
     }
   }
 
+  const renderPreviewPlaceholder = (message: string, realPath: string) => {
+    previewContent.innerHTML = '';
+    const messageEl = document.createElement('p');
+    messageEl.className = 'files__preview-message';
+    messageEl.textContent = message;
+    const actions = document.createElement('div');
+    actions.className = 'files__preview-actions';
+    const openButton = createButton({
+      label: 'Open Externally',
+      variant: 'ghost',
+      onClick: async (event) => {
+        event.preventDefault();
+        const ok = await openFileExternally(realPath);
+        if (!ok) {
+          showError({
+            code: 'INFO',
+            message: 'Unable to open the file externally.',
+          });
+        }
+      },
+    });
+    actions.append(openButton);
+    previewContent.append(messageEl, actions);
+  };
+
+  const attachPreviewErrorBoundary = (
+    element: HTMLImageElement | HTMLEmbedElement,
+    realPath: string,
+  ) => {
+    const fail = () => {
+      renderPreviewPlaceholder('Preview failed to load. Open externally instead.', realPath);
+    };
+    element.addEventListener('error', fail, { once: true });
+    element.addEventListener('abort', fail, { once: true });
+  };
+
+  const renderImagePreview = (realPath: string, tokenValue: number, alt: string) => {
+    const url = convertFileSrc(realPath);
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = alt;
+    img.className = 'files__preview-image';
+    attachPreviewErrorBoundary(img, realPath);
+    if (tokenValue === previewToken) {
+      previewContent.appendChild(img);
+    }
+  };
+
+  const renderPdfPreview = (realPath: string, tokenValue: number) => {
+    const url = convertFileSrc(realPath);
+    const embed = document.createElement('embed');
+    embed.src = url;
+    embed.type = 'application/pdf';
+    embed.style.width = '100%';
+    embed.style.height = '600px';
+    attachPreviewErrorBoundary(embed, realPath);
+    if (tokenValue === previewToken) {
+      previewContent.appendChild(embed);
+    }
+  };
+
+  const renderTextPreview = async (
+    relativePath: string,
+    realPath: string,
+    tokenValue: number,
+  ) => {
+    try {
+      const content = await readText(relativePath, ROOT);
+      if (tokenValue !== previewToken) return;
+      const truncated = content.length > TEXT_PREVIEW_LIMIT;
+      const previewText = truncated
+        ? `${content.slice(0, TEXT_PREVIEW_LIMIT)}…`
+        : content;
+      const pre = document.createElement('pre');
+      pre.className = 'files__preview-text';
+      pre.textContent = previewText;
+      previewContent.appendChild(pre);
+      if (truncated) {
+        const info = document.createElement('p');
+        info.className = 'files__preview-message';
+        info.textContent = 'Preview truncated. Open externally to view the full file.';
+        previewContent.appendChild(info);
+        const actions = document.createElement('div');
+        actions.className = 'files__preview-actions';
+        const openButton = createButton({
+          label: 'Open Externally',
+          variant: 'ghost',
+          onClick: async (event) => {
+            event.preventDefault();
+            const ok = await openFileExternally(realPath);
+            if (!ok) {
+              showError({
+                code: 'INFO',
+                message: 'Unable to open the file externally.',
+              });
+            }
+          },
+        });
+        actions.append(openButton);
+        previewContent.appendChild(actions);
+      }
+    } catch (error) {
+      if (tokenValue !== previewToken) return;
+      renderPreviewPlaceholder('Preview unavailable — Open Externally', realPath);
+    }
+  };
+
   async function handleActivate(item: FilesListItem) {
     if (item.entry.isDirectory) {
       renderReminderDetail(null);
@@ -331,30 +730,32 @@ export async function FilesView(container: HTMLElement) {
     const token = ++previewToken;
     renderReminderDetail(item);
     previewContent.innerHTML = '';
-    const ext = item.entry.name.split('.').pop()?.toLowerCase();
+    const decision = decidePreview({
+      mime: item.entry.mime ?? null,
+      sizeBytes:
+        typeof item.entry.size_bytes === 'number' ? item.entry.size_bytes : null,
+    });
     try {
       const { realPath } = await canonicalizeAndVerify(item.relativePath, ROOT);
       await rejectSymlinks(realPath, ROOT);
       if (token !== previewToken) return;
-      const url = convertFileSrc(realPath);
-      if (
-        ext &&
-        ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg'].includes(ext)
-      ) {
-        const img = document.createElement('img');
-        img.src = url;
-        img.style.maxWidth = '100%';
-        if (token === previewToken) previewContent.appendChild(img);
-      } else if (ext === 'pdf') {
-        const embed = document.createElement('embed');
-        embed.src = url;
-        embed.type = 'application/pdf';
-        embed.style.width = '100%';
-        embed.style.height = '600px';
-        if (token === previewToken) previewContent.appendChild(embed);
-      } else {
-        previewContent.textContent = 'No preview available';
+      if (!isPreviewAllowed(decision)) {
+        void logPreviewBlocked({ path: item.relativePath, reason: decision.reason });
+        renderPreviewPlaceholder(decision.message, realPath);
+        return;
       }
+
+      if (decision.kind === 'image') {
+        renderImagePreview(realPath, token, item.entry.name);
+        return;
+      }
+
+      if (decision.kind === 'pdf') {
+        renderPdfPreview(realPath, token);
+        return;
+      }
+
+      await renderTextPreview(item.relativePath, realPath, token);
     } catch (error) {
       showError({ code: 'INFO', message: toUserMessage(error) });
     }
@@ -367,9 +768,12 @@ export async function FilesView(container: HTMLElement) {
       breadcrumbNav.innerHTML = '';
       previewContent.innerHTML = '';
       renderReminderDetail(null);
+      clearScanDebug();
       return;
     }
-    setLoading(false);
+    setListBusy(false);
+    loaderSkeleton.hidden = true;
+    scanNotice.hide();
     clearInlineError();
     setDir(snapshot.path);
     renderBreadcrumb(snapshot.path, breadcrumbNav, handleNavigate);
@@ -379,12 +783,13 @@ export async function FilesView(container: HTMLElement) {
       relativePath:
         snapshot.path === '.' ? entry.name : `${snapshot.path}/${entry.name}`,
       typeLabel: entry.isDirectory ? 'Folder' : 'File',
-      sizeLabel: '',
-      modifiedLabel: '',
+      sizeLabel: entry.isDirectory ? '' : formatBytes(entry.size_bytes ?? null),
+      modifiedLabel: formatModified(entry.modified_at ?? null),
       reminder: entry.reminder ?? null,
       reminderTz: entry.reminder_tz ?? null,
     }));
     filesList.setItems(items);
+    applyScanDebug(items.length);
   }
 
   setDir(currentDir);
@@ -393,6 +798,11 @@ export async function FilesView(container: HTMLElement) {
     void applySnapshot(snapshot);
   });
   registerViewCleanup(container, unsubscribe);
+
+  const unsubscribeScan = subscribe(selectors.files.scanStatus, (status) => {
+    updateScanUi(status);
+  });
+  registerViewCleanup(container, unsubscribeScan);
 
   const stopLoadError = on('files:load-error', ({ message, detail }) => {
     showInlineError(message, detail);
@@ -404,4 +814,10 @@ export async function FilesView(container: HTMLElement) {
     if (dir) await refreshDirectory(dir, 'household-change');
   });
   registerViewCleanup(container, stopHousehold);
+
+  registerViewCleanup(container, () => {
+    abortCurrentScan('navigation');
+    stopSkeletonDelay();
+    clearScanDebug();
+  });
 }

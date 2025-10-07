@@ -25,7 +25,7 @@ test('TruncationBanner renders message and toggles visibility', async () => {
   const formatted = (500).toLocaleString();
   assert.equal(
     message.textContent,
-    `This list was shortened to the first ${formatted} results.`,
+    `Only showing the first ${formatted} events — refine filters to see more.`,
   );
 
   banner.update({ count: 10_000, hidden: false });
@@ -33,7 +33,7 @@ test('TruncationBanner renders message and toggles visibility', async () => {
   const updated = (10_000).toLocaleString();
   assert.equal(
     message.textContent,
-    `This list was shortened to the first ${updated} results.`,
+    `Only showing the first ${updated} events — refine filters to see more.`,
   );
 
   await nextTick();
@@ -49,7 +49,7 @@ test('TruncationBanner calls onDismiss when Close is pressed', async () => {
     },
   });
 
-  const closeButton = banner.querySelector('button');
+  const closeButton = banner.querySelector<HTMLButtonElement>('.truncation-banner__dismiss');
   if (!closeButton) throw new Error('missing close button');
   assert.equal(banner.hidden, false);
 
