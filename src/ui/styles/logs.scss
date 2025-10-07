@@ -31,9 +31,32 @@
   padding: var(--space-4);
 }
 
-.logs-content .empty {
+.logs-loading,
+.logs-empty,
+.logs-ready {
   margin: 0;
   color: var(--color-text-muted);
   font-style: italic;
-  opacity: 0.85;
+}
+
+.logs-ready {
+  font-style: normal;
+  color: var(--color-text);
+}
+
+.logs-error {
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-base);
+  background: color-mix(
+    in srgb,
+    var(--color-danger, #dc2626) 12%,
+    transparent
+  );
+  color: var(--color-danger);
+}
+
+.logs-error__message {
+  margin: 0;
 }

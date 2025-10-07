@@ -15,6 +15,13 @@ Engineering teams implementing the logging surface and integrating the supportin
 ## Data source contract
 * **Data source:** Sole source is `diagnostics_summary` IPC. Each call flushes then returns the latest ~200 JSON lines from rotating files. The UI must not read raw files.
 
+### Frontend consumption (PR-2)
+* `LogsView` issues a single `diagnostics_summary` request on mount via `src/features/logs/logs.api.ts`; responses are not polled.
+* Payload lines may arrive as strings or objects. `src/features/logs/logs.parse.ts` normalises each into a `LogEntry`, skipping malformed records without throwing.
+* `src/features/logs/logs.store.ts` stores at most 200 parsed entries, sorted newest-first by `tsEpochMs` with the original index as a stable tiebreaker.
+* The store exposes selectors for all entries, distinct categories, available levels, and the timestamp range so later PRs can hydrate filters without extra parsing.
+* Loading, empty, and error shells render immediately inside `LogsView`, and state resets when navigating away so each visit fetches a fresh tail.
+
 ## Filtering rules
 * **Categories:** Derived from the `event` field in the returned payload. Multi-select with OR semantics; an empty selection means “all categories.”
 * **Severity:** Uses an inclusive-upward model (e.g., selecting `warn` includes `warn` and `error`; selecting `info` includes `info`, `warn`, and `error`).
