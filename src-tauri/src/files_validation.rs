@@ -150,7 +150,12 @@ mod tests {
             if *count == 0 {
                 return Some(String::new());
             }
-            return Some(std::iter::repeat(segment).take(*count).collect::<Vec<_>>().join("/"));
+            return Some(
+                std::iter::repeat(segment.as_str())
+                    .take(*count)
+                    .collect::<Vec<_>>()
+                    .join("/"),
+            );
         }
         Some(String::from("."))
     }
