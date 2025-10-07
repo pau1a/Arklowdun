@@ -5,7 +5,6 @@ use tracing::{debug, info, warn};
 
 use std::collections::HashSet;
 use std::num::NonZeroU32;
-use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -749,7 +748,7 @@ async fn cascade_files_cleanup(
     }
 
     let total_entries = entries.len();
-    let mut remaining = total_entries as i64;
+    let remaining = total_entries as i64;
 
     let files_phase_index = (CASCADE_PHASES.len() + 1) as i64;
     if checkpoint.phase != CascadePhase::FilesCleanup.as_str() {
@@ -1186,6 +1185,7 @@ pub async fn delete_household(
             phase: initial_phase.to_string(),
             updated_at_utc: now,
             vacuum_pending: 0,
+            remaining_paths: 0,
         });
 
         let mut tx = pool
