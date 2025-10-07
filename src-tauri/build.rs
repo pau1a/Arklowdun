@@ -7,6 +7,7 @@ fn main() {
     sync_diagnostics_doc();
     emit_git_commit();
     emit_chrono_tz_metadata();
+    watch_migrations();
     tauri_build::build();
 }
 
@@ -100,6 +101,26 @@ fn emit_chrono_tz_metadata() {
     println!("cargo:rustc-env=CHRONO_TZ_CRATE_VERSION={version}");
     if chrono_tz_has_iana_version(&version) {
         println!("cargo:rustc-cfg=chrono_tz_has_iana_version");
+    }
+}
+
+fn watch_migrations() {
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+    let crate_dir = PathBuf::from(&manifest_dir);
+    let candidates = [
+        crate_dir.join("migrations"),
+        crate_dir.join("../migrations"),
+    ];
+
+    for dir in candidates {
+        println!("cargo:rerun-if-changed={}", dir.display());
+        if dir.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    println!("cargo:rerun-if-changed={}", entry.path().display());
+                }
+            }
+        }
     }
 }
 
