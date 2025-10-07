@@ -92,7 +92,9 @@ export const settingsInitStub = `(() => {
   };
 
   const syncFixture = () => {
+    const previous = window.__ARKLOWDUN_FIXTURE__ ?? {};
     window.__ARKLOWDUN_FIXTURE__ = {
+      ...previous,
       households,
       activeId,
       counter,
@@ -100,6 +102,7 @@ export const settingsInitStub = `(() => {
     };
     persistState({ households, activeId, counter });
   };
+  const getFixture = () => window.__ARKLOWDUN_FIXTURE__ ?? {};
   syncFixture();
 
   const emitEvent = (event, payload) => {
@@ -318,6 +321,70 @@ export const settingsInitStub = `(() => {
             logTruncated: false,
             logLinesReturned: 0,
           });
+        case 'file_move': {
+          const maintenance = getFixture().maintenance ?? {};
+          const move = maintenance.move ?? {};
+          if (move.errorCode) {
+            return Promise.reject({ code: move.errorCode });
+          }
+          const moved = typeof move.moved === 'number' ? move.moved : 1;
+          const renamed = Boolean(move.renamed);
+          return Promise.resolve({ moved, renamed });
+        }
+        case 'attachments_repair': {
+          const cancel = Boolean(args?.cancel);
+          const mode = args?.mode ?? 'scan';
+          if (cancel) {
+            const fixture = getFixture();
+            const maintenance = fixture.maintenance ?? {};
+            const existingRepair = maintenance.repair ?? {};
+            const updatedRepair = { ...existingRepair, cancelled: true };
+            maintenance.repair = updatedRepair;
+            window.__ARKLOWDUN_FIXTURE__ = { ...fixture, maintenance };
+            return Promise.resolve({ scanned: 0, missing: 0, repaired: 0, cancelled: true });
+          }
+
+          const computeResult = () => {
+            const fixture = getFixture();
+            const maintenance = fixture.maintenance ?? {};
+            const repair = maintenance.repair ?? {};
+            const scanned =
+              typeof repair.scanned === 'number' && Number.isFinite(repair.scanned)
+                ? repair.scanned
+                : 5;
+            const cancelled = Boolean(repair.cancelled);
+            const missing =
+              typeof repair.missing === 'number' && Number.isFinite(repair.missing)
+                ? repair.missing
+                : cancelled
+                ? 0
+                : 2;
+            const repaired =
+              mode === 'apply'
+                ? typeof repair.repaired === 'number' && Number.isFinite(repair.repaired)
+                  ? repair.repaired
+                  : cancelled
+                  ? 0
+                  : 2
+                : 0;
+            return { scanned, missing, repaired, cancelled };
+          };
+
+          const repairState = (getFixture().maintenance ?? {}).repair ?? {};
+          const delay =
+            typeof repairState.delayMs === 'number' && Number.isFinite(repairState.delayMs)
+              ? repairState.delayMs
+              : 0;
+          if (delay > 0) {
+            return new Promise((resolve) => {
+              setTimeout(() => resolve(computeResult()), delay);
+            });
+          }
+
+          return Promise.resolve(computeResult());
+        }
+        case 'attachments_repair_manifest_export':
+          return Promise.resolve('/tmp/missing.csv');
         case 'open_diagnostics_doc':
           return Promise.resolve();
         case 'diagnostics_doc_path':

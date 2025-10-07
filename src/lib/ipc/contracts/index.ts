@@ -96,6 +96,57 @@ const filesIndexRebuildRequest = filesIndexRequestBase
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "household id required" });
   });
 
+const attachmentCategory = z.enum([
+  "bills",
+  "policies",
+  "property_documents",
+  "inventory_items",
+  "pet_medical",
+  "vehicles",
+  "vehicle_maintenance",
+  "notes",
+  "misc",
+]);
+
+const conflictStrategy = z.enum(["rename", "fail"]);
+const attachmentsRepairMode = z.enum(["scan", "apply"]);
+
+const fileMoveRequest = z
+  .object({
+    household_id: z.string(),
+    from_category: attachmentCategory,
+    from_rel: z.string().min(1),
+    to_category: attachmentCategory,
+    to_rel: z.string().min(1),
+    conflict: conflictStrategy.optional(),
+  })
+  .passthrough();
+
+const fileMoveResponse = z.object({
+  moved: z.number(),
+  renamed: z.boolean(),
+});
+
+const attachmentsRepairRequest = z
+  .object({
+    household_id: z.string(),
+    mode: attachmentsRepairMode,
+  })
+  .passthrough();
+
+const attachmentsRepairResponse = z.object({
+  scanned: z.number(),
+  missing: z.number(),
+  repaired: z.number(),
+  cancelled: z.boolean(),
+});
+
+const attachmentsRepairManifestExportRequest = z
+  .object({
+    household_id: z.string(),
+  })
+  .passthrough();
+
 const householdDeleteResponse = z
   .object({ fallbackId: z.string().nullable().optional() })
   .passthrough();
@@ -272,6 +323,14 @@ export const contracts = {
   about_metadata: contract({ request: flexibleRequest, response: flexibleRequest }),
   attachment_open: contract({ request: flexibleRequest, response: z.null() }),
   attachment_reveal: contract({ request: flexibleRequest, response: z.null() }),
+  attachments_repair: contract({
+    request: attachmentsRepairRequest,
+    response: attachmentsRepairResponse,
+  }),
+  attachments_repair_manifest_export: contract({
+    request: attachmentsRepairManifestExportRequest,
+    response: z.string(),
+  }),
   bills_list: contract({ request: flexibleRequest, response: z.array(flexibleRequest) }),
   bills_get: contract({ request: flexibleRequest, response: flexibleRequest.nullable() }),
   bills_create: contract({ request: flexibleRequest, response: flexibleRequest }),
@@ -279,6 +338,10 @@ export const contracts = {
   bills_delete: contract({ request: flexibleRequest, response: flexibleRequest }),
   bills_restore: contract({ request: flexibleRequest, response: flexibleRequest }),
   bills_list_due_between: contract({ request: flexibleRequest, response: z.array(flexibleRequest) }),
+  file_move: contract({
+    request: fileMoveRequest,
+    response: fileMoveResponse,
+  }),
   db_backup_create: contract({ request: flexibleRequest, response: z.custom<BackupEntry>() }),
   db_backup_overview: contract({ request: flexibleRequest, response: z.custom<BackupOverview>() }),
   db_backup_reveal: contract({ request: flexibleRequest, response: z.void() }),
