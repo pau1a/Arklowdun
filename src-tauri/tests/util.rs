@@ -1,6 +1,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use arklowdun_lib::vault::Vault;
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+use std::fs;
+use tempfile::TempDir;
 
 pub async fn temp_pool() -> SqlitePool {
     let pool = SqlitePoolOptions::new()
@@ -13,4 +16,11 @@ pub async fn temp_pool() -> SqlitePool {
         .await
         .unwrap();
     pool
+}
+
+pub fn temp_vault() -> (TempDir, Vault) {
+    let dir = TempDir::new().expect("create temp vault dir");
+    let base = dir.path().join("vault");
+    fs::create_dir_all(&base).expect("create vault base dir");
+    (dir, Vault::new(&base))
 }
