@@ -134,6 +134,7 @@ pub mod exdate;
 pub mod export;
 pub mod file_ops;
 pub mod files_indexer;
+pub mod files_validation;
 mod household; // declare module; avoid `use` to prevent name collision
 pub mod household_active;
 pub use household::{

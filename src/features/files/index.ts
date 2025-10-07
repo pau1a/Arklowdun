@@ -1,4 +1,5 @@
 export { default as createFilesList } from "./components/FilesList";
+export { VIRTUALIZE_THRESHOLD } from "./components/FilesList";
 export type {
   FilesListInstance,
   FilesListItem,

@@ -1,6 +1,7 @@
 import createButton from '@ui/Button';
 import createInput, { type InputElement } from '@ui/Input';
 import createModal, { type ModalInstance } from '@ui/Modal';
+import { validateFilename } from '@features/files/validation';
 
 export interface FilesToolbarProps {
   onSelectDirectory: () => void | Promise<void>;
@@ -11,6 +12,7 @@ export interface FilesToolbarProps {
 export interface FilesToolbarInstance {
   element: HTMLDivElement;
   setDirectoryAvailable: (available: boolean) => void;
+  setDirectoryContext: (path: string | null) => void;
   openCreateFile: () => void;
   openCreateFolder: () => void;
 }
@@ -52,7 +54,12 @@ function buildModalForm(options: ModalFormOptions): void {
     input.id = `${titleId}-input`;
   }
   labelEl.htmlFor = input.id;
-  field.append(labelEl, input);
+  const errorMessage = document.createElement('p');
+  errorMessage.className = 'files__validation-error';
+  errorMessage.id = `${titleId}-error`;
+  errorMessage.hidden = true;
+  input.setAttribute('aria-describedby', errorMessage.id);
+  field.append(labelEl, input, errorMessage);
   form.appendChild(field);
 
   const actions = document.createElement('div');
@@ -72,21 +79,62 @@ function buildModalForm(options: ModalFormOptions): void {
     label: submitLabel,
     variant: 'primary',
     type: 'submit',
+    disabled: true,
   });
 
   actions.append(cancelButton, submitButton);
   form.appendChild(actions);
 
+  let parentPath: string | null = null;
+
+  const setParentPath = (value: string | null) => {
+    parentPath = value;
+  };
+
+  const setError = (message: string | null) => {
+    if (message) {
+      errorMessage.textContent = message;
+      errorMessage.hidden = false;
+    } else {
+      errorMessage.textContent = '';
+      errorMessage.hidden = true;
+    }
+  };
+
+  const setInvalid = (invalid: boolean) => {
+    input.update({ invalid });
+    submitButton.update({ disabled: invalid });
+  };
+
+  const evaluate = (opts: { force?: boolean } = {}): boolean => {
+    const rawValue = input.value;
+    if (!rawValue) {
+      setError(opts.force ? 'Enter a name before continuing.' : null);
+      setInvalid(true);
+      return false;
+    }
+    const result = validateFilename(rawValue, { parent: parentPath ?? null });
+    if (!result.ok) {
+      setError(result.error.message);
+      setInvalid(true);
+      return false;
+    }
+    setError(null);
+    setInvalid(false);
+    if (rawValue !== result.normalized) {
+      input.value = result.normalized;
+    }
+    return true;
+  };
+
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const value = input.value.trim();
-    if (!value) {
-      input.update({ invalid: true });
+    if (!evaluate({ force: true })) {
       input.focus();
       return;
     }
     try {
-      await onSubmit(value);
+      await onSubmit(input.value);
       input.update({ invalid: false });
     } catch {
       input.focus();
@@ -94,8 +142,16 @@ function buildModalForm(options: ModalFormOptions): void {
   });
 
   input.addEventListener('input', () => {
-    input.update({ invalid: false });
+    evaluate({ force: true });
   });
+
+  submitButton.update({ disabled: true });
+
+  (form as any).__setParentPath = setParentPath;
+  (form as any).__resetValidation = () => {
+    setError(null);
+    setInvalid(true);
+  };
 
   dialog.append(heading, helper, form);
 }
@@ -129,6 +185,7 @@ export function createFilesToolbar(props: FilesToolbarProps): FilesToolbarInstan
   container.append(selectButton, newFolderButton, newFileButton);
 
   let canCreate = true;
+  let currentPath: string | null = null;
 
   const fileInput = createInput({
     type: 'text',
@@ -164,16 +221,26 @@ export function createFilesToolbar(props: FilesToolbarProps): FilesToolbarInstan
     },
   });
 
+  const resetFormState = (form: HTMLFormElement) => {
+    (form as any).__resetValidation?.();
+  };
+
+  const applyParentPath = (form: HTMLFormElement) => {
+    (form as any).__setParentPath?.(currentPath);
+  };
+
   const closeFileModal = () => {
     if (!fileModal.isOpen()) return;
     fileModal.setOpen(false);
     fileInput.value = '';
+    resetFormState(fileModal.dialog.querySelector('form')!);
   };
 
   const closeFolderModal = () => {
     if (!folderModal.isOpen()) return;
     folderModal.setOpen(false);
     folderInput.value = '';
+    resetFormState(folderModal.dialog.querySelector('form')!);
   };
 
   buildModalForm({
@@ -209,11 +276,13 @@ export function createFilesToolbar(props: FilesToolbarProps): FilesToolbarInstan
   const openFileModal = () => {
     if (!canCreate) return;
     fileModal.setOpen(true);
+    applyParentPath(fileModal.dialog.querySelector('form')!);
   };
 
   const openFolderModal = () => {
     if (!canCreate) return;
     folderModal.setOpen(true);
+    applyParentPath(folderModal.dialog.querySelector('form')!);
   };
 
   newFileButton.addEventListener('click', (event) => {
@@ -232,6 +301,11 @@ export function createFilesToolbar(props: FilesToolbarProps): FilesToolbarInstan
       canCreate = available;
       newFileButton.disabled = !available;
       newFolderButton.disabled = !available;
+    },
+    setDirectoryContext(path: string | null) {
+      currentPath = path;
+      applyParentPath(fileModal.dialog.querySelector('form')!);
+      applyParentPath(folderModal.dialog.querySelector('form')!);
     },
     openCreateFile: openFileModal,
     openCreateFolder: openFolderModal,

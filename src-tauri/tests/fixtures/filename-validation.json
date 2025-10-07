@@ -1,0 +1,23 @@
+[
+  { "name": "report.txt", "parent": ".", "valid": true },
+  { "name": "", "parent": ".", "valid": false, "code": "empty" },
+  { "name": ".", "parent": ".", "valid": false, "code": "relative-segment" },
+  { "name": "CON", "parent": ".", "valid": false, "code": "reserved-name" },
+  { "name": "CON.txt", "parent": ".", "valid": false, "code": "reserved-name" },
+  { "name": "final?.txt", "parent": ".", "valid": false, "code": "forbidden-character" },
+  { "name": "budget.", "parent": ".", "valid": false, "code": "trailing-dot-or-space" },
+  {
+    "name": "Cafe\u0301.txt",
+    "parent": ".",
+    "valid": true,
+    "normalized": "Caf\u00e9.txt"
+  },
+  { "nameRepeat": ["a", 256], "parent": ".", "valid": false, "code": "component-too-long" },
+  {
+    "name": "leaf.txt",
+    "parentSegmentsRepeat": ["long", 1025],
+    "valid": false,
+    "code": "path-too-long"
+  },
+  { "name": "notes", "parent": "projects/2024", "valid": true }
+]

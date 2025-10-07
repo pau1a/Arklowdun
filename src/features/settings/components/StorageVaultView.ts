@@ -36,8 +36,42 @@ import {
 } from "../api/vaultMigration";
 import { openPath } from "../api/opener";
 
-export const vaultMigrationUiEnabled =
-  (import.meta.env.VITE_VAULT_MIGRATION_UI ?? "true") !== "false";
+type Unlisten = () => Promise<void>;
+
+const safeListen = async <T>(
+  event: string,
+  handler: Parameters<typeof listen<T>>[1],
+): Promise<Unlisten> => {
+  const win = typeof window === "undefined" ? undefined : (window as any);
+  if (!win || (!win.__TAURI__ && !win.__TAURI_INTERNALS__)) {
+    return async () => {};
+  }
+  return listen<T>(event, handler);
+};
+
+const resolveMigrationFlag = (): string | undefined => {
+  try {
+    if (typeof import.meta !== "undefined" && (import.meta as any)?.env) {
+      const value = (import.meta as any).env.VITE_VAULT_MIGRATION_UI;
+      if (value !== undefined) {
+        return value as string;
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  if (typeof process !== "undefined" && process.env) {
+    const value = process.env.VITE_VAULT_MIGRATION_UI;
+    if (value !== undefined) {
+      return value;
+    }
+  }
+
+  return undefined;
+};
+
+export const vaultMigrationUiEnabled = (resolveMigrationFlag() ?? "true") !== "false";
 
 interface StorageVaultViewInstance {
   element: HTMLElement;
@@ -806,7 +840,7 @@ export function createStorageVaultView(): StorageVaultViewInstance {
           summaryParts.push(`Missing ${result.missing}`);
         }
         updateRepairStatus(summaryParts.join(" · "), "warning");
-        toast.show({ kind: "warning", message: "Repair run cancelled." });
+        toast.show({ kind: "info", message: "Repair run cancelled." });
       } else {
         const parts = [`Scanned ${result.scanned}`, `Missing ${result.missing}`];
         if (result.repaired) {
@@ -1137,7 +1171,7 @@ export function createStorageVaultView(): StorageVaultViewInstance {
   void refreshStatus();
   void refreshIndexStatus();
 
-  void listen<MigrationProgress>(EVENT_PROGRESS, (event) => {
+  void safeListen<MigrationProgress>(EVENT_PROGRESS, (event) => {
     const payload = event.payload;
     if (!payload) return;
     state.latest = payload;
@@ -1150,7 +1184,7 @@ export function createStorageVaultView(): StorageVaultViewInstance {
     state.unlisten.push(unlisten);
   });
 
-  void listen<MigrationProgress>(EVENT_COMPLETE, (event) => {
+  void safeListen<MigrationProgress>(EVENT_COMPLETE, (event) => {
     const payload = event.payload;
     if (!payload) return;
     state.latest = payload;
@@ -1161,7 +1195,7 @@ export function createStorageVaultView(): StorageVaultViewInstance {
     state.unlisten.push(unlisten);
   });
 
-  void listen<{ stage?: string; file?: string; done?: number; total?: number }>(
+  void safeListen<{ stage?: string; file?: string; done?: number; total?: number }>(
     "file_move_progress",
     (event) => {
       const payload = event.payload;
@@ -1180,7 +1214,7 @@ export function createStorageVaultView(): StorageVaultViewInstance {
     state.unlisten.push(unlisten);
   });
 
-  void listen<{ table?: string; scanned?: number; missing?: number }>(
+  void safeListen<{ table?: string; scanned?: number; missing?: number }>(
     "attachments_repair_progress",
     (event) => {
       const payload = event.payload;
@@ -1196,7 +1230,7 @@ export function createStorageVaultView(): StorageVaultViewInstance {
     state.unlisten.push(unlisten);
   });
 
-  void listen<FilesIndexProgressPayload>("files_index_progress", (event) => {
+  void safeListen<FilesIndexProgressPayload>("files_index_progress", (event) => {
     const payload = event.payload;
     if (!payload) return;
     if (
@@ -1224,7 +1258,7 @@ export function createStorageVaultView(): StorageVaultViewInstance {
     state.unlisten.push(unlisten);
   });
 
-  void listen<FilesIndexStatePayload>("files_index_state", (event) => {
+  void safeListen<FilesIndexStatePayload>("files_index_state", (event) => {
     const payload = event.payload;
     if (!payload) return;
     if (
