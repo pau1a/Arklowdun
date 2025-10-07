@@ -1,6 +1,17 @@
 import { listen } from "@tauri-apps/api/event";
 
-import { call } from "@lib/ipc/call";
+import {
+  cancelAttachmentsRepair,
+  exportAttachmentsRepairManifest,
+  moveFile,
+  runAttachmentsRepair,
+} from "@api/fileOps";
+import type {
+  AttachmentsRepairAction,
+  AttachmentsRepairMode,
+  ConflictStrategy,
+} from "@api/fileOps";
+import type { AttachmentCategory } from "@bindings/AttachmentCategory";
 import {
   cancelIndexRebuild,
   getIndexStatus,
@@ -11,7 +22,10 @@ import {
 } from "@lib/files/indexer";
 
 import createButton from "@ui/Button";
+import createInput from "@ui/Input";
 import toast from "@ui/Toast";
+
+import { toUserMessage } from "@files/safe-fs";
 
 import {
   fetchMigrationStatus,
@@ -20,6 +34,7 @@ import {
   type MigrationMode,
   type MigrationProgress,
 } from "../api/vaultMigration";
+import { openPath } from "../api/opener";
 
 export const vaultMigrationUiEnabled =
   (import.meta.env.VITE_VAULT_MIGRATION_UI ?? "true") !== "false";
@@ -42,11 +57,41 @@ const MODE_STATUS: Record<MigrationMode, string> = {
   apply: "Applying migration",
 };
 
+const ATTACHMENT_CATEGORIES: AttachmentCategory[] = [
+  "bills",
+  "policies",
+  "property_documents",
+  "inventory_items",
+  "pet_medical",
+  "vehicles",
+  "vehicle_maintenance",
+  "notes",
+  "misc",
+];
+
 function formatCounts(counts: MigrationProgress["counts"]): string {
   return `Processed ${counts.processed} · Copied ${counts.copied} · Conflicts ${counts.conflicts} · Skipped ${counts.skipped} · Unsupported ${counts.unsupported}`;
 }
 
 export function createStorageVaultView(): StorageVaultViewInstance {
+  const makeCategorySelect = (placeholder: string): HTMLSelectElement => {
+    const select = document.createElement("select");
+    select.className = "storage__maintenance-select";
+    const placeholderOption = document.createElement("option");
+    placeholderOption.value = "";
+    placeholderOption.textContent = placeholder;
+    placeholderOption.disabled = true;
+    placeholderOption.selected = true;
+    select.appendChild(placeholderOption);
+    for (const category of ATTACHMENT_CATEGORIES) {
+      const option = document.createElement("option");
+      option.value = category;
+      option.textContent = category.replace(/_/g, " ");
+      select.appendChild(option);
+    }
+    return select;
+  };
+
   const section = document.createElement("section");
   section.className = "card settings__section settings__section--storage";
   section.setAttribute("aria-labelledby", "settings-storage");
@@ -92,7 +137,7 @@ export function createStorageVaultView(): StorageVaultViewInstance {
   manifestLink.addEventListener("click", (event) => {
     event.preventDefault();
     if (!state.latest?.manifest_path) return;
-    void call("open_path", { path: state.latest.manifest_path }).catch((error: unknown) => {
+    void openPath(state.latest.manifest_path).catch((error: unknown) => {
       const message = (error as { message?: string })?.message ?? "Unable to open manifest.";
       toast.show({ kind: "error", message });
     });
@@ -177,6 +222,150 @@ export function createStorageVaultView(): StorageVaultViewInstance {
     indexControls,
   );
 
+  const maintenanceSection = document.createElement("div");
+  maintenanceSection.className = "storage__maintenance";
+
+  const maintenanceHeading = document.createElement("h4");
+  maintenanceHeading.className = "storage__maintenance-title";
+  maintenanceHeading.textContent = "Maintenance tools";
+
+  const householdField = document.createElement("div");
+  householdField.className = "storage__maintenance-field";
+  const householdLabel = document.createElement("label");
+  householdLabel.className = "storage__maintenance-label";
+  householdLabel.textContent = "Household ID";
+  const householdInput = createInput({
+    id: "storage-maintenance-household",
+    placeholder: "Household ID",
+    className: "storage__maintenance-input",
+  });
+  householdLabel.setAttribute("for", "storage-maintenance-household");
+  householdField.append(householdLabel, householdInput);
+
+  const moveGroup = document.createElement("div");
+  moveGroup.className = "storage__maintenance-group";
+  const moveTitle = document.createElement("h5");
+  moveTitle.className = "storage__maintenance-heading";
+  moveTitle.textContent = "Move or rename";
+  const moveFields = document.createElement("div");
+  moveFields.className = "storage__maintenance-row";
+  const fromCategorySelect = makeCategorySelect("From category");
+  const fromRelInput = createInput({
+    placeholder: "From relative path",
+    className: "storage__maintenance-input",
+  });
+  const toCategorySelect = makeCategorySelect("To category");
+  const toRelInput = createInput({
+    placeholder: "To relative path",
+    className: "storage__maintenance-input",
+  });
+  const conflictSelect = document.createElement("select");
+  conflictSelect.className = "storage__maintenance-select";
+  const renameOption = document.createElement("option");
+  renameOption.value = "rename";
+  renameOption.textContent = "Rename on conflict";
+  const failOption = document.createElement("option");
+  failOption.value = "fail";
+  failOption.textContent = "Fail on conflict";
+  conflictSelect.append(renameOption, failOption);
+  conflictSelect.value = "rename";
+  const moveActionButton = createButton({
+    label: "Move file",
+    variant: "primary",
+    size: "sm",
+    className: "storage__maintenance-action",
+  });
+  moveFields.append(
+    fromCategorySelect,
+    fromRelInput,
+    toCategorySelect,
+    toRelInput,
+    conflictSelect,
+    moveActionButton,
+  );
+  const moveStatus = document.createElement("p");
+  moveStatus.className = "storage__maintenance-status";
+  moveStatus.hidden = true;
+  moveGroup.append(moveTitle, moveFields, moveStatus);
+
+  const repairGroup = document.createElement("div");
+  repairGroup.className = "storage__maintenance-group";
+  const repairTitle = document.createElement("h5");
+  repairTitle.className = "storage__maintenance-heading";
+  repairTitle.textContent = "Scan & repair";
+  const repairControls = document.createElement("div");
+  repairControls.className = "storage__maintenance-row";
+  const repairScanButton = createButton({
+    label: "Scan for missing attachments",
+    variant: "ghost",
+    size: "sm",
+    className: "storage__maintenance-action",
+  });
+  const repairApplyButton = createButton({
+    label: "Apply recorded actions",
+    variant: "ghost",
+    size: "sm",
+    className: "storage__maintenance-action",
+  });
+  const repairLoadManifestButton = createButton({
+    label: "Load manifest",
+    variant: "ghost",
+    size: "sm",
+    className: "storage__maintenance-action",
+  });
+  const repairExportButton = createButton({
+    label: "Export list",
+    variant: "ghost",
+    size: "sm",
+    className: "storage__maintenance-action",
+  });
+  const repairCancelButton = createButton({
+    label: "Cancel",
+    variant: "ghost",
+    size: "sm",
+    className: "storage__maintenance-action",
+    disabled: true,
+  });
+  const repairProgress = document.createElement("progress");
+  repairProgress.className = "storage__maintenance-progress";
+  repairProgress.max = 1;
+  repairProgress.value = 0;
+  repairProgress.hidden = true;
+  const repairStatus = document.createElement("p");
+  repairStatus.className = "storage__maintenance-status";
+  repairStatus.hidden = true;
+  const repairManifestInput = document.createElement("input");
+  repairManifestInput.type = "file";
+  repairManifestInput.accept = ".json,.csv";
+  repairManifestInput.hidden = true;
+  const repairManifestNote = document.createElement("p");
+  repairManifestNote.className = "storage__maintenance-note";
+  repairManifestNote.hidden = true;
+  repairControls.append(
+    repairScanButton,
+    repairApplyButton,
+    repairLoadManifestButton,
+    repairExportButton,
+    repairCancelButton,
+  );
+  repairApplyButton.update({ disabled: true });
+  repairExportButton.update({ disabled: true });
+  repairGroup.append(
+    repairTitle,
+    repairControls,
+    repairProgress,
+    repairStatus,
+    repairManifestNote,
+    repairManifestInput,
+  );
+
+  maintenanceSection.append(
+    maintenanceHeading,
+    householdField,
+    moveGroup,
+    repairGroup,
+  );
+
   const state: {
     running: boolean;
     mode: MigrationMode | null;
@@ -186,6 +375,19 @@ export function createStorageVaultView(): StorageVaultViewInstance {
       householdId: string | null;
       status: FilesIndexStatus | null;
       progress: { scanned: number; updated: number; skipped: number };
+    };
+    maintenance: {
+      move: {
+        running: boolean;
+      };
+      repair: {
+        running: boolean;
+        scanned: number;
+        missing: number;
+        actions: AttachmentsRepairAction[];
+        manifestName: string | null;
+        cancelled: boolean;
+      };
     };
   } = {
     running: false,
@@ -197,7 +399,446 @@ export function createStorageVaultView(): StorageVaultViewInstance {
       status: null,
       progress: { scanned: 0, updated: 0, skipped: 0 },
     },
+    maintenance: {
+      move: {
+        running: false,
+      },
+      repair: {
+        running: false,
+        scanned: 0,
+        missing: 0,
+        actions: [],
+        manifestName: null,
+        cancelled: false,
+      },
+    },
   };
+
+  const updateRepairActionsSummary = (): void => {
+    const { actions, manifestName } = state.maintenance.repair;
+    if (actions.length > 0) {
+      const source = manifestName ? ` from ${manifestName}` : "";
+      repairManifestNote.hidden = false;
+      repairManifestNote.textContent = `Loaded ${actions.length} actions${source}.`;
+    } else {
+      repairManifestNote.hidden = true;
+      repairManifestNote.textContent = "";
+    }
+    if (!state.maintenance.repair.running) {
+      repairApplyButton.update({ disabled: actions.length === 0 });
+    }
+  };
+
+  const requireHouseholdId = (): string | null => {
+    const value = householdInput.value.trim();
+    if (!value) {
+      toast.show({ kind: "error", message: "Household ID is required." });
+      householdInput.focus();
+      return null;
+    }
+    return value;
+  };
+
+  const ensureCategory = (value: string, label: string): AttachmentCategory | null => {
+    if (!value) {
+      toast.show({
+        kind: "error",
+        message: `${label} is required.`,
+      });
+      return null;
+    }
+    return value as AttachmentCategory;
+  };
+
+  const updateMoveStatus = (message: string, isError = false): void => {
+    moveStatus.hidden = false;
+    moveStatus.textContent = message;
+    moveStatus.dataset.status = isError ? "error" : "info";
+  };
+
+  const updateRepairStatus = (
+    message: string,
+    status: "info" | "error" | "warning" = "info",
+  ): void => {
+    repairStatus.hidden = false;
+    repairStatus.textContent = message;
+    repairStatus.dataset.status = status;
+  };
+
+  type ManifestEntry = {
+    table_name?: unknown;
+    tableName?: unknown;
+    row_id?: unknown;
+    rowId?: unknown;
+    action?: unknown;
+    action_type?: unknown;
+    type?: unknown;
+    new_category?: unknown;
+    newCategory?: unknown;
+    new_relative_path?: unknown;
+    newRelativePath?: unknown;
+  };
+
+  const manifestEntryToAction = (entry: ManifestEntry): AttachmentsRepairAction => {
+    const tableNameValue = entry.table_name ?? entry.tableName;
+    if (typeof tableNameValue !== "string" || tableNameValue.length === 0) {
+      throw new Error("Manifest entry missing table name.");
+    }
+
+    const rowIdValue = entry.row_id ?? entry.rowId;
+    const rowId = Number(rowIdValue);
+    if (!Number.isInteger(rowId)) {
+      throw new Error("Manifest entry row_id must be an integer.");
+    }
+
+    const actionValueRaw = entry.action ?? entry.action_type ?? entry.type;
+    if (typeof actionValueRaw !== "string") {
+      throw new Error("Manifest entry has unsupported action type.");
+    }
+
+    const actionValue = actionValueRaw.toLowerCase() as AttachmentsRepairAction["action"];
+    if (!["detach", "mark", "relink"].includes(actionValue)) {
+      throw new Error("Manifest entry has unsupported action type.");
+    }
+
+    const categoryRaw = entry.new_category ?? entry.newCategory;
+    const relativeRaw = entry.new_relative_path ?? entry.newRelativePath;
+
+    const action: AttachmentsRepairAction = {
+      tableName: tableNameValue,
+      rowId,
+      action: actionValue,
+    };
+
+    if (typeof categoryRaw === "string" && categoryRaw.length > 0) {
+      action.newCategory = categoryRaw as AttachmentCategory;
+    }
+
+    if (typeof relativeRaw === "string" && relativeRaw.trim().length > 0) {
+      action.newRelativePath = relativeRaw;
+    }
+
+    return action;
+  };
+
+  const parseJsonManifest = (text: string): AttachmentsRepairAction[] => {
+    const parsed = JSON.parse(text) as unknown;
+    if (!Array.isArray(parsed)) {
+      throw new Error("Manifest must be an array of repair actions.");
+    }
+    return parsed.map((entry) => manifestEntryToAction(entry as ManifestEntry));
+  };
+
+  const parseCsvLine = (line: string): string[] => {
+    const values: string[] = [];
+    let current = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i += 1) {
+      const char = line[i];
+      if (inQuotes) {
+        if (char === "\"") {
+          if (line[i + 1] === "\"") {
+            current += "\"";
+            i += 1;
+          } else {
+            inQuotes = false;
+          }
+        } else {
+          current += char;
+        }
+      } else if (char === "\"") {
+        inQuotes = true;
+      } else if (char === ",") {
+        values.push(current);
+        current = "";
+      } else {
+        current += char;
+      }
+    }
+    values.push(current);
+    return values.map((value) => value.replace(/\r$/, ""));
+  };
+
+  const parseCsvManifest = (text: string): AttachmentsRepairAction[] => {
+    const lines = text
+      .split(/\r?\n/)
+      .map((line) => line.trimEnd())
+      .filter((line) => line.length > 0);
+    if (lines.length <= 1) {
+      return [];
+    }
+    const header = parseCsvLine(lines[0]);
+    const actions: AttachmentsRepairAction[] = [];
+
+    for (let i = 1; i < lines.length; i += 1) {
+      const row = parseCsvLine(lines[i]);
+      if (row.every((value) => value.trim().length === 0)) {
+        continue;
+      }
+      const entry: ManifestEntry = {};
+      header.forEach((rawHeader, idx) => {
+        const value = (row[idx] ?? "").trim();
+        const normalized = rawHeader
+          .toLowerCase()
+          .replace(/[^a-z0-9_]/g, "");
+        switch (normalized) {
+          case "tablename":
+          case "table_name":
+            entry.table_name = value;
+            entry.tableName = value;
+            break;
+          case "rowid":
+          case "row_id":
+            entry.row_id = value;
+            entry.rowId = value;
+            break;
+          case "action":
+          case "actiontype":
+          case "action_type":
+          case "type":
+            entry.action = value.toLowerCase();
+            entry.action_type = value.toLowerCase();
+            entry.type = value.toLowerCase();
+            break;
+          case "newcategory":
+          case "new_category":
+            entry.new_category = value;
+            entry.newCategory = value;
+            break;
+          case "newrelativepath":
+          case "new_relative_path":
+            entry.new_relative_path = value;
+            entry.newRelativePath = value;
+            break;
+          default:
+            break;
+        }
+      });
+      actions.push(manifestEntryToAction(entry));
+    }
+
+    return actions;
+  };
+
+  const parseManifestFile = async (file: File): Promise<AttachmentsRepairAction[]> => {
+    const text = await file.text();
+    const trimmed = text.trimStart().toLowerCase();
+    if (
+      file.name.toLowerCase().endsWith(".csv") ||
+      trimmed.startsWith("table_name,") ||
+      trimmed.startsWith("tablename,")
+    ) {
+      return parseCsvManifest(text);
+    }
+    return parseJsonManifest(text);
+  };
+
+  repairLoadManifestButton.addEventListener("click", () => {
+    repairManifestInput.value = "";
+    repairManifestInput.click();
+  });
+
+  repairExportButton.addEventListener("click", async () => {
+    if (state.maintenance.repair.running) return;
+    const householdId = requireHouseholdId();
+    if (!householdId) return;
+    repairExportButton.update({ disabled: true });
+    try {
+      const path = await exportAttachmentsRepairManifest(householdId);
+      toast.show({
+        kind: "success",
+        message: `Exported manifest to ${path}.`,
+      });
+    } catch (error) {
+      const message = toUserMessage(error) || "Unable to export manifest.";
+      toast.show({ kind: "error", message });
+    } finally {
+      repairExportButton.update({
+        disabled:
+          state.maintenance.repair.running || state.maintenance.repair.missing === 0,
+      });
+    }
+  });
+
+  repairManifestInput.addEventListener("change", async () => {
+    const file = repairManifestInput.files?.[0];
+    if (!file) return;
+    try {
+      const actions = await parseManifestFile(file);
+      state.maintenance.repair.actions = actions;
+      state.maintenance.repair.manifestName = file.name;
+      updateRepairActionsSummary();
+      toast.show({
+        kind: "success",
+        message: `Loaded ${actions.length} repair action${actions.length === 1 ? "" : "s"}.`,
+      });
+    } catch (error) {
+      state.maintenance.repair.actions = [];
+      state.maintenance.repair.manifestName = null;
+      updateRepairActionsSummary();
+      const message =
+        (error as { message?: string })?.message ?? "Unable to load repair manifest.";
+      toast.show({ kind: "error", message });
+    }
+  });
+
+  repairCancelButton.addEventListener("click", async () => {
+    if (!state.maintenance.repair.running) return;
+    const householdId = householdInput.value.trim();
+    if (!householdId) {
+      toast.show({ kind: "error", message: "Household ID is required." });
+      return;
+    }
+    repairCancelButton.update({ disabled: true });
+    try {
+      await cancelAttachmentsRepair(householdId);
+      updateRepairStatus("Cancellation requested. Finishing current batch…", "warning");
+      toast.show({ kind: "info", message: "Cancellation requested." });
+    } catch (error) {
+      const message = toUserMessage(error) || "Unable to cancel repair.";
+      toast.show({ kind: "error", message });
+      repairCancelButton.update({ disabled: false });
+    }
+  });
+
+  async function performMove(): Promise<void> {
+    if (state.maintenance.move.running) return;
+    const householdId = requireHouseholdId();
+    if (!householdId) return;
+
+    const fromCategory = ensureCategory(
+      fromCategorySelect.value,
+      "Source category",
+    );
+    const toCategory = ensureCategory(
+      toCategorySelect.value,
+      "Destination category",
+    );
+    const fromRelative = fromRelInput.value.trim();
+    const toRelative = toRelInput.value.trim();
+
+    if (!fromCategory || !toCategory) return;
+    if (!fromRelative || !toRelative) {
+      toast.show({
+        kind: "error",
+        message: "Relative paths are required.",
+      });
+      return;
+    }
+
+    state.maintenance.move.running = true;
+    moveActionButton.update({ disabled: true });
+    updateMoveStatus("Moving file…");
+    try {
+      const result = await moveFile({
+        householdId,
+        fromCategory,
+        fromRelativePath: fromRelative,
+        toCategory,
+        toRelativePath: toRelative,
+        conflict: conflictSelect.value as ConflictStrategy,
+      });
+      const renameNote = result.renamed ? " (renamed)" : "";
+      updateMoveStatus(
+        `Updated ${result.moved} references${renameNote}.`,
+        false,
+      );
+      toast.show({ kind: "success", message: "File move completed." });
+    } catch (error) {
+      const message = toUserMessage(error) || "File move failed.";
+      updateMoveStatus(message, true);
+      toast.show({ kind: "error", message });
+    } finally {
+      state.maintenance.move.running = false;
+      moveActionButton.update({ disabled: false });
+    }
+  }
+
+  async function runRepair(
+    mode: AttachmentsRepairMode,
+    actions?: AttachmentsRepairAction[],
+  ): Promise<void> {
+    if (state.maintenance.repair.running) return;
+    const householdId = requireHouseholdId();
+    if (!householdId) return;
+
+    let payloadActions: AttachmentsRepairAction[] | undefined;
+    if (mode === "apply") {
+      const active = actions ?? state.maintenance.repair.actions;
+      if (!active.length) {
+        toast.show({
+          kind: "error",
+          message: "Load a repair manifest before applying actions.",
+        });
+        return;
+      }
+      payloadActions = active;
+    }
+
+    state.maintenance.repair.running = true;
+    state.maintenance.repair.cancelled = false;
+    repairScanButton.update({ disabled: true });
+    repairApplyButton.update({ disabled: true });
+    repairLoadManifestButton.update({ disabled: true });
+    repairExportButton.update({ disabled: true });
+    repairCancelButton.update({ disabled: false });
+    repairProgress.hidden = false;
+    repairProgress.removeAttribute("value");
+    updateRepairStatus(
+      mode === "scan"
+        ? "Scanning attachments…"
+        : "Applying recorded actions…",
+      "info",
+    );
+    try {
+      const result = await runAttachmentsRepair({
+        householdId,
+        mode,
+        actions: payloadActions,
+      });
+      state.maintenance.repair.scanned = result.scanned;
+      state.maintenance.repair.missing = result.missing;
+      state.maintenance.repair.cancelled = result.cancelled;
+
+      if (result.cancelled) {
+        const summaryParts = [`Cancelled after scanning ${result.scanned}`];
+        if (result.missing > 0) {
+          summaryParts.push(`Missing ${result.missing}`);
+        }
+        updateRepairStatus(summaryParts.join(" · "), "warning");
+        toast.show({ kind: "warning", message: "Repair run cancelled." });
+      } else {
+        const parts = [`Scanned ${result.scanned}`, `Missing ${result.missing}`];
+        if (result.repaired) {
+          parts.push(`Repaired ${result.repaired}`);
+        }
+        updateRepairStatus(parts.join(" · "));
+        toast.show({ kind: "success", message: `Repair ${mode} completed.` });
+        if (mode === "apply") {
+          state.maintenance.repair.actions = [];
+          state.maintenance.repair.manifestName = null;
+        } else if (result.missing > 0) {
+          repairApplyButton.update({
+            disabled: state.maintenance.repair.actions.length === 0,
+          });
+        }
+      }
+    } catch (error) {
+      const message = toUserMessage(error) || "Repair run failed.";
+      updateRepairStatus(message, "error");
+      toast.show({ kind: "error", message });
+    } finally {
+      state.maintenance.repair.running = false;
+      repairScanButton.update({ disabled: false });
+      repairLoadManifestButton.update({ disabled: false });
+      repairExportButton.update({
+        disabled: state.maintenance.repair.missing === 0,
+      });
+      repairCancelButton.update({ disabled: true });
+      updateRepairActionsSummary();
+      repairProgress.hidden = true;
+    }
+  }
 
   function updateUi(): void {
     const status = state.latest;
@@ -468,6 +1109,21 @@ export function createStorageVaultView(): StorageVaultViewInstance {
     void resume();
   });
 
+  moveActionButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    void performMove();
+  });
+
+  repairScanButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    void runRepair("scan");
+  });
+
+  repairApplyButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    void runRepair("apply", state.maintenance.repair.actions);
+  });
+
   indexRebuildButton.addEventListener("click", (event) => {
     event.preventDefault();
     void startIndexRebuild();
@@ -502,6 +1158,41 @@ export function createStorageVaultView(): StorageVaultViewInstance {
     state.mode = null;
     updateUi();
   }).then((unlisten) => {
+    state.unlisten.push(unlisten);
+  });
+
+  void listen<{ stage?: string; file?: string; done?: number; total?: number }>(
+    "file_move_progress",
+    (event) => {
+      const payload = event.payload;
+      if (!payload) return;
+      const file = payload.file ?? "";
+      if (payload.stage === "completed") {
+        updateMoveStatus(`Completed: ${file}`);
+      } else {
+        const done = Number(payload.done ?? 0);
+        const total = Number(payload.total ?? 0);
+        const progress = total > 0 ? `${done}/${total}` : `${done}`;
+        updateMoveStatus(`Moving ${file} (${progress})`);
+      }
+    },
+  ).then((unlisten) => {
+    state.unlisten.push(unlisten);
+  });
+
+  void listen<{ table?: string; scanned?: number; missing?: number }>(
+    "attachments_repair_progress",
+    (event) => {
+      const payload = event.payload;
+      if (!payload) return;
+      const table = payload.table ?? "";
+      const scanned = Number(payload.scanned ?? 0);
+      const missing = Number(payload.missing ?? 0);
+      updateRepairStatus(
+        `Scanning ${table || "attachments"}: ${scanned} scanned · ${missing} missing`,
+      );
+    },
+  ).then((unlisten) => {
     state.unlisten.push(unlisten);
   });
 
@@ -558,6 +1249,8 @@ export function createStorageVaultView(): StorageVaultViewInstance {
     state.unlisten.push(unlisten);
   });
 
+  updateRepairActionsSummary();
+
   section.append(
     statusWrapper,
     helper,
@@ -566,6 +1259,7 @@ export function createStorageVaultView(): StorageVaultViewInstance {
     progressNote,
     summary,
     indexSection,
+    maintenanceSection,
   );
 
   return {
