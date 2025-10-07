@@ -42,6 +42,6 @@ fn os_eq_clause_unix_matches_exact() {
 #[test]
 fn csv_escape_quotes_fields() {
     assert_eq!(csv_escape(Some("plain")), "plain");
-    assert_eq!(csv_escape(Some("with,comma")), "\"with,comma\"");
-    assert_eq!(csv_escape(Some("with\"quote")), "\"with""quote\"");
+    assert_eq!(csv_escape(Some("with,comma")), r#""with,comma""#);
+    assert_eq!(csv_escape(Some("with\"quote")), r#""with""quote""#);
 }
