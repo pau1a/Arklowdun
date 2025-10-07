@@ -20,6 +20,17 @@ Frontend engineers implementing the Logs page presentation and interactive behav
 * **Live Tail toggle:** Start polling `diagnostics_summary` every 3–5 seconds while active; stop polling when toggled off or on navigation away.
 * **Export button:** Visible at all times to trigger JSONL export per the specification.
 
+Live Tail – optional toggle refreshing the log view every 3 seconds via `diagnostics_summary`. Stops automatically on navigation. Default OFF.
+
+## Data shape
+The Logs view consumes the `diagnostics_summary` IPC response with the following primary keys:
+
+```
+logTail        → Array of JSON strings representing the latest log lines (oldest first).
+logLinesReturned → Count of items in `logTail` (up to ~200).
+logTruncated   → Boolean indicating whether older entries were trimmed server-side.
+```
+
 ## Time Display & Toggle
 * The header contains a single pill button labelled `Time: Local (BST/GMT) ↔ UTC`. Clicking swaps the displayed timestamps between London local time and UTC without additional data fetches.
 * Tooltips on each timestamp reveal the alternate representation so both formats remain one hover away.
