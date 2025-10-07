@@ -12,6 +12,10 @@ const severityRank: Record<LogLevel, number> = {
   error: 4,
 };
 
+type LiveTailState = "idle" | "active" | "paused";
+
+const LIVE_TAIL_PAUSED_MESSAGE = "Live Tail paused – temporary connection issue.";
+
 function renderSummary(
   visibleCount: number,
   totalCount: number,
@@ -51,6 +55,7 @@ function applyFilters(
   selectedSeverity: LogLevel,
   selectedCategories: Set<string>,
   searchTerm: string,
+  showLocal: boolean,
 ): LogEntry[] {
   const normalizedSearch = searchTerm.trim().toLowerCase();
   return entries.filter((entry) => {
@@ -61,7 +66,13 @@ function applyFilters(
       return false;
     }
     if (normalizedSearch) {
-      const haystack = `${entry.event} ${entry.message ?? ""}`.toLowerCase();
+      const timestampLocal = formatTimestamp(entry.tsUtc, showLocal);
+      const timestampAlt = formatTimestamp(entry.tsUtc, !showLocal);
+      const haystack = `${timestampLocal} ${timestampAlt} ${entry.level} ${entry.event} ${
+        entry.message ?? ""
+      }`
+        .trim()
+        .toLowerCase();
       if (!haystack.includes(normalizedSearch)) {
         return false;
       }
@@ -139,6 +150,30 @@ export function mountLogsView(container: HTMLElement): () => void {
           ></button>
         </div>
         <div class="logs-header__actions">
+          <div class="logs-live-control">
+            <label
+              class="logs-live-toggle"
+              title="Automatically refresh the most recent logs every 3 seconds."
+            >
+              <input
+                type="checkbox"
+                class="logs-live-toggle__checkbox"
+                data-testid="logs-live-toggle"
+              />
+              <span class="logs-live-toggle__switch" aria-hidden="true">
+                <span class="logs-live-toggle__thumb"></span>
+              </span>
+              <span class="logs-live-toggle__label">
+                <span
+                  class="logs-live-toggle__status"
+                  data-testid="logs-live-indicator"
+                  data-state="idle"
+                  aria-hidden="true"
+                >•</span>
+                Live Tail
+              </span>
+            </label>
+          </div>
           <span class="logs-summary" aria-live="polite" aria-atomic="true"></span>
           <button type="button" class="btn btn--secondary btn--sm" disabled title="Export will arrive soon">Export JSON</button>
         </div>
@@ -159,10 +194,6 @@ export function mountLogsView(container: HTMLElement): () => void {
         <label class="logs-filter logs-filter--search">
           <span class="logs-filter__label">Search</span>
           <input type="search" class="logs-filter__search" placeholder="Search logs…" data-testid="logs-filter-search" />
-        </label>
-        <label class="logs-filter logs-filter--live">
-          <input type="checkbox" class="logs-filter__checkbox" data-testid="logs-live-toggle" />
-          <span>Live Tail</span>
         </label>
         <button type="button" class="btn btn--secondary btn--sm logs-refresh" data-testid="logs-refresh">Refresh</button>
       </div>
@@ -209,6 +240,9 @@ export function mountLogsView(container: HTMLElement): () => void {
   const liveTailToggle = container.querySelector<HTMLInputElement>(
     "[data-testid='logs-live-toggle']",
   );
+  const liveTailIndicator = container.querySelector<HTMLElement>(
+    "[data-testid='logs-live-indicator']",
+  );
   const refreshButton = container.querySelector<HTMLButtonElement>(
     "[data-testid='logs-refresh']",
   );
@@ -236,6 +270,7 @@ export function mountLogsView(container: HTMLElement): () => void {
     !categoriesCount ||
     !searchInput ||
     !liveTailToggle ||
+    !liveTailIndicator ||
     !refreshButton ||
     !loadingEl ||
     !errorEl ||
@@ -261,7 +296,21 @@ export function mountLogsView(container: HTMLElement): () => void {
   let lastFetchedAt: string | undefined;
   let currentStatus: "loading" | "ready" | "error" = "loading";
   let liveTailTimer: number | null = null;
+  let liveTailState: LiveTailState = "idle";
+  let liveTailErrorNotified = false;
   let lastErrorToast: string | null = null;
+
+  function setLiveTailState(state: LiveTailState): void {
+    liveTailState = state;
+    liveTailIndicator.dataset.state = state;
+  }
+
+  function clearLiveTailTimer(): void {
+    if (liveTailTimer !== null) {
+      window.clearInterval(liveTailTimer);
+      liveTailTimer = null;
+    }
+  }
 
   function updateTimeToggle(): void {
     const zoneLabel = getZoneLabel(true);
@@ -338,26 +387,25 @@ export function mountLogsView(container: HTMLElement): () => void {
       selectedSeverity,
       selectedCategories,
       searchTerm,
+      showLocal,
     );
     renderRows(tableBody, filteredEntries, showLocal);
     updateSummary();
   }
 
   function startLiveTail(): void {
-    if (liveTailTimer !== null) return;
+    clearLiveTailTimer();
     liveTailTimer = window.setInterval(() => {
       void logsStore.fetchTail();
     }, 3000);
+    setLiveTailState("active");
+    liveTailErrorNotified = false;
   }
 
   function stopLiveTail(): void {
-    if (liveTailTimer !== null) {
-      window.clearInterval(liveTailTimer);
-      liveTailTimer = null;
-    }
-    if (liveTailToggle.checked) {
-      liveTailToggle.checked = false;
-    }
+    clearLiveTailTimer();
+    setLiveTailState("idle");
+    liveTailErrorNotified = false;
   }
 
   severitySelect.addEventListener("change", () => {
@@ -397,45 +445,73 @@ export function mountLogsView(container: HTMLElement): () => void {
 
   timeToggleButton.addEventListener("click", () => {
     showLocal = !showLocal;
-    updateTimeToggle();
-    renderRows(tableBody, filteredEntries, showLocal);
+    refreshRows();
   });
 
   const unsubscribe = logsStore.subscribe((state) => {
     const status = state.status === "idle" ? "loading" : state.status;
-    currentStatus = status;
+    let nextStatus: typeof currentStatus = status;
+    const snapshot = state.entries.slice();
 
-    if (status === "error") {
-      const message = state.error ?? "Unable to load logs.";
-      errorEl.textContent = message;
-      if (message !== lastErrorToast) {
-        toast.show({ kind: "error", message });
-        lastErrorToast = message;
-      }
-      stopLiveTail();
-    } else {
-      lastErrorToast = null;
+    if (status !== "error" || snapshot.length > 0) {
+      allEntries = snapshot;
+      totalCount = allEntries.length;
     }
 
-    allEntries = state.entries.slice();
-    totalCount = allEntries.length;
-    lastFetchedAt = state.fetchedAtUtc;
+    if (state.fetchedAtUtc && status !== "error") {
+      lastFetchedAt = state.fetchedAtUtc;
+    }
 
     if (status === "ready") {
       const categories = Array.from(new Set(allEntries.map((entry) => entry.event)));
       syncCategoryOptions(categories);
       refreshRows();
       updateBanners(state.droppedCount, state.logWriteStatus);
+      if (liveTailToggle.checked) {
+        setLiveTailState("active");
+      }
+      liveTailErrorNotified = false;
+      lastErrorToast = null;
     } else if (status === "loading") {
       if (totalCount > 0) {
         refreshRows();
       }
+      if (liveTailToggle.checked && liveTailState === "paused") {
+        setLiveTailState("active");
+      }
     } else if (status === "error") {
-      filteredEntries = [];
-      tableBody.replaceChildren();
-      updateBanners(0, "ok");
+      const message = state.error ?? "Unable to load logs.";
+      const liveTailEnabled = liveTailToggle.checked;
+      const hasPreviousEntries = totalCount > 0;
+      errorEl.textContent = message;
+
+      if (liveTailEnabled) {
+        if (!liveTailErrorNotified) {
+          toast.show({ kind: "info", message: LIVE_TAIL_PAUSED_MESSAGE });
+          liveTailErrorNotified = true;
+          lastErrorToast = LIVE_TAIL_PAUSED_MESSAGE;
+        }
+        setLiveTailState("paused");
+        if (hasPreviousEntries) {
+          nextStatus = "ready";
+        }
+      } else if (message !== lastErrorToast) {
+        toast.show({ kind: "error", message });
+        lastErrorToast = message;
+      }
+
+      if (!liveTailEnabled || !hasPreviousEntries) {
+        filteredEntries = [];
+        tableBody.replaceChildren();
+        updateBanners(0, "ok");
+      }
     }
 
+    if (!liveTailToggle.checked && liveTailState !== "idle") {
+      setLiveTailState("idle");
+    }
+
+    currentStatus = nextStatus;
     updateStates();
   });
 

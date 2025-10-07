@@ -35,6 +35,92 @@
   gap: var(--space-3);
 }
 
+.logs-live-control {
+  display: flex;
+  align-items: center;
+}
+
+.logs-live-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+  color: var(--color-text, #0f172a);
+  cursor: pointer;
+  user-select: none;
+}
+
+.logs-live-toggle__checkbox {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  border: 0;
+  padding: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  overflow: hidden;
+}
+
+.logs-live-toggle__switch {
+  position: relative;
+  width: 34px;
+  height: 18px;
+  border-radius: 9999px;
+  background: var(--color-border-subtle, rgba(15, 23, 42, 0.2));
+  transition: background-color 150ms ease;
+  flex-shrink: 0;
+}
+
+.logs-live-toggle__thumb {
+  position: absolute;
+  inset-block-start: 2px;
+  inset-inline-start: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-surface, #fff);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.2);
+  transition: transform 150ms ease;
+}
+
+.logs-live-toggle__checkbox:checked + .logs-live-toggle__switch {
+  background: color-mix(in srgb, var(--color-success, #00C896) 55%, transparent);
+}
+
+.logs-live-toggle__checkbox:checked + .logs-live-toggle__switch .logs-live-toggle__thumb {
+  transform: translateX(16px);
+}
+
+.logs-live-toggle__checkbox:focus-visible + .logs-live-toggle__switch {
+  outline: 2px solid var(--color-focus-ring, var(--color-accent, #2563eb));
+  outline-offset: 2px;
+}
+
+.logs-live-toggle__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.875rem;
+}
+
+.logs-live-toggle__status {
+  font-size: 0.75rem;
+  line-height: 1;
+  color: var(--color-text-muted, rgba(71, 85, 105, 0.7));
+  transition: color 150ms ease, opacity 150ms ease;
+}
+
+.logs-live-toggle__status[data-state='active'] {
+  color: var(--color-success, #00C896);
+}
+
+.logs-live-toggle__status[data-state='paused'] {
+  color: var(--color-warning, #d48806);
+}
+
 .logs-summary {
   min-height: 1.25rem;
   font-size: 0.875rem;
@@ -165,16 +251,6 @@
 .logs-filter__checkbox {
   width: 16px;
   height: 16px;
-}
-
-.logs-filter--live {
-  gap: var(--space-1);
-  font-weight: 600;
-  color: var(--color-text, #0f172a);
-}
-
-.logs-filter--live .logs-filter__checkbox {
-  margin-inline-end: 0.25rem;
 }
 
 .logs-content {

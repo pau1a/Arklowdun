@@ -94,10 +94,16 @@ function setError(message: string): void {
   notify();
 }
 
-interface TailResponse {
-  lines?: (string | Record<string, unknown>)[];
+interface DiagnosticsSummaryResponse {
+  logTail?: unknown;
+  logLinesReturned?: unknown;
+  logTruncated?: unknown;
+  logAvailable?: unknown;
   dropped_count?: unknown;
+  droppedCount?: unknown;
   log_write_status?: unknown;
+  logWriteStatus?: unknown;
+  lines?: (string | Record<string, unknown>)[];
 }
 
 function toFiniteNumber(value: unknown): number | null {
@@ -113,9 +119,7 @@ function toFiniteNumber(value: unknown): number | null {
   return null;
 }
 
-function normalizeTail(
-  lines: (string | Record<string, unknown>)[] | unknown,
-): LogEntry[] {
+function normalizeTail(lines: unknown): LogEntry[] {
   if (!Array.isArray(lines)) return [];
   const parsed = lines
     .map((line, index) => {
@@ -138,36 +142,54 @@ function normalizeTail(
   return entries;
 }
 
+function pickTailLines(record: DiagnosticsSummaryResponse): unknown {
+  if (Array.isArray(record.logTail)) {
+    return record.logTail;
+  }
+  if (Array.isArray(record.lines)) {
+    return record.lines;
+  }
+  return [];
+}
+
 function normalizeResponse(
   response: unknown,
 ): { entries: LogEntry[]; droppedCount: number; logWriteStatus: LogWriteStatus } {
-  let lines: (string | Record<string, unknown>)[] | unknown = response;
+  let tailSource: unknown = [];
   let droppedCount = state.droppedCount ?? 0;
   let logWriteStatus: LogWriteStatus = state.logWriteStatus ?? "ok";
 
   if (response && typeof response === "object" && !Array.isArray(response)) {
-    const record = response as TailResponse;
-    if (Array.isArray(record.lines)) {
-      lines = record.lines;
-    }
-    const dropped = toFiniteNumber(record.dropped_count);
-    if (dropped !== null) {
-      droppedCount = Math.max(0, dropped);
-    } else if (Array.isArray(record.lines)) {
+    const record = response as DiagnosticsSummaryResponse;
+    tailSource = pickTailLines(record);
+
+    const droppedCandidate =
+      toFiniteNumber(record.dropped_count) ?? toFiniteNumber(record.droppedCount);
+    if (droppedCandidate !== null) {
+      droppedCount = Math.max(0, droppedCandidate);
+    } else if (Array.isArray(tailSource)) {
       droppedCount = 0;
     }
-    if (typeof record.log_write_status === "string") {
-      const normalized = record.log_write_status.trim();
+
+    const rawStatus =
+      typeof record.log_write_status === "string"
+        ? record.log_write_status
+        : typeof record.logWriteStatus === "string"
+          ? record.logWriteStatus
+          : null;
+    if (rawStatus !== null) {
+      const normalized = rawStatus.trim();
       logWriteStatus = (normalized || "ok") as LogWriteStatus;
-    } else if (Array.isArray(record.lines)) {
+    } else if (Array.isArray(tailSource)) {
       logWriteStatus = "ok";
     }
   } else if (Array.isArray(response)) {
+    tailSource = response;
     droppedCount = 0;
     logWriteStatus = "ok";
   }
 
-  const entries = normalizeTail(lines);
+  const entries = normalizeTail(tailSource);
   return { entries, droppedCount, logWriteStatus };
 }
 
