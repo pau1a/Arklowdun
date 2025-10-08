@@ -2,6 +2,7 @@ import { exportLogsJsonl } from "@features/logs/exportLogsJsonl";
 import { logsStore } from "@features/logs/logs.store";
 import type { LogEntry, LogLevel } from "@features/logs/logs.types";
 import { formatTimestamp, getZoneLabel } from "@features/logs/time";
+import { createLogsStatusBanner } from "@ui/components/logsStatusBanner";
 import { toast } from "@ui/Toast";
 
 const severityOrder: LogLevel[] = ["trace", "debug", "info", "warn", "error"];
@@ -515,10 +516,7 @@ export function mountLogsView(container: HTMLElement): () => void {
         <button type="button" class="btn btn--secondary btn--sm logs-refresh" data-testid="logs-refresh">Refresh</button>
       </div>
       <div class="logs-content">
-        <div class="logs-banners" hidden>
-          <div class="logs-banner" data-banner="backlog" role="status" hidden>⚠ Log backlog detected — some entries may be missing.</div>
-          <div class="logs-banner" data-banner="io" role="status" hidden>⚠ Log writing paused — insufficient disk space.</div>
-        </div>
+        <div id="logs-status" class="logs__status" hidden></div>
         <div class="logs-state logs-state--loading" role="status" data-testid="logs-loading">Loading latest diagnostics…</div>
         <div class="logs-state logs-state--error" role="alert" data-testid="logs-error" hidden></div>
         <div class="logs-state logs-state--empty" data-testid="logs-empty" hidden>No log lines yet — perform an action and refresh.</div>
@@ -582,9 +580,7 @@ export function mountLogsView(container: HTMLElement): () => void {
   const exportButton = container.querySelector<HTMLButtonElement>(
     "[data-testid='logs-export']",
   );
-  const bannersContainer = container.querySelector<HTMLElement>(".logs-banners");
-  const backlogBanner = container.querySelector<HTMLElement>("[data-banner='backlog']");
-  const ioBanner = container.querySelector<HTMLElement>("[data-banner='io']");
+  const statusBannerEl = container.querySelector<HTMLElement>("#logs-status");
   const densityButton = container.querySelector<HTMLButtonElement>(".logs-density-toggle");
   const columnsDetails = container.querySelector<HTMLDetailsElement>(".logs-columns");
   const columnsMenu = columnsDetails?.querySelector<HTMLDivElement>(".logs-columns__menu");
@@ -609,9 +605,7 @@ export function mountLogsView(container: HTMLElement): () => void {
     !summaryEl ||
     !timeToggleButton ||
     !exportButton ||
-    !bannersContainer ||
-    !backlogBanner ||
-    !ioBanner ||
+    !statusBannerEl ||
     !densityButton ||
     !columnsDetails ||
     !columnsMenu ||
@@ -690,13 +684,7 @@ export function mountLogsView(container: HTMLElement): () => void {
     updateCategoryLabel();
   }
 
-  function updateBanners(droppedCount: number, logWriteStatus: string): void {
-    const backlogVisible = droppedCount > 0;
-    const ioVisible = logWriteStatus === "io_error";
-    backlogBanner.hidden = !backlogVisible;
-    ioBanner.hidden = !ioVisible;
-    bannersContainer.hidden = !(backlogVisible || ioVisible);
-  }
+  const statusBanner = createLogsStatusBanner(statusBannerEl);
 
   function updateSummary(): void {
     if (totalCount === 0) {
@@ -958,7 +946,10 @@ export function mountLogsView(container: HTMLElement): () => void {
       const categories = Array.from(new Set(allEntries.map((entry) => entry.event)));
       syncCategoryOptions(categories);
       refreshRows();
-      updateBanners(state.droppedCount, state.logWriteStatus);
+      statusBanner.update({
+        droppedCount: state.droppedCount,
+        logWriteStatus: state.logWriteStatus,
+      });
       if (liveTailToggle.checked) {
         setLiveTailState("active");
       }
@@ -995,7 +986,7 @@ export function mountLogsView(container: HTMLElement): () => void {
       if (!liveTailEnabled || !hasPreviousEntries) {
         filteredEntries = [];
         tableBody.replaceChildren();
-        updateBanners(0, "ok");
+        statusBanner.reset();
       }
     }
 
@@ -1015,6 +1006,7 @@ export function mountLogsView(container: HTMLElement): () => void {
     exportButton.removeEventListener("click", onExportClick);
     unsubscribe();
     stopLiveTail();
+    statusBanner.reset();
     logsStore.clear();
   };
 

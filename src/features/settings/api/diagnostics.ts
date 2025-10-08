@@ -12,6 +12,9 @@ export interface DiagnosticsSummary {
   logTail: string[];
   logTruncated: boolean;
   logLinesReturned: number;
+  lines?: string[];
+  dropped_count?: number;
+  log_write_status?: "ok" | "io_error" | (string & {});
 }
 
 export interface AboutMetadata {

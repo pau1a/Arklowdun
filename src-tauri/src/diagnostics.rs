@@ -2,7 +2,10 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::{collections::BTreeMap, env, fs, path::PathBuf};
 
-use crate::{git_commit_hash, resolve_logs_dir, AppError, AppResult, LOG_FILE_NAME};
+use crate::{
+    git_commit_hash, log_dropped_count, log_io_error_detected, resolve_logs_dir, AppError,
+    AppResult, LOG_FILE_NAME,
+};
 use tauri::Manager;
 
 #[derive(Serialize)]
@@ -19,6 +22,29 @@ pub struct Summary {
     pub log_tail: Vec<String>,
     pub log_truncated: bool,
     pub log_lines_returned: usize,
+    #[serde(rename = "lines")]
+    pub lines_alias: Vec<String>,
+    #[serde(rename = "dropped_count")]
+    pub dropped_count: u64,
+    #[serde(rename = "log_write_status")]
+    pub log_write_status: LogWriteStatus,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LogWriteStatus {
+    Ok,
+    IoError,
+}
+
+impl LogWriteStatus {
+    fn from_io_error(flag: bool) -> Self {
+        if flag {
+            Self::IoError
+        } else {
+            Self::Ok
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -129,6 +155,9 @@ pub fn gather_summary<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult
     }
 
     let log_lines_returned = log_tail.len();
+    let lines_alias = log_tail.clone();
+    let dropped_count = log_dropped_count();
+    let log_write_status = LogWriteStatus::from_io_error(log_io_error_detected());
 
     Ok(Summary {
         platform,
@@ -142,6 +171,9 @@ pub fn gather_summary<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult
         log_tail,
         log_truncated,
         log_lines_returned,
+        lines_alias,
+        dropped_count,
+        log_write_status,
     })
 }
 

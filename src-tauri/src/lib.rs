@@ -22,7 +22,7 @@ use tokio::{
     time::{sleep, Duration as TokioDuration},
 };
 use tracing_appender::non_blocking::NonBlockingBuilder;
-use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
+use tracing_appender::non_blocking::{ErrorCounter, NonBlocking, WorkerGuard};
 use tracing_subscriber::{
     fmt::{self, time::UtcTime, MakeWriter},
     layer::SubscriberExt,
@@ -62,6 +62,8 @@ pub(crate) const LOG_FILE_NAME: &str = "arklowdun.log";
 
 static FILE_LOG_WRITER: OnceCell<NonBlocking> = OnceCell::new();
 static FILE_LOG_GUARD: OnceCell<WorkerGuard> = OnceCell::new();
+static LOG_DROPPED_COUNTER: OnceCell<ErrorCounter> = OnceCell::new();
+static LOG_IO_ERROR: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Default)]
 struct RotatingFileWriter;
@@ -343,6 +345,48 @@ impl Write for CountRotator {
     }
 }
 
+struct IoErrorTrackingWriter<T: Write + Send + 'static> {
+    inner: T,
+}
+
+impl<T: Write + Send + 'static> IoErrorTrackingWriter<T> {
+    fn new(inner: T) -> Self {
+        Self { inner }
+    }
+
+    fn record<R>(result: io::Result<R>) -> io::Result<R> {
+        if result.is_err() {
+            LOG_IO_ERROR.store(true, Ordering::Relaxed);
+        }
+        result
+    }
+}
+
+impl<T: Write + Send + 'static> Write for IoErrorTrackingWriter<T> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        Self::record(self.inner.write(buf))
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Self::record(self.inner.flush())
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        Self::record(self.inner.write_all(buf))
+    }
+}
+
+pub(crate) fn log_dropped_count() -> u64 {
+    LOG_DROPPED_COUNTER
+        .get()
+        .map(|counter| counter.dropped_lines() as u64)
+        .unwrap_or(0)
+}
+
+pub(crate) fn log_io_error_detected() -> bool {
+    LOG_IO_ERROR.load(Ordering::Relaxed)
+}
+
 pub fn init_logging() {
     let filter = std::env::var("TAURI_ARKLOWDUN_LOG")
         .unwrap_or_else(|_| "arklowdun=info,sqlx=warn".to_string());
@@ -434,10 +478,14 @@ pub fn init_file_logging<R: tauri::Runtime>(
 
     // Use a lossless, larger-buffer non-blocking writer so heavy bursts
     // (like stress tests) don't drop lines before rotation can trigger.
+    LOG_IO_ERROR.store(false, Ordering::Relaxed);
+
     let (writer, guard) = NonBlockingBuilder::default()
         .lossy(false)
         .buffered_lines_limit(50_000)
-        .finish(rotator);
+        .finish(IoErrorTrackingWriter::new(rotator));
+    let dropped_counter = writer.error_counter();
+    let _ = LOG_DROPPED_COUNTER.get_or_init(|| dropped_counter.clone());
     match FILE_LOG_WRITER.set(writer) {
         Ok(()) => {
             let _ = FILE_LOG_GUARD.set(guard);
@@ -498,10 +546,15 @@ pub fn init_file_logging_standalone(bundle_id: &str) -> Result<PathBuf, FileLogg
         }
     })?;
 
+    LOG_IO_ERROR.store(false, Ordering::Relaxed);
+
     let (writer, guard) = NonBlockingBuilder::default()
         .lossy(false)
         .buffered_lines_limit(50_000)
-        .finish(rotator);
+        .finish(IoErrorTrackingWriter::new(rotator));
+
+    let dropped_counter = writer.error_counter();
+    let _ = LOG_DROPPED_COUNTER.get_or_init(|| dropped_counter.clone());
 
     FILE_LOG_WRITER.set(writer).ok();
     FILE_LOG_GUARD.set(guard).ok();

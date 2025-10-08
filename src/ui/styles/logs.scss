@@ -349,6 +349,22 @@
   padding: var(--space-4);
 }
 
+.logs__status {
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-base, 8px);
+  border: 1px solid
+    var(
+      --color-warn-border,
+      color-mix(in srgb, var(--color-warning, #d48806) 35%, transparent)
+    );
+  background: var(
+    --color-warn-bg,
+    color-mix(in srgb, var(--color-warning, #d48806) 18%, transparent)
+  );
+  color: var(--color-warn-text, var(--color-warning, #d48806));
+  font-size: 0.875rem;
+}
+
 .logs-banners {
   display: flex;
   flex-direction: column;
