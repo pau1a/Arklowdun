@@ -49,7 +49,6 @@ use crate::{
     files_indexer::{IndexProgress, IndexerState, RebuildMode},
     household_active::ActiveSetError,
     ipc::guard,
-    state::AppState,
     vault_migration::ATTACHMENT_TABLES,
 };
 
