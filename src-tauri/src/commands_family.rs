@@ -51,24 +51,31 @@ fn log_command_error(
     household_id: Option<&str>,
     member_id: Option<&str>,
 ) {
-    let level = if is_validation_error(err.code()) {
-        tracing::Level::WARN
+    if is_validation_error(err.code()) {
+        tracing::warn!(
+            target: "arklowdun",
+            area = "family",
+            cmd,
+            household_id,
+            member_id,
+            code = err.code(),
+            message = err.message(),
+            elapsed_ms = start.elapsed().as_millis() as u64,
+            "ipc_failure"
+        );
     } else {
-        tracing::Level::ERROR
-    };
-
-    tracing::event!(
-        target: "arklowdun",
-        level,
-        area = "family",
-        cmd,
-        household_id,
-        member_id,
-        code = err.code(),
-        message = err.message(),
-        elapsed_ms = start.elapsed().as_millis() as u64,
-        "ipc_failure"
-    );
+        tracing::error!(
+            target: "arklowdun",
+            area = "family",
+            cmd,
+            household_id,
+            member_id,
+            code = err.code(),
+            message = err.message(),
+            elapsed_ms = start.elapsed().as_millis() as u64,
+            "ipc_failure"
+        );
+    }
 }
 
 fn is_validation_error(code: &str) -> bool {

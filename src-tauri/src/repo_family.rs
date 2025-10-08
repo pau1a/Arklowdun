@@ -1,6 +1,6 @@
 use once_cell::sync::Lazy;
 use regex::Regex;
-use sqlx::{sqlite::SqliteRow, Error as SqlxError, Row, SqlitePool};
+use sqlx::{sqlite::SqliteRow, Error as SqlxError, Executor, Row, SqlitePool};
 use uuid::Uuid;
 
 use crate::{
@@ -293,7 +293,7 @@ pub async fn attachments_add(
     .bind(&canonical_relative)
     .bind(&mime_hint)
     .bind(added_at)
-    .execute(&mut tx)
+    .execute(&mut *tx)
     .await
     .map_err(|err| map_attachment_insert_error(err, &canonical_relative))?;
 
@@ -302,7 +302,7 @@ pub async fn attachments_add(
          FROM member_attachments WHERE id = ?",
     )
     .bind(&id_str)
-    .fetch_one(&mut tx)
+    .fetch_one(&mut *tx)
     .await
     .map_err(|err| wrap_unexpected(err.into(), "member_attachments_add_fetch"))?;
 
@@ -329,7 +329,7 @@ pub async fn attachments_remove(
 
     sqlx::query("DELETE FROM member_attachments WHERE id = ?")
         .bind(&payload.id)
-        .execute(&mut tx)
+        .execute(&mut *tx)
         .await
         .map_err(|err| wrap_unexpected(err.into(), "member_attachments_remove"))?;
 
@@ -403,7 +403,7 @@ pub async fn renewals_upsert(pool: &SqlitePool, mut input: RenewalInput) -> AppR
                 "SELECT household_id FROM member_renewals WHERE id = ?",
             )
             .bind(id.to_string())
-            .fetch_optional(&mut tx)
+            .fetch_optional(&mut *tx)
             .await
             .map_err(|err| wrap_unexpected(err.into(), "member_renewals_upsert_lookup"))?
             {
@@ -429,9 +429,9 @@ pub async fn renewals_upsert(pool: &SqlitePool, mut input: RenewalInput) -> AppR
     let id_str = id.to_string();
 
     let created_at =
-        sqlx::query_scalar::<_, Option<i64>>("SELECT created_at FROM member_renewals WHERE id = ?")
+        sqlx::query_scalar::<_, i64>("SELECT created_at FROM member_renewals WHERE id = ?")
             .bind(&id_str)
-            .fetch_optional(&mut tx)
+            .fetch_optional(&mut *tx)
             .await
             .map_err(|err| wrap_unexpected(err.into(), "member_renewals_upsert_created_at"))?
             .unwrap_or(now);
@@ -453,7 +453,7 @@ pub async fn renewals_upsert(pool: &SqlitePool, mut input: RenewalInput) -> AppR
     .bind(input.remind_offset_days)
     .bind(created_at)
     .bind(input.updated_at)
-    .execute(&mut tx)
+    .execute(&mut *tx)
     .await
     .map_err(|err| wrap_unexpected(err.into(), "member_renewals_upsert"))?;
 
@@ -462,7 +462,7 @@ pub async fn renewals_upsert(pool: &SqlitePool, mut input: RenewalInput) -> AppR
          FROM member_renewals WHERE id = ?",
     )
     .bind(&id_str)
-    .fetch_one(&mut tx)
+    .fetch_one(&mut *tx)
     .await
     .map_err(|err| wrap_unexpected(err.into(), "member_renewals_upsert_fetch"))?;
 
@@ -483,7 +483,7 @@ pub async fn renewals_delete(pool: &SqlitePool, payload: RenewalDeletePayload) -
 
     sqlx::query("DELETE FROM member_renewals WHERE id = ?")
         .bind(&payload.id)
-        .execute(&mut tx)
+        .execute(&mut *tx)
         .await
         .map_err(|err| wrap_unexpected(err.into(), "member_renewals_delete"))?;
 
