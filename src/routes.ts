@@ -1,21 +1,23 @@
-import { DashboardView } from "./DashboardView";
-import { CalendarView } from "./CalendarView";
-import { FilesView } from "./FilesView";
-import { ShoppingListView } from "./ShoppingListView";
-import { BillsView } from "./BillsView";
-import { InsuranceView } from "./InsuranceView";
-import { VehiclesView } from "./VehiclesView";
-import { PetsView } from "./PetsView";
-import { FamilyView } from "./FamilyView";
-import { PropertyView } from "./PropertyView";
-import { SettingsView } from "./SettingsView";
-import { InventoryView } from "./InventoryView";
-import { BudgetView } from "./BudgetView";
-import { NotesView } from "./NotesView";
-import { ManageView } from "./ManageView";
-import { mountLogsView } from "./ui/views/logsView";
+import {
+  mountBillsView,
+  mountBudgetView,
+  mountCalendarView,
+  mountDashboardView,
+  mountFamilyView,
+  mountFilesView,
+  mountInsuranceView,
+  mountInventoryView,
+  mountLogsView,
+  mountManageView,
+  mountNotesView,
+  mountPetsView,
+  mountPropertyView,
+  mountSettingsView,
+  mountShoppingListView,
+  mountVehiclesView,
+} from "./ui/views";
+import { wrapLegacyView } from "./ui/views/wrapLegacyView";
 import type { AppPane } from "./store";
-import { registerViewCleanup } from "./utils/viewLifecycle";
 import { ImportModal } from "@ui/ImportModal";
 
 const envRecord =
@@ -42,11 +44,13 @@ export interface RouteDisplayConfig {
   icon?: RouteIconConfig;
 }
 
+export type RouteMountResult = void | (() => void);
+
 export interface RouteDefinition {
   id: AppPane;
   hash: `#/${string}`;
   legacyHashes?: string[];
-  mount: (container: HTMLElement) => void | Promise<void>;
+  mount: (container: HTMLElement) => RouteMountResult | Promise<RouteMountResult>;
   display?: RouteDisplayConfig;
 }
 
@@ -86,7 +90,7 @@ const ROUTE_DEFINITIONS: RouteDefinition[] = [
     id: "manage",
     hash: "#/manage",
     legacyHashes: ["#manage"],
-    mount: (container) => ManageView(container),
+    mount: mountManageView,
     display: {
       placement: "hub",
       label: "Manage",
@@ -99,7 +103,7 @@ const ROUTE_DEFINITIONS: RouteDefinition[] = [
     id: "dashboard",
     hash: "#/dashboard",
     legacyHashes: ["#dashboard"],
-    mount: (container) => DashboardView(container),
+    mount: mountDashboardView,
     display: {
       placement: "sidebar",
       label: "Dashboard",
@@ -110,7 +114,7 @@ const ROUTE_DEFINITIONS: RouteDefinition[] = [
     id: "calendar",
     hash: "#/calendar",
     legacyHashes: ["#calendar"],
-    mount: (container) => CalendarView(container),
+    mount: mountCalendarView,
     display: {
       placement: "sidebar",
       label: "Calendar",
@@ -121,7 +125,7 @@ const ROUTE_DEFINITIONS: RouteDefinition[] = [
     id: "files",
     hash: "#/files",
     legacyHashes: ["#files"],
-    mount: (container) => FilesView(container),
+    mount: mountFilesView,
     display: {
       placement: "sidebar",
       label: "Files",
@@ -132,7 +136,7 @@ const ROUTE_DEFINITIONS: RouteDefinition[] = [
     id: "notes",
     hash: "#/notes",
     legacyHashes: ["#notes"],
-    mount: (container) => NotesView(container),
+    mount: mountNotesView,
     display: {
       placement: "sidebar",
       label: "Notes",
@@ -143,10 +147,13 @@ const ROUTE_DEFINITIONS: RouteDefinition[] = [
     id: "settings",
     hash: "#/settings",
     legacyHashes: ["#settings"],
-    mount: (container) => {
-      SettingsView(container);
+    mount: async (container) => {
+      const cleanup = await mountSettingsView(container);
       const settingsContainer = container.querySelector<HTMLElement>(".settings");
       if (settingsContainer) addImportButtonToSettings(settingsContainer);
+      return () => {
+        cleanup();
+      };
     },
     display: {
       placement: "footer",
@@ -160,11 +167,7 @@ const ROUTE_DEFINITIONS: RouteDefinition[] = [
     id: "logs",
     hash: "#/logs",
     legacyHashes: ["#logs"],
-    mount: (container) => {
-      const cleanup = mountLogsView(container);
-      registerViewCleanup(container, cleanup);
-      return cleanup;
-    },
+    mount: mountLogsView,
     display: {
       placement: "hidden",
       label: "Logs",
@@ -176,84 +179,84 @@ const ROUTE_DEFINITIONS: RouteDefinition[] = [
     id: "primary",
     hash: "#/primary",
     legacyHashes: ["#primary"],
-    mount: (container) => renderPlaceholder(container, "Primary"),
+    mount: wrapLegacyView((container) => renderPlaceholder(container, "Primary")),
     display: { placement: "hidden", label: "Primary" },
   },
   {
     id: "secondary",
     hash: "#/secondary",
     legacyHashes: ["#secondary"],
-    mount: (container) => renderPlaceholder(container, "Secondary"),
+    mount: wrapLegacyView((container) => renderPlaceholder(container, "Secondary")),
     display: { placement: "hidden", label: "Secondary" },
   },
   {
     id: "tasks",
     hash: "#/tasks",
     legacyHashes: ["#tasks"],
-    mount: (container) => renderPlaceholder(container, "Tasks"),
+    mount: wrapLegacyView((container) => renderPlaceholder(container, "Tasks")),
     display: { placement: "hidden", label: "Tasks" },
   },
   {
     id: "shopping",
     hash: "#/shopping",
     legacyHashes: ["#shopping"],
-    mount: (container) => ShoppingListView(container),
+    mount: mountShoppingListView,
     display: { placement: "hidden", label: "Shopping" },
   },
   {
     id: "bills",
     hash: "#/bills",
     legacyHashes: ["#bills"],
-    mount: (container) => BillsView(container),
+    mount: mountBillsView,
     display: { placement: "hidden", label: "Bills" },
   },
   {
     id: "insurance",
     hash: "#/insurance",
     legacyHashes: ["#insurance"],
-    mount: (container) => InsuranceView(container),
+    mount: mountInsuranceView,
     display: { placement: "hidden", label: "Insurance" },
   },
   {
     id: "property",
     hash: "#/property",
     legacyHashes: ["#property"],
-    mount: (container) => PropertyView(container),
+    mount: mountPropertyView,
     display: { placement: "hidden", label: "Property" },
   },
   {
     id: "vehicles",
     hash: "#/vehicles",
     legacyHashes: ["#vehicles"],
-    mount: (container) => VehiclesView(container),
+    mount: mountVehiclesView,
     display: { placement: "hidden", label: "Vehicles" },
   },
   {
     id: "pets",
     hash: "#/pets",
     legacyHashes: ["#pets"],
-    mount: (container) => PetsView(container),
+    mount: mountPetsView,
     display: { placement: "hidden", label: "Pets" },
   },
   {
     id: "family",
     hash: "#/family",
     legacyHashes: ["#family"],
-    mount: (container) => FamilyView(container),
+    mount: mountFamilyView,
     display: { placement: "hidden", label: "Family" },
   },
   {
     id: "inventory",
     hash: "#/inventory",
     legacyHashes: ["#inventory"],
-    mount: (container) => InventoryView(container),
+    mount: mountInventoryView,
     display: { placement: "hidden", label: "Inventory" },
   },
   {
     id: "budget",
     hash: "#/budget",
     legacyHashes: ["#budget"],
-    mount: (container) => BudgetView(container),
+    mount: mountBudgetView,
     display: { placement: "hidden", label: "Budget" },
   },
 ];

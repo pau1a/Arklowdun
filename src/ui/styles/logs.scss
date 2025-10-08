@@ -350,19 +350,15 @@
 }
 
 .logs__status {
-  padding: 0.5rem 0.75rem;
+  padding: 0.4rem 0.6rem;
   border-radius: var(--radius-base, 8px);
-  border: 1px solid
-    var(
-      --color-warn-border,
-      color-mix(in srgb, var(--color-warning, #d48806) 35%, transparent)
-    );
-  background: var(
-    --color-warn-bg,
-    color-mix(in srgb, var(--color-warning, #d48806) 18%, transparent)
-  );
+  border: 1px solid var(--color-warn-border, rgba(212, 136, 6, 0.85));
+  background: var(--color-warn-bg, rgba(212, 136, 6, 0.14));
   color: var(--color-warn-text, var(--color-warning, #d48806));
   font-size: 0.875rem;
+  transition: opacity 0.2s ease-in-out;
+  max-width: 640px;
+  margin-inline: auto;
 }
 
 .logs-banners {
