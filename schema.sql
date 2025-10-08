@@ -47,7 +47,8 @@ CREATE TABLE notes (
   x REAL NOT NULL DEFAULT 0,
   y REAL NOT NULL DEFAULT 0,
   deadline INTEGER,
-  deadline_tz TEXT
+  deadline_tz TEXT,
+  member_id TEXT
 );
 CREATE TABLE files_index (
   id INTEGER PRIMARY KEY,
@@ -121,7 +122,67 @@ CREATE TABLE family_members (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER,
-  position INTEGER NOT NULL DEFAULT 0
+  position INTEGER NOT NULL DEFAULT 0,
+  nickname TEXT,
+  full_name TEXT,
+  relationship TEXT,
+  photo_path TEXT,
+  phone_mobile TEXT,
+  phone_home TEXT,
+  phone_work TEXT,
+  email TEXT,
+  address TEXT,
+  personal_website TEXT,
+  social_links_json TEXT,
+  passport_number TEXT,
+  passport_expiry INTEGER,
+  driving_licence_number TEXT,
+  driving_licence_expiry INTEGER,
+  nhs_number TEXT,
+  national_insurance_number TEXT,
+  tax_id TEXT,
+  photo_id_expiry INTEGER,
+  blood_group TEXT,
+  allergies TEXT,
+  medical_notes TEXT,
+  gp_contact TEXT,
+  emergency_contact_name TEXT,
+  emergency_contact_phone TEXT,
+  bank_accounts_json TEXT,
+  pension_details_json TEXT,
+  insurance_refs TEXT,
+  tags_json TEXT,
+  groups_json TEXT,
+  last_verified INTEGER,
+  verified_by TEXT,
+  keyholder INTEGER DEFAULT 0,
+  status TEXT DEFAULT 'active'
+);
+CREATE TABLE member_attachments (
+  id TEXT PRIMARY KEY,
+  household_id TEXT NOT NULL,
+  member_id TEXT NOT NULL,
+  title TEXT,
+  root_key TEXT NOT NULL,
+  relative_path TEXT NOT NULL,
+  mime_hint TEXT,
+  added_at INTEGER NOT NULL,
+  FOREIGN KEY(household_id) REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(member_id) REFERENCES family_members(id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE TABLE member_renewals (
+  id TEXT PRIMARY KEY,
+  household_id TEXT NOT NULL,
+  member_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  label TEXT,
+  expires_at INTEGER NOT NULL,
+  remind_on_expiry INTEGER NOT NULL DEFAULT 0,
+  remind_offset_days INTEGER NOT NULL DEFAULT 30,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(household_id) REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(member_id) REFERENCES family_members(id) ON DELETE CASCADE ON UPDATE CASCADE
 );
 CREATE TABLE import_id_map (
   entity TEXT NOT NULL,
@@ -272,6 +333,7 @@ CREATE INDEX expenses_category_date_idx ON expenses(category_id, date);
 CREATE INDEX expenses_household_updated_idx ON expenses(household_id, updated_at);
 CREATE UNIQUE INDEX family_members_household_position_idx ON family_members(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX family_members_household_updated_idx ON family_members(household_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_family_members_house_bday ON family_members(household_id, birthday);
 CREATE INDEX idx_bills_household_due ON bills(household_id, due_date);
 CREATE INDEX idx_events_household_active ON events(household_id, updated_at) WHERE deleted_at IS NULL;
 CREATE INDEX idx_events_household_rrule ON events(household_id, rrule);
@@ -283,6 +345,7 @@ CREATE UNIQUE INDEX notes_household_position_idx ON notes(household_id, position
 CREATE INDEX notes_deadline_idx ON notes(household_id, deadline);
 CREATE INDEX notes_household_category_deleted_idx ON notes(household_id, category_id, deleted_at);
 CREATE INDEX notes_created_cursor_idx ON notes(household_id, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_notes_member ON notes(member_id);
 CREATE INDEX pet_medical_household_updated_idx ON pet_medical(household_id, updated_at);
 CREATE INDEX pet_medical_pet_date_idx ON pet_medical(pet_id, date);
 CREATE UNIQUE INDEX pets_household_position_idx ON pets(household_id, position) WHERE deleted_at IS NULL;
@@ -293,6 +356,10 @@ CREATE UNIQUE INDEX property_documents_household_position_idx ON property_docume
 CREATE INDEX property_documents_household_updated_idx ON property_documents(household_id, updated_at);
 CREATE UNIQUE INDEX shopping_household_position_idx ON shopping_items(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX shopping_scope_idx ON shopping_items(household_id, deleted_at, position);
+CREATE UNIQUE INDEX idx_member_attachments_path ON member_attachments(household_id, root_key, relative_path);
+CREATE INDEX idx_member_attachments_member ON member_attachments(member_id, added_at);
+CREATE INDEX idx_member_renewals_house_kind ON member_renewals(household_id, kind, expires_at);
+CREATE INDEX idx_member_renewals_member ON member_renewals(member_id, expires_at);
 CREATE INDEX vehicle_maintenance_household_updated_idx ON vehicle_maintenance(household_id, updated_at);
 CREATE INDEX vehicle_maintenance_vehicle_date_idx ON vehicle_maintenance(vehicle_id, date);
 CREATE UNIQUE INDEX vehicles_household_position_idx ON vehicles(household_id, position) WHERE deleted_at IS NULL;
