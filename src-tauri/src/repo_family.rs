@@ -1,6 +1,6 @@
 use once_cell::sync::Lazy;
 use regex::Regex;
-use sqlx::{sqlite::SqliteRow, Error as SqlxError, Executor, Row, SqlitePool};
+use sqlx::{sqlite::SqliteRow, Error as SqlxError, Row, SqlitePool};
 use uuid::Uuid;
 
 use crate::{

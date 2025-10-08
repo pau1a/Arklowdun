@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use anyhow::Result;
 use sqlx::SqlitePool;
+use tauri::{App, Manager};
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -75,7 +76,7 @@ async fn build_app_state(dir: &TempDir) -> Result<(AppState, SqlitePool, PathBuf
     Ok((state, pool, db_path))
 }
 
-fn build_app(state: AppState) -> tauri::App<tauri::Wry> {
+fn build_app(state: AppState) -> App<tauri::test::MockRuntime> {
     tauri::test::mock_builder()
         .manage(state)
         .invoke_handler(tauri::generate_handler![
