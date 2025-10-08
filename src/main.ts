@@ -431,12 +431,16 @@ function updatePageBanner(route: RouteDefinition): void {
   if (url) {
     bannerEl.hidden = false;
     bannerEl.style.backgroundImage = `url("${url}")`;
+    bannerEl.style.setProperty("--banner-pos-x", "50%");
+    bannerEl.style.setProperty("--banner-pos-y", "50%");
     bannerEl.setAttribute("aria-hidden", "false");
     bannerEl.setAttribute("aria-label", `${label} banner`);
     body.dataset.bannerVisibility = "visible";
   } else {
     bannerEl.hidden = true;
     bannerEl.style.removeProperty("background-image");
+    bannerEl.style.removeProperty("--banner-pos-x");
+    bannerEl.style.removeProperty("--banner-pos-y");
     bannerEl.setAttribute("aria-hidden", "true");
     bannerEl.removeAttribute("aria-label");
     delete body.dataset.bannerVisibility;

@@ -115,8 +115,10 @@ main.container {
   grid-column: 3;
   grid-row: 2;
   align-self: stretch;
+  --banner-pos-x: 50%;
+  --banner-pos-y: 50%;
   background-repeat: no-repeat;
-  background-position: center right;
+  background-position: var(--banner-pos-x) var(--banner-pos-y);
   background-size: cover;
   border-left: 1px solid rgba(0, 0, 0, 0.06);
   opacity: 0.98;
