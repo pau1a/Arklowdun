@@ -320,6 +320,9 @@ export const settingsInitStub = `(() => {
             logTail: [],
             logTruncated: false,
             logLinesReturned: 0,
+            lines: [],
+            dropped_count: 0,
+            log_write_status: 'ok',
           });
         case 'file_move': {
           const maintenance = getFixture().maintenance ?? {};
