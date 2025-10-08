@@ -1,3 +1,4 @@
+import { exportLogsJsonl } from "@features/logs/exportLogsJsonl";
 import { logsStore } from "@features/logs/logs.store";
 import type { LogEntry, LogLevel } from "@features/logs/logs.types";
 import { formatTimestamp, getZoneLabel } from "@features/logs/time";
@@ -482,7 +483,16 @@ export function mountLogsView(container: HTMLElement): () => void {
             </div>
           </details>
           <span class="logs-summary" aria-live="polite" aria-atomic="true"></span>
-          <button type="button" class="btn btn--secondary btn--sm" disabled title="Export will arrive soon">Export JSON</button>
+          <button
+            type="button"
+            class="btn btn--secondary btn--sm logs-export"
+            data-testid="logs-export"
+            title="Save this 200-line tail as a JSON Lines file"
+            disabled
+          >
+            <i class="fa-solid fa-download" aria-hidden="true"></i>
+            <span>Export JSONL</span>
+          </button>
         </div>
       </header>
       <div class="logs-toolbar" role="region" aria-label="Log filters">
@@ -569,6 +579,9 @@ export function mountLogsView(container: HTMLElement): () => void {
   const timeToggleButton = container.querySelector<HTMLButtonElement>(
     "[data-testid='logs-time-toggle']",
   );
+  const exportButton = container.querySelector<HTMLButtonElement>(
+    "[data-testid='logs-export']",
+  );
   const bannersContainer = container.querySelector<HTMLElement>(".logs-banners");
   const backlogBanner = container.querySelector<HTMLElement>("[data-banner='backlog']");
   const ioBanner = container.querySelector<HTMLElement>("[data-banner='io']");
@@ -595,6 +608,7 @@ export function mountLogsView(container: HTMLElement): () => void {
     !tableBody ||
     !summaryEl ||
     !timeToggleButton ||
+    !exportButton ||
     !bannersContainer ||
     !backlogBanner ||
     !ioBanner ||
@@ -623,6 +637,7 @@ export function mountLogsView(container: HTMLElement): () => void {
   let compact = false;
   let showTargetColumn = false;
   let showHouseholdColumn = false;
+  let exporting = false;
 
   function getColumnCount(): number {
     return 4 + (showTargetColumn ? 1 : 0) + (showHouseholdColumn ? 1 : 0);
@@ -695,6 +710,10 @@ export function mountLogsView(container: HTMLElement): () => void {
     );
   }
 
+  function updateExportButtonState(): void {
+    exportButton.disabled = exporting || totalCount === 0;
+  }
+
   function updateTableVisibility(): void {
     const hasEntries = totalCount > 0;
     tableWrapper.hidden = !hasEntries;
@@ -706,6 +725,7 @@ export function mountLogsView(container: HTMLElement): () => void {
     errorEl.hidden = currentStatus !== "error";
     updateTableVisibility();
     updateSummary();
+    updateExportButtonState();
   }
 
   function refreshRows(): void {
@@ -732,6 +752,7 @@ export function mountLogsView(container: HTMLElement): () => void {
   }
 
   updateDensity();
+  updateExportButtonState();
 
   function syncColumnVisibility(): void {
     viewRoot.classList.toggle("logs--show-target", showTargetColumn);
@@ -809,6 +830,73 @@ export function mountLogsView(container: HTMLElement): () => void {
   refreshButton.addEventListener("click", () => {
     void logsStore.fetchTail();
   });
+
+  const onExportClick = async () => {
+    if (exporting || totalCount === 0) {
+      return;
+    }
+    exporting = true;
+    updateExportButtonState();
+    try {
+      const result = await exportLogsJsonl({
+        entries: filteredEntries.slice(),
+        filters: {
+          severity: selectedSeverity,
+          categories: Array.from(selectedCategories),
+        },
+      });
+      if (!result) {
+        return;
+      }
+
+      const clipboard = navigator?.clipboard;
+      let message = `Saved ${result.fileName}`;
+      const actions: { label: string; onSelect: () => void | Promise<void> }[] = [];
+
+      if (clipboard?.writeText) {
+        let copied = false;
+        try {
+          await clipboard.writeText(result.checksum);
+          copied = true;
+        } catch (error) {
+          copied = false;
+          console.warn("logs export clipboard failed", error);
+        }
+        message += copied ? " | SHA-256 copied." : " | Copy unavailable.";
+        actions.push({
+          label: "Copy",
+          onSelect: async () => {
+            if (!clipboard?.writeText) {
+              return;
+            }
+            try {
+              await clipboard.writeText(result.checksum);
+              toast.show({ kind: "success", message: "SHA-256 copied." });
+            } catch (error) {
+              console.error("logs export copy failed", error);
+              toast.show({ kind: "error", message: "Unable to copy checksum." });
+            }
+          },
+        });
+      } else {
+        message += " | Copy unavailable.";
+      }
+
+      toast.show({
+        kind: "success",
+        message,
+        actions: actions.length > 0 ? actions : undefined,
+      });
+    } catch (error) {
+      console.error("logs export failed", error);
+      toast.show({ kind: "error", message: "Export failed – see console for details." });
+    } finally {
+      exporting = false;
+      updateExportButtonState();
+    }
+  };
+
+  exportButton.addEventListener("click", onExportClick);
 
   function onRowToggle(event: Event): void {
     const target = event.target as HTMLElement | null;
@@ -924,6 +1012,7 @@ export function mountLogsView(container: HTMLElement): () => void {
   const cleanup = () => {
     tableBody.removeEventListener("click", onRowToggle);
     tableBody.removeEventListener("keydown", onRowKeydown);
+    exportButton.removeEventListener("click", onExportClick);
     unsubscribe();
     stopLiveTail();
     logsStore.clear();

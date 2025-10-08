@@ -188,3 +188,30 @@ test('LogsView surfaces IPC errors', async () => {
   __resetTailFetcherForTests();
   logsStore.clear();
 });
+
+test('LogsView enables export button when data is ready', async () => {
+  logsStore.clear();
+  __setTailFetcherForTests(async () => ({
+    lines: [
+      { ts: '2025-10-07T18:30:00Z', level: 'info', event: 'alpha', message: 'ready' },
+    ],
+  }));
+
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+
+  const cleanup = mountLogsView(container);
+
+  const exportButton = container.querySelector<HTMLButtonElement>("[data-testid='logs-export']");
+  assert.ok(exportButton);
+  assert.equal(exportButton?.disabled, true);
+
+  await flush();
+
+  assert.equal(exportButton?.disabled, false);
+
+  cleanup();
+  container.remove();
+  __resetTailFetcherForTests();
+  logsStore.clear();
+});
