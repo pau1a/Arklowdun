@@ -1,12 +1,20 @@
 # Schema changes (PR1)
 
-This document specifies the exact database evolution for PR1. The commands apply to SQLite as used by the Tauri runtime and must be mirrored in `schema.sql` and any snapshot schemas. All new columns are additive and nullable unless noted otherwise. Existing tables keep their current column ordering; the listing below reflects the order enforced in the migration scripts.
+This document specifies the exact database evolution for PR1. The commands apply to SQLite as used by the Tauri runtime and must be mirrored in `schema.sql`, `src-tauri/schema.sql`, and any snapshot schemas. All new columns are additive and nullable unless noted otherwise. Existing tables keep their current column ordering; the listing below reflects the order enforced in the migration scripts.
 
 ## Migration files
 - `migrations/0027_family_expansion.up.sql`
 - `migrations/0027_family_expansion.down.sql`
 
 The up migration is authoritative. The down migration reverses each step to restore the PR0 baseline without data reordering.
+
+### Guardrails
+- Wrap all statements in a single `BEGIN IMMEDIATE; … COMMIT;` transaction per file.
+- Issue the standard PRAGMAs at the top of each migration:
+  - `PRAGMA journal_mode=WAL;`
+  - `PRAGMA foreign_keys=ON;`
+  - `PRAGMA busy_timeout=5000;`
+- Use `IF NOT EXISTS` / `IF EXISTS` on index and table operations to maintain idempotence.
 
 ## family_members alterations
 
@@ -78,6 +86,7 @@ CREATE TABLE IF NOT EXISTS member_attachments (
   relative_path TEXT NOT NULL,
   mime_hint TEXT,
   added_at INTEGER NOT NULL,
+  FOREIGN KEY(household_id) REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
   FOREIGN KEY(member_id) REFERENCES family_members(id) ON DELETE CASCADE ON UPDATE CASCADE
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_member_attachments_path
@@ -104,6 +113,7 @@ CREATE TABLE IF NOT EXISTS member_renewals (
   remind_offset_days INTEGER NOT NULL DEFAULT 30,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
+  FOREIGN KEY(household_id) REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
   FOREIGN KEY(member_id) REFERENCES family_members(id) ON DELETE CASCADE ON UPDATE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_member_renewals_house_kind
@@ -131,7 +141,7 @@ CREATE INDEX IF NOT EXISTS idx_notes_member ON notes(member_id);
 The down script removes indexes first, then drops tables, and finally removes columns in reverse order. This ordering prevents dependency errors and mirrors SQLite's limited `ALTER TABLE DROP COLUMN` behaviour implemented via table rebuilds in our migration harness.
 
 ## Snapshot updates
-- Update `src-tauri/src/schema.sql` to mirror every change so new installs match the migrated database.
+- Update the schema mirrors (`schema.sql` and `src-tauri/schema.sql`) so new installs match the migrated database.
 - `schema/family_members.json` or equivalent snapshots (if present) must add the new keys with nullable types; values default to `null` when omitted.
 
 No data manipulation is performed in PR1; existing rows remain untouched until subsequent PRs populate the new fields.
