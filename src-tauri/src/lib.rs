@@ -128,6 +128,7 @@ pub mod attachment_category;
 mod attachments;
 mod categories;
 pub mod commands;
+pub mod commands_family;
 pub mod db;
 pub mod diagnostics;
 pub mod error;
@@ -153,10 +154,12 @@ pub mod ipc;
 pub mod logging;
 pub mod migrate;
 pub mod migration_guard;
+pub mod model_family;
 pub mod note_links;
 mod notes;
 pub mod ops;
 mod repo;
+pub mod repo_family;
 pub mod security;
 mod state;
 mod time;
@@ -4345,6 +4348,12 @@ macro_rules! app_commands {
             family_members_update,
             family_members_delete,
             family_members_restore,
+            commands_family::member_attachments_list,
+            commands_family::member_attachments_add,
+            commands_family::member_attachments_remove,
+            commands_family::member_renewals_list,
+            commands_family::member_renewals_upsert,
+            commands_family::member_renewals_delete,
             categories_list,
             categories_get,
             categories_create,

@@ -35,3 +35,57 @@ The table was introduced in the baseline migration (`migrations/0001_baseline.sq
 
 ### SQLite runtime configuration
 The SQLite pool enforces `journal_mode=WAL`, `synchronous=FULL`, `foreign_keys=ON`, sets a 5 s busy timeout, and enables WAL autocheckpointing when connections are established; `log_effective_pragmas` records the effective values for diagnostics.【F:src-tauri/src/db.rs†L139-L219】
+
+## member_attachments
+
+```sql
+CREATE TABLE member_attachments (
+  id TEXT PRIMARY KEY,
+  household_id TEXT NOT NULL,
+  member_id TEXT NOT NULL,
+  title TEXT,
+  root_key TEXT NOT NULL,
+  relative_path TEXT NOT NULL,
+  mime_hint TEXT,
+  added_at INTEGER NOT NULL,
+  FOREIGN KEY(household_id) REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(member_id) REFERENCES family_members(id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE UNIQUE INDEX idx_member_attachments_path
+  ON member_attachments(household_id, root_key, relative_path);
+CREATE INDEX idx_member_attachments_member
+  ON member_attachments(member_id, added_at DESC);
+```
+
+- The unique index enforces one attachment per `(household_id, root_key, relative_path)` tuple.
+- Vault integrity relies on `Vault::resolve` normalising and validating `root_key` and `relative_path` before inserts.
+- Rows cascade-delete with both the owning household and member to avoid orphaned paths.
+- `added_at` stores epoch milliseconds for ordering.
+
+## member_renewals
+
+```sql
+CREATE TABLE member_renewals (
+  id TEXT PRIMARY KEY,
+  household_id TEXT NOT NULL,
+  member_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  label TEXT,
+  expires_at INTEGER NOT NULL,
+  remind_on_expiry INTEGER NOT NULL DEFAULT 0,
+  remind_offset_days INTEGER NOT NULL DEFAULT 30,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(household_id) REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(member_id) REFERENCES family_members(id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE INDEX idx_member_renewals_house_kind
+  ON member_renewals(household_id, kind, expires_at);
+CREATE INDEX idx_member_renewals_member
+  ON member_renewals(member_id, expires_at);
+```
+
+- Renewals always belong to a member within the same household; the repository layer enforces this before writes.
+- Boolean values (`remind_on_expiry`) are stored as integers and normalised to `true`/`false` in IPC adapters.
+- Offsets default to 30 days and must remain between 0 and 365 in PR2 validation.
+- Ordering indexes support the IPC guarantees documented in `docs/family/ipc.md`.

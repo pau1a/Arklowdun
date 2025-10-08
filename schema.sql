@@ -357,7 +357,7 @@ CREATE INDEX property_documents_household_updated_idx ON property_documents(hous
 CREATE UNIQUE INDEX shopping_household_position_idx ON shopping_items(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX shopping_scope_idx ON shopping_items(household_id, deleted_at, position);
 CREATE UNIQUE INDEX idx_member_attachments_path ON member_attachments(household_id, root_key, relative_path);
-CREATE INDEX idx_member_attachments_member ON member_attachments(member_id, added_at);
+CREATE INDEX idx_member_attachments_member ON member_attachments(member_id, added_at DESC);
 CREATE INDEX idx_member_renewals_house_kind ON member_renewals(household_id, kind, expires_at);
 CREATE INDEX idx_member_renewals_member ON member_renewals(member_id, expires_at);
 CREATE INDEX vehicle_maintenance_household_updated_idx ON vehicle_maintenance(household_id, updated_at);

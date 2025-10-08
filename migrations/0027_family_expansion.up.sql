@@ -64,7 +64,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_member_attachments_path
   ON member_attachments(household_id, root_key, relative_path);
 
 CREATE INDEX IF NOT EXISTS idx_member_attachments_member
-  ON member_attachments(member_id, added_at);
+  ON member_attachments(member_id, added_at DESC);
 
 CREATE TABLE IF NOT EXISTS member_renewals (
   id                 TEXT PRIMARY KEY,

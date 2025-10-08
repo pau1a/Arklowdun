@@ -1,5 +1,15 @@
 // src/repos.ts
 import { call } from "@lib/ipc/call";
+import {
+  AttachmentInputSchema,
+  AttachmentRefSchema,
+  RenewalInputSchema,
+  RenewalSchema,
+  type AttachmentInput,
+  type AttachmentRef,
+  type Renewal,
+  type RenewalInput,
+} from "@lib/ipc/contracts";
 import { clearSearchCache } from "./services/searchRepo";
 
 import type {
@@ -101,10 +111,50 @@ export const policiesRepo         = domainRepo<Policy>("policies", "position, cr
 export const propertyDocsRepo     = domainRepo<PropertyDocument>("property_documents", "position, created_at, id");
 export const petsRepo             = domainRepo<Pet>("pets", "position, created_at, id");
 export const petMedicalRepo       = domainRepo<PetMedicalRecord>("pet_medical", "date DESC, created_at DESC, id");
-export const familyRepo           = domainRepo<FamilyMember>("family_members", "position, created_at, id");
+const familyMembersRepo           = domainRepo<FamilyMember>("family_members", "position, created_at, id");
 export const inventoryRepo        = domainRepo<InventoryItem>("inventory_items", "position, created_at, id");
 export const notesRepo            = domainRepo<Note>("notes", "position, created_at, id");
 export const shoppingRepo         = domainRepo<ShoppingItem>("shopping_items", "position, created_at, id");
+
+export const familyRepo = {
+  ...familyMembersRepo,
+  attachments: {
+    async list(memberId: string): Promise<AttachmentRef[]> {
+      const response = await call("member_attachments_list", { memberId });
+      return AttachmentRefSchema.array().parse(response);
+    },
+    async add(input: AttachmentInput): Promise<AttachmentRef> {
+      const payload = AttachmentInputSchema.parse(input);
+      const response = await call("member_attachments_add", payload);
+      return AttachmentRefSchema.parse(response);
+    },
+    async remove(id: string): Promise<void> {
+      await call("member_attachments_remove", { id });
+    },
+  },
+  renewals: {
+    async list(memberId?: string, householdId?: string): Promise<Renewal[]> {
+      const response = await call("member_renewals_list", { memberId, householdId });
+      return RenewalSchema.array().parse(response);
+    },
+    async upsert(input: RenewalInput): Promise<Renewal> {
+      const payload = RenewalInputSchema.parse(input);
+      const response = await call("member_renewals_upsert", payload);
+      return RenewalSchema.parse(response);
+    },
+    async delete(id: string): Promise<void> {
+      await call("member_renewals_delete", { id });
+    },
+  },
+  notes: {
+    listByMember(notes: Note[], memberId: string): Note[] {
+      return notes.filter((note: Note & { member_id?: string; memberId?: string }) => {
+        const linked = note.member_id ?? note.memberId;
+        return typeof linked === "string" && linked === memberId;
+      });
+    },
+  },
+};
 
 // ✅ Budget repos you need for BudgetView.ts
 export const categoriesRepo        = domainRepo<Category>("categories", "position, created_at, id");
