@@ -1,7 +1,12 @@
 // src/NotesView.ts
 import { getHouseholdIdForCalls } from "./db/household";
 import { showError } from "./ui/errors";
-import { NotesList, useNotes, type Note } from "@features/notes";
+import {
+  NotesList,
+  useNotes,
+  type Note,
+  type NotesViewMode,
+} from "@features/notes";
 import {
   actions,
   selectors,
@@ -41,6 +46,27 @@ const NOTE_PALETTE: Record<string, { base: string; text: string }> = {
 
 const PAGE_SIZE = 20;
 const DEFAULT_NOTE_COLOR = "#FFF4B8";
+
+const VIEW_MODE_STORAGE_KEY = "notes:view-mode";
+const SORT_STORAGE_KEY = "notes:sort";
+const COLOR_FILTER_STORAGE_KEY = "notes:color";
+
+type NotesSortKey = "updated_at" | "created_at";
+type NotesSortDirection = "asc" | "desc";
+
+interface NotesSortOption {
+  value: string;
+  label: string;
+  key: NotesSortKey;
+  direction: NotesSortDirection;
+}
+
+const SORT_OPTIONS: NotesSortOption[] = [
+  { value: "updated_desc", label: "Updated ↓", key: "updated_at", direction: "desc" },
+  { value: "updated_asc", label: "Updated ↑", key: "updated_at", direction: "asc" },
+  { value: "created_desc", label: "Created ↓", key: "created_at", direction: "desc" },
+  { value: "created_asc", label: "Created ↑", key: "created_at", direction: "asc" },
+];
 
 type NewNoteDraft = {
   text: string;
@@ -113,44 +139,114 @@ export async function NotesView(
 ) {
   runViewCleanups(container);
 
+  const readStoredViewMode = (): NotesViewMode => {
+    try {
+      const stored = window.localStorage?.getItem(VIEW_MODE_STORAGE_KEY);
+      if (stored === "grid" || stored === "list") {
+        return stored;
+      }
+    } catch {}
+    return "grid";
+  };
+
+  const readStoredSort = (): NotesSortOption => {
+    try {
+      const stored = window.localStorage?.getItem(SORT_STORAGE_KEY);
+      const match = SORT_OPTIONS.find((option) => option.value === stored);
+      if (match) return match;
+    } catch {}
+    return SORT_OPTIONS[0];
+  };
+
+  const readStoredColor = (): string | null => {
+    try {
+      const stored = window.localStorage?.getItem(COLOR_FILTER_STORAGE_KEY);
+      if (stored) return stored;
+    } catch {}
+    return null;
+  };
+
   const section = document.createElement("section");
+  section.className = "notes";
 
-  const form = document.createElement("form");
-  form.id = "note-form";
-  form.setAttribute("aria-label", "Create note");
+  const toolbar = document.createElement("header");
+  toolbar.className = "notes__toolbar";
 
-  const textLabel = document.createElement("label");
-  textLabel.className = "sr-only";
-  textLabel.htmlFor = "note-text";
-  textLabel.textContent = "Note text";
-  const textInput = createInput({
-    id: "note-text",
-    type: "text",
-    placeholder: "Note",
-    ariaLabel: "Note text",
-    required: true,
+  const searchLabel = document.createElement("label");
+  searchLabel.className = "sr-only";
+  searchLabel.htmlFor = "notes-search";
+  searchLabel.textContent = "Search notes";
+
+  const searchInput = createInput({
+    id: "notes-search",
+    type: "search",
+    placeholder: "Search notes…",
+    ariaLabel: "Search notes",
+    className: "notes__search",
   });
 
-  const colorLabel = document.createElement("label");
-  colorLabel.className = "sr-only";
-  colorLabel.htmlFor = "note-color";
-  colorLabel.textContent = "Note color";
-  const colorInput = createInput({
-    id: "note-color",
-    type: "color",
-    value: DEFAULT_NOTE_COLOR,
-    ariaLabel: "Note color",
+  const searchGroup = document.createElement("div");
+  searchGroup.className = "notes__toolbar-group notes__toolbar-group--search";
+  searchGroup.append(searchLabel, searchInput);
+
+  const filtersGroup = document.createElement("div");
+  filtersGroup.className = "notes__filters";
+
+  const tagFilter = createSelect({
+    id: "notes-filter-tag",
+    ariaLabel: "Filter by tag",
+    className: "notes__filter",
   });
 
-  const submitButton = createButton({
-    label: "Add",
+  const colorFilter = createSelect({
+    id: "notes-filter-color",
+    ariaLabel: "Filter by colour",
+    className: "notes__filter",
+  });
+
+  const sortSelect = createSelect({
+    id: "notes-sort",
+    ariaLabel: "Sort notes",
+    className: "notes__sort",
+  });
+
+  filtersGroup.append(tagFilter, colorFilter, sortSelect);
+
+  const viewToggle = document.createElement("div");
+  viewToggle.className = "notes__view";
+
+  const gridViewButton = createButton({
+    label: "Grid",
+    variant: "ghost",
+    className: "notes__view-button",
+    type: "button",
+  });
+
+  const listViewButton = createButton({
+    label: "List",
+    variant: "ghost",
+    className: "notes__view-button",
+    type: "button",
+  });
+
+  viewToggle.append(gridViewButton, listViewButton);
+
+  const newNoteButton = createButton({
+    label: "New note",
     variant: "primary",
-    type: "submit",
+    id: "note-new",
+    type: "button",
   });
 
-  form.append(textLabel, textInput, colorLabel, colorInput, submitButton);
+  toolbar.append(searchGroup, filtersGroup, viewToggle, newNoteButton);
 
-  const notesBoard = NotesList();
+  const pinnedContainer = document.createElement("section");
+  pinnedContainer.className = "notes__pinned";
+  pinnedContainer.setAttribute("aria-label", "Pinned notes");
+  pinnedContainer.hidden = true;
+
+  const viewMode: NotesViewMode = readStoredViewMode();
+  const notesBoard = NotesList(viewMode);
   const canvas = notesBoard.element;
 
   const pagination = document.createElement("div");
@@ -176,10 +272,140 @@ export async function NotesView(
   deadlinesList.className = "notes__deadline-list";
   deadlinesPanel.append(deadlinesHeading, deadlinesList);
 
-  section.append(form, canvas, pagination);
-  section.append(deadlinesPanel);
+  section.append(toolbar, pinnedContainer, canvas, pagination, deadlinesPanel);
   container.innerHTML = "";
   container.appendChild(section);
+
+  const persistViewMode = (mode: NotesViewMode) => {
+    try {
+      window.localStorage?.setItem(VIEW_MODE_STORAGE_KEY, mode);
+    } catch {}
+  };
+
+  const persistSort = (option: NotesSortOption) => {
+    try {
+      window.localStorage?.setItem(SORT_STORAGE_KEY, option.value);
+    } catch {}
+  };
+
+  const persistColorFilter = (value: string | null) => {
+    try {
+      if (value) {
+        window.localStorage?.setItem(COLOR_FILTER_STORAGE_KEY, value);
+      } else {
+        window.localStorage?.removeItem(COLOR_FILTER_STORAGE_KEY);
+      }
+    } catch {}
+  };
+
+  let searchTerm = "";
+  let colorFilterValue = readStoredColor();
+  let categoryFilterId: string | null = null;
+  let sortState = readStoredSort();
+  let viewModeState: NotesViewMode = viewMode;
+  let notesLocal: Note[] = [];
+
+  const updateViewButtons = () => {
+    gridViewButton.update({ ariaPressed: viewModeState === "grid" });
+    listViewButton.update({ ariaPressed: viewModeState === "list" });
+  };
+
+  const buildColorOptions = () => {
+    const options = [{ value: "", label: "All colours" }];
+    const seen = new Set<string>();
+    const addColor = (hex: string | undefined) => {
+      if (!hex) return;
+      const normalised = hex.toUpperCase();
+      if (seen.has(normalised)) return;
+      seen.add(normalised);
+      options.push({ value: normalised, label: `Color ${normalised}` });
+    };
+    Object.keys(NOTE_PALETTE).forEach(addColor);
+    notesLocal.forEach((note) => addColor(note.color));
+    return options;
+  };
+
+  const updateColorFilterOptions = () => {
+    const options = buildColorOptions();
+    const target = colorFilterValue ? colorFilterValue.toUpperCase() : "";
+    colorFilter.update({ options, value: target });
+  };
+
+  const updateSortOptions = () => {
+    sortSelect.update({
+      options: SORT_OPTIONS.map((option) => ({
+        value: option.value,
+        label: option.label,
+      })),
+      value: sortState.value,
+    });
+  };
+
+  const updateTagFilterOptions = () => {
+    const categories = getCategories();
+    const options = [{ value: "", label: "All tags" }];
+    categories.forEach((category) => {
+      options.push({ value: category.id, label: category.name });
+    });
+    const currentIds = new Set(categories.map((category) => category.id));
+    if (categoryFilterId && !currentIds.has(categoryFilterId)) {
+      categoryFilterId = null;
+    }
+    tagFilter.update({ options, value: categoryFilterId ?? "" });
+  };
+
+  updateColorFilterOptions();
+  updateSortOptions();
+  updateTagFilterOptions();
+  updateViewButtons();
+
+  searchInput.addEventListener("input", () => {
+    searchTerm = searchInput.value.trim().toLowerCase();
+    render();
+  });
+
+  tagFilter.addEventListener("change", () => {
+    categoryFilterId = tagFilter.value ? tagFilter.value : null;
+    render();
+  });
+
+  colorFilter.addEventListener("change", () => {
+    const value = colorFilter.value ? colorFilter.value.toUpperCase() : "";
+    colorFilterValue = value ? value : null;
+    persistColorFilter(colorFilterValue);
+    render();
+  });
+
+  sortSelect.addEventListener("change", () => {
+    const next = SORT_OPTIONS.find((option) => option.value === sortSelect.value);
+    sortState = next ?? SORT_OPTIONS[0];
+    persistSort(sortState);
+    render();
+  });
+
+  const setViewMode = (mode: NotesViewMode) => {
+    if (viewModeState === mode) return;
+    viewModeState = mode;
+    persistViewMode(mode);
+    notesBoard.setViewMode(mode);
+    updateViewButtons();
+    render();
+  };
+
+  gridViewButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    setViewMode("grid");
+  });
+
+  listViewButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    setViewMode("list");
+  });
+
+  newNoteButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    openQuickCapture();
+  });
 
   const quickTextInput = createInput({
     id: "quick-capture-text",
@@ -249,10 +475,131 @@ export async function NotesView(
 
   quickDialog.append(quickTitle, quickForm);
 
+  let editingNote: Note | null = null;
+
+  const editTextarea = document.createElement("textarea");
+
+  const editModal = createModal({
+    open: false,
+    onOpenChange: (open) => {
+      if (!open) {
+        editModal.setOpen(false);
+        editingNote = null;
+      }
+    },
+    titleId: "edit-note-title",
+    initialFocus: () => editTextarea,
+  });
+  const editDialog = editModal.dialog;
+  editDialog.classList.add("notes__edit-dialog");
+  const editTitle = document.createElement("h2");
+  editTitle.id = "edit-note-title";
+  editTitle.textContent = "Edit note";
+
+  const editForm = document.createElement("form");
+  editForm.className = "notes__edit-form";
+
+  const editTextLabel = document.createElement("label");
+  editTextLabel.htmlFor = "edit-note-text";
+  editTextLabel.textContent = "Note";
+
+  editTextarea.id = "edit-note-text";
+  editTextarea.required = true;
+  editTextarea.rows = 6;
+  editTextarea.className = "notes__edit-textarea";
+
+  const editColorLabel = document.createElement("label");
+  editColorLabel.htmlFor = "edit-note-color";
+  editColorLabel.textContent = "Colour";
+
+  const editColorInput = createInput({
+    id: "edit-note-color",
+    type: "color",
+    ariaLabel: "Note colour",
+    value: DEFAULT_NOTE_COLOR,
+  });
+
+  const editActions = document.createElement("div");
+  editActions.className = "notes__edit-actions";
+
+  const editCancel = createButton({
+    type: "button",
+    variant: "ghost",
+    label: "Cancel",
+  });
+  editCancel.addEventListener("click", (event) => {
+    event.preventDefault();
+    editModal.setOpen(false);
+  });
+
+  const editSave = createButton({
+    type: "submit",
+    variant: "primary",
+    label: "Save changes",
+  });
+
+  editActions.append(editCancel, editSave);
+
+  editForm.append(
+    editTextLabel,
+    editTextarea,
+    editColorLabel,
+    editColorInput,
+    editActions,
+  );
+
+  editDialog.append(editTitle, editForm);
+
+  editForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!editingNote) {
+      editModal.setOpen(false);
+      return;
+    }
+    const note = editingNote;
+    const nextText = editTextarea.value.trim();
+    if (!nextText) {
+      editTextarea.focus();
+      return;
+    }
+    const nextColor = editColorInput.value || DEFAULT_NOTE_COLOR;
+    const previous = { text: note.text, color: note.color };
+    note.text = nextText;
+    note.color = nextColor;
+    commitSnapshot("notes:edit", false, true);
+    render();
+    try {
+      const saved = await updateNote(
+        householdId,
+        note.id,
+        { text: nextText, color: nextColor },
+        updateNoteFn,
+      );
+      Object.assign(note, saved);
+      commitSnapshot("notes:edit", true, true);
+      render();
+      editModal.setOpen(false);
+      toast.show({ kind: "success", message: "Note updated." });
+    } catch (err) {
+      note.text = previous.text;
+      note.color = previous.color;
+      commitSnapshot("notes:edit", true, true);
+      render();
+      showError(err);
+    }
+  });
+
   registerViewCleanup(container, () => {
     if (quickCaptureModal.isOpen()) quickCaptureModal.setOpen(false);
     if (quickCaptureModal.root.parentElement) {
       quickCaptureModal.root.remove();
+    }
+  });
+
+  registerViewCleanup(container, () => {
+    if (editModal.isOpen()) editModal.setOpen(false);
+    if (editModal.root.parentElement) {
+      editModal.root.remove();
     }
   });
 
@@ -277,7 +624,7 @@ export async function NotesView(
     incoming.forEach((note) => map.set(note.id, { ...note }));
     return Array.from(map.values());
   };
-  let notesLocal: Note[] = cloneNotes(selectors.notes.items(getState()));
+  notesLocal = cloneNotes(selectors.notes.items(getState()));
   const appTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
 
   const filterVisibleNotes = (notes: Note[]): Note[] => {
@@ -311,6 +658,7 @@ export async function NotesView(
     quickCategorySelect.update({ options });
     const preferred = activeCategoryIds[0] ?? options[0]?.value ?? "";
     quickCategorySelect.value = preferred ?? "";
+    updateTagFilterOptions();
   };
 
   const renderDeadlines = (notes: Note[]): void => {
@@ -366,14 +714,6 @@ export async function NotesView(
   renderDeadlines(notesLocal);
 
   let suppressNextRender = false;
-
-  const saveSoon = (() => {
-    let t: number | undefined;
-    return (fn: () => void) => {
-      if (t) clearTimeout(t);
-      t = window.setTimeout(fn, 200);
-    };
-  })();
 
   const commitSnapshot = (
     source: string,
@@ -460,176 +800,281 @@ export async function NotesView(
     void loadMore();
   });
 
+  function openEditModal(note: Note): void {
+    editingNote = note;
+    editTextarea.value = note.text ?? "";
+    editColorInput.value = note.color ?? DEFAULT_NOTE_COLOR;
+    editModal.setOpen(true);
+  }
+
+  function isPinned(note: Note): boolean {
+    return (note.position ?? 0) < 0;
+  }
+
+  function getSortValue(note: Note, key: NotesSortKey): number {
+    if (key === "created_at") return note.created_at ?? 0;
+    return note.updated_at ?? note.created_at ?? 0;
+  }
+
+  function formatRelative(timestamp: number | null | undefined): string {
+    if (!timestamp) return "";
+    const now = Date.now();
+    let diffSeconds = Math.floor((now - timestamp) / 1000);
+    const past = diffSeconds >= 0;
+    diffSeconds = Math.abs(diffSeconds);
+    const minutes = Math.floor(diffSeconds / 60);
+    if (minutes < 1) return past ? "just now" : "in moments";
+    if (minutes < 60) return past ? `${minutes}m ago` : `in ${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return past ? `${hours}h ago` : `in ${hours}h`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return past ? `${days}d ago` : `in ${days}d`;
+    const weeks = Math.floor(days / 7);
+    if (weeks < 5) return past ? `${weeks}w ago` : `in ${weeks}w`;
+    const months = Math.floor(days / 30);
+    if (months < 12) return past ? `${months}mo ago` : `in ${months}mo`;
+    const years = Math.floor(days / 365);
+    return past ? `${years}y ago` : `in ${years}y`;
+  }
+
+  async function togglePinned(note: Note, desired: boolean): Promise<void> {
+    const previousPosition = note.position ?? 0;
+    const magnitude = Math.max(Math.abs(previousPosition), 1);
+    const nextPosition = desired ? -magnitude : magnitude;
+    note.position = nextPosition;
+    commitSnapshot("notes:pin", false, true);
+    render();
+    try {
+      const saved = await updateNote(
+        householdId,
+        note.id,
+        { position: nextPosition },
+        updateNoteFn,
+      );
+      Object.assign(note, saved);
+      commitSnapshot("notes:pin", true, true);
+      render();
+    } catch (err) {
+      note.position = previousPosition;
+      commitSnapshot("notes:pin", true, true);
+      render();
+      throw err;
+    }
+  }
+
+  async function deleteNote(note: Note): Promise<void> {
+    const previousDeleted = note.deleted_at;
+    note.deleted_at = Date.now();
+    commitSnapshot("notes:delete", false, true);
+    render();
+    try {
+      await deleteNoteFn(householdId, note.id);
+      notesLocal = notesLocal.filter((entry) => entry.id !== note.id);
+      commitSnapshot("notes:delete", true, true);
+      render();
+    } catch (err) {
+      note.deleted_at = previousDeleted;
+      commitSnapshot("notes:delete", true, true);
+      render();
+      throw err;
+    }
+  }
+
+  function createDeadlineBadgeBlock(note: Note): HTMLElement | null {
+    if (note.deadline === undefined || note.deadline === null) return null;
+    const dueMs = Number(note.deadline);
+    if (!Number.isFinite(dueMs)) return null;
+    const zone = note.deadline_tz ?? appTimezone ?? "UTC";
+    const formatted = new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: zone,
+    }).format(new Date(dueMs));
+    const wrapper = document.createElement("div");
+    wrapper.className = "note__deadline";
+    const label = document.createElement("span");
+    label.textContent = `Due ${formatted}`;
+    wrapper.appendChild(label);
+    const badge = createTimezoneBadge({
+      eventTimezone: note.deadline_tz,
+      appTimezone,
+      tooltipId: `note-deadline-${note.id}`,
+    });
+    if (!badge.hidden) wrapper.appendChild(badge);
+    return wrapper;
+  }
+
+  function createNoteCard(note: Note): HTMLElement {
+    const card = document.createElement("article");
+    card.className = "note";
+    if (viewModeState === "list") card.classList.add("note--list");
+    if (isPinned(note)) card.classList.add("note--pinned");
+
+    const normalizedColor = (note.color ?? DEFAULT_NOTE_COLOR).toUpperCase();
+    const palette = NOTE_PALETTE[normalizedColor];
+    const baseColor = palette?.base ?? note.color ?? DEFAULT_NOTE_COLOR;
+    const textColor = palette?.text ?? "#1f2937";
+    card.style.setProperty("--note-color", baseColor);
+    card.style.setProperty("--note-text-color", textColor);
+
+    const normalisedText = (note.text ?? "").replace(/\r\n/g, "\n");
+    const lines = normalisedText.split("\n").map((line) => line.trim());
+    const firstLineIndex = lines.findIndex((line) => line.length > 0);
+    const titleText = firstLineIndex >= 0 ? lines[firstLineIndex] : "Untitled note";
+    const bodyText = firstLineIndex >= 0 ? lines.slice(firstLineIndex + 1).join("\n").trim() : normalisedText.trim();
+
+    const title = document.createElement("header");
+    title.className = "note__title";
+    title.textContent = titleText;
+    card.appendChild(title);
+
+    const body = document.createElement("div");
+    body.className = "note__body";
+    if (bodyText) {
+      body.textContent = bodyText;
+    } else {
+      body.classList.add("note__body--empty");
+      body.textContent = "No additional details";
+    }
+    card.appendChild(body);
+
+    const deadlineBlock = createDeadlineBadgeBlock(note);
+    if (deadlineBlock) card.appendChild(deadlineBlock);
+
+    const meta = document.createElement("footer");
+    meta.className = "note__meta";
+
+    const referenceTs = getSortValue(note, sortState.key);
+    const prefix = sortState.key === "created_at" ? "Created" : "Updated";
+    const time = document.createElement("time");
+    const iso = new Date(referenceTs || Date.now()).toISOString();
+    time.dateTime = iso;
+    const relative = formatRelative(referenceTs);
+    time.textContent = relative ? `${prefix} ${relative}` : prefix;
+    meta.appendChild(time);
+
+    const actions = document.createElement("div");
+    actions.className = "note__actions";
+
+    const pinButton = createButton({
+      type: "button",
+      variant: "ghost",
+      size: "sm",
+      className: "note__action",
+    });
+    const refreshPinButton = () => {
+      const pinned = isPinned(note);
+      pinButton.update({
+        ariaLabel: pinned ? "Unpin note" : "Pin note",
+        children: pinned ? "📌" : "📍",
+      });
+    };
+    refreshPinButton();
+    pinButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      pinButton.disabled = true;
+      void togglePinned(note, !isPinned(note))
+        .catch((err) => {
+          showError(err);
+        })
+        .finally(() => {
+          if (!pinButton.isConnected) return;
+          pinButton.disabled = false;
+          refreshPinButton();
+        });
+    });
+    actions.appendChild(pinButton);
+
+    const editButton = createButton({
+      type: "button",
+      variant: "ghost",
+      size: "sm",
+      className: "note__action",
+      ariaLabel: "Edit note",
+      children: "✏️",
+    });
+    editButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      openEditModal(note);
+    });
+    actions.appendChild(editButton);
+
+    const deleteButton = createButton({
+      type: "button",
+      variant: "ghost",
+      size: "sm",
+      className: "note__action note__action--delete",
+      ariaLabel: "Delete note",
+      children: "🗑️",
+    });
+    deleteButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      deleteButton.disabled = true;
+      void deleteNote(note)
+        .catch((err) => {
+          showError(err);
+        })
+        .finally(() => {
+          if (deleteButton.isConnected) {
+            deleteButton.disabled = false;
+          }
+        });
+    });
+    actions.appendChild(deleteButton);
+
+    meta.appendChild(actions);
+    card.appendChild(meta);
+
+    return card;
+  }
+
   function render() {
     notesBoard.clear();
-    const visible = filterVisibleNotes(notesLocal);
-    visible
-      .sort((a, b) =>
-        (b.z ?? 0) - (a.z ?? 0) ||
-        a.position - b.position ||
-        (a.created_at ?? 0) - (b.created_at ?? 0)
-      )
-      .forEach((note) => {
-        const el = document.createElement("div");
-        el.className = "note";
-        const palette = NOTE_PALETTE[note.color.toUpperCase()];
-        const baseColor = palette?.base ?? note.color;
-        const textColor = palette?.text ?? "#1f2937";
-        el.style.setProperty("--note-color", baseColor);
-        el.style.setProperty("--note-text-color", textColor);
-        el.style.left = note.x + "px";
-        el.style.top = note.y + "px";
-        el.style.zIndex = String(note.z ?? 0);
+    pinnedContainer.innerHTML = "";
+    updateColorFilterOptions();
 
-        const textarea = document.createElement("textarea");
-        textarea.value = note.text;
-        textarea.addEventListener("input", () => {
-          note.text = textarea.value;
-          commitSnapshot("notes:text-change", false, true);
-          saveSoon(async () => {
-            try {
-              const saved = await updateNote(
-                householdId,
-                note.id,
-                { text: note.text },
-                updateNoteFn,
-              );
-              Object.assign(note, saved);
-              commitSnapshot("notes:text-change", true, true);
-            } catch {}
-          });
-        });
-        el.appendChild(textarea);
+    const visible = filterVisibleNotes(notesLocal).filter((note) => {
+      if (categoryFilterId && note.category_id !== categoryFilterId) return false;
+      if (colorFilterValue && note.color.toUpperCase() !== colorFilterValue) return false;
+      if (searchTerm) {
+        const text = note.text?.toLowerCase() ?? "";
+        if (!text.includes(searchTerm)) return false;
+      }
+      return true;
+    });
 
-        if (note.deadline !== undefined && note.deadline !== null) {
-          const deadlineWrapper = document.createElement("div");
-          deadlineWrapper.className = "note__deadline-inline";
-          const dueMs = Number(note.deadline);
-          if (Number.isFinite(dueMs)) {
-            const zone = note.deadline_tz ?? appTimezone ?? "UTC";
-            const formatted = new Intl.DateTimeFormat(undefined, {
-              dateStyle: "medium",
-              timeStyle: "short",
-              timeZone: zone,
-            }).format(new Date(dueMs));
-            const label = document.createElement("span");
-            label.textContent = `Due ${formatted}`;
-            deadlineWrapper.appendChild(label);
-            const badge = createTimezoneBadge({
-              eventTimezone: note.deadline_tz,
-              appTimezone,
-              tooltipId: `note-inline-deadline-${note.id}`,
-            });
-            if (!badge.hidden) deadlineWrapper.appendChild(badge);
-            el.appendChild(deadlineWrapper);
-          }
-        }
+    const sorted = visible.sort((a, b) => {
+      const aValue = getSortValue(a, sortState.key);
+      const bValue = getSortValue(b, sortState.key);
+      const direction = sortState.direction === "asc" ? 1 : -1;
+      if (aValue === bValue) {
+        return (a.created_at ?? 0) - (b.created_at ?? 0);
+      }
+      return (aValue - bValue) * direction;
+    });
 
-        const deleteButton = createButton({
-          type: "button",
-          variant: "ghost",
-          size: "sm",
-          className: "note__control note__control--delete",
-          ariaLabel: "Delete note",
-          children: "\u00d7",
-          onClick: async (event) => {
-            event.preventDefault();
-            note.deleted_at = Date.now();
-            try {
-              await deleteNoteFn(householdId, note.id);
-              notesLocal = notesLocal.filter((n) => n.id !== note.id);
-              commitSnapshot("notes:delete", true, true);
-              render();
-            } catch (err: any) {
-              showError(err);
-            }
-          },
-        });
-        el.appendChild(deleteButton);
+    const pinned = sorted.filter((note) => isPinned(note));
+    const regular = sorted.filter((note) => !isPinned(note));
 
-        const bringButton = createButton({
-          type: "button",
-          variant: "ghost",
-          size: "sm",
-          className: "note__control note__control--bring",
-          ariaLabel: "Bring note to front",
-          children: "\u2191",
-          onClick: async (event) => {
-            event.preventDefault();
-            const maxZ = Math.max(0, ...notesLocal.filter((n) => !n.deleted_at).map((n) => n.z ?? 0));
-            note.z = maxZ + 1;
-            commitSnapshot("notes:bring", false, true);
-            try {
-              const saved = await updateNote(
-                householdId,
-                note.id,
-                { z: note.z },
-                updateNoteFn,
-              );
-              Object.assign(note, saved);
-              commitSnapshot("notes:bring", true, true);
-              render();
-            } catch (err: any) {
-              showError(err);
-            }
-          },
-        });
-        el.appendChild(bringButton);
-
-        el.addEventListener("pointerdown", (e) => {
-          if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLButtonElement) return;
-          e.preventDefault();
-          const startX = e.clientX;
-          const startY = e.clientY;
-          const origX = note.x;
-          const origY = note.y;
-          const maxZ = Math.max(0, ...notesLocal.filter((n) => !n.deleted_at).map((n) => n.z ?? 0));
-          note.z = maxZ + 1;
-          el.style.zIndex = String(note.z);
-          commitSnapshot("notes:drag", false, true);
-          saveSoon(async () => {
-            try {
-              const saved = await updateNote(
-                householdId,
-                note.id,
-                { z: note.z },
-                updateNoteFn,
-              );
-              Object.assign(note, saved);
-              commitSnapshot("notes:drag", true, true);
-            } catch {}
-          });
-          el.classList.add("dragging");
-          el.setPointerCapture(e.pointerId);
-          function onMove(ev: PointerEvent) {
-            const maxX = canvas.clientWidth - el.offsetWidth;
-            const maxY = canvas.clientHeight - el.offsetHeight;
-            note.x = Math.max(0, Math.min(maxX, origX + (ev.clientX - startX)));
-            note.y = Math.max(0, Math.min(maxY, origY + (ev.clientY - startY)));
-            el.style.left = note.x + "px";
-            el.style.top = note.y + "px";
-          }
-          async function onUp() {
-            el.removeEventListener("pointermove", onMove);
-            el.removeEventListener("pointerup", onUp);
-            el.classList.remove("dragging");
-            try {
-              const saved = await updateNote(
-                householdId,
-                note.id,
-                { x: note.x, y: note.y },
-                updateNoteFn,
-              );
-              Object.assign(note, saved);
-              commitSnapshot("notes:drag", true, true);
-            } catch {}
-          }
-          el.addEventListener("pointermove", onMove);
-          el.addEventListener("pointerup", onUp);
-        });
-
-        canvas.appendChild(el);
+    if (pinned.length > 0) {
+      pinnedContainer.hidden = false;
+      pinned.forEach((note) => {
+        pinnedContainer.appendChild(createNoteCard(note));
       });
+    } else {
+      pinnedContainer.hidden = true;
+    }
+
+    if (regular.length === 0 && pinned.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "notes__empty";
+      empty.textContent = "Create your first note to get started.";
+      notesBoard.element.appendChild(empty);
+    } else {
+      regular.forEach((note) => {
+        notesBoard.element.appendChild(createNoteCard(note));
+      });
+    }
 
     renderDeadlines(notesLocal);
   }
@@ -674,30 +1119,6 @@ export async function NotesView(
     await reload("notes:init");
   }
 
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    try {
-      const created = await insertNote(
-        householdId,
-        {
-          text: textInput.value,
-          color: colorInput.value,
-          x: 10,
-          y: 10,
-          category_id: activeCategoryIds[0] ?? null,
-        },
-        createNoteFn,
-      );
-      notesLocal = mergeNotes(notesLocal, [created]);
-      commitSnapshot("notes:create", true, true);
-      render();
-      form.reset();
-      colorInput.value = DEFAULT_NOTE_COLOR;
-    } catch (err: any) {
-      showError(err);
-    }
-  });
-
   quickForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const text = quickTextInput.value.trim();
@@ -723,8 +1144,8 @@ export async function NotesView(
         {
           text,
           color: DEFAULT_NOTE_COLOR,
-          x: 10,
-          y: 10,
+          x: 0,
+          y: 0,
           category_id: categoryId,
           deadline,
           deadline_tz: deadlineTz,
@@ -742,12 +1163,12 @@ export async function NotesView(
     }
   });
 
-  const openQuickCapture = () => {
+  function openQuickCapture(): void {
     refreshQuickCaptureCategories();
     quickTextInput.value = "";
     quickDeadlineInput.value = "";
     quickCaptureModal.setOpen(true);
-  };
+  }
 
   const handleShortcut = (event: KeyboardEvent) => {
     const key = event.key.toLowerCase();
