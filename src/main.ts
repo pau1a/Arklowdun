@@ -90,6 +90,7 @@ interface DbHealthUiContext {
 let layoutContext: LayoutContext | null = null;
 let layoutMounted = false;
 let currentRouteId: AppPane | null = null;
+let currentCleanup: (() => void) | null = null;
 let renderSequence = 0;
 let dbHealthUi: DbHealthUiContext | null = null;
 const numberFormatter = new Intl.NumberFormat();
@@ -436,6 +437,16 @@ async function renderApp({ route }: { route: RouteDefinition }) {
   const container = context.content.view;
 
   actions.setActivePane(route.id);
+  if (currentCleanup) {
+    try {
+      currentCleanup();
+    } catch (error) {
+      log.error("renderApp: cleanup failed", error);
+    } finally {
+      currentCleanup = null;
+    }
+  }
+
   runViewCleanups(container);
 
   log.debug("renderApp: mount route", { route: route.id, reusedLayout });
@@ -443,7 +454,26 @@ async function renderApp({ route }: { route: RouteDefinition }) {
   applyRouteTitle(route);
 
   try {
-    await route.mount(container);
+    const mountResult = await route.mount(container);
+    console.assert(typeof mountResult === "function", `${route.id} must return cleanup`);
+    if (typeof mountResult === "function") {
+      currentCleanup = () => {
+        try {
+          mountResult();
+        } catch (error) {
+          log.error("renderApp: cleanup failed", error);
+        } finally {
+          runViewCleanups(container);
+          currentCleanup = null;
+        }
+      };
+    } else {
+      currentCleanup = () => {
+        runViewCleanups(container);
+        currentCleanup = null;
+      };
+      runViewCleanups(container);
+    }
   } catch (error) {
     log.error("renderApp: mount failed", error);
     if (!appReadyNotified) {

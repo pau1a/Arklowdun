@@ -13,7 +13,7 @@ export interface LogsState {
 
 type Listener = (state: LogsState) => void;
 
-type TailFetcher = () => Promise<unknown>;
+type TailFetcher = (options?: { signal?: AbortSignal }) => Promise<unknown>;
 
 const MAX_ENTRIES = 200;
 
@@ -27,6 +27,8 @@ const state: LogsState = {
 };
 
 let tailFetcher: TailFetcher = getTail;
+let activeAbort: AbortController | null = null;
+let activeRequestId = 0;
 
 function snapshot(): LogsState {
   return {
@@ -63,6 +65,20 @@ function formatError(error: unknown): string {
   } catch {
     return String(error ?? "Unknown error");
   }
+}
+
+function isAbortError(error: unknown): boolean {
+  if (error instanceof DOMException) {
+    return error.name === "AbortError";
+  }
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const record = error as { name?: unknown; code?: unknown };
+  if (record.name === "AbortError") {
+    return true;
+  }
+  return record.code === "ABORT_ERR";
 }
 
 function setLoading(): void {
@@ -203,23 +219,45 @@ export const logsStore = {
     };
   },
   async fetchTail(): Promise<void> {
+    const requestId = ++activeRequestId;
+    if (activeAbort) {
+      activeAbort.abort();
+    }
+    const abortController = new AbortController();
+    activeAbort = abortController;
+
     setLoading();
     try {
-      const response = await tailFetcher();
+      const response = await tailFetcher({ signal: abortController.signal });
+      if (abortController.signal.aborted || requestId !== activeRequestId) {
+        return;
+      }
       const result = normalizeResponse(response);
       setReady(result.entries, {
         droppedCount: result.droppedCount,
         logWriteStatus: result.logWriteStatus,
       });
     } catch (error) {
+      if (abortController.signal.aborted || requestId !== activeRequestId || isAbortError(error)) {
+        return;
+      }
       const message = formatError(error);
       setError(message);
+    } finally {
+      if (activeAbort === abortController) {
+        activeAbort = null;
+      }
     }
   },
   clear(): void {
+    activeRequestId += 1;
+    if (activeAbort) {
+      activeAbort.abort();
+      activeAbort = null;
+    }
     state.status = "idle";
     state.error = undefined;
-    state.entries = [];
+    state.entries.length = 0;
     state.fetchedAtUtc = undefined;
     state.droppedCount = 0;
     state.logWriteStatus = "ok";

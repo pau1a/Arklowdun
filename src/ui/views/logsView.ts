@@ -435,7 +435,7 @@ export function mountLogsView(container: HTMLElement): () => void {
     <section class="logs-view" aria-labelledby="logs-title">
       <header class="logs-header">
         <div class="logs-header__title">
-          <h1 id="logs-title" class="logs-title">Logs</h1>
+          <h1 id="logs-title" class="logs-title" tabindex="-1">Logs</h1>
           <button
             type="button"
             class="logs-time-toggle"
@@ -516,7 +516,7 @@ export function mountLogsView(container: HTMLElement): () => void {
         <button type="button" class="btn btn--secondary btn--sm logs-refresh" data-testid="logs-refresh">Refresh</button>
       </div>
       <div class="logs-content">
-        <div id="logs-status" class="logs__status" hidden></div>
+        <div id="logs-status" class="logs__status" role="status" aria-live="polite" hidden></div>
         <div class="logs-state logs-state--loading" role="status" data-testid="logs-loading">Loading latest diagnostics…</div>
         <div class="logs-state logs-state--error" role="alert" data-testid="logs-error" hidden></div>
         <div class="logs-state logs-state--empty" data-testid="logs-empty" hidden>No log lines yet — perform an action and refresh.</div>
@@ -584,6 +584,9 @@ export function mountLogsView(container: HTMLElement): () => void {
   const densityButton = container.querySelector<HTMLButtonElement>(".logs-density-toggle");
   const columnsDetails = container.querySelector<HTMLDetailsElement>(".logs-columns");
   const columnsMenu = columnsDetails?.querySelector<HTMLDivElement>(".logs-columns__menu");
+  const timestampHeader = container.querySelector<HTMLTableCellElement>(
+    ".logs-table__header--timestamp",
+  );
   const targetHeader = container.querySelector<HTMLTableCellElement>("[data-column='target']");
   const householdHeader = container.querySelector<HTMLTableCellElement>("[data-column='household']");
 
@@ -609,6 +612,7 @@ export function mountLogsView(container: HTMLElement): () => void {
     !densityButton ||
     !columnsDetails ||
     !columnsMenu ||
+    !timestampHeader ||
     !targetHeader ||
     !householdHeader
   ) {
@@ -730,6 +734,7 @@ export function mountLogsView(container: HTMLElement): () => void {
       includeHousehold: showHouseholdColumn,
       columnCount: getColumnCount(),
     });
+    timestampHeader.setAttribute("aria-sort", "descending");
     updateSummary();
   }
 
@@ -741,6 +746,17 @@ export function mountLogsView(container: HTMLElement): () => void {
 
   updateDensity();
   updateExportButtonState();
+
+  const raf = window.requestAnimationFrame?.bind(window);
+  if (raf) {
+    raf(() => {
+      viewRoot.querySelector<HTMLHeadingElement>("h1")?.focus();
+    });
+  } else {
+    window.setTimeout(() => {
+      viewRoot.querySelector<HTMLHeadingElement>("h1")?.focus();
+    }, 0);
+  }
 
   function syncColumnVisibility(): void {
     viewRoot.classList.toggle("logs--show-target", showTargetColumn);
@@ -1007,7 +1023,14 @@ export function mountLogsView(container: HTMLElement): () => void {
     unsubscribe();
     stopLiveTail();
     statusBanner.reset();
+    tableBody.replaceChildren();
+    allEntries.length = 0;
+    filteredEntries.length = 0;
+    totalCount = 0;
+    currentStatus = "idle";
+    lastFetchedAt = undefined;
     logsStore.clear();
+    container.replaceChildren();
   };
 
   return cleanup;

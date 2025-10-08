@@ -102,3 +102,34 @@ test('fetchTail records IPC failures as error state', async () => {
   __resetTailFetcherForTests();
   logsStore.clear();
 });
+
+test('clear aborts in-flight fetch without extra notifications', async () => {
+  logsStore.clear();
+  __setTailFetcherForTests(({ signal } = {}) => {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        resolve({ lines: [] });
+      }, 50);
+      signal?.addEventListener('abort', () => {
+        clearTimeout(timer);
+        reject(new DOMException('Aborted', 'AbortError'));
+      });
+    });
+  });
+
+  const updates: string[] = [];
+  const unsubscribe = logsStore.subscribe((snapshot) => {
+    updates.push(snapshot.status);
+  });
+
+  const pending = logsStore.fetchTail();
+  logsStore.clear();
+  await pending;
+  await WAIT();
+
+  assert.deepEqual(updates, ['idle', 'loading', 'idle']);
+
+  unsubscribe();
+  __resetTailFetcherForTests();
+  logsStore.clear();
+});

@@ -7,10 +7,14 @@ import {
   __setTailFetcherForTests,
   __resetTailFetcherForTests,
 } from '../src/features/logs/logs.store.ts';
+import { formatTimestamp } from '../src/features/logs/time.ts';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', {
   url: 'http://localhost',
 });
+
+dom.window.requestAnimationFrame = ((callback: FrameRequestCallback) =>
+  dom.window.setTimeout(() => callback(performance.now()), 0)) as typeof dom.window.requestAnimationFrame;
 
 (globalThis as any).window = dom.window as unknown as typeof globalThis & Window;
 (globalThis as any).document = dom.window.document;
@@ -58,8 +62,7 @@ test('LogsView renders table, summary, and banners', async () => {
 
   const loading = container.querySelector<HTMLElement>("[data-testid='logs-loading']");
   const summary = container.querySelector<HTMLElement>('.logs-summary');
-  const backlogBanner = container.querySelector<HTMLElement>("[data-banner='backlog']");
-  const ioBanner = container.querySelector<HTMLElement>("[data-banner='io']");
+  const statusBanner = container.querySelector<HTMLElement>('#logs-status');
   const rows = container.querySelectorAll<HTMLTableRowElement>('.logs-table tbody tr');
   const categories = container.querySelectorAll<HTMLInputElement>(
     '.logs-filter__menu input[type="checkbox"]',
@@ -69,10 +72,12 @@ test('LogsView renders table, summary, and banners', async () => {
   assert.equal(loading?.hidden, true);
   assert.ok(summary);
   assert.match(summary?.textContent ?? '', /Showing 3 log lines/);
-  assert.ok(backlogBanner);
-  assert.equal(backlogBanner?.hidden, false);
-  assert.ok(ioBanner);
-  assert.equal(ioBanner?.hidden, false);
+  assert.ok(statusBanner);
+  assert.equal(statusBanner?.hidden, false);
+  assert.equal(
+    statusBanner?.textContent,
+    '⚠ Some log entries may have been skipped (buffer full).',
+  );
   assert.equal(categories.length, 3);
   assert.equal(rows.length, 3);
   assert.equal(
@@ -150,15 +155,16 @@ test('LogsView toggles timezone display', async () => {
 
   let timestampCell = container.querySelector<HTMLElement>('.logs-table__cell--timestamp');
   assert.ok(timestampCell);
-  const expectedLocal = new Date(ts).toLocaleString('en-GB', { timeZone: 'Europe/London' });
+  const expectedLocal = formatTimestamp(ts, true);
   assert.equal(timestampCell?.textContent, expectedLocal);
 
-  const utcButton = container.querySelector<HTMLButtonElement>(".logs-time-toggle__button[data-timezone='utc']");
-  assert.ok(utcButton);
-  utcButton!.click();
+  const toggleButton = container.querySelector<HTMLButtonElement>("[data-testid='logs-time-toggle']");
+  assert.ok(toggleButton);
+  toggleButton!.click();
 
   timestampCell = container.querySelector<HTMLElement>('.logs-table__cell--timestamp');
-  assert.equal(timestampCell?.textContent, ts);
+  const expectedUtc = formatTimestamp(ts, false);
+  assert.equal(timestampCell?.textContent, expectedUtc);
 
   cleanup();
   container.remove();
