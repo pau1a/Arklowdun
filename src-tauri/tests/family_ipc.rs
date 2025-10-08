@@ -22,7 +22,7 @@ use arklowdun_lib::{
         RENEWALS_INVALID_OFFSET, VALIDATION_HOUSEHOLD_MISMATCH, VALIDATION_MEMBER_MISSING,
         VALIDATION_SCOPE_REQUIRED,
     },
-    state::AppState,
+    AppState,
     vault::Vault,
     vault_migration::VaultMigrationManager,
 };

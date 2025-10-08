@@ -162,6 +162,7 @@ mod repo;
 pub mod repo_family;
 pub mod security;
 mod state;
+pub use state::AppState;
 mod time;
 pub mod time_errors;
 pub mod time_invariants;
