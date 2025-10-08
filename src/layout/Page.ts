@@ -26,6 +26,13 @@ export function Page({ sidebar, content, footer, toolbar }: PageProps): PageInst
   liveRegion.className = "sr-only";
   liveRegion.setAttribute("aria-live", "polite");
 
+  const bannerHost = document.createElement("div");
+  bannerHost.id = "page-banner";
+  bannerHost.className = "page-banner";
+  bannerHost.setAttribute("role", "img");
+  bannerHost.setAttribute("aria-hidden", "true");
+  bannerHost.hidden = true;
+
   function mount(target: HTMLElement = document.body) {
     if (toolbar && !content.element.contains(toolbar.element)) {
       content.element.prepend(toolbar.element);
@@ -46,6 +53,7 @@ export function Page({ sidebar, content, footer, toolbar }: PageProps): PageInst
     nextChildren.push(
       sidebar.element,
       content.element,
+      bannerHost,
       footer.element,
       modalRoot,
       liveRegion,

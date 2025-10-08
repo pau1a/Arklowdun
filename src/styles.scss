@@ -11,6 +11,8 @@
   --window-surface-inset: 0px;
   /* Height for the custom macOS-style toolbar (2x previous) */
   --app-toolbar-height: 64px;
+  --banner-w: 112px;
+  --banner-gap: 12px;
 }
 
 /* Animatable gradient variables for the app-wide backdrop */
@@ -80,8 +82,49 @@ body {
   display: grid;
   grid-template-columns: minmax(160px, max-content) 1fr;
   grid-template-rows: var(--app-toolbar-height) 1fr auto;
+  column-gap: 0;
   margin: 0;
   position: relative;
+}
+
+body[data-banner-visibility="visible"] {
+  grid-template-columns:
+    minmax(160px, max-content)
+    1fr
+    var(--banner-w);
+  column-gap: var(--banner-gap);
+}
+
+body[data-banner-visibility="hidden"],
+body:not([data-banner-visibility]) {
+  grid-template-columns: minmax(160px, max-content) 1fr;
+  column-gap: 0;
+}
+
+.sidebar {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+main.container {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.page-banner {
+  grid-column: 3;
+  grid-row: 2;
+  align-self: stretch;
+  background-repeat: no-repeat;
+  background-position: center right;
+  background-size: cover;
+  border-left: 1px solid rgba(0, 0, 0, 0.06);
+  opacity: 0.98;
+}
+
+body[data-banner-visibility="hidden"] .page-banner,
+body:not([data-banner-visibility]) .page-banner {
+  display: none;
 }
 
 /* App-wide backdrop layer: sits behind toolbar/sidebar/content/footer */
@@ -182,13 +225,22 @@ footer {
 .window-surface { display: none !important; }
 
 @media (max-width: 900px) {
-  body {
+  body,
+  body[data-banner-visibility="visible"],
+  body[data-banner-visibility="hidden"] {
     grid-template-columns: var(--layout-sidebar-collapsed) 1fr;
+    column-gap: 0;
+  }
+
+  .page-banner {
+    display: none !important;
   }
 }
 
 @media (max-width: 600px) {
-  body {
+  body,
+  body[data-banner-visibility="visible"],
+  body[data-banner-visibility="hidden"] {
     grid-template-columns: var(--layout-sidebar-collapsed-sm) 1fr;
   }
 }

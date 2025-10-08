@@ -42,6 +42,7 @@ import { recoveryText } from "@strings/recovery";
 import { mountMacToolbar, setAppToolbarTitle } from "@ui/AppToolbar";
 import { initAmbientBackground, type AmbientBackgroundController } from "@ui/AmbientBackground";
 import { getActiveTestScenario, getIpcAdapterName } from "@lib/ipc/provider";
+import { bannerFor } from "@ui/banner";
 
 // Resolve main app logo (SVG) as a URL the bundler can serve
 const appLogoUrl = new URL("./assets/logo.svg", import.meta.url).href;
@@ -419,6 +420,29 @@ function ensureCanonicalHash(route: RouteDefinition) {
   history.replaceState(null, "", route.hash);
 }
 
+function updatePageBanner(route: RouteDefinition): void {
+  if (typeof document === "undefined") return;
+  const bannerEl = document.getElementById("page-banner") as HTMLDivElement | null;
+  if (!bannerEl) return;
+  const body = document.body;
+  const key = route.id.toLowerCase();
+  const label = route.display?.label ?? key;
+  const url = bannerFor(key);
+  if (url) {
+    bannerEl.hidden = false;
+    bannerEl.style.backgroundImage = `url("${url}")`;
+    bannerEl.setAttribute("aria-hidden", "false");
+    bannerEl.setAttribute("aria-label", `${label} banner`);
+    body.dataset.bannerVisibility = "visible";
+  } else {
+    bannerEl.hidden = true;
+    bannerEl.style.removeProperty("background-image");
+    bannerEl.setAttribute("aria-hidden", "true");
+    bannerEl.removeAttribute("aria-label");
+    delete body.dataset.bannerVisibility;
+  }
+}
+
 async function renderApp({ route }: { route: RouteDefinition }) {
   const context = ensureLayout();
   const reusedLayout = layoutMounted;
@@ -426,6 +450,7 @@ async function renderApp({ route }: { route: RouteDefinition }) {
   context.sidebar.setActive(route.id);
   context.footer.setActive(route.id);
   ensureCanonicalHash(route);
+  updatePageBanner(route);
 
   if (currentRouteId === route.id) {
     applyRouteTitle(route);
