@@ -1,8 +1,3 @@
-PRAGMA journal_mode=WAL;
-PRAGMA foreign_keys=ON;
-PRAGMA busy_timeout=5000;
-BEGIN IMMEDIATE;
-
 -- Contact / naming
 ALTER TABLE family_members ADD COLUMN nickname TEXT;
 ALTER TABLE family_members ADD COLUMN full_name TEXT;
@@ -101,5 +96,3 @@ CREATE INDEX IF NOT EXISTS idx_member_renewals_member
 ALTER TABLE notes ADD COLUMN member_id TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_notes_member ON notes(member_id);
-
-COMMIT;

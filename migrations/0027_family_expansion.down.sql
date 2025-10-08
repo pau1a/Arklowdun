@@ -1,8 +1,3 @@
-PRAGMA journal_mode=WAL;
-PRAGMA foreign_keys=ON;
-PRAGMA busy_timeout=5000;
-BEGIN IMMEDIATE;
-
 PRAGMA foreign_keys=OFF;
 
 DROP INDEX IF EXISTS idx_member_renewals_member;
@@ -122,8 +117,5 @@ CREATE UNIQUE INDEX IF NOT EXISTS family_members_household_position_idx
 CREATE INDEX IF NOT EXISTS family_members_household_updated_idx
   ON family_members(household_id, updated_at);
 DROP INDEX IF EXISTS idx_family_members_house_bday;
-
-PRAGMA foreign_keys=ON;
-COMMIT;
 
 PRAGMA foreign_keys=ON;
