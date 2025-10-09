@@ -519,3 +519,41 @@ async fn member_attachments_list_wraps_unexpected_errors() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn member_renewals_upsert_rejects_past_expiry() -> Result<()> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    // Create temp app environment
+    let dir = TempDir::new()?;
+    let (state, _pool, _db_path) = build_app_state(&dir).await?;
+    let app = build_app(state);
+
+    // Compute a date in the past (e.g., yesterday)
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let yesterday_ms = now_ms - 86_400_000; // 24h earlier
+
+    // Attempt to insert an expired renewal
+    let err = commands_family::member_renewals_upsert(
+        app.state(),
+        RenewalUpsertPayload {
+            id: None,
+            household_id: "hh-1".into(),
+            member_id: "mem-1".into(),
+            kind: "passport".into(),
+            label: None,
+            expires_at: yesterday_ms,
+            remind_on_expiry: true,
+            remind_offset_days: 10,
+        },
+    )
+    .await
+    .expect_err("past expiry should fail validation");
+
+    // Confirm correct error code
+    assert_eq!(err.code(), RENEWALS_PAST_EXPIRY);
+    Ok(())
+}
