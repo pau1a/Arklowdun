@@ -11,6 +11,7 @@ export type NotesUpdatedPayload = { count: number; ts: number; activeCategoryIds
 export type HouseholdChangedPayload = { householdId: string };
 export type ErrorRaisedPayload = { id: string; message: string; code?: string };
 export type AppReadyPayload = { ts: number };
+export type FamilyMemberAddedPayload = { memberId: string; householdId: string };
 
 export interface AppEventMap {
   "files:updated": FilesUpdatedPayload;
@@ -21,6 +22,7 @@ export interface AppEventMap {
   "household:changed": HouseholdChangedPayload;
   "error:raised": ErrorRaisedPayload;
   "app:ready": AppReadyPayload;
+  "family:memberAdded": FamilyMemberAddedPayload;
 }
 
 export type AppEventChannel = keyof AppEventMap;

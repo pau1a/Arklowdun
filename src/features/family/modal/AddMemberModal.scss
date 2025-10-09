@@ -1,0 +1,108 @@
+.add-member-modal__overlay {
+  background: rgba(0, 0, 0, 0.6);
+  animation: add-member-modal-overlay 200ms ease;
+}
+
+.add-member-modal__dialog {
+  width: min(480px, calc(100vw - var(--space-5, 32px)));
+  max-height: 90vh;
+  border-radius: var(--radius-lg, 16px);
+  background: var(--surface, #ffffff);
+  padding: var(--space-5, 32px);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.25);
+}
+
+.add-member-modal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4, 24px);
+  height: 100%;
+}
+
+.add-member-modal__title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--color-text-strong, #0f172a);
+}
+
+.add-member-modal__progress {
+  margin: 0;
+  color: var(--color-text-muted, #475569);
+  font-size: 0.95rem;
+}
+
+.add-member-modal__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4, 24px);
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.add-member-modal__step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 16px);
+}
+
+.add-member-modal__step-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--color-text-strong, #0f172a);
+}
+
+.add-member-modal__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.add-member-modal__label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: var(--color-text-muted, #475569);
+}
+
+.add-member-modal__input {
+  font: inherit;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--color-text-strong, #0f172a);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.add-member-modal__input:focus-visible {
+  outline: none;
+  border-color: var(--color-accent, #00c896);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent, #00c896) 20%, transparent);
+}
+
+.add-member-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2, 12px);
+}
+
+.form-error {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-danger, #dc2626);
+}
+
+@keyframes add-member-modal-overlay {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
