@@ -537,9 +537,10 @@ export const contracts = {
   family_members_list: contract({ request: flexibleRequest, response: z.array(flexibleRequest) }),
   family_members_get: contract({ request: flexibleRequest, response: flexibleRequest.nullable() }),
   family_members_create: contract({ request: flexibleRequest, response: flexibleRequest }),
-  family_members_update: contract({ request: flexibleRequest, response: flexibleRequest }),
-  family_members_delete: contract({ request: flexibleRequest, response: flexibleRequest }),
-  family_members_restore: contract({ request: flexibleRequest, response: flexibleRequest }),
+  // Rust returns () for these, which maps to null over IPC
+  family_members_update: contract({ request: flexibleRequest, response: z.null() }),
+  family_members_delete: contract({ request: flexibleRequest, response: z.null() }),
+  family_members_restore: contract({ request: flexibleRequest, response: z.null() }),
   member_attachments_list: contract({
     request: memberAttachmentsListRequest,
     response: z.array(AttachmentRefRawSchema),
