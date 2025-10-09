@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
-use std::{collections::BTreeMap, env, fs, path::PathBuf};
+use sqlx::{Error as SqlxError, SqlitePool};
+use std::{collections::BTreeMap, env, fs, path::PathBuf, time::Instant};
+use tracing::{info, warn};
 
 use crate::{
     git_commit_hash, log_dropped_count, log_io_error_detected, resolve_logs_dir, AppError,
@@ -61,7 +62,19 @@ pub struct HouseholdStatsEntry {
     pub name: String,
     pub is_default: bool,
     pub counts: BTreeMap<String, u64>,
+    pub family: FamilyDiagnostics,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FamilyDiagnostics {
+    pub members_total: u64,
+    pub attachments_total: u64,
+    pub renewals_total: u64,
+    pub notes_linked_total: u64,
+    pub members_stale: u64,
+}
+
+const FAMILY_STALE_MS: i64 = 180 * 24 * 60 * 60 * 1_000;
 
 struct CountSpec {
     table: &'static str,
@@ -212,6 +225,7 @@ pub async fn household_stats(pool: &SqlitePool) -> AppResult<Vec<HouseholdStatsE
                 name: row.name,
                 is_default: row.is_default != 0,
                 counts,
+                family: FamilyDiagnostics::default(),
             }
         })
         .collect();
@@ -254,7 +268,183 @@ pub async fn household_stats(pool: &SqlitePool) -> AppResult<Vec<HouseholdStatsE
         }
     }
 
+    for entry in stats.iter_mut() {
+        let family = collect_family_diagnostics(pool, &entry.id).await?;
+        entry.family = family;
+    }
+
     Ok(stats)
+}
+
+fn counter_error(
+    err: SqlxError,
+    household_id: &str,
+    counter: &'static str,
+    elapsed_ms: u128,
+) -> AppError {
+    warn!(
+        target: "arklowdun",
+        area = "family",
+        event = "diagnostics_counter_failed",
+        household_id = household_id,
+        counter = counter,
+        code = "SQL_ERROR",
+        context = %err,
+        ms = elapsed_ms as u64
+    );
+    AppError::from(err)
+        .with_context("counter", counter)
+        .with_context("household_id", household_id.to_string())
+}
+
+async fn collect_family_diagnostics(
+    pool: &SqlitePool,
+    household_id: &str,
+) -> AppResult<FamilyDiagnostics> {
+    let start = Instant::now();
+
+    let members_total = {
+        let query_start = Instant::now();
+        match sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(1) FROM family_members WHERE household_id = ? AND deleted_at IS NULL",
+        )
+        .bind(household_id)
+        .fetch_one(pool)
+        .await
+        {
+            Ok(value) => value.max(0) as u64,
+            Err(err) => {
+                return Err(counter_error(
+                    err,
+                    household_id,
+                    "members_total",
+                    query_start.elapsed().as_millis(),
+                ))
+            }
+        }
+    };
+
+    let attachments_total = {
+        let query_start = Instant::now();
+        match sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(1) FROM member_attachments a \
+             JOIN family_members m ON m.id = a.member_id \
+             WHERE a.household_id = ? AND m.household_id = ? AND m.deleted_at IS NULL",
+        )
+        .bind(household_id)
+        .bind(household_id)
+        .fetch_one(pool)
+        .await
+        {
+            Ok(value) => value.max(0) as u64,
+            Err(err) => {
+                return Err(counter_error(
+                    err,
+                    household_id,
+                    "attachments_total",
+                    query_start.elapsed().as_millis(),
+                ))
+            }
+        }
+    };
+
+    let renewals_total = {
+        let query_start = Instant::now();
+        match sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(1) FROM member_renewals r \
+             JOIN family_members m ON m.id = r.member_id \
+             WHERE r.household_id = ? AND m.household_id = ? AND m.deleted_at IS NULL",
+        )
+        .bind(household_id)
+        .bind(household_id)
+        .fetch_one(pool)
+        .await
+        {
+            Ok(value) => value.max(0) as u64,
+            Err(err) => {
+                return Err(counter_error(
+                    err,
+                    household_id,
+                    "renewals_total",
+                    query_start.elapsed().as_millis(),
+                ))
+            }
+        }
+    };
+
+    let notes_linked_total = {
+        let query_start = Instant::now();
+        match sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(1) FROM notes n \
+             JOIN family_members m ON m.id = n.member_id \
+             WHERE n.household_id = ? \
+               AND n.member_id IS NOT NULL \
+               AND n.deleted_at IS NULL \
+               AND m.household_id = ? \
+               AND m.deleted_at IS NULL",
+        )
+        .bind(household_id)
+        .bind(household_id)
+        .fetch_one(pool)
+        .await
+        {
+            Ok(value) => value.max(0) as u64,
+            Err(err) => {
+                return Err(counter_error(
+                    err,
+                    household_id,
+                    "notes_linked_total",
+                    query_start.elapsed().as_millis(),
+                ))
+            }
+        }
+    };
+
+    let members_stale = {
+        let query_start = Instant::now();
+        match sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(1) FROM family_members \
+             WHERE household_id = ? \
+               AND deleted_at IS NULL \
+               AND (last_verified IS NULL OR updated_at - last_verified > ?)",
+        )
+        .bind(household_id)
+        .bind(FAMILY_STALE_MS)
+        .fetch_one(pool)
+        .await
+        {
+            Ok(value) => value.max(0) as u64,
+            Err(err) => {
+                return Err(counter_error(
+                    err,
+                    household_id,
+                    "members_stale",
+                    query_start.elapsed().as_millis(),
+                ))
+            }
+        }
+    };
+
+    info!(
+        target: "arklowdun",
+        area = "family",
+        event = "diagnostics_collected",
+        household_id = household_id,
+        members_total = members_total,
+        attachments_total = attachments_total,
+        renewals_total = renewals_total,
+        notes_linked_total = notes_linked_total,
+        members_stale = members_stale,
+        ms = start.elapsed().as_millis() as u64
+    );
+
+    Ok(FamilyDiagnostics {
+        members_total,
+        attachments_total,
+        renewals_total,
+        notes_linked_total,
+        members_stale,
+    })
 }
 
 #[allow(clippy::result_large_err)]

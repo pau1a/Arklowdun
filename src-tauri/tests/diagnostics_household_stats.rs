@@ -70,6 +70,119 @@ async fn household_stats_reports_counts_per_household() -> Result<()> {
     .execute(&pool)
     .await?;
 
+    let stale_ms: i64 = 180 * 24 * 60 * 60 * 1000;
+    let now: i64 = 200 * 24 * 60 * 60 * 1000;
+
+    sqlx::query(
+        "INSERT INTO family_members (id, name, household_id, created_at, updated_at, position, last_verified)\n         VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)",
+    )
+    .bind("mem-default-fresh")
+    .bind("Fresh Member")
+    .bind(&default_id)
+    .bind(now)
+    .bind(now)
+    .bind(now)
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO family_members (id, name, household_id, created_at, updated_at, position, last_verified)\n         VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)",
+    )
+    .bind("mem-default-stale")
+    .bind("Stale Member")
+    .bind(&default_id)
+    .bind(now)
+    .bind(now)
+    .bind(now - stale_ms - 1)
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO family_members (id, name, household_id, created_at, updated_at, deleted_at, position)\n         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
+    )
+    .bind("mem-default-deleted")
+    .bind("Deleted Member")
+    .bind(&default_id)
+    .bind(now)
+    .bind(now)
+    .bind(now)
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO family_members (id, name, household_id, created_at, updated_at, position, last_verified)\n         VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)",
+    )
+    .bind("mem-secondary")
+    .bind("Secondary Member")
+    .bind(&secondary.id)
+    .bind(now)
+    .bind(now)
+    .bind(now)
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO member_attachments (id, household_id, member_id, title, root_key, relative_path, mime_hint, added_at)\n         VALUES (?1, ?2, ?3, 'Passport', 'appData', 'docs/passport.pdf', 'application/pdf', ?4)",
+    )
+    .bind("att-active")
+    .bind(&default_id)
+    .bind("mem-default-fresh")
+    .bind(now)
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO member_attachments (id, household_id, member_id, title, root_key, relative_path, mime_hint, added_at)\n         VALUES (?1, ?2, ?3, 'Driver licence', 'appData', 'docs/licence.pdf', 'application/pdf', ?4)",
+    )
+    .bind("att-deleted")
+    .bind(&default_id)
+    .bind("mem-default-deleted")
+    .bind(now)
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO member_renewals (id, household_id, member_id, kind, label, expires_at, remind_on_expiry, remind_offset_days, created_at, updated_at)\n         VALUES (?1, ?2, ?3, 'passport', 'Renew passport', ?4, 1, 30, ?5, ?5)",
+    )
+    .bind("ren-active")
+    .bind(&default_id)
+    .bind("mem-default-fresh")
+    .bind(now + stale_ms)
+    .bind(now)
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO member_renewals (id, household_id, member_id, kind, label, expires_at, remind_on_expiry, remind_offset_days, created_at, updated_at)\n         VALUES (?1, ?2, ?3, 'passport', 'Old', ?4, 1, 30, ?5, ?5)",
+    )
+    .bind("ren-deleted")
+    .bind(&default_id)
+    .bind("mem-default-deleted")
+    .bind(now + stale_ms)
+    .bind(now)
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO notes (id, household_id, category_id, position, created_at, updated_at, z, text, color, x, y, member_id)\n         VALUES (?1, ?2, NULL, 2, ?3, ?3, 0, 'Linked note', '#FFFFFF', 0, 0, ?4)",
+    )
+    .bind("note-linked-active")
+    .bind(&default_id)
+    .bind(now)
+    .bind("mem-default-fresh")
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO notes (id, household_id, category_id, position, created_at, updated_at, z, text, color, x, y, member_id)\n         VALUES (?1, ?2, NULL, 3, ?3, ?3, 0, 'Linked deleted', '#FFFFFF', 0, 0, ?4)",
+    )
+    .bind("note-linked-deleted")
+    .bind(&default_id)
+    .bind(now)
+    .bind("mem-default-deleted")
+    .execute(&pool)
+    .await?;
+
     let stats = diagnostics::household_stats(&pool).await?;
 
     let mut default_entry = None;
@@ -83,13 +196,23 @@ async fn household_stats_reports_counts_per_household() -> Result<()> {
     }
 
     let default_entry = default_entry.expect("default household present");
-    assert_eq!(default_entry.counts.get("notes"), Some(&1));
+    assert_eq!(default_entry.counts.get("notes"), Some(&3));
     assert_eq!(default_entry.counts.get("events"), Some(&0));
+    assert_eq!(default_entry.family.members_total, 2);
+    assert_eq!(default_entry.family.attachments_total, 1);
+    assert_eq!(default_entry.family.renewals_total, 1);
+    assert_eq!(default_entry.family.notes_linked_total, 1);
+    assert_eq!(default_entry.family.members_stale, 1);
 
     let secondary_entry = secondary_entry.expect("secondary household present");
     assert_eq!(secondary_entry.counts.get("notes"), Some(&1));
     assert_eq!(secondary_entry.counts.get("events"), Some(&1));
     assert_eq!(secondary_entry.counts.get("files"), Some(&1));
+    assert_eq!(secondary_entry.family.members_total, 1);
+    assert_eq!(secondary_entry.family.attachments_total, 0);
+    assert_eq!(secondary_entry.family.renewals_total, 0);
+    assert_eq!(secondary_entry.family.notes_linked_total, 0);
+    assert_eq!(secondary_entry.family.members_stale, 0);
 
     Ok(())
 }
