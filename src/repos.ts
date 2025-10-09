@@ -218,7 +218,7 @@ export const familyRepo = {
     },
   },
   renewals: {
-    async list(memberId?: string, householdId?: string): Promise<Renewal[]> {
+    async list(memberId: string, householdId: string): Promise<Renewal[]> {
       const start = performance.now();
       logUI("DEBUG", "ui.family.renewals.list.start", { member_id: memberId, household_id: householdId });
       try {
@@ -266,18 +266,20 @@ export const familyRepo = {
         throw error;
       }
     },
-    async delete(id: string): Promise<void> {
+    async delete(id: string, householdId: string): Promise<void> {
       const start = performance.now();
-      logUI("DEBUG", "ui.family.renewals.delete.start", { renewal_id: id });
+      logUI("DEBUG", "ui.family.renewals.delete.start", { renewal_id: id, household_id: householdId });
       try {
-        await call("member_renewals_delete", { id });
+        await call("member_renewals_delete", { id, householdId });
         logUI("INFO", "ui.family.renewals.delete.complete", {
           renewal_id: id,
+          household_id: householdId,
           duration_ms: Math.round(performance.now() - start),
         });
       } catch (error) {
         logUI("ERROR", "ui.family.renewals.delete.error", {
           renewal_id: id,
+          household_id: householdId,
           message: (error as Error)?.message ?? String(error),
         });
         throw error;

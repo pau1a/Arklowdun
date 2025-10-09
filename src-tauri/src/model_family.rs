@@ -12,12 +12,11 @@ pub const GENERIC_FAIL_MESSAGE: &str = "Something went wrong — please try agai
 
 pub const RENEWALS_INVALID_KIND: &str = "RENEWALS/INVALID_KIND";
 pub const RENEWALS_INVALID_OFFSET: &str = "RENEWALS/INVALID_OFFSET";
-pub const RENEWALS_INVALID_EXPIRY: &str = "RENEWALS/INVALID_EXPIRY";
 pub const RENEWALS_INVALID_LABEL: &str = "RENEWALS/INVALID_LABEL";
+pub const RENEWALS_PAST_EXPIRY: &str = "RENEWALS/PAST_EXPIRY";
 
 pub const VALIDATION_HOUSEHOLD_MISMATCH: &str = "VALIDATION/HOUSEHOLD_MISMATCH";
 pub const VALIDATION_MEMBER_MISSING: &str = "VALIDATION/MEMBER_NOT_FOUND";
-pub const VALIDATION_SCOPE_REQUIRED: &str = "VALIDATION/HOUSEHOLD_OR_MEMBER_REQUIRED";
 
 pub const ALLOWED_ATTACHMENT_ROOTS: &[&str] = &["appData"];
 pub const RENEWAL_KINDS: &[&str] = &[
@@ -82,10 +81,10 @@ pub struct AttachmentImportPathsPayload {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct RenewalsListRequest {
-    #[serde(default, alias = "memberId")]
-    pub member_id: Option<String>,
-    #[serde(default, alias = "householdId")]
-    pub household_id: Option<String>,
+    #[serde(alias = "memberId")]
+    pub member_id: String,
+    #[serde(alias = "householdId")]
+    pub household_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -110,6 +109,8 @@ pub struct RenewalUpsertPayload {
 #[derive(Debug, Clone, Deserialize)]
 pub struct RenewalDeletePayload {
     pub id: String,
+    #[serde(alias = "householdId")]
+    pub household_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

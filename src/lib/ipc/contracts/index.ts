@@ -207,7 +207,7 @@ const RenewalRawSchema = z.object({
   household_id: z.string(),
   member_id: z.string(),
   kind: RenewalKind,
-  label: z.string().max(100).nullable().optional(),
+  label: z.string().max(120).nullable().optional(),
   expires_at: z.number(),
   remind_on_expiry: z.union([z.boolean(), z.number()]),
   remind_offset_days: z.number(),
@@ -236,7 +236,7 @@ export const RenewalInputSchema = z.object({
   householdId: z.string(),
   memberId: z.string(),
   kind: RenewalKind,
-  label: z.string().max(100).optional(),
+  label: z.string().min(1).max(120).optional(),
   expiresAt: z.number().positive(),
   remindOnExpiry: z.boolean(),
   remindOffsetDays: z.number().int().min(0).max(365),
@@ -264,15 +264,24 @@ const memberRenewalsListRequest = z
     householdId: z.string().optional(),
   })
   .superRefine((value, ctx) => {
-    if (
-      typeof value.member_id === "string" ||
-      typeof value.memberId === "string" ||
-      typeof value.household_id === "string" ||
-      typeof value.householdId === "string"
-    ) {
-      return;
+    if (typeof (value.memberId ?? value.member_id) !== "string") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "member id required" });
     }
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "scope required" });
+    if (typeof (value.householdId ?? value.household_id) !== "string") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "household id required" });
+    }
+  });
+
+const renewalDeleteRequest = z
+  .object({
+    id: z.string(),
+    householdId: z.string().optional(),
+    household_id: z.string().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (typeof (value.householdId ?? value.household_id) !== "string") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "household id required" });
+    }
   });
 
 const dbRequest = emptyObject;
@@ -570,7 +579,7 @@ export const contracts = {
     response: RenewalRawSchema,
   }),
   // Rust returns () which maps to null over IPC
-  member_renewals_delete: contract({ request: idRequest, response: z.null() }),
+  member_renewals_delete: contract({ request: renewalDeleteRequest, response: z.null() }),
   household_create: contract({
     request: z.object({ args: householdArgs }).passthrough(),
     response: householdRecord,

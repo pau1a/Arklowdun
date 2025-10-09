@@ -10,9 +10,8 @@ use crate::{
         RenewalDeletePayload, RenewalInput, RenewalsListRequest, ALLOWED_ATTACHMENT_ROOTS,
         ATTACHMENTS_INVALID_INPUT, ATTACHMENTS_INVALID_ROOT, ATTACHMENTS_OUT_OF_VAULT,
         ATTACHMENTS_PATH_CONFLICT, ATTACHMENTS_SYMLINK_REJECTED, FAMILY_DECODE_ERROR, GENERIC_FAIL,
-        GENERIC_FAIL_MESSAGE, RENEWALS_INVALID_EXPIRY, RENEWALS_INVALID_KIND,
-        RENEWALS_INVALID_LABEL, RENEWALS_INVALID_OFFSET, RENEWAL_KINDS,
-        VALIDATION_HOUSEHOLD_MISMATCH, VALIDATION_MEMBER_MISSING, VALIDATION_SCOPE_REQUIRED,
+        GENERIC_FAIL_MESSAGE, RENEWALS_INVALID_KIND, RENEWALS_INVALID_LABEL, RENEWALS_INVALID_OFFSET,
+        RENEWALS_PAST_EXPIRY, RENEWAL_KINDS, VALIDATION_HOUSEHOLD_MISMATCH, VALIDATION_MEMBER_MISSING,
     },
     time::now_ms,
     vault::Vault,
@@ -130,27 +129,36 @@ fn validate_offset(offset: i64) -> AppResult<()> {
 }
 
 fn validate_expiry(expires_at: i64) -> AppResult<()> {
-    if expires_at > 0 {
+    if expires_at > now_ms() {
         Ok(())
     } else {
-        Err(AppError::new(
-            RENEWALS_INVALID_EXPIRY,
-            "Expiry must be a positive timestamp.",
-        ))
+        Err(
+            AppError::new(RENEWALS_PAST_EXPIRY, "Expiry must be in the future.")
+                .with_context("expires_at", expires_at.to_string()),
+        )
     }
 }
 
-fn validate_label(label: &Option<String>) -> AppResult<()> {
+fn normalize_label(label: Option<String>) -> AppResult<Option<String>> {
     if let Some(label) = label {
-        if label.chars().count() > 100 {
+        let trimmed = label.trim();
+        if trimmed.is_empty() {
             return Err(AppError::new(
                 RENEWALS_INVALID_LABEL,
-                "Renewal labels are limited to 100 characters.",
-            )
-            .with_context("length", label.chars().count().to_string()));
+                "Labels must include at least one visible character.",
+            ));
         }
+        if trimmed.chars().count() > 120 {
+            return Err(AppError::new(
+                RENEWALS_INVALID_LABEL,
+                "Renewal labels are limited to 120 characters.",
+            )
+            .with_context("length", trimmed.chars().count().to_string()));
+        }
+        Ok(Some(trimmed.to_string()))
+    } else {
+        Ok(None)
     }
-    Ok(())
 }
 
 async fn member_household(pool: &SqlitePool, member_id: &str) -> AppResult<Option<String>> {
@@ -455,42 +463,15 @@ pub async fn renewals_list(
     pool: &SqlitePool,
     request: &RenewalsListRequest,
 ) -> AppResult<Vec<Renewal>> {
-    let (sql, bind_member, bind_household) = if let Some(member_id) = &request.member_id {
-        (
-            "SELECT id, household_id, member_id, kind, label, expires_at, remind_on_expiry, remind_offset_days, updated_at \
-             FROM member_renewals WHERE member_id = ? ORDER BY expires_at ASC, id",
-            Some(member_id.clone()),
-            None,
-        )
-    } else if let Some(household_id) = &request.household_id {
-        (
-            "SELECT id, household_id, member_id, kind, label, expires_at, remind_on_expiry, remind_offset_days, updated_at \
-             FROM member_renewals WHERE household_id = ? ORDER BY expires_at ASC, id",
-            None,
-            Some(household_id.clone()),
-        )
-    } else {
-        return Err(AppError::new(
-            VALIDATION_SCOPE_REQUIRED,
-            "A member_id or household_id is required.",
-        ));
-    };
+    ensure_member_in_household(pool, &request.household_id, &request.member_id).await?;
 
-    let mut query = sqlx::query(sql);
-    if let Some(member_id) = bind_member {
-        if member_household(pool, &member_id).await?.is_none() {
-            return Err(
-                AppError::new(VALIDATION_MEMBER_MISSING, "Member record not found.")
-                    .with_context("member_id", member_id),
-            );
-        }
-        query = query.bind(member_id);
-    } else if let Some(household_id) = bind_household {
-        query = query.bind(household_id);
-    }
-
-    let rows = query
-        .fetch_all(pool)
+    let rows = sqlx::query(
+        "SELECT id, household_id, member_id, kind, label, expires_at, remind_on_expiry, remind_offset_days, updated_at \
+         FROM member_renewals WHERE household_id = ? AND member_id = ? ORDER BY expires_at ASC, id",
+    )
+    .bind(&request.household_id)
+    .bind(&request.member_id)
+    .fetch_all(pool)
         .await
         .map_err(|err| wrap_unexpected(err.into(), "member_renewals_list"))?;
 
@@ -501,7 +482,7 @@ pub async fn renewals_upsert(pool: &SqlitePool, mut input: RenewalInput) -> AppR
     validate_renewal_kind(&input.kind)?;
     validate_offset(input.remind_offset_days)?;
     validate_expiry(input.expires_at)?;
-    validate_label(&input.label)?;
+    input.label = normalize_label(input.label)?;
     ensure_member_in_household(pool, &input.household_id, &input.member_id).await?;
 
     let mut tx = pool
@@ -593,8 +574,9 @@ pub async fn renewals_delete(pool: &SqlitePool, payload: RenewalDeletePayload) -
         .await
         .map_err(|err| wrap_unexpected(err.into(), "member_renewals_delete_begin"))?;
 
-    sqlx::query("DELETE FROM member_renewals WHERE id = ?")
+    sqlx::query("DELETE FROM member_renewals WHERE id = ? AND household_id = ?")
         .bind(&payload.id)
+        .bind(&payload.household_id)
         .execute(&mut *tx)
         .await
         .map_err(|err| wrap_unexpected(err.into(), "member_renewals_delete"))?;

@@ -19,8 +19,8 @@ use arklowdun_lib::{
         RenewalDeletePayload, RenewalUpsertPayload, RenewalsListRequest, ATTACHMENTS_INVALID_INPUT,
         ATTACHMENTS_INVALID_ROOT, ATTACHMENTS_OUT_OF_VAULT, ATTACHMENTS_PATH_CONFLICT,
         ATTACHMENTS_SYMLINK_REJECTED, GENERIC_FAIL, GENERIC_FAIL_MESSAGE, RENEWALS_INVALID_KIND,
-        RENEWALS_INVALID_OFFSET, VALIDATION_HOUSEHOLD_MISMATCH, VALIDATION_MEMBER_MISSING,
-        VALIDATION_SCOPE_REQUIRED,
+        RENEWALS_INVALID_OFFSET, RENEWALS_PAST_EXPIRY, VALIDATION_HOUSEHOLD_MISMATCH,
+        VALIDATION_MEMBER_MISSING,
     },
     vault::Vault,
     vault_migration::VaultMigrationManager,
@@ -413,8 +413,8 @@ async fn member_renewals_list_round_trip() -> Result<()> {
     let renewals = commands_family::member_renewals_list(
         app.state(),
         RenewalsListRequest {
-            member_id: Some("mem-1".into()),
-            household_id: None,
+            member_id: "mem-1".into(),
+            household_id: "hh-1".into(),
         },
     )
     .await?;
@@ -425,6 +425,7 @@ async fn member_renewals_list_round_trip() -> Result<()> {
         app.state(),
         RenewalDeletePayload {
             id: renewals[0].id.to_string(),
+            household_id: "hh-1".into(),
         },
     )
     .await?;
@@ -432,8 +433,8 @@ async fn member_renewals_list_round_trip() -> Result<()> {
     let remaining = commands_family::member_renewals_list(
         app.state(),
         RenewalsListRequest {
-            member_id: Some("mem-1".into()),
-            household_id: None,
+            member_id: "mem-1".into(),
+            household_id: "hh-1".into(),
         },
     )
     .await?;
@@ -452,14 +453,14 @@ async fn member_renewals_list_requires_scope() -> Result<()> {
     let err = commands_family::member_renewals_list(
         app.state(),
         RenewalsListRequest {
-            member_id: None,
-            household_id: None,
+            member_id: "missing".into(),
+            household_id: "hh-1".into(),
         },
     )
     .await
-    .expect_err("scope required");
+    .expect_err("member must exist");
 
-    assert_eq!(err.code(), VALIDATION_SCOPE_REQUIRED);
+    assert_eq!(err.code(), VALIDATION_MEMBER_MISSING);
     Ok(())
 }
 
@@ -473,6 +474,7 @@ async fn member_renewals_delete_is_idempotent() -> Result<()> {
         app.state(),
         RenewalDeletePayload {
             id: Uuid::new_v4().to_string(),
+            household_id: "hh-1".into(),
         },
     )
     .await?;
@@ -481,6 +483,7 @@ async fn member_renewals_delete_is_idempotent() -> Result<()> {
         app.state(),
         RenewalDeletePayload {
             id: Uuid::new_v4().to_string(),
+            household_id: "hh-1".into(),
         },
     )
     .await?;
