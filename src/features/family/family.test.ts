@@ -139,11 +139,33 @@ describe("familyRepo adapters", () => {
     const notes: (Note & { member_id?: string; memberId?: string })[] = [
       { id: "n1", household_id: "hh-1", text: "A", created_at: 1, updated_at: 1, member_id: "mem-1" } as any,
       { id: "n2", household_id: "hh-1", text: "B", created_at: 1, updated_at: 1, member_id: "mem-2" } as any,
+      { id: "n3", household_id: "hh-1", text: "C", created_at: 1, updated_at: 1, member_id: null } as any,
     ];
 
     const filtered = familyRepo.notes.listByMember(notes as Note[], "mem-1");
     expect(filtered).toHaveLength(1);
     expect(filtered[0].id).toBe("n1");
+  });
+
+  it("optionally includes household notes when toggled", () => {
+    const notes: (Note & { member_id?: string | null })[] = [
+      { id: "n1", household_id: "hh-1", text: "A", created_at: 1, updated_at: 1, member_id: "mem-1" } as any,
+      { id: "n2", household_id: "hh-1", text: "B", created_at: 1, updated_at: 1, member_id: null } as any,
+      { id: "n3", household_id: "hh-1", text: "C", created_at: 1, updated_at: 1, member_id: "mem-2" } as any,
+    ];
+
+    const filtered = familyRepo.notes.listByMember(notes as Note[], "mem-1", { includeHousehold: true });
+    expect(filtered.map((note) => note.id)).toEqual(["n1", "n2"]);
+  });
+
+  it("returns household notes when member id is null", () => {
+    const notes: (Note & { member_id?: string | null })[] = [
+      { id: "n1", household_id: "hh-1", text: "A", created_at: 1, updated_at: 1, member_id: "mem-1" } as any,
+      { id: "n2", household_id: "hh-1", text: "B", created_at: 1, updated_at: 1, member_id: null } as any,
+    ];
+
+    const filtered = familyRepo.notes.listByMember(notes as Note[], null);
+    expect(filtered).toEqual([{ id: "n2", household_id: "hh-1", text: "B", created_at: 1, updated_at: 1, member_id: null } as any]);
   });
 });
 

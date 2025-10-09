@@ -285,10 +285,29 @@ export const familyRepo = {
     },
   },
   notes: {
-    listByMember(notes: Note[], memberId: string): Note[] {
-      return notes.filter((note: Note & { member_id?: string; memberId?: string }) => {
-        const linked = note.member_id ?? note.memberId;
-        return typeof linked === "string" && linked === memberId;
+    listByMember(
+      notes: Note[],
+      memberId: string | null,
+      options?: { includeHousehold?: boolean },
+    ): Note[] {
+      const includeHousehold = Boolean(options?.includeHousehold);
+
+      return notes.filter((note: Note & { member_id?: string | null; memberId?: string | null }) => {
+        const linked = note.member_id ?? note.memberId ?? null;
+
+        if (memberId == null) {
+          return linked == null;
+        }
+
+        if (typeof linked === "string" && linked === memberId) {
+          return true;
+        }
+
+        if (includeHousehold && linked == null) {
+          return true;
+        }
+
+        return false;
       });
     },
   },
