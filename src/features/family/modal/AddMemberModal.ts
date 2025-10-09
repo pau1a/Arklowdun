@@ -5,8 +5,9 @@ import { toast } from "@ui/Toast";
 import { normalizeError } from "@lib/ipc/call";
 import { logUI } from "@lib/uiLog";
 import { emit } from "@store/events";
+import type { FamilyMember as BackendFamilyMember } from "../../../models";
+import { familyRepo } from "../../../repos";
 import { familyStore } from "../family.store";
-import type { FamilyMember } from "../family.types";
 
 type ModalStep = 1 | 2;
 
@@ -331,14 +332,27 @@ export function mountAddMemberModal(
 
     const memberCount = Number(options.getMemberCount?.() ?? 0);
     const nickname = values.nickname.trim();
-    const payload: Partial<FamilyMember> = {
-      name: nickname,
-      notes: null,
-      position: Number.isFinite(memberCount) ? memberCount : 0,
-    };
+    const position = Number.isFinite(memberCount) ? memberCount : 0;
+    let optimisticHandle: ReturnType<typeof familyStore.optimisticCreate> | null = null;
 
     try {
-      const created = await familyStore.upsert(payload);
+      optimisticHandle = familyStore.optimisticCreate({
+        name: nickname,
+        nickname,
+        notes: null,
+        position,
+      });
+      const createPayload = {
+        name: nickname,
+        notes: null,
+        position,
+        household_id: options.householdId,
+      } as const;
+      const createdRaw = await familyRepo.create(
+        options.householdId,
+        createPayload as unknown as Partial<BackendFamilyMember>,
+      );
+      const created = familyStore.commitCreated(optimisticHandle.memberId, createdRaw);
       const duration = (typeof performance !== "undefined" && performance.now
         ? performance.now()
         : Date.now()) - start;
@@ -351,6 +365,13 @@ export function mountAddMemberModal(
       submitting = false;
       close();
     } catch (error) {
+      if (optimisticHandle) {
+        try {
+          optimisticHandle.rollback();
+        } catch {
+          // ignore rollback failures
+        }
+      }
       submitting = false;
       const normalized = normalizeError(error);
       const code = normalized.code ?? "";

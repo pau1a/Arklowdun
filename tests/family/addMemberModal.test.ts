@@ -5,10 +5,14 @@ import { JSDOM } from "jsdom";
 import { mountAddMemberModal } from "../../src/features/family/modal/index.ts";
 import { familyStore } from "../../src/features/family/family.store";
 import type { FamilyMember } from "../../src/features/family/family.types";
+import { familyRepo } from "../../src/repos.ts";
 import { toast } from "../../src/ui/Toast";
 import { on, type FamilyMemberAddedPayload } from "../../src/store/events";
 
 type UpsertFn = typeof familyStore.upsert;
+type OptimisticCreateFn = typeof familyStore.optimisticCreate;
+type CommitCreatedFn = typeof familyStore.commitCreated;
+type RepoCreateFn = typeof familyRepo.create;
 type ToastShowFn = typeof toast.show;
 test.beforeEach(() => {
   (globalThis as any).performance = nodePerformance;
@@ -31,10 +35,16 @@ test.afterEach(() => {
   delete (globalThis as any).HTMLElement;
   delete (globalThis as any).HTMLInputElement;
   familyStore.upsert = originalUpsert;
+  familyStore.optimisticCreate = originalOptimisticCreate;
+  familyStore.commitCreated = originalCommitCreated;
+  familyRepo.create = originalRepoCreate;
   toast.show = originalToastShow;
 });
 
 const originalUpsert: UpsertFn = familyStore.upsert;
+const originalOptimisticCreate: OptimisticCreateFn = familyStore.optimisticCreate;
+const originalCommitCreated: CommitCreatedFn = familyStore.commitCreated;
+const originalRepoCreate: RepoCreateFn = familyRepo.create;
 const originalToastShow: ToastShowFn = toast.show;
 
 function createMember(partial: Partial<FamilyMember> = {}): FamilyMember {
@@ -82,11 +92,40 @@ test("shows an inline error when no nickname is provided", () => {
 });
 
 test("emits success feedback and event on create", async () => {
-  const upsertCalls: Partial<FamilyMember>[] = [];
-  familyStore.upsert = (async (payload: Partial<FamilyMember>) => {
-    upsertCalls.push(payload);
-    return createMember({ id: "mem-123", name: payload.name ?? "Member" });
-  }) as UpsertFn;
+  const optimisticCalls: Partial<FamilyMember>[] = [];
+  let rollbackCalled = false;
+  familyStore.optimisticCreate = ((payload: Partial<FamilyMember>) => {
+    optimisticCalls.push(payload);
+    return {
+      memberId: "mem-temp",
+      rollback() {
+        rollbackCalled = true;
+      },
+    };
+  }) as OptimisticCreateFn;
+
+  const commitCalls: { tempId: string | null | undefined; raw: unknown }[] = [];
+  familyStore.commitCreated = ((tempId, raw) => {
+    commitCalls.push({ tempId, raw });
+    return createMember({ id: "mem-123", name: (raw as any)?.name ?? "Member" });
+  }) as CommitCreatedFn;
+
+  const repoCalls: { householdId: string; data: unknown }[] = [];
+  familyRepo.create = (async (householdId, data) => {
+    repoCalls.push({ householdId, data });
+    return {
+      id: "mem-123",
+      name: (data as any)?.name ?? "Member",
+      birthday: 0,
+      notes: (data as any)?.notes ?? "",
+      documents: [],
+      household_id: householdId,
+      position: (data as any)?.position ?? 0,
+      created_at: 1,
+      updated_at: 1,
+      deleted_at: undefined,
+    } as any;
+  }) as RepoCreateFn;
 
   const toastCalls: Parameters<ToastShowFn>[0][] = [];
   toast.show = ((options) => {
@@ -111,9 +150,23 @@ test("emits success feedback and event on create", async () => {
 
   await Promise.resolve();
 
-  assert.equal(upsertCalls.length, 1);
-  assert.equal(upsertCalls[0]?.name, "Dee");
-  assert.equal(upsertCalls[0]?.position, 2);
+  assert.equal(optimisticCalls.length, 1);
+  assert.equal(optimisticCalls[0]?.name, "Dee");
+  assert.equal(optimisticCalls[0]?.position, 2);
+  assert.equal(repoCalls.length, 1);
+  assert.deepEqual(repoCalls[0], {
+    householdId: "house-1",
+    data: {
+      name: "Dee",
+      notes: null,
+      position: 2,
+      household_id: "house-1",
+    },
+  });
+  assert.equal(commitCalls.length, 1);
+  assert.equal(commitCalls[0]?.tempId, "mem-temp");
+  assert.equal((commitCalls[0]?.raw as any)?.name, "Dee");
+  assert.equal(rollbackCalled, false);
   assert.deepEqual(toastCalls[toastCalls.length - 1], {
     kind: "success",
     message: "Member added",
@@ -128,10 +181,24 @@ test("emits success feedback and event on create", async () => {
 });
 
 test("surfaces duplicate position errors with a friendly toast", async () => {
-  familyStore.upsert = (async () => {
+  let rollbackCalls = 0;
+  familyStore.optimisticCreate = ((payload: Partial<FamilyMember>) => {
+    return {
+      memberId: "mem-temp",
+      rollback() {
+        rollbackCalls += 1;
+      },
+    };
+  }) as OptimisticCreateFn;
+
+  familyStore.commitCreated = ((tempId) => {
+    throw new Error(`should not commit ${String(tempId)}`);
+  }) as CommitCreatedFn;
+
+  familyRepo.create = (async () => {
     const error = { code: "DB_CONSTRAINT_UNIQUE", message: "duplicate" };
     throw error;
-  }) as UpsertFn;
+  }) as RepoCreateFn;
 
   const toastCalls: Parameters<ToastShowFn>[0][] = [];
   toast.show = ((options) => {
@@ -159,6 +226,7 @@ test("surfaces duplicate position errors with a friendly toast", async () => {
     kind: "info",
     message: "Could not save — please try again",
   });
+  assert.equal(rollbackCalls, 1);
 });
 
 test("restores focus to the trigger when the modal closes", () => {

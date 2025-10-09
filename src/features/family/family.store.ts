@@ -355,6 +355,45 @@ export const familyStore = {
     };
   },
 
+  optimisticCreate(patch: Partial<FamilyMember>) {
+    const householdId = ensureHydrated();
+    const previousMembers = state.members;
+    const memberId = patch.id ?? uuid("member-temp");
+    const optimistic: FamilyMember = {
+      ...normalizeMember({}, householdId),
+      ...patch,
+      id: memberId,
+      householdId,
+    };
+    const nextMembers = { ...state.members, [memberId]: optimistic };
+    state = { ...state, members: nextMembers };
+    emit();
+    logUI("INFO", "ui.family.optimisticInsert", { member_id: memberId });
+    return {
+      memberId,
+      rollback() {
+        state = { ...state, members: previousMembers };
+        emit();
+        logUI("INFO", "ui.family.rollback", { member_id: memberId });
+      },
+    };
+  },
+
+  commitCreated(tempId: string | null | undefined, raw: unknown): FamilyMember {
+    const householdId = ensureHydrated();
+    const created = normalizeMember(toRecord(raw), householdId);
+    const reconciledMembers = { ...state.members };
+    if (tempId && reconciledMembers[tempId]) {
+      delete reconciledMembers[tempId];
+    }
+    reconciledMembers[created.id] = created;
+    state = { ...state, members: reconciledMembers };
+    emit();
+    logUI("INFO", "ui.family.upsert", { member_id: created.id, optimistic: false });
+    logUI("INFO", "ui.family.reconciled", { member_id: created.id });
+    return cloneMember(created);
+  },
+
   async upsert(patch: Partial<FamilyMember>): Promise<FamilyMember> {
     const householdId = ensureHydrated();
     const existingId = patch.id && state.members[patch.id] ? patch.id : undefined;
