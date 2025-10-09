@@ -20,7 +20,7 @@ Navigation is keyboard-friendly (`Tab`/`Shift+Tab`, `Enter` to advance/submit, `
 ## Submission and state integration
 
 - On submit the modal derives `name` from the supplied nickname, calculates `position` from `familyStore.getAll().length`, and immediately seeds an optimistic shell via `familyStore.optimisticCreate` so the grid renders the pending card.
-- Persistence runs through `familyRepo.create(householdId, data)` with the trimmed payload (`name`, `notes`, `position`, plus `household_id`), and the resulting row is reconciled through `familyStore.commitCreated` to swap the optimistic placeholder for the real member.
+- Persistence runs through `familyRepo.create({ householdId, name, notes, position })` with the trimmed payload, and the resulting row is reconciled through `familyStore.commitCreated` to swap the optimistic placeholder for the real member.
 - Successful creates trigger `toast.show({ kind: "success", message: "Member added" })`, emit a `family:memberAdded` event (consumed by the grid to focus/scroll into view), and log a debug entry via `logUI("DEBUG", "ui.family.modal.create_success", { member_id, duration_ms })`.
 
 ## Error handling

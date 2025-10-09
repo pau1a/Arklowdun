@@ -1,6 +1,7 @@
 // src/repos.ts
 import { call } from "@lib/ipc/call";
 import { logUI } from "@lib/uiLog";
+import { z } from "zod";
 import {
   AttachmentInputSchema,
   AttachmentRefSchema,
@@ -113,12 +114,44 @@ export const propertyDocsRepo     = domainRepo<PropertyDocument>("property_docum
 export const petsRepo             = domainRepo<Pet>("pets", "position, created_at, id");
 export const petMedicalRepo       = domainRepo<PetMedicalRecord>("pet_medical", "date DESC, created_at DESC, id");
 const familyMembersRepo           = domainRepo<FamilyMember>("family_members", "position, created_at, id");
+
+const FamilyMemberCreateRequestSchema = z
+  .object({
+    householdId: z.string().min(1),
+    name: z.string().min(1),
+    position: z.number().int().nonnegative(),
+    notes: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+export type FamilyMemberCreateRequest = z.infer<typeof FamilyMemberCreateRequestSchema>;
+
+const FamilyMemberRawSchema = z
+  .object({
+    id: z.string(),
+    household_id: z.string(),
+    name: z.string(),
+    position: z.number().int(),
+    notes: z.string().nullable().optional(),
+    created_at: z.number(),
+    updated_at: z.number(),
+    deleted_at: z.number().nullable().optional(),
+  })
+  .passthrough();
 export const inventoryRepo        = domainRepo<InventoryItem>("inventory_items", "position, created_at, id");
 export const notesRepo            = domainRepo<Note>("notes", "position, created_at, id");
 export const shoppingRepo         = domainRepo<ShoppingItem>("shopping_items", "position, created_at, id");
 
 export const familyRepo = {
   ...familyMembersRepo,
+  async create(input: FamilyMemberCreateRequest): Promise<FamilyMember> {
+    const payload = FamilyMemberCreateRequestSchema.parse(input);
+    const response = await call("family_members_create", {
+      ...payload,
+      household_id: payload.householdId,
+    });
+    return FamilyMemberRawSchema.parse(response) as FamilyMember;
+  },
   attachments: {
     async list(memberId: string): Promise<AttachmentRef[]> {
       const start = performance.now();

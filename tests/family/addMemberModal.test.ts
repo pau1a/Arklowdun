@@ -6,6 +6,7 @@ import { mountAddMemberModal } from "../../src/features/family/modal/index.ts";
 import { familyStore } from "../../src/features/family/family.store";
 import type { FamilyMember } from "../../src/features/family/family.types";
 import { familyRepo } from "../../src/repos.ts";
+import type { FamilyMemberCreateRequest } from "../../src/repos.ts";
 import { toast } from "../../src/ui/Toast";
 import { on, type FamilyMemberAddedPayload } from "../../src/store/events";
 
@@ -110,17 +111,17 @@ test("emits success feedback and event on create", async () => {
     return createMember({ id: "mem-123", name: (raw as any)?.name ?? "Member" });
   }) as CommitCreatedFn;
 
-  const repoCalls: { householdId: string; data: unknown }[] = [];
-  familyRepo.create = (async (householdId, data) => {
-    repoCalls.push({ householdId, data });
+  const repoCalls: FamilyMemberCreateRequest[] = [];
+  familyRepo.create = (async (request) => {
+    repoCalls.push(request);
     return {
       id: "mem-123",
-      name: (data as any)?.name ?? "Member",
+      name: request.name ?? "Member",
       birthday: 0,
-      notes: (data as any)?.notes ?? "",
+      notes: request.notes ?? "",
       documents: [],
-      household_id: householdId,
-      position: (data as any)?.position ?? 0,
+      household_id: request.householdId,
+      position: request.position ?? 0,
       created_at: 1,
       updated_at: 1,
       deleted_at: undefined,
@@ -156,12 +157,9 @@ test("emits success feedback and event on create", async () => {
   assert.equal(repoCalls.length, 1);
   assert.deepEqual(repoCalls[0], {
     householdId: "house-1",
-    data: {
-      name: "Dee",
-      notes: null,
-      position: 2,
-      household_id: "house-1",
-    },
+    name: "Dee",
+    notes: null,
+    position: 2,
   });
   assert.equal(commitCalls.length, 1);
   assert.equal(commitCalls[0]?.tempId, "mem-temp");

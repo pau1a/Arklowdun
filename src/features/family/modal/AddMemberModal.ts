@@ -5,7 +5,6 @@ import { toast } from "@ui/Toast";
 import { normalizeError } from "@lib/ipc/call";
 import { logUI } from "@lib/uiLog";
 import { emit } from "@store/events";
-import type { FamilyMember as BackendFamilyMember } from "../../../models";
 import { familyRepo } from "../../../repos";
 import { familyStore } from "../family.store";
 
@@ -342,16 +341,17 @@ export function mountAddMemberModal(
         notes: null,
         position,
       });
-      const createPayload = {
+      const request = {
+        householdId: options.householdId,
         name: nickname,
-        notes: null,
+        notes: null as string | null,
         position,
-        household_id: options.householdId,
-      } as const;
-      const createdRaw = await familyRepo.create(
-        options.householdId,
-        createPayload as unknown as Partial<BackendFamilyMember>,
-      );
+      };
+      logUI("DEBUG", "ui.family.modal.create_attempt", {
+        has_household: Boolean(request.householdId),
+        position: request.position,
+      });
+      const createdRaw = await familyRepo.create(request);
       const created = familyStore.commitCreated(optimisticHandle.memberId, createdRaw);
       const duration = (typeof performance !== "undefined" && performance.now
         ? performance.now()
@@ -387,7 +387,7 @@ export function mountAddMemberModal(
       }
       logUI("WARN", "ui.family.modal.create_failed", {
         code: normalized.code,
-        context: normalized.context,
+        ctx: normalized.context,
       });
       updateState();
     }

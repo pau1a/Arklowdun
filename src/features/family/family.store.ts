@@ -1,6 +1,7 @@
 import { normalizeError } from "@lib/ipc/call";
 import { logUI } from "@lib/uiLog";
 import { familyRepo } from "../../repos";
+import type { FamilyMemberCreateRequest } from "../../repos";
 import type {
   FamilyMember,
   FamilyState,
@@ -395,6 +396,9 @@ export const familyStore = {
   },
 
   async upsert(patch: Partial<FamilyMember>): Promise<FamilyMember> {
+    if (!patch || typeof patch !== "object") {
+      throw new Error("familyStore.upsert requires a patch object");
+    }
     const householdId = ensureHydrated();
     const existingId = patch.id && state.members[patch.id] ? patch.id : undefined;
     const memberId = existingId ?? patch.id ?? uuid("member-temp");
@@ -431,7 +435,8 @@ export const familyStore = {
       }
 
       const payload = denormalizeMemberPatch({ ...patch, id: undefined });
-      const createdRaw = await familyRepo.create(householdId, payload);
+      const request = { ...payload, householdId } as FamilyMemberCreateRequest;
+      const createdRaw = await familyRepo.create(request);
       const created = normalizeMember(toRecord(createdRaw), householdId);
       const reconciledMembers = { ...state.members };
       delete reconciledMembers[memberId];
