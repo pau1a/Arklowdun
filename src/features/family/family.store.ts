@@ -432,6 +432,7 @@ export const familyStore = {
           (typeof payload === "object" && Object.keys(payload).length === 0)
         ) {
           logUI("INFO", "ui.family.upsert.noop", { member_id: memberId });
+          console.warn("[family.upsert.noop]", { patch, payload });
           const reconciled = state.members[memberId] ?? optimistic;
           return cloneMember(reconciled);
         }

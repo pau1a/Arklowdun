@@ -79,6 +79,10 @@ function domainRepo<T extends object>(table: string, defaultOrderBy: string) {
     },
 
     async update(householdId: string, id: string, data: Partial<T>): Promise<void> {
+      if (data == null || (typeof data === "object" && Object.keys(data).length === 0)) {
+        logUI("INFO", "repo.update.noop", { table, id });
+        return;
+      }
       if (table === "events") {
         throw new Error('Do not use domainRepo("events"). Use eventsApi.* helpers.');
       }
