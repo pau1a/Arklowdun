@@ -3,6 +3,12 @@ import type { FamilyMember } from "./models";
 import { familyRepo } from "./repos";
 import { getHouseholdIdForCalls } from "./db/household";
 import { nowMs, toDate } from "./db/time";
+import { logUI } from "./lib/uiLog";
+
+type FamilyViewDeps = {
+  getHouseholdId?: () => Promise<string>;
+  log?: typeof logUI;
+};
 
 function renderMembers(listEl: HTMLUListElement, members: FamilyMember[]) {
   listEl.innerHTML = "";
@@ -17,19 +23,37 @@ function renderMembers(listEl: HTMLUListElement, members: FamilyMember[]) {
   });
 }
 
-export async function FamilyView(container: HTMLElement) {
+export async function FamilyView(container: HTMLElement, deps?: FamilyViewDeps) {
   const section = document.createElement("section");
   container.innerHTML = "";
   container.appendChild(section);
 
-  const householdId = await getHouseholdIdForCalls();
+  const emitLog = deps?.log ?? logUI;
+  const resolveHouseholdId = deps?.getHouseholdId ?? getHouseholdIdForCalls;
+  const householdId = await resolveHouseholdId();
 
   async function load(): Promise<FamilyMember[]> {
-    // Order: position then created_at so it’s stable
-    return await familyRepo.list({
-      householdId,
-      orderBy: "position, created_at, id",
-    });
+    const start = performance.now();
+    emitLog("DEBUG", "ui.family.list.load.start", { household_id: householdId });
+    try {
+      // Order: position then created_at so it’s stable
+      const members = await familyRepo.list({
+        householdId,
+        orderBy: "position, created_at, id",
+      });
+      emitLog("INFO", "ui.family.list.load.complete", {
+        household_id: householdId,
+        count: members.length,
+        duration_ms: Math.round(performance.now() - start),
+      });
+      return members;
+    } catch (error) {
+      emitLog("ERROR", "ui.family.list.load.error", {
+        household_id: householdId,
+        message: (error as Error)?.message ?? String(error),
+      });
+      throw error;
+    }
   }
 
   let members: FamilyMember[] = await load();
@@ -63,17 +87,37 @@ export async function FamilyView(container: HTMLElement) {
       const [y, m, d] = bdayInput.value.split("-").map(Number);
       const bdayLocalNoon = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0);
 
-      // Create via repo; backend fills id/created_at/updated_at
-      await familyRepo.create(householdId, {
+      const start = performance.now();
+      emitLog("DEBUG", "ui.family.create.start", {
+        household_id: householdId,
         name: nameInput.value,
-        birthday: bdayLocalNoon.getTime(),
-        notes: "",
-        position: members.length,
-      } as Partial<FamilyMember>);
+      });
 
-      await refresh();
-      if (listEl) renderMembers(listEl, members);
-      form.reset();
+      try {
+        // Create via repo; backend fills id/created_at/updated_at
+        const created = await familyRepo.create(householdId, {
+          name: nameInput.value,
+          birthday: bdayLocalNoon.getTime(),
+          notes: "",
+          position: members.length,
+        } as Partial<FamilyMember>);
+
+        emitLog("INFO", "ui.family.create.success", {
+          household_id: householdId,
+          member_id: created.id,
+          duration_ms: Math.round(performance.now() - start),
+        });
+
+        await refresh();
+        if (listEl) renderMembers(listEl, members);
+        form.reset();
+      } catch (error) {
+        emitLog("ERROR", "ui.family.create.error", {
+          household_id: householdId,
+          message: (error as Error)?.message ?? String(error),
+        });
+        throw error;
+      }
     });
 
     listEl?.addEventListener("click", (e) => {
@@ -114,10 +158,20 @@ export async function FamilyView(container: HTMLElement) {
       }
       patch.updated_at = nowMs();
 
+      const start = performance.now();
+      emitLog("DEBUG", "ui.family.drawer.save.start", { member_id: member.id });
       try {
         await familyRepo.update(householdId, member.id, patch);
-      } catch {
+        emitLog("INFO", "ui.family.drawer.save", {
+          member_id: member.id,
+          duration_ms: Math.round(performance.now() - start),
+        });
+      } catch (error) {
         // soft-fail; UI still navigates back
+        emitLog("ERROR", "ui.family.drawer.save.error", {
+          member_id: member.id,
+          message: (error as Error)?.message ?? String(error),
+        });
       }
 
       await refresh();
@@ -125,23 +179,55 @@ export async function FamilyView(container: HTMLElement) {
     });
 
     notesArea?.addEventListener("input", async () => {
+      const start = performance.now();
+      emitLog("DEBUG", "ui.family.drawer.autosave.start", {
+        member_id: member.id,
+        field: "notes",
+      });
       try {
         await familyRepo.update(householdId, member.id, {
           notes: notesArea.value,
           updated_at: nowMs(),
         } as Partial<FamilyMember>);
-      } catch {}
+        emitLog("INFO", "ui.family.drawer.autosave.complete", {
+          member_id: member.id,
+          field: "notes",
+          duration_ms: Math.round(performance.now() - start),
+        });
+      } catch (error) {
+        emitLog("WARN", "ui.family.drawer.autosave.error", {
+          member_id: member.id,
+          field: "notes",
+          message: (error as Error)?.message ?? String(error),
+        });
+      }
     });
 
     bdayInput?.addEventListener("change", async () => {
       const [y, m, d] = bdayInput.value.split("-").map(Number);
       const dt = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0).getTime();
+      const start = performance.now();
+      emitLog("DEBUG", "ui.family.drawer.autosave.start", {
+        member_id: member.id,
+        field: "birthday",
+      });
       try {
         await familyRepo.update(householdId, member.id, {
           birthday: dt,
           updated_at: nowMs(),
         } as Partial<FamilyMember>);
-      } catch {}
+        emitLog("INFO", "ui.family.drawer.autosave.complete", {
+          member_id: member.id,
+          field: "birthday",
+          duration_ms: Math.round(performance.now() - start),
+        });
+      } catch (error) {
+        emitLog("WARN", "ui.family.drawer.autosave.error", {
+          member_id: member.id,
+          field: "birthday",
+          message: (error as Error)?.message ?? String(error),
+        });
+      }
     });
   }
 

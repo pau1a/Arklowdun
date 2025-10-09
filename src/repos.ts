@@ -1,5 +1,6 @@
 // src/repos.ts
 import { call } from "@lib/ipc/call";
+import { logUI } from "@lib/uiLog";
 import {
   AttachmentInputSchema,
   AttachmentRefSchema,
@@ -120,30 +121,132 @@ export const familyRepo = {
   ...familyMembersRepo,
   attachments: {
     async list(memberId: string): Promise<AttachmentRef[]> {
-      const response = await call("member_attachments_list", { memberId });
-      return AttachmentRefSchema.array().parse(response);
+      const start = performance.now();
+      logUI("DEBUG", "ui.family.attachments.list.start", { member_id: memberId });
+      try {
+        const response = await call("member_attachments_list", { memberId });
+        const parsed = AttachmentRefSchema.array().parse(response);
+        logUI("INFO", "ui.family.attachments.list.complete", {
+          member_id: memberId,
+          count: parsed.length,
+          duration_ms: Math.round(performance.now() - start),
+        });
+        return parsed;
+      } catch (error) {
+        logUI("ERROR", "ui.family.attachments.list.error", {
+          member_id: memberId,
+          message: (error as Error)?.message ?? String(error),
+        });
+        throw error;
+      }
     },
     async add(input: AttachmentInput): Promise<AttachmentRef> {
       const payload = AttachmentInputSchema.parse(input);
-      const response = await call("member_attachments_add", payload);
-      return AttachmentRefSchema.parse(response);
+      const start = performance.now();
+      logUI("DEBUG", "ui.family.attachments.add.start", {
+        member_id: payload.member_id,
+        household_id: payload.household_id,
+      });
+      try {
+        const response = await call("member_attachments_add", payload);
+        const parsed = AttachmentRefSchema.parse(response);
+        logUI("INFO", "ui.family.attachments.add.complete", {
+          member_id: payload.member_id,
+          attachment_id: parsed.id,
+          duration_ms: Math.round(performance.now() - start),
+        });
+        return parsed;
+      } catch (error) {
+        logUI("ERROR", "ui.family.attachments.add.error", {
+          member_id: payload.member_id,
+          message: (error as Error)?.message ?? String(error),
+        });
+        throw error;
+      }
     },
     async remove(id: string): Promise<void> {
-      await call("member_attachments_remove", { id });
+      const start = performance.now();
+      logUI("DEBUG", "ui.family.attachments.remove.start", { attachment_id: id });
+      try {
+        await call("member_attachments_remove", { id });
+        logUI("INFO", "ui.family.attachments.remove.complete", {
+          attachment_id: id,
+          duration_ms: Math.round(performance.now() - start),
+        });
+      } catch (error) {
+        logUI("ERROR", "ui.family.attachments.remove.error", {
+          attachment_id: id,
+          message: (error as Error)?.message ?? String(error),
+        });
+        throw error;
+      }
     },
   },
   renewals: {
     async list(memberId?: string, householdId?: string): Promise<Renewal[]> {
-      const response = await call("member_renewals_list", { memberId, householdId });
-      return RenewalSchema.array().parse(response);
+      const start = performance.now();
+      logUI("DEBUG", "ui.family.renewals.list.start", { member_id: memberId, household_id: householdId });
+      try {
+        const response = await call("member_renewals_list", { memberId, householdId });
+        const parsed = RenewalSchema.array().parse(response);
+        logUI("INFO", "ui.family.renewals.list.complete", {
+          member_id: memberId,
+          household_id: householdId,
+          count: parsed.length,
+          duration_ms: Math.round(performance.now() - start),
+        });
+        return parsed;
+      } catch (error) {
+        logUI("ERROR", "ui.family.renewals.list.error", {
+          member_id: memberId,
+          household_id: householdId,
+          message: (error as Error)?.message ?? String(error),
+        });
+        throw error;
+      }
     },
     async upsert(input: RenewalInput): Promise<Renewal> {
       const payload = RenewalInputSchema.parse(input);
-      const response = await call("member_renewals_upsert", payload);
-      return RenewalSchema.parse(response);
+      const start = performance.now();
+      logUI("DEBUG", "ui.family.renewals.upsert.start", {
+        member_id: payload.member_id,
+        household_id: payload.household_id,
+      });
+      try {
+        const response = await call("member_renewals_upsert", payload);
+        const parsed = RenewalSchema.parse(response);
+        logUI("INFO", "ui.family.renewals.upsert.complete", {
+          member_id: payload.member_id,
+          household_id: payload.household_id,
+          renewal_id: parsed.id,
+          duration_ms: Math.round(performance.now() - start),
+        });
+        return parsed;
+      } catch (error) {
+        logUI("ERROR", "ui.family.renewals.upsert.error", {
+          member_id: payload.member_id,
+          household_id: payload.household_id,
+          message: (error as Error)?.message ?? String(error),
+        });
+        throw error;
+      }
     },
     async delete(id: string): Promise<void> {
-      await call("member_renewals_delete", { id });
+      const start = performance.now();
+      logUI("DEBUG", "ui.family.renewals.delete.start", { renewal_id: id });
+      try {
+        await call("member_renewals_delete", { id });
+        logUI("INFO", "ui.family.renewals.delete.complete", {
+          renewal_id: id,
+          duration_ms: Math.round(performance.now() - start),
+        });
+      } catch (error) {
+        logUI("ERROR", "ui.family.renewals.delete.error", {
+          renewal_id: id,
+          message: (error as Error)?.message ?? String(error),
+        });
+        throw error;
+      }
     },
   },
   notes: {

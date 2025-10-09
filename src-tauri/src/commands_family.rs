@@ -1,8 +1,9 @@
-use std::time::Instant;
-
 use tauri::State;
 
+use serde_json::json;
+
 use crate::{
+    family_logging::LogScope,
     ipc::guard,
     model_family::{
         AttachmentAddPayload, AttachmentRemovePayload, AttachmentsListRequest,
@@ -11,90 +12,23 @@ use crate::{
     repo_family,
     state::AppState,
     util::dispatch_async_app_result,
-    AppError, AppResult,
+    AppResult,
 };
-
-fn log_command_start(cmd: &'static str, household_id: Option<&str>, member_id: Option<&str>) {
-    tracing::debug!(
-        target: "arklowdun",
-        area = "family",
-        cmd,
-        household_id,
-        member_id,
-        "ipc_enter"
-    );
-}
-
-fn log_command_success(
-    cmd: &'static str,
-    start: Instant,
-    household_id: Option<&str>,
-    member_id: Option<&str>,
-    row_count: usize,
-) {
-    tracing::info!(
-        target: "arklowdun",
-        area = "family",
-        cmd,
-        household_id,
-        member_id,
-        elapsed_ms = start.elapsed().as_millis() as u64,
-        row_count,
-        "ipc_success"
-    );
-}
-
-fn log_command_error(
-    cmd: &'static str,
-    start: Instant,
-    err: &AppError,
-    household_id: Option<&str>,
-    member_id: Option<&str>,
-) {
-    if is_validation_error(err.code()) {
-        tracing::warn!(
-            target: "arklowdun",
-            area = "family",
-            cmd,
-            household_id,
-            member_id,
-            code = err.code(),
-            message = err.message(),
-            elapsed_ms = start.elapsed().as_millis() as u64,
-            "ipc_failure"
-        );
-    } else {
-        tracing::error!(
-            target: "arklowdun",
-            area = "family",
-            cmd,
-            household_id,
-            member_id,
-            code = err.code(),
-            message = err.message(),
-            elapsed_ms = start.elapsed().as_millis() as u64,
-            "ipc_failure"
-        );
-    }
-}
-
-fn is_validation_error(code: &str) -> bool {
-    code.starts_with("ATTACHMENTS/")
-        || code.starts_with("RENEWALS/")
-        || code.starts_with("VALIDATION/")
-}
 
 #[tauri::command]
 pub async fn member_attachments_list(
     state: State<'_, AppState>,
     request: AttachmentsListRequest,
 ) -> AppResult<Vec<repo_family::AttachmentRef>> {
-    log_command_start("member_attachments_list", None, Some(&request.member_id));
+    let scope = LogScope::new(
+        "member_attachments_list",
+        None,
+        Some(request.member_id.clone()),
+    );
     let pool = state.pool_clone();
     let request_clone = AttachmentsListRequest {
         member_id: request.member_id.clone(),
     };
-    let start = Instant::now();
 
     let result = dispatch_async_app_result(move || {
         let pool = pool.clone();
@@ -105,23 +39,14 @@ pub async fn member_attachments_list(
 
     match result {
         Ok(records) => {
-            log_command_success(
-                "member_attachments_list",
-                start,
-                None,
+            scope.success(
                 Some(&request.member_id),
-                records.len(),
+                json!({ "rows": records.len(), "message": "attachments listed" }),
             );
             Ok(records)
         }
         Err(err) => {
-            log_command_error(
-                "member_attachments_list",
-                start,
-                &err,
-                None,
-                Some(&request.member_id),
-            );
+            scope.fail(&err);
             Err(err)
         }
     }
@@ -132,22 +57,15 @@ pub async fn member_attachments_add(
     state: State<'_, AppState>,
     payload: AttachmentAddPayload,
 ) -> AppResult<repo_family::AttachmentRef> {
-    log_command_start(
+    let scope = LogScope::new(
         "member_attachments_add",
-        Some(&payload.household_id),
-        Some(&payload.member_id),
+        Some(payload.household_id.clone()),
+        Some(payload.member_id.clone()),
     );
-    let start = Instant::now();
     let permit = match guard::ensure_db_writable(&state) {
         Ok(permit) => permit,
         Err(err) => {
-            log_command_error(
-                "member_attachments_add",
-                start,
-                &err,
-                Some(&payload.household_id),
-                Some(&payload.member_id),
-            );
+            scope.fail(&err);
             return Err(err);
         }
     };
@@ -174,23 +92,18 @@ pub async fn member_attachments_add(
 
     match result {
         Ok(record) => {
-            log_command_success(
-                "member_attachments_add",
-                start,
-                Some(&payload.household_id),
+            scope.success(
                 Some(&payload.member_id),
-                1,
+                json!({
+                    "rows": 1,
+                    "attachment_id": record.id.to_string(),
+                    "message": "attachment added",
+                }),
             );
             Ok(record)
         }
         Err(err) => {
-            log_command_error(
-                "member_attachments_add",
-                start,
-                &err,
-                Some(&payload.household_id),
-                Some(&payload.member_id),
-            );
+            scope.fail(&err);
             Err(err)
         }
     }
@@ -201,12 +114,11 @@ pub async fn member_attachments_remove(
     state: State<'_, AppState>,
     payload: AttachmentRemovePayload,
 ) -> AppResult<()> {
-    log_command_start("member_attachments_remove", None, None);
-    let start = Instant::now();
+    let scope = LogScope::new("member_attachments_remove", None, None);
     let permit = match guard::ensure_db_writable(&state) {
         Ok(permit) => permit,
         Err(err) => {
-            log_command_error("member_attachments_remove", start, &err, None, None);
+            scope.fail(&err);
             return Err(err);
         }
     };
@@ -226,11 +138,18 @@ pub async fn member_attachments_remove(
 
     match result {
         Ok(()) => {
-            log_command_success("member_attachments_remove", start, None, None, 0);
+            scope.success(
+                None,
+                json!({
+                    "rows": 0,
+                    "attachment_id": payload.id,
+                    "message": "attachment removed",
+                }),
+            );
             Ok(())
         }
         Err(err) => {
-            log_command_error("member_attachments_remove", start, &err, None, None);
+            scope.fail(&err);
             Err(err)
         }
     }
@@ -243,8 +162,11 @@ pub async fn member_renewals_list(
 ) -> AppResult<Vec<repo_family::Renewal>> {
     let household = request.household_id.as_deref();
     let member = request.member_id.as_deref();
-    log_command_start("member_renewals_list", household, member);
-    let start = Instant::now();
+    let scope = LogScope::new(
+        "member_renewals_list",
+        household.map(|id| id.to_string()),
+        member.map(|id| id.to_string()),
+    );
     let pool = state.pool_clone();
     let request_clone = RenewalsListRequest {
         member_id: request.member_id.clone(),
@@ -260,17 +182,18 @@ pub async fn member_renewals_list(
 
     match result {
         Ok(records) => {
-            log_command_success(
-                "member_renewals_list",
-                start,
+            scope.success_with_ids(
                 household,
                 member,
-                records.len(),
+                json!({
+                    "rows": records.len(),
+                    "message": "renewals listed",
+                }),
             );
             Ok(records)
         }
         Err(err) => {
-            log_command_error("member_renewals_list", start, &err, household, member);
+            scope.fail(&err);
             Err(err)
         }
     }
@@ -281,22 +204,15 @@ pub async fn member_renewals_upsert(
     state: State<'_, AppState>,
     payload: RenewalUpsertPayload,
 ) -> AppResult<repo_family::Renewal> {
-    log_command_start(
+    let scope = LogScope::new(
         "member_renewals_upsert",
-        Some(&payload.household_id),
-        Some(&payload.member_id),
+        Some(payload.household_id.clone()),
+        Some(payload.member_id.clone()),
     );
-    let start = Instant::now();
     let permit = match guard::ensure_db_writable(&state) {
         Ok(permit) => permit,
         Err(err) => {
-            log_command_error(
-                "member_renewals_upsert",
-                start,
-                &err,
-                Some(&payload.household_id),
-                Some(&payload.member_id),
-            );
+            scope.fail(&err);
             return Err(err);
         }
     };
@@ -324,23 +240,18 @@ pub async fn member_renewals_upsert(
 
     match result {
         Ok(record) => {
-            log_command_success(
-                "member_renewals_upsert",
-                start,
-                Some(&payload.household_id),
+            scope.success(
                 Some(&payload.member_id),
-                1,
+                json!({
+                    "rows": 1,
+                    "renewal_id": record.id.to_string(),
+                    "message": "renewal saved",
+                }),
             );
             Ok(record)
         }
         Err(err) => {
-            log_command_error(
-                "member_renewals_upsert",
-                start,
-                &err,
-                Some(&payload.household_id),
-                Some(&payload.member_id),
-            );
+            scope.fail(&err);
             Err(err)
         }
     }
@@ -351,12 +262,11 @@ pub async fn member_renewals_delete(
     state: State<'_, AppState>,
     payload: RenewalDeletePayload,
 ) -> AppResult<()> {
-    log_command_start("member_renewals_delete", None, None);
-    let start = Instant::now();
+    let scope = LogScope::new("member_renewals_delete", None, None);
     let permit = match guard::ensure_db_writable(&state) {
         Ok(permit) => permit,
         Err(err) => {
-            log_command_error("member_renewals_delete", start, &err, None, None);
+            scope.fail(&err);
             return Err(err);
         }
     };
@@ -376,11 +286,18 @@ pub async fn member_renewals_delete(
 
     match result {
         Ok(()) => {
-            log_command_success("member_renewals_delete", start, None, None, 0);
+            scope.success(
+                None,
+                json!({
+                    "rows": 0,
+                    "renewal_id": payload.id,
+                    "message": "renewal deleted",
+                }),
+            );
             Ok(())
         }
         Err(err) => {
-            log_command_error("member_renewals_delete", start, &err, None, None);
+            scope.fail(&err);
             Err(err)
         }
     }
