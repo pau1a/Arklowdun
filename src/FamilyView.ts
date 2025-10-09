@@ -1,9 +1,10 @@
 // src/FamilyView.ts
-import type { FamilyMember } from "./models";
-import { familyRepo } from "./repos";
+import { familyStore } from "./features/family/family.store";
+import type { FamilyMember } from "./features/family/family.types";
 import { getHouseholdIdForCalls } from "./db/household";
 import { nowMs, toDate } from "./db/time";
 import { logUI } from "./lib/uiLog";
+import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
 
 type FamilyViewDeps = {
   getHouseholdId?: () => Promise<string>;
@@ -24,6 +25,8 @@ function renderMembers(listEl: HTMLUListElement, members: FamilyMember[]) {
 }
 
 export async function FamilyView(container: HTMLElement, deps?: FamilyViewDeps) {
+  runViewCleanups(container);
+
   const section = document.createElement("section");
   container.innerHTML = "";
   container.appendChild(section);
@@ -31,36 +34,25 @@ export async function FamilyView(container: HTMLElement, deps?: FamilyViewDeps) 
   const emitLog = deps?.log ?? logUI;
   const resolveHouseholdId = deps?.getHouseholdId ?? getHouseholdIdForCalls;
   const householdId = await resolveHouseholdId();
+  await familyStore.load(householdId);
 
-  async function load(): Promise<FamilyMember[]> {
-    const start = performance.now();
-    emitLog("DEBUG", "ui.family.list.load.start", { household_id: householdId });
-    try {
-      // Order: position then created_at so it’s stable
-      const members = await familyRepo.list({
-        householdId,
-        orderBy: "position, created_at, id",
-      });
-      emitLog("INFO", "ui.family.list.load.complete", {
-        household_id: householdId,
-        count: members.length,
-        duration_ms: Math.round(performance.now() - start),
-      });
-      return members;
-    } catch (error) {
-      emitLog("ERROR", "ui.family.list.load.error", {
-        household_id: householdId,
-        message: (error as Error)?.message ?? String(error),
-      });
-      throw error;
+  let members: FamilyMember[] = familyStore.getAll();
+  let activeList: HTMLUListElement | null = null;
+  let unsubscribed = false;
+
+  const unsubscribe = familyStore.subscribe((state) => {
+    if (unsubscribed) return;
+    if (state.hydratedHouseholdId !== householdId) return;
+    members = familyStore.getAll();
+    if (activeList) {
+      renderMembers(activeList, members);
     }
-  }
+  });
 
-  let members: FamilyMember[] = await load();
-
-  async function refresh() {
-    members = await load();
-  }
+  registerViewCleanup(container, () => {
+    unsubscribed = true;
+    unsubscribe();
+  });
 
   function showList() {
     section.innerHTML = `
@@ -77,6 +69,7 @@ export async function FamilyView(container: HTMLElement, deps?: FamilyViewDeps) 
     const nameInput = section.querySelector<HTMLInputElement>("#family-name");
     const bdayInput = section.querySelector<HTMLInputElement>("#family-bday");
 
+    activeList = listEl ?? null;
     if (listEl) renderMembers(listEl, members);
 
     form?.addEventListener("submit", async (e) => {
@@ -94,13 +87,12 @@ export async function FamilyView(container: HTMLElement, deps?: FamilyViewDeps) 
       });
 
       try {
-        // Create via repo; backend fills id/created_at/updated_at
-        const created = await familyRepo.create(householdId, {
+        const created = await familyStore.upsert({
           name: nameInput.value,
           birthday: bdayLocalNoon.getTime(),
           notes: "",
           position: members.length,
-        } as Partial<FamilyMember>);
+        });
 
         emitLog("INFO", "ui.family.create.success", {
           household_id: householdId,
@@ -108,7 +100,7 @@ export async function FamilyView(container: HTMLElement, deps?: FamilyViewDeps) 
           duration_ms: Math.round(performance.now() - start),
         });
 
-        await refresh();
+        members = familyStore.getAll();
         if (listEl) renderMembers(listEl, members);
         form.reset();
       } catch (error) {
@@ -130,17 +122,23 @@ export async function FamilyView(container: HTMLElement, deps?: FamilyViewDeps) 
   }
 
   function showProfile(member: FamilyMember) {
+    activeList = null;
+    const current = familyStore.get(member.id) ?? member;
     section.innerHTML = `
-      <h2>${member.name}</h2>
+      <h2>${current.name}</h2>
       <button id="family-back">Back</button>
       <div style="margin-top:.5rem;">
         <label>Birthday:
           <input id="profile-bday" type="date"
-                 value="${member.birthday ? toDate(member.birthday).toISOString().slice(0,10) : ""}" />
+                 value="${
+                   current.birthday ? toDate(current.birthday).toISOString().slice(0, 10) : ""
+                 }" />
         </label>
       </div>
       <div style="margin-top:.5rem;">
-        <textarea id="profile-notes" placeholder="Notes" rows="6" style="width:100%">${member.notes ?? ""}</textarea>
+        <textarea id="profile-notes" placeholder="Notes" rows="6" style="width:100%">${
+          current.notes ?? ""
+        }</textarea>
       </div>
     `;
 
@@ -150,53 +148,53 @@ export async function FamilyView(container: HTMLElement, deps?: FamilyViewDeps) 
 
     backBtn?.addEventListener("click", async () => {
       // Persist any pending changes before returning
-      const patch: Partial<FamilyMember> = {};
+      const patch: Partial<FamilyMember> = { id: current.id };
       if (notesArea) patch.notes = notesArea.value;
       if (bdayInput && bdayInput.value) {
         const [y, m, d] = bdayInput.value.split("-").map(Number);
         patch.birthday = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0).getTime();
       }
-      patch.updated_at = nowMs();
+      patch.updatedAt = nowMs();
 
       const start = performance.now();
-      emitLog("DEBUG", "ui.family.drawer.save.start", { member_id: member.id });
+      emitLog("DEBUG", "ui.family.drawer.save.start", { member_id: current.id });
       try {
-        await familyRepo.update(householdId, member.id, patch);
+        await familyStore.upsert(patch);
         emitLog("INFO", "ui.family.drawer.save", {
-          member_id: member.id,
+          member_id: current.id,
           duration_ms: Math.round(performance.now() - start),
         });
       } catch (error) {
         // soft-fail; UI still navigates back
         emitLog("ERROR", "ui.family.drawer.save.error", {
-          member_id: member.id,
+          member_id: current.id,
           message: (error as Error)?.message ?? String(error),
         });
       }
 
-      await refresh();
       showList();
     });
 
     notesArea?.addEventListener("input", async () => {
       const start = performance.now();
       emitLog("DEBUG", "ui.family.drawer.autosave.start", {
-        member_id: member.id,
+        member_id: current.id,
         field: "notes",
       });
       try {
-        await familyRepo.update(householdId, member.id, {
+        await familyStore.upsert({
+          id: current.id,
           notes: notesArea.value,
-          updated_at: nowMs(),
-        } as Partial<FamilyMember>);
+          updatedAt: nowMs(),
+        });
         emitLog("INFO", "ui.family.drawer.autosave.complete", {
-          member_id: member.id,
+          member_id: current.id,
           field: "notes",
           duration_ms: Math.round(performance.now() - start),
         });
       } catch (error) {
         emitLog("WARN", "ui.family.drawer.autosave.error", {
-          member_id: member.id,
+          member_id: current.id,
           field: "notes",
           message: (error as Error)?.message ?? String(error),
         });
@@ -208,22 +206,23 @@ export async function FamilyView(container: HTMLElement, deps?: FamilyViewDeps) 
       const dt = new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0).getTime();
       const start = performance.now();
       emitLog("DEBUG", "ui.family.drawer.autosave.start", {
-        member_id: member.id,
+        member_id: current.id,
         field: "birthday",
       });
       try {
-        await familyRepo.update(householdId, member.id, {
+        await familyStore.upsert({
+          id: current.id,
           birthday: dt,
-          updated_at: nowMs(),
-        } as Partial<FamilyMember>);
+          updatedAt: nowMs(),
+        });
         emitLog("INFO", "ui.family.drawer.autosave.complete", {
-          member_id: member.id,
+          member_id: current.id,
           field: "birthday",
           duration_ms: Math.round(performance.now() - start),
         });
       } catch (error) {
         emitLog("WARN", "ui.family.drawer.autosave.error", {
-          member_id: member.id,
+          member_id: current.id,
           field: "birthday",
           message: (error as Error)?.message ?? String(error),
         });
