@@ -427,8 +427,16 @@ export const familyStore = {
     try {
       if (existingId) {
         const payload = denormalizeMemberPatch({ ...patch, id: memberId });
+        if (
+          payload == null ||
+          (typeof payload === "object" && Object.keys(payload).length === 0)
+        ) {
+          logUI("INFO", "ui.family.upsert.noop", { member_id: memberId });
+          const reconciled = state.members[memberId] ?? optimistic;
+          return cloneMember(reconciled);
+        }
         await familyRepo.update(householdId, memberId, payload);
-        const reconciled = state.members[memberId];
+        const reconciled = state.members[memberId] ?? optimistic;
         logUI("INFO", "ui.family.upsert", {
           member_id: memberId,
           optimistic: false,
