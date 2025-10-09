@@ -233,7 +233,7 @@ impl LogScope {
             household_id = self.household_id.as_deref(),
             member_id = self.member_id.as_deref(),
             duration_ms = self.elapsed_ms() as u64,
-            details = field::display(Value::Object(map))
+            details = field::display(serde_json::Value::Object(map))
         );
     }
 
