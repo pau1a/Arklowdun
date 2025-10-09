@@ -80,7 +80,7 @@ pub fn emit_ui_log(record: UiLogRecord) {
             household_id = household_id.as_deref(),
             member_id = member_id.as_deref(),
             duration_ms = duration_ms,
-            details = field::display(wrapped_details.clone())
+            details = field::display(&wrapped_details)
         ),
         UiLogLevel::Info => info!(
             target: "arklowdun",
@@ -89,7 +89,7 @@ pub fn emit_ui_log(record: UiLogRecord) {
             household_id = household_id.as_deref(),
             member_id = member_id.as_deref(),
             duration_ms = duration_ms,
-            details = field::display(wrapped_details.clone())
+            details = field::display(&wrapped_details)
         ),
         UiLogLevel::Warn => warn!(
             target: "arklowdun",
@@ -98,7 +98,7 @@ pub fn emit_ui_log(record: UiLogRecord) {
             household_id = household_id.as_deref(),
             member_id = member_id.as_deref(),
             duration_ms = duration_ms,
-            details = field::display(wrapped_details.clone())
+            details = field::display(&wrapped_details)
         ),
         UiLogLevel::Error => error!(
             target: "arklowdun",
@@ -107,7 +107,7 @@ pub fn emit_ui_log(record: UiLogRecord) {
             household_id = household_id.as_deref(),
             member_id = member_id.as_deref(),
             duration_ms = duration_ms,
-            details = field::display(wrapped_details)
+            details = field::display(&wrapped_details)
         ),
     }
 }
@@ -226,6 +226,7 @@ impl LogScope {
         if let Some(crash) = err.crash_id() {
             map.insert("crash_id".into(), Value::String(crash.to_string()));
         }
+        let details = serde_json::Value::Object(map);
         error!(
             target: "arklowdun",
             area = "family",
@@ -233,11 +234,12 @@ impl LogScope {
             household_id = self.household_id.as_deref(),
             member_id = self.member_id.as_deref(),
             duration_ms = self.elapsed_ms() as u64,
-            details = field::display(serde_json::Value::Object(map))
+            details = field::display(&details)
         );
     }
 
     fn emit_warn(&self, details: Value, household_id: Option<&str>, member_id: Option<&str>) {
+        let wrapped = wrap_details(details);
         warn!(
             target: "arklowdun",
             area = "family",
@@ -245,7 +247,7 @@ impl LogScope {
             household_id = self.resolved_household(household_id).as_deref(),
             member_id = self.resolved_member(member_id).as_deref(),
             duration_ms = self.elapsed_ms() as u64,
-            details = field::display(wrap_details(details))
+            details = field::display(&wrapped)
         );
     }
 }

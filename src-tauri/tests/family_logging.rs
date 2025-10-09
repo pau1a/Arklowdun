@@ -18,8 +18,7 @@ use arklowdun_lib::{
     household_active::StoreHandle,
     ipc::guard,
     migrate,
-    state::AppState,
-    time::now_ms,
+    AppState,
     vault::Vault,
     vault_migration::VaultMigrationManager,
 };
@@ -51,6 +50,15 @@ fn init_buffer_subscriber() -> (Arc<StdMutex<Vec<u8>>>, DefaultGuard) {
 
 fn logs_to_string(buffer: &Arc<StdMutex<Vec<u8>>>) -> String {
     String::from_utf8(buffer.lock().unwrap().clone()).expect("log utf8")
+}
+
+fn now_ms_local() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("time went backwards")
+        .as_millis() as i64
 }
 
 async fn seed_family_db() -> (TempDir, SqlitePool) {
@@ -135,7 +143,7 @@ async fn update_command_emits_family_logs() {
 
     let mut data = Map::new();
     data.insert("notes".into(), Value::String("updated".into()));
-    data.insert("updated_at".into(), Value::from(now_ms()));
+    data.insert("updated_at".into(), Value::from(now_ms_local()));
 
     commands::update_command(&pool, "family_members", "mem-1", data, Some("hh-1"), None)
         .await
