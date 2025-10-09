@@ -151,6 +151,130 @@ const householdDeleteResponse = z
   .object({ fallbackId: z.string().nullable().optional() })
   .passthrough();
 
+const mimeHint = z
+  .string()
+  .regex(/^[a-zA-Z0-9._+-]+\/[a-zA-Z0-9._+-]+$/);
+
+const AttachmentRefRawSchema = z.object({
+  id: z.string().uuid(),
+  household_id: z.string(),
+  member_id: z.string(),
+  root_key: z.string(),
+  relative_path: z.string().max(255),
+  title: z.string().max(120).nullable().optional(),
+  mime_hint: mimeHint.nullable().optional(),
+  added_at: z.number(),
+});
+
+export const AttachmentRefSchema = AttachmentRefRawSchema.transform((value) => ({
+  id: value.id,
+  householdId: value.household_id,
+  memberId: value.member_id,
+  rootKey: value.root_key,
+  relativePath: value.relative_path,
+  title: value.title ?? undefined,
+  mimeHint: value.mime_hint ?? undefined,
+  addedAt: value.added_at,
+}));
+
+export type AttachmentRef = z.infer<typeof AttachmentRefSchema>;
+
+export const AttachmentInputSchema = z.object({
+  householdId: z.string(),
+  memberId: z.string(),
+  rootKey: z.string(),
+  relativePath: z.string().max(255),
+  title: z.string().max(120).optional(),
+  mimeHint: mimeHint.optional(),
+});
+
+export type AttachmentInput = z.infer<typeof AttachmentInputSchema>;
+
+const RenewalKind = z.enum([
+  "passport",
+  "driving_licence",
+  "photo_id",
+  "insurance",
+  "pension",
+]);
+
+export const RenewalKindSchema = RenewalKind;
+
+export type RenewalKind = z.infer<typeof RenewalKindSchema>;
+
+const RenewalRawSchema = z.object({
+  id: z.string().uuid(),
+  household_id: z.string(),
+  member_id: z.string(),
+  kind: RenewalKind,
+  label: z.string().max(100).nullable().optional(),
+  expires_at: z.number(),
+  remind_on_expiry: z.union([z.boolean(), z.number()]),
+  remind_offset_days: z.number(),
+  updated_at: z.number(),
+});
+
+export const RenewalSchema = RenewalRawSchema.transform((value) => ({
+  id: value.id,
+  householdId: value.household_id,
+  memberId: value.member_id,
+  kind: value.kind,
+  label: value.label ?? undefined,
+  expiresAt: value.expires_at,
+  remindOnExpiry:
+    typeof value.remind_on_expiry === "number"
+      ? value.remind_on_expiry !== 0
+      : value.remind_on_expiry,
+  remindOffsetDays: value.remind_offset_days,
+  updatedAt: value.updated_at,
+}));
+
+export type Renewal = z.infer<typeof RenewalSchema>;
+
+export const RenewalInputSchema = z.object({
+  id: z.string().uuid().optional(),
+  householdId: z.string(),
+  memberId: z.string(),
+  kind: RenewalKind,
+  label: z.string().max(100).optional(),
+  expiresAt: z.number().positive(),
+  remindOnExpiry: z.boolean(),
+  remindOffsetDays: z.number().int().min(0).max(365),
+});
+
+export type RenewalInput = z.infer<typeof RenewalInputSchema>;
+
+const memberAttachmentsListRequest = z
+  .object({
+    member_id: z.string().optional(),
+    memberId: z.string().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (typeof value.member_id === "string" || typeof value.memberId === "string") {
+      return;
+    }
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "member id required" });
+  });
+
+const memberRenewalsListRequest = z
+  .object({
+    member_id: z.string().optional(),
+    memberId: z.string().optional(),
+    household_id: z.string().optional(),
+    householdId: z.string().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (
+      typeof value.member_id === "string" ||
+      typeof value.memberId === "string" ||
+      typeof value.household_id === "string" ||
+      typeof value.householdId === "string"
+    ) {
+      return;
+    }
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "scope required" });
+  });
+
 const dbRequest = emptyObject;
 
 const eventCreateData = z
@@ -416,6 +540,24 @@ export const contracts = {
   family_members_update: contract({ request: flexibleRequest, response: flexibleRequest }),
   family_members_delete: contract({ request: flexibleRequest, response: flexibleRequest }),
   family_members_restore: contract({ request: flexibleRequest, response: flexibleRequest }),
+  member_attachments_list: contract({
+    request: memberAttachmentsListRequest,
+    response: z.array(AttachmentRefRawSchema),
+  }),
+  member_attachments_add: contract({
+    request: AttachmentInputSchema,
+    response: AttachmentRefRawSchema,
+  }),
+  member_attachments_remove: contract({ request: idRequest, response: z.void() }),
+  member_renewals_list: contract({
+    request: memberRenewalsListRequest,
+    response: z.array(RenewalRawSchema),
+  }),
+  member_renewals_upsert: contract({
+    request: RenewalInputSchema,
+    response: RenewalRawSchema,
+  }),
+  member_renewals_delete: contract({ request: idRequest, response: z.void() }),
   household_create: contract({
     request: z.object({ args: householdArgs }).passthrough(),
     response: householdRecord,
