@@ -381,6 +381,10 @@ export const familyStore = {
   },
 
   commitCreated(tempId: string | null | undefined, raw: unknown): FamilyMember {
+    if (!raw || typeof raw !== "object") {
+      logUI("ERROR", "ui.family.commitCreated.null_response", { temp_id: tempId });
+      throw new Error("commitCreated received no record from IPC");
+    }
     const householdId = ensureHydrated();
     const created = normalizeMember(toRecord(raw), householdId);
     const reconciledMembers = { ...state.members };

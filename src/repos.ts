@@ -125,19 +125,6 @@ const FamilyMemberCreateRequestSchema = z
   .passthrough();
 
 export type FamilyMemberCreateRequest = z.infer<typeof FamilyMemberCreateRequestSchema>;
-
-const FamilyMemberRawSchema = z
-  .object({
-    id: z.string(),
-    household_id: z.string(),
-    name: z.string(),
-    position: z.number().int(),
-    notes: z.string().nullable().optional(),
-    created_at: z.number(),
-    updated_at: z.number(),
-    deleted_at: z.number().nullable().optional(),
-  })
-  .passthrough();
 export const inventoryRepo        = domainRepo<InventoryItem>("inventory_items", "position, created_at, id");
 export const notesRepo            = domainRepo<Note>("notes", "position, created_at, id");
 export const shoppingRepo         = domainRepo<ShoppingItem>("shopping_items", "position, created_at, id");
@@ -146,11 +133,22 @@ export const familyRepo = {
   ...familyMembersRepo,
   async create(input: FamilyMemberCreateRequest): Promise<FamilyMember> {
     const payload = FamilyMemberCreateRequestSchema.parse(input);
-    const response = await call("family_members_create", {
-      ...payload,
-      household_id: payload.householdId,
-    });
-    return FamilyMemberRawSchema.parse(response) as FamilyMember;
+    const args = {
+      householdId: payload.householdId,
+      name: payload.name,
+      position: payload.position,
+      notes: payload.notes ?? null,
+    } satisfies Record<string, unknown>;
+    const response = await call("family_members_create", args);
+    if (response == null) {
+      const error: Error & { code?: string; context?: unknown } = new Error(
+        "family_members_create returned null/undefined",
+      );
+      error.code = "IPC_NULL_RESPONSE";
+      error.context = { args };
+      throw error;
+    }
+    return response as FamilyMember;
   },
   attachments: {
     async list(memberId: string): Promise<AttachmentRef[]> {

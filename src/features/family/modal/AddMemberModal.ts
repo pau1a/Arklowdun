@@ -375,7 +375,13 @@ export function mountAddMemberModal(
       submitting = false;
       const normalized = normalizeError(error);
       const code = normalized.code ?? "";
-      if (code === "DB_CONSTRAINT_UNIQUE" || code === "duplicate-position") {
+      if (code === "IPC_NULL_RESPONSE") {
+        console.error("family:add-member:create:null-response", normalized.context);
+        toast.show({
+          kind: "error",
+          message: "Couldn’t save (no response). Try again.",
+        });
+      } else if (code === "DB_CONSTRAINT_UNIQUE" || code === "duplicate-position") {
         toast.show({ kind: "info", message: DUPLICATE_TOAST_MESSAGE });
       } else if (code === "MISSING_FIELD" || code === "missing-nickname") {
         errors.identity = "Enter a nickname.";
