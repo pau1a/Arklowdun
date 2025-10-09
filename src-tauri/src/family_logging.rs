@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, field, info, warn};
 
 use crate::{ipc::guard, AppError};
 
@@ -80,7 +80,7 @@ pub fn emit_ui_log(record: UiLogRecord) {
             household_id = household_id.as_deref(),
             member_id = member_id.as_deref(),
             duration_ms = duration_ms,
-            details = %wrapped_details
+            details = field::display(wrapped_details.clone())
         ),
         UiLogLevel::Info => info!(
             target: "arklowdun",
@@ -89,7 +89,7 @@ pub fn emit_ui_log(record: UiLogRecord) {
             household_id = household_id.as_deref(),
             member_id = member_id.as_deref(),
             duration_ms = duration_ms,
-            details = %wrapped_details
+            details = field::display(wrapped_details.clone())
         ),
         UiLogLevel::Warn => warn!(
             target: "arklowdun",
@@ -98,7 +98,7 @@ pub fn emit_ui_log(record: UiLogRecord) {
             household_id = household_id.as_deref(),
             member_id = member_id.as_deref(),
             duration_ms = duration_ms,
-            details = %wrapped_details
+            details = field::display(wrapped_details.clone())
         ),
         UiLogLevel::Error => error!(
             target: "arklowdun",
@@ -107,7 +107,7 @@ pub fn emit_ui_log(record: UiLogRecord) {
             household_id = household_id.as_deref(),
             member_id = member_id.as_deref(),
             duration_ms = duration_ms,
-            details = %wrapped_details
+            details = field::display(wrapped_details)
         ),
     }
 }
@@ -133,7 +133,7 @@ impl LogScope {
             cmd = scope.cmd,
             household_id = scope.household_id.as_deref(),
             member_id = scope.member_id.as_deref(),
-            details = %json!({ "stage": "enter" })
+            details = field::display(json!({ "stage": "enter" }))
         );
         scope
     }
@@ -162,7 +162,7 @@ impl LogScope {
             household_id = self.household_id.as_deref(),
             member_id = member_id.or(self.member_id.as_deref()),
             duration_ms = self.elapsed_ms() as u64,
-            details = %wrap_details(details)
+            details = field::display(wrap_details(details))
         );
     }
 
@@ -179,7 +179,7 @@ impl LogScope {
             household_id = self.resolved_household(household_id).as_deref(),
             member_id = self.resolved_member(member_id).as_deref(),
             duration_ms = self.elapsed_ms() as u64,
-            details = %wrap_details(details)
+            details = field::display(wrap_details(details))
         );
     }
 
@@ -233,7 +233,7 @@ impl LogScope {
             household_id = self.household_id.as_deref(),
             member_id = self.member_id.as_deref(),
             duration_ms = self.elapsed_ms() as u64,
-            details = %Value::Object(map)
+            details = field::display(Value::Object(map))
         );
     }
 
@@ -245,7 +245,7 @@ impl LogScope {
             household_id = self.resolved_household(household_id).as_deref(),
             member_id = self.resolved_member(member_id).as_deref(),
             duration_ms = self.elapsed_ms() as u64,
-            details = %wrap_details(details)
+            details = field::display(wrap_details(details))
         );
     }
 }
