@@ -1,10 +1,18 @@
 // src/FamilyView.ts
 import { familyStore } from "./features/family/family.store";
 import type { FamilyMember } from "./features/family/family.types";
+import { createFamilyShell, type FamilyShellInstance } from "./features/family/FamilyShell";
+import { getNextBirthday, getUpcomingBirthdays } from "./features/family/family.utils";
 import { getHouseholdIdForCalls } from "./db/household";
 import { nowMs, toDate } from "./db/time";
 import { logUI } from "./lib/uiLog";
 import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
+import { ENABLE_FAMILY_EXPANSION } from "./config/flags";
+import {
+  subscribe as subscribeHouseholdStore,
+  selectors as householdSelectors,
+} from "./state/householdStore";
+import type { HouseholdRecord } from "./api/households";
 
 type FamilyViewDeps = {
   getHouseholdId?: () => Promise<string>;
@@ -27,9 +35,17 @@ function renderMembers(listEl: HTMLUListElement, members: FamilyMember[]) {
 export async function FamilyView(container: HTMLElement, deps?: FamilyViewDeps) {
   runViewCleanups(container);
 
-  const section = document.createElement("section");
-  container.innerHTML = "";
-  container.appendChild(section);
+  let shell: FamilyShellInstance | null = null;
+  let section: HTMLElement;
+
+  if (ENABLE_FAMILY_EXPANSION) {
+    shell = createFamilyShell(container);
+    section = shell.contentHost;
+  } else {
+    section = document.createElement("section");
+    container.innerHTML = "";
+    container.appendChild(section);
+  }
 
   const emitLog = deps?.log ?? logUI;
   const resolveHouseholdId = deps?.getHouseholdId ?? getHouseholdIdForCalls;
@@ -39,6 +55,19 @@ export async function FamilyView(container: HTMLElement, deps?: FamilyViewDeps) 
   let members: FamilyMember[] = familyStore.getAll();
   let activeList: HTMLUListElement | null = null;
   let unsubscribed = false;
+  let household: HouseholdRecord | null = null;
+
+  const updateWidgets = () => {
+    if (!shell) return;
+    const upcoming = getUpcomingBirthdays(members);
+    const nextBirthday = getNextBirthday(members);
+    shell.header.update({
+      householdName: household?.name ?? null,
+      memberCount: members.length,
+      nextBirthday,
+    });
+    shell.banner.update(upcoming, { totalMembers: members.length });
+  };
 
   const unsubscribe = familyStore.subscribe((state) => {
     if (unsubscribed) return;
@@ -47,11 +76,28 @@ export async function FamilyView(container: HTMLElement, deps?: FamilyViewDeps) 
     if (activeList) {
       renderMembers(activeList, members);
     }
+    updateWidgets();
   });
+
+  let unsubscribeHousehold: (() => void) | null = null;
+  if (shell) {
+    unsubscribeHousehold = subscribeHouseholdStore(
+      householdSelectors.activeHousehold,
+      (record) => {
+        household = record;
+        updateWidgets();
+      },
+    );
+  }
 
   registerViewCleanup(container, () => {
     unsubscribed = true;
     unsubscribe();
+    if (unsubscribeHousehold) {
+      unsubscribeHousehold();
+      unsubscribeHousehold = null;
+    }
+    shell?.destroy();
   });
 
   function showList() {
@@ -71,6 +117,7 @@ export async function FamilyView(container: HTMLElement, deps?: FamilyViewDeps) 
 
     activeList = listEl ?? null;
     if (listEl) renderMembers(listEl, members);
+    updateWidgets();
 
     form?.addEventListener("submit", async (e) => {
       e.preventDefault();
