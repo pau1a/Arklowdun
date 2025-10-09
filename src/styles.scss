@@ -1,5 +1,6 @@
 @use "./styles/manage";
 @use "./ui/styles/logs";
+@use "./styles/family-shell";
 
 :root {
   --radius-sm: 6px;
@@ -122,6 +123,20 @@ main.container {
   background-size: cover;
   border-left: 1px solid rgba(0, 0, 0, 0.06);
   opacity: 0.98;
+}
+
+.page-banner[data-banner-mode="interactive"] {
+  background: none;
+  border-left: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--space-4, 24px);
+}
+
+.page-banner[data-banner-mode="interactive"] > * {
+  width: 100%;
+  max-width: 360px;
 }
 
 body[data-banner-visibility="hidden"] .page-banner,

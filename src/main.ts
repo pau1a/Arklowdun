@@ -38,6 +38,7 @@ import { runViewCleanups } from "./utils/viewLifecycle";
 import { initTheme } from "@ui/ThemeToggle";
 import { getStartupWindow } from "@lib/ipc/startup";
 import { ensureDbHealthReport, recheckDbHealth } from "./services/dbHealth";
+import { ENABLE_FAMILY_EXPANSION } from "./config/flags";
 import { recoveryText } from "@strings/recovery";
 import { mountMacToolbar, setAppToolbarTitle } from "@ui/AppToolbar";
 import { initAmbientBackground, type AmbientBackgroundController } from "@ui/AmbientBackground";
@@ -425,6 +426,26 @@ function updatePageBanner(route: RouteDefinition): void {
   const bannerEl = document.getElementById("page-banner") as HTMLDivElement | null;
   if (!bannerEl) return;
   const body = document.body;
+  const isFamilyInteractive = ENABLE_FAMILY_EXPANSION && route.id === "family";
+
+  if (isFamilyInteractive) {
+    bannerEl.hidden = false;
+    bannerEl.style.removeProperty("background-image");
+    bannerEl.style.removeProperty("--banner-pos-x");
+    bannerEl.style.removeProperty("--banner-pos-y");
+    bannerEl.setAttribute("aria-hidden", "false");
+    bannerEl.setAttribute("role", "complementary");
+    bannerEl.removeAttribute("aria-label");
+    bannerEl.dataset.bannerMode = "interactive";
+    body.dataset.bannerVisibility = "visible";
+    return;
+  }
+
+  if (bannerEl.dataset.bannerMode === "interactive") {
+    delete bannerEl.dataset.bannerMode;
+    bannerEl.innerHTML = "";
+    bannerEl.setAttribute("role", "img");
+  }
   const key = route.id.toLowerCase();
   const label = route.display?.label ?? key;
   const url = bannerFor(key);
