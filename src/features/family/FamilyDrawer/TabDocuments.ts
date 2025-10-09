@@ -19,6 +19,7 @@ import {
   PathError,
 } from "@files/safe-fs";
 import { revealLabel } from "../../../ui/attachments";
+import type { OpenDialogReturn } from "@tauri-apps/plugin-dialog/dist-js/index";
 import type { AttachmentRef } from "@lib/ipc/contracts";
 
 type AttachmentSource = {
@@ -424,6 +425,30 @@ export function createDocumentsTab(): DocumentsTabInstance {
     };
   }
 
+  async function openSystemPicker(): Promise<AttachmentSource[]> {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = (await open({ multiple: true })) as OpenDialogReturn<{ multiple: true }>;
+      const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
+      if (paths.length === 0) return [];
+      const { readFile } = await import("@tauri-apps/plugin-fs");
+      const sources: AttachmentSource[] = [];
+      for (const p of paths) {
+        try {
+          const data = await readFile(p);
+          const name = p.split(/[\\/]/).pop() || "Document";
+          sources.push({ name, mimeType: null, read: async () => data });
+        } catch (e) {
+          console.warn("dialog-read-failed", e);
+        }
+      }
+      return sources;
+    } catch (e) {
+      console.warn("dialog-open-unavailable", e);
+      return [];
+    }
+  }
+
   function recordError(bucketMap: Map<string, ErrorBucket>, bucket: ErrorBucket | null): void {
     if (!bucket) return;
     const existing = bucketMap.get(bucket.message);
@@ -698,11 +723,14 @@ export function createDocumentsTab(): DocumentsTabInstance {
     if (!data) return [];
     const files: File[] = [];
     let hasDirectory = false;
+
     const items = data.items;
-    if (items) {
+    if (items && items.length > 0) {
       for (let i = 0; i < items.length; i += 1) {
         const item = items[i];
         if (item.kind !== "file") continue;
+
+        // Best-effort directory detection (Safari/WebKit specific API)
         const entry = (item as DataTransferItem & {
           webkitGetAsEntry?: () => FileSystemEntryLike | null;
         }).webkitGetAsEntry?.();
@@ -710,21 +738,30 @@ export function createDocumentsTab(): DocumentsTabInstance {
           hasDirectory = true;
           continue;
         }
+
         const file = item.getAsFile();
-        if (!file) {
-          if (!entry && item.kind === "file") {
-            hasDirectory = true;
-          }
+        if (file) {
+          files.push(file);
           continue;
         }
-        files.push(file);
+
+        // Some WebKit builds expose items but return null for getAsFile().
+        // Fall back to DataTransfer.files so drops still work.
+        if (data.files && data.files.length > 0) {
+          for (let j = 0; j < data.files.length; j += 1) {
+            const f = data.files[j];
+            if (f) files.push(f);
+          }
+          break;
+        }
       }
-    } else {
+    } else if (data.files && data.files.length > 0) {
       for (let i = 0; i < data.files.length; i += 1) {
         const file = data.files[i];
         if (file) files.push(file);
       }
     }
+
     if (hasDirectory) {
       toast.show({ kind: "info", message: "Folders aren’t supported yet." });
     }
@@ -736,24 +773,43 @@ export function createDocumentsTab(): DocumentsTabInstance {
     if (!currentMember || importing) return;
     dropZone.classList.remove(DROP_ACTIVE_CLASS);
     const files = collectFilesFromDataTransfer(event.dataTransfer);
-    const sources = files.map(createSource);
-    void importSources(sources);
+    if (files.length > 0) {
+      const sources = files.map(createSource);
+      void importSources(sources);
+    } else {
+      // Older WebKit didn’t provide File objects on drop. Don’t force a picker;
+      // guide the user to use the button explicitly.
+      toast.show({ kind: "info", message: "Drag-and-drop isn’t supported here. Use ‘Add from disk’." });
+    }
   }
 
   function handleDragEnter(event: DragEvent): void {
     event.preventDefault();
     if (!currentMember || importing) return;
+    try {
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    } catch {
+      /* ignore */
+    }
     dropZone.classList.add(DROP_ACTIVE_CLASS);
   }
 
   function handleDragOver(event: DragEvent): void {
     event.preventDefault();
     if (!currentMember || importing) return;
+    try {
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    } catch {
+      /* ignore */
+    }
   }
 
   function handleDragLeave(event: DragEvent): void {
-    if (event.target !== dropZone) return;
-    dropZone.classList.remove(DROP_ACTIVE_CLASS);
+    const target = event.currentTarget as EventTarget | null;
+    // Only clear the highlight when the pointer leaves our drop region entirely.
+    if (target === dropZone || target === element) {
+      dropZone.classList.remove(DROP_ACTIVE_CLASS);
+    }
   }
 
   function handleKeydown(event: KeyboardEvent): void {
@@ -785,11 +841,23 @@ export function createDocumentsTab(): DocumentsTabInstance {
     event.stopPropagation();
   });
 
-  dropZone.addEventListener("dragenter", handleDragEnter);
-  dropZone.addEventListener("dragover", handleDragOver);
-  dropZone.addEventListener("dragleave", handleDragLeave);
-  dropZone.addEventListener("drop", handleDrop);
+  // Attach to both the explicit dropZone and the entire tab panel to
+  // tolerate minor layout/positioning differences across WebKit builds.
+  const dropTargets: (HTMLElement | Window)[] = [dropZone, element];
+  for (const target of dropTargets) {
+    target.addEventListener("dragenter", handleDragEnter as any);
+    target.addEventListener("dragover", handleDragOver as any);
+    target.addEventListener("dragleave", handleDragLeave as any);
+    target.addEventListener("drop", handleDrop as any);
+  }
   dropZone.addEventListener("keydown", handleKeydown);
+
+  // Global fallback: some WebKit builds only deliver drop if default
+  // is prevented at the window level. Limit this to the lifetime of
+  // the Documents tab instance to avoid side effects elsewhere.
+  const windowDragBlocker = (e: Event) => e.preventDefault();
+  window.addEventListener("dragover", windowDragBlocker);
+  window.addEventListener("drop", windowDragBlocker);
 
   addButton.addEventListener("click", (event) => {
     event.preventDefault();
@@ -816,6 +884,68 @@ export function createDocumentsTab(): DocumentsTabInstance {
     sortMode = "name";
     renderAttachments();
   });
+
+  // Bridge for older macOS WebKit where Finder file drops do not
+  // produce DOM `drop` events with File objects. We listen to the
+  // Tauri window drag/drop events and provide a graceful fallback by
+  // prompting the user with the standard file picker on drop.
+  (async () => {
+    try {
+      const mod = await import("@tauri-apps/api/window");
+      const appWindow = mod.getCurrentWindow?.() ?? mod.Window?.getCurrent?.();
+      if (!appWindow || typeof appWindow.onDragDropEvent !== "function") return;
+      await appWindow.onDragDropEvent((evt: any) => {
+        const kind = evt?.payload?.type as string | undefined;
+        if (!kind) return;
+        if (!currentMember || importing) return;
+        if (kind === "enter" || kind === "over") {
+          dropZone.classList.add(DROP_ACTIVE_CLASS);
+          return;
+        }
+        if (kind === "leave") {
+          dropZone.classList.remove(DROP_ACTIVE_CLASS);
+          return;
+        }
+        if (kind === "drop") {
+          dropZone.classList.remove(DROP_ACTIVE_CLASS);
+          const osPaths: string[] = Array.isArray(evt?.payload?.paths) ? evt.payload.paths : [];
+          if (osPaths.length === 0) return;
+          // Import via backend so users don't need a picker on older WebKit.
+          const start = performance.now();
+          logUI("INFO", "ui.family.attach.drop.import_paths", {
+            count: osPaths.length,
+          });
+          void (async () => {
+            try {
+              const created = (await call("member_attachments_import_paths", {
+                householdId: currentMember!.householdId,
+                memberId: currentMember!.id,
+                paths: osPaths,
+              })) as AttachmentRef[];
+              if (created.length > 0) {
+                const msg = created.length === 1 ? "Added 1 document." : `Added ${created.length} documents.`;
+                toast.show({ kind: "success", message: msg });
+                pendingFocusId = created[created.length - 1].id;
+                await loadForMember(currentMember!, true);
+              }
+              logUI("INFO", "ui.family.attach.drop.import_paths.complete", {
+                count: created.length,
+                duration_ms: Math.round(performance.now() - start),
+              });
+            } catch (error) {
+              const normalized = normalizeError(error);
+              showErrorToast(mapAttachmentError(normalized, error));
+              logUI("ERROR", "ui.family.attach.drop.import_paths.error", {
+                error_code: normalized.code,
+              });
+            }
+          })();
+        }
+      });
+    } catch {
+      // Not running under Tauri or API unavailable; ignore.
+    }
+  })();
 
   function resetState(): void {
     attachments = [];
@@ -865,11 +995,15 @@ export function createDocumentsTab(): DocumentsTabInstance {
       applyPendingFocus();
     },
     destroy() {
-      dropZone.removeEventListener("dragenter", handleDragEnter);
-      dropZone.removeEventListener("dragover", handleDragOver);
-      dropZone.removeEventListener("dragleave", handleDragLeave);
-      dropZone.removeEventListener("drop", handleDrop);
+      for (const target of dropTargets) {
+        target.removeEventListener("dragenter", handleDragEnter as any);
+        target.removeEventListener("dragover", handleDragOver as any);
+        target.removeEventListener("dragleave", handleDragLeave as any);
+        target.removeEventListener("drop", handleDrop as any);
+      }
       dropZone.removeEventListener("keydown", handleKeydown);
+      window.removeEventListener("dragover", windowDragBlocker);
+      window.removeEventListener("drop", windowDragBlocker);
     },
   };
 }

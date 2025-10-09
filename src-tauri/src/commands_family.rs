@@ -6,7 +6,7 @@ use crate::{
     family_logging::LogScope,
     ipc::guard,
     model_family::{
-        AttachmentAddPayload, AttachmentRemovePayload, AttachmentsListRequest,
+        AttachmentAddPayload, AttachmentImportPathsPayload, AttachmentRemovePayload, AttachmentsListRequest,
         RenewalDeletePayload, RenewalInput, RenewalUpsertPayload, RenewalsListRequest,
     },
     repo_family,
@@ -147,6 +147,55 @@ pub async fn member_attachments_remove(
                 }),
             );
             Ok(())
+        }
+        Err(err) => {
+            scope.fail(&err);
+            Err(err)
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn member_attachments_import_paths(
+    state: State<'_, AppState>,
+    payload: AttachmentImportPathsPayload,
+) -> AppResult<Vec<repo_family::AttachmentRef>> {
+    let scope = LogScope::new(
+        "member_attachments_import_paths",
+        Some(payload.household_id.clone()),
+        Some(payload.member_id.clone()),
+    );
+    let permit = match guard::ensure_db_writable(&state) {
+        Ok(permit) => permit,
+        Err(err) => {
+            scope.fail(&err);
+            return Err(err);
+        }
+    };
+
+    let pool = state.pool_clone();
+    let vault = state.vault();
+    let payload_clone = payload.clone();
+
+    let result = dispatch_async_app_result(move || {
+        let pool = pool.clone();
+        let vault = vault.clone();
+        let payload = payload_clone.clone();
+        async move { repo_family::attachments_import_paths(&pool, &vault, payload).await }
+    })
+    .await;
+    drop(permit);
+
+    match result {
+        Ok(records) => {
+            scope.success(
+                Some(&payload.member_id),
+                serde_json::json!({
+                    "rows": records.len(),
+                    "message": "attachments imported",
+                }),
+            );
+            Ok(records)
         }
         Err(err) => {
             scope.fail(&err);

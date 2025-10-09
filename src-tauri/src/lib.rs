@@ -4445,6 +4445,7 @@ macro_rules! app_commands {
             commands_family::member_attachments_list,
             commands_family::member_attachments_add,
             commands_family::member_attachments_remove,
+            commands_family::member_attachments_import_paths,
             commands_family::member_renewals_list,
             commands_family::member_renewals_upsert,
             commands_family::member_renewals_delete,

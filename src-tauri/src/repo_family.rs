@@ -339,6 +339,118 @@ pub async fn attachments_remove(
     Ok(())
 }
 
+use crate::model_family::AttachmentImportPathsPayload;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+fn split_ext(name: &str) -> (String, String) {
+    match name.rfind('.') {
+        Some(idx) if idx > 0 && idx < name.len() - 1 => {
+            (name[..idx].to_string(), name[idx..].to_string())
+        }
+        _ => (name.to_string(), String::new()),
+    }
+}
+
+fn candidate_name(base: &str, ext: &str, attempt: usize) -> String {
+    if attempt == 0 {
+        format!("{}{}", base, ext)
+    } else {
+        format!("{}-{}{}", base, attempt, ext)
+    }
+}
+
+pub async fn attachments_import_paths(
+    pool: &SqlitePool,
+    vault: &Vault,
+    payload: AttachmentImportPathsPayload,
+) -> AppResult<Vec<AttachmentRef>> {
+    ensure_member_in_household(pool, &payload.household_id, &payload.member_id).await?;
+
+    let mut out = Vec::new();
+
+    for raw_path in &payload.paths {
+        let src = PathBuf::from(raw_path);
+        let meta = fs::symlink_metadata(&src).map_err(|e| {
+            AppError::from(e)
+                .with_context("operation", "import_stat")
+                .with_context("path", raw_path.clone())
+        })?;
+        if !meta.is_file() {
+            return Err(AppError::new(
+                ATTACHMENTS_INVALID_INPUT,
+                "Only regular files can be imported.",
+            ));
+        }
+        if meta.file_type().is_symlink() {
+            return Err(AppError::new(
+                ATTACHMENTS_SYMLINK_REJECTED,
+                "Symbolic links aren’t allowed for safety.",
+            ));
+        }
+
+        let file_name = src
+            .file_name()
+            .and_then(|o| o.to_str())
+            .unwrap_or("Document");
+        let (base, ext) = split_ext(file_name);
+
+        // ensure unique under people/{memberId}
+        let mut attempt: usize = 0;
+        let target_rel = loop {
+            let name = candidate_name(&base, &ext, attempt);
+            let rel = format!("people/{}/{}", payload.member_id, name);
+            let resolved = vault
+                .resolve(&payload.household_id, AttachmentCategory::Misc, &rel)
+                .map_err(map_vault_error)?;
+            if !resolved.exists() {
+                break rel;
+            }
+            attempt += 1;
+        };
+
+        let dest_abs = vault
+            .resolve(&payload.household_id, AttachmentCategory::Misc, &target_rel)
+            .map_err(map_vault_error)?;
+        if let Some(parent) = dest_abs.parent() {
+            fs::create_dir_all(parent).map_err(|e| {
+                AppError::from(e)
+                    .with_context("operation", "import_mkdir")
+                    .with_context("path", parent.display().to_string())
+            })?;
+        }
+        fs::copy(&src, &dest_abs).map_err(|e| {
+            AppError::from(e)
+                .with_context("operation", "import_copy")
+                .with_context("from", src.display().to_string())
+                .with_context("to", dest_abs.display().to_string())
+        })?;
+
+        let record = attachments_add(
+            pool,
+            vault,
+            AttachmentAddPayload {
+                household_id: payload.household_id.clone(),
+                member_id: payload.member_id.clone(),
+                root_key: "appData".into(),
+                relative_path: target_rel.clone(),
+                title: Some(
+                    Path::new(&target_rel)
+                        .file_name()
+                        .and_then(|o| o.to_str())
+                        .unwrap_or("Document")
+                        .to_string(),
+                ),
+                mime_hint: None,
+            },
+        )
+        .await?;
+        out.push(record);
+    }
+
+    Ok(out)
+}
+
 pub async fn renewals_list(
     pool: &SqlitePool,
     request: &RenewalsListRequest,

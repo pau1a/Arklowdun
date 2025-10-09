@@ -71,6 +71,16 @@ pub struct AttachmentRemovePayload {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct AttachmentImportPathsPayload {
+    #[serde(alias = "householdId")]
+    pub household_id: String,
+    #[serde(alias = "memberId")]
+    pub member_id: String,
+    /// Absolute OS paths provided by the window drag/drop event.
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct RenewalsListRequest {
     #[serde(default, alias = "memberId")]
     pub member_id: Option<String>,

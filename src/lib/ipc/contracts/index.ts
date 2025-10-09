@@ -549,7 +549,18 @@ export const contracts = {
     request: AttachmentInputSchema,
     response: AttachmentRefRawSchema,
   }),
-  member_attachments_remove: contract({ request: idRequest, response: z.void() }),
+  // Rust returns () which maps to null over IPC
+  member_attachments_remove: contract({ request: idRequest, response: z.null() }),
+  member_attachments_import_paths: contract({
+    request: z
+      .object({
+        householdId: z.string(),
+        memberId: z.string(),
+        paths: z.array(z.string()).min(1),
+      })
+      .passthrough(),
+    response: z.array(AttachmentRefRawSchema),
+  }),
   member_renewals_list: contract({
     request: memberRenewalsListRequest,
     response: z.array(RenewalRawSchema),
@@ -558,7 +569,8 @@ export const contracts = {
     request: RenewalInputSchema,
     response: RenewalRawSchema,
   }),
-  member_renewals_delete: contract({ request: idRequest, response: z.void() }),
+  // Rust returns () which maps to null over IPC
+  member_renewals_delete: contract({ request: idRequest, response: z.null() }),
   household_create: contract({
     request: z.object({ args: householdArgs }).passthrough(),
     response: householdRecord,

@@ -159,6 +159,14 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
   modal.dialog.setAttribute("role", "dialog");
   modal.dialog.setAttribute("aria-modal", "true");
 
+  // Prevent the webview from attempting to open dropped files when the drawer is open.
+  // Some WebKit builds require this at the overlay level for drag&drop to work reliably.
+  const preventDefaultDrop = (e: Event) => {
+    e.preventDefault();
+  };
+  modal.root.addEventListener("dragover", preventDefaultDrop);
+  modal.root.addEventListener("drop", preventDefaultDrop);
+
   const container = document.createElement("div");
   container.className = "family-drawer__container";
   modal.dialog.appendChild(container);

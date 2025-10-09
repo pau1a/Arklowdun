@@ -58,7 +58,16 @@ export class TauriAdapter implements IpcAdapter {
       const contract = getContract(command);
       const request = contract.request.parse(payload ?? {});
       const invoke = await this.getInvoke();
-      const result = await invoke<ContractResponse<K>>(command, request as Record<string, unknown>);
+      // Some Tauri commands expect a single struct argument named `request` or `payload`.
+      // Others expect flattened args. To support all cases without changing callers,
+      // send flattened args and also include both wrappers.
+      const base = request as Record<string, unknown>;
+      const args: Record<string, unknown> = {
+        ...(base ?? {}),
+        request: request,
+        payload: request,
+      };
+      const result = await invoke<ContractResponse<K>>(command, args);
       const parsed = contract.response.parse(result);
       span.finish({ success: true });
       return parsed;
