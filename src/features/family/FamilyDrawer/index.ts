@@ -4,8 +4,10 @@ import { toast } from "@ui/Toast";
 import { normalizeError, DB_UNHEALTHY_WRITE_BLOCKED, DB_UNHEALTHY_WRITE_BLOCKED_MESSAGE } from "@lib/ipc/call";
 import { logUI, type UiLogLevel } from "@lib/uiLog";
 import type { FamilyMember } from "../family.types";
+import { familyStore } from "../family.store";
 import { createDrawerTabs, type FamilyDrawerTabId } from "./DrawerTabs";
 import { createPersonalTab, type PersonalFormData } from "./TabPersonal";
+import { createDocumentsTab } from "./TabDocuments";
 import { createFinanceTab } from "./TabFinance";
 import { createAuditTab } from "./TabAudit";
 
@@ -113,6 +115,7 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
   };
 
   const personalTab = createPersonalTab();
+  const documentsTab = createDocumentsTab();
   const financeTab = createFinanceTab();
   const auditTab = createAuditTab();
 
@@ -120,6 +123,7 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
 
   const tabs = createDrawerTabs([
     { id: "personal", label: "Personal", panel: personalTab.element },
+    { id: "documents", label: "Documents", panel: documentsTab.element },
     { id: "finance", label: "Finance", panel: financeTab.element },
     { id: "audit", label: "Audit", panel: auditTab.element },
   ]);
@@ -138,6 +142,7 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
         const reason = pendingCloseReason ?? "cancel";
         const memberId = currentMemberId;
         pendingCloseReason = null;
+        documentsTab.setMember(null);
         if (memberId) {
           emitLog("INFO", "family.ui.drawer_closed", { member_id: memberId, reason });
           options.onClose?.(reason);
@@ -153,6 +158,14 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
   modal.dialog.setAttribute("aria-label", "Member details");
   modal.dialog.setAttribute("role", "dialog");
   modal.dialog.setAttribute("aria-modal", "true");
+
+  // Prevent the webview from attempting to open dropped files when the drawer is open.
+  // Some WebKit builds require this at the overlay level for drag&drop to work reliably.
+  const preventDefaultDrop = (e: Event) => {
+    e.preventDefault();
+  };
+  modal.root.addEventListener("dragover", preventDefaultDrop);
+  modal.root.addEventListener("drop", preventDefaultDrop);
 
   const container = document.createElement("div");
   container.className = "family-drawer__container";
@@ -254,7 +267,12 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
 
   const syncMember = (memberId: string) => {
     const member = options.getMember(memberId);
-    if (!member) return;
+    if (!member) {
+      documentsTab.setMember(null);
+      return;
+    }
+    documentsTab.setMember(member);
+    documentsTab.updateAttachments(familyStore.attachments.get(member.id));
     personalTab.setData(toPersonalData(member));
     financeTab.setData(toFinanceData(member));
     auditTab.setData(toAuditData(member));
@@ -609,6 +627,7 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
       modal.dialog.removeEventListener("keydown", handleKeydown);
       container.removeEventListener("input", markDirty, true);
       container.removeEventListener("change", markDirty, true);
+      documentsTab.destroy();
       modal.root.remove();
     },
     isOpen() {

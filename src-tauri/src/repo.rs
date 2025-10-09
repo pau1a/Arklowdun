@@ -17,6 +17,7 @@ pub(crate) const DOMAIN_TABLES: &[&str] = &[
     "pets",
     "pet_medical",
     "family_members",
+    "member_attachments",
     "categories",
     "budget_categories",
     "expenses",

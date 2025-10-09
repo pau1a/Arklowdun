@@ -36,14 +36,13 @@ impl FilenameError {
 }
 
 fn has_forbidden_characters(value: &str) -> bool {
-    value.chars().any(|c| c.is_control() || FORBIDDEN_CHARS.contains(&c))
+    value
+        .chars()
+        .any(|c| c.is_control() || FORBIDDEN_CHARS.contains(&c))
 }
 
 fn is_reserved_name(value: &str) -> bool {
-    let stem = value
-        .split_once('.')
-        .map(|(stem, _)| stem)
-        .unwrap_or(value);
+    let stem = value.split_once('.').map(|(stem, _)| stem).unwrap_or(value);
 
     RESERVED_WINDOWS_NAMES
         .iter()
@@ -180,4 +179,3 @@ mod tests {
         }
     }
 }
-

@@ -42,6 +42,7 @@ pub const ATTACHMENT_TABLES: &[&str] = &[
     "inventory_items",
     "pet_medical",
     "vehicle_maintenance",
+    "member_attachments",
 ];
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

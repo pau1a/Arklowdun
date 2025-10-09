@@ -22,9 +22,9 @@ use arklowdun_lib::{
         RENEWALS_INVALID_OFFSET, VALIDATION_HOUSEHOLD_MISMATCH, VALIDATION_MEMBER_MISSING,
         VALIDATION_SCOPE_REQUIRED,
     },
-    AppState,
     vault::Vault,
     vault_migration::VaultMigrationManager,
+    AppState,
 };
 
 async fn build_app_state(dir: &TempDir) -> Result<(AppState, SqlitePool, PathBuf)> {
@@ -100,7 +100,7 @@ async fn member_attachments_add_and_list() -> Result<()> {
     let payload = AttachmentAddPayload {
         household_id: "hh-1".into(),
         member_id: "mem-1".into(),
-        root_key: "attachments".into(),
+        root_key: "appData".into(),
         relative_path: "docs/passport.pdf".into(),
         title: Some("Passport".into()),
         mime_hint: Some("application/pdf".into()),
@@ -138,7 +138,7 @@ async fn member_attachments_add_rejects_duplicates() -> Result<()> {
     let payload = AttachmentAddPayload {
         household_id: "hh-1".into(),
         member_id: "mem-1".into(),
-        root_key: "attachments".into(),
+        root_key: "appData".into(),
         relative_path: "docs/id.png".into(),
         title: None,
         mime_hint: None,
@@ -163,7 +163,7 @@ async fn member_attachments_add_rejects_out_of_vault() -> Result<()> {
         AttachmentAddPayload {
             household_id: "hh-1".into(),
             member_id: "mem-1".into(),
-            root_key: "attachments".into(),
+            root_key: "appData".into(),
             relative_path: "../escape".into(),
             title: None,
             mime_hint: None,
@@ -211,7 +211,7 @@ async fn member_attachments_add_rejects_empty_path() -> Result<()> {
         AttachmentAddPayload {
             household_id: "hh-1".into(),
             member_id: "mem-1".into(),
-            root_key: "attachments".into(),
+            root_key: "appData".into(),
             relative_path: "   ".into(),
             title: None,
             mime_hint: None,
@@ -234,7 +234,7 @@ async fn member_attachments_add_rejects_symlink() -> Result<()> {
     let app = build_app(state);
 
     let vault_root = dir.path().join("attachments");
-    let household_root = vault_root.join("hh-1").join("attachments");
+    let household_root = vault_root.join("hh-1").join("misc");
     std::fs::create_dir_all(&household_root)?;
     let external_dir = dir.path().join("external");
     std::fs::create_dir_all(&external_dir)?;
@@ -246,7 +246,7 @@ async fn member_attachments_add_rejects_symlink() -> Result<()> {
         AttachmentAddPayload {
             household_id: "hh-1".into(),
             member_id: "mem-1".into(),
-            root_key: "attachments".into(),
+            root_key: "appData".into(),
             relative_path: "docs/secret.txt".into(),
             title: None,
             mime_hint: None,

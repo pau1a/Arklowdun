@@ -134,10 +134,10 @@ pub mod error;
 pub mod events_tz_backfill;
 pub mod exdate;
 pub mod export;
+pub mod family_logging;
 pub mod file_ops;
 pub mod files_indexer;
 pub mod files_validation;
-pub mod family_logging;
 mod household; // declare module; avoid `use` to prevent name collision
 pub mod household_active;
 pub use household::{
@@ -4445,6 +4445,7 @@ macro_rules! app_commands {
             commands_family::member_attachments_list,
             commands_family::member_attachments_add,
             commands_family::member_attachments_remove,
+            commands_family::member_attachments_import_paths,
             commands_family::member_renewals_list,
             commands_family::member_renewals_upsert,
             commands_family::member_renewals_delete,

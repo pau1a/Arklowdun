@@ -32,4 +32,5 @@ pub(crate) const ATTACHMENT_TABLES: &[&str] = &[
     "inventory_items",
     "vehicle_maintenance",
     "pet_medical",
+    "member_attachments",
 ];

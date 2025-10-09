@@ -477,9 +477,16 @@ export const familyStore = {
   },
 
   attachments: {
-    async load(memberId: string): Promise<MemberAttachment[]> {
+    get(memberId: string): MemberAttachment[] {
+      if (!memberId) return [];
+      const cached = state.attachments[memberId];
+      if (!cached) return [];
+      return cached.map(cloneAttachment);
+    },
+
+    async load(memberId: string, options?: { force?: boolean }): Promise<MemberAttachment[]> {
       const householdId = ensureHydrated();
-      if (state.attachments[memberId]) {
+      if (!options?.force && state.attachments[memberId]) {
         return state.attachments[memberId].map(cloneAttachment);
       }
       const start = now();
@@ -513,7 +520,7 @@ export const familyStore = {
         id: uuid("attach-temp"),
         householdId,
         memberId,
-        rootKey: "attachments",
+        rootKey: "appData",
         relativePath: file.name,
         title: file.name,
         mimeHint: file.type || undefined,
@@ -537,7 +544,7 @@ export const familyStore = {
         const created = await familyRepo.attachments.add({
           householdId,
           memberId,
-          rootKey: "attachments",
+          rootKey: "appData",
           relativePath: file.name,
           title: file.name,
           mimeHint: file.type || undefined,
@@ -591,18 +598,16 @@ export const familyStore = {
       };
       emit();
       const start = now();
-      logUI("INFO", "ui.family.attach.remove", {
+      logUI("INFO", "ui.family.attach.remove.begin", {
         member_id: memberId,
         attachment_id: attachmentId,
-        optimistic: true,
       });
 
       try {
         await familyRepo.attachments.remove(attachmentId);
-        logUI("INFO", "ui.family.attach.remove", {
+        logUI("INFO", "ui.family.attach.remove.success", {
           member_id: memberId,
           attachment_id: attachmentId,
-          optimistic: false,
           duration_ms: Math.round(now() - start),
         });
         logUI("INFO", "ui.family.reconciled", {
@@ -620,9 +625,10 @@ export const familyStore = {
           member_id: memberId,
           attachment_id: attachmentId,
         });
-        logUI("ERROR", "ui.family.error.reconcile", {
+        logUI("ERROR", "ui.family.attach.remove.error", {
           member_id: memberId,
-          message: normalized.message,
+          attachment_id: attachmentId,
+          error_code: normalized.code,
         });
         throw normalized;
       }
