@@ -22,6 +22,7 @@ use serde::Serialize;
 use tracing::warn;
 use ts_rs::TS;
 
+pub mod family;
 pub mod manifest;
 
 const PARTIAL_SUFFIX: &str = ".partial";

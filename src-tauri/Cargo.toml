@@ -73,6 +73,7 @@ unicode-normalization = "0.1"
 walkdir = "2"
 mime_guess = "2"
 infer = "0.15"
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 libc = "0.2"
