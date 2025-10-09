@@ -10,6 +10,7 @@ export interface FamilyHeaderState {
 export interface FamilyHeaderInstance {
   element: HTMLElement;
   update(state: Partial<FamilyHeaderState>): void;
+  setAddMemberHandler(handler: (() => void) | null): void;
   destroy(): void;
 }
 
@@ -60,9 +61,14 @@ export function createFamilyHeader(host: HTMLElement): FamilyHeaderInstance {
   addButton.textContent = "Add member";
   addButton.setAttribute("aria-label", "Add a family member");
 
+  let addMemberHandler: (() => void) | null = null;
+
   const handleAddMember = () => {
     logUI("INFO", "ui.family.add_member.cta", { source: "header" });
-    // Stubbed modal hook for PR8.
+    if (addMemberHandler) {
+      addMemberHandler();
+      return;
+    }
     console.info("FamilyShell:AddMember", { source: "header" });
   };
 
@@ -93,6 +99,9 @@ export function createFamilyHeader(host: HTMLElement): FamilyHeaderInstance {
     update(partial: Partial<FamilyHeaderState>) {
       state = { ...state, ...partial };
       apply();
+    },
+    setAddMemberHandler(handler: (() => void) | null) {
+      addMemberHandler = handler;
     },
     destroy() {
       addButton.removeEventListener("click", handleAddMember);

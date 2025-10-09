@@ -1,6 +1,7 @@
 // src/repos.ts
 import { call } from "@lib/ipc/call";
 import { logUI } from "@lib/uiLog";
+import { z } from "zod";
 import {
   AttachmentInputSchema,
   AttachmentRefSchema,
@@ -78,6 +79,10 @@ function domainRepo<T extends object>(table: string, defaultOrderBy: string) {
     },
 
     async update(householdId: string, id: string, data: Partial<T>): Promise<void> {
+      if (data == null || (typeof data === "object" && Object.keys(data).length === 0)) {
+        logUI("INFO", "repo.update.noop", { table, id });
+        return;
+      }
       if (table === "events") {
         throw new Error('Do not use domainRepo("events"). Use eventsApi.* helpers.');
       }
@@ -113,12 +118,42 @@ export const propertyDocsRepo     = domainRepo<PropertyDocument>("property_docum
 export const petsRepo             = domainRepo<Pet>("pets", "position, created_at, id");
 export const petMedicalRepo       = domainRepo<PetMedicalRecord>("pet_medical", "date DESC, created_at DESC, id");
 const familyMembersRepo           = domainRepo<FamilyMember>("family_members", "position, created_at, id");
+
+const FamilyMemberCreateRequestSchema = z
+  .object({
+    householdId: z.string().min(1),
+    name: z.string().min(1),
+    position: z.number().int().nonnegative(),
+    notes: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+export type FamilyMemberCreateRequest = z.infer<typeof FamilyMemberCreateRequestSchema>;
 export const inventoryRepo        = domainRepo<InventoryItem>("inventory_items", "position, created_at, id");
 export const notesRepo            = domainRepo<Note>("notes", "position, created_at, id");
 export const shoppingRepo         = domainRepo<ShoppingItem>("shopping_items", "position, created_at, id");
 
 export const familyRepo = {
   ...familyMembersRepo,
+  async create(input: FamilyMemberCreateRequest): Promise<FamilyMember> {
+    const payload = FamilyMemberCreateRequestSchema.parse(input);
+    const args = {
+      householdId: payload.householdId,
+      name: payload.name,
+      position: payload.position,
+      notes: payload.notes ?? null,
+    } satisfies Record<string, unknown>;
+    const response = await call("family_members_create", args);
+    if (response == null) {
+      const error: Error & { code?: string; context?: unknown } = new Error(
+        "family_members_create returned null/undefined",
+      );
+      error.code = "IPC_NULL_RESPONSE";
+      error.context = { args };
+      throw error;
+    }
+    return response as FamilyMember;
+  },
   attachments: {
     async list(memberId: string): Promise<AttachmentRef[]> {
       const start = performance.now();

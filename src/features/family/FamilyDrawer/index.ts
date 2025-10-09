@@ -105,6 +105,7 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
   let destroyed = false;
   const logFn = options.log ?? logUI;
   let pendingCloseReason: DrawerCloseReason | null = null;
+  let hasPendingChanges = false;
 
   const emitLog = (level: UiLogLevel, cmd: string, details: Record<string, unknown>) => {
     if (!ENABLE_FAMILY_EXPANSION) return;
@@ -208,7 +209,7 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
   };
 
   const setButtonsDisabled = (disabled: boolean) => {
-    saveButton.disabled = disabled;
+    saveButton.disabled = disabled || !hasPendingChanges;
     cancelButton.disabled = disabled;
   };
 
@@ -257,6 +258,10 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
     personalTab.setData(toPersonalData(member));
     financeTab.setData(toFinanceData(member));
     auditTab.setData(toAuditData(member));
+    hasPendingChanges = false;
+    if (!isSaving) {
+      setButtonsDisabled(false);
+    }
   };
 
   const markTabError = (id: FamilyDrawerTabId, hasError: boolean) => {
@@ -327,6 +332,164 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
     return patch;
   };
 
+  const normalizeNullableString = (value: string | null | undefined): string | null => {
+    if (value == null) return null;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  };
+
+  const normalizePhoneForComparison = (
+    phone: FamilyMember["phone"] | Partial<FamilyMember["phone"]> | null | undefined,
+  ) => {
+    if (!phone) {
+      return { mobile: null, home: null, work: null } as const;
+    }
+    return {
+      mobile: normalizeNullableString(phone.mobile ?? null),
+      home: normalizeNullableString(phone.home ?? null),
+      work: normalizeNullableString(phone.work ?? null),
+    } as const;
+  };
+
+  const normalizeFinanceForComparison = (
+    finance: FamilyMember["finance"] | Partial<FamilyMember["finance"]> | null | undefined,
+  ) => {
+    if (!finance) {
+      return {
+        bankAccounts: null,
+        pensionDetails: null,
+        insuranceRefs: null,
+      } as const;
+    }
+    return {
+      bankAccounts: finance.bankAccounts ?? null,
+      pensionDetails: finance.pensionDetails ?? null,
+      insuranceRefs: normalizeNullableString(finance.insuranceRefs ?? null),
+    } as const;
+  };
+
+  const normalizeSocialLinks = (links: Record<string, string> | null | undefined) => {
+    if (!links || typeof links !== "object") return null;
+    const normalisedEntries = Object.entries(links as Record<string, unknown>)
+      .map(([key, value]) => [key, String(value ?? "").trim()] as const)
+      .filter(([, value]) => value.length > 0)
+      .sort(([a], [b]) => a.localeCompare(b));
+    if (normalisedEntries.length === 0) {
+      return null;
+    }
+    const out: Record<string, string> = {};
+    for (const [key, value] of normalisedEntries) {
+      out[key] = value;
+    }
+    return out;
+  };
+
+  const stableStringify = (value: unknown): string => {
+    if (value === null) return "null";
+    if (Array.isArray(value)) {
+      return `[${value.map(stableStringify).join(",")}]`;
+    }
+    if (typeof value === "object") {
+      const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+        a.localeCompare(b),
+      );
+      return `{${entries.map(([key, val]) => `${key}:${stableStringify(val)}`).join(",")}}`;
+    }
+    if (typeof value === "string") {
+      return JSON.stringify(value);
+    }
+    return String(value);
+  };
+
+  const pruneUnchangedFields = (
+    member: FamilyMember,
+    patch: Partial<FamilyMember>,
+  ): Partial<FamilyMember> => {
+    const trimmed: Partial<FamilyMember> = { ...patch };
+
+    if (
+      "nickname" in trimmed &&
+      normalizeNullableString(trimmed.nickname ?? null) ===
+        normalizeNullableString(member.nickname ?? member.name ?? null)
+    ) {
+      delete trimmed.nickname;
+    }
+
+    if (
+      "fullName" in trimmed &&
+      normalizeNullableString(trimmed.fullName ?? null) ===
+        normalizeNullableString(member.fullName ?? null)
+    ) {
+      delete trimmed.fullName;
+    }
+
+    if (
+      "relationship" in trimmed &&
+      normalizeNullableString(trimmed.relationship ?? null) ===
+        normalizeNullableString(member.relationship ?? null)
+    ) {
+      delete trimmed.relationship;
+    }
+
+    if (
+      "address" in trimmed &&
+      normalizeNullableString(trimmed.address ?? null) ===
+        normalizeNullableString(member.address ?? null)
+    ) {
+      delete trimmed.address;
+    }
+
+    if (
+      "personalWebsite" in trimmed &&
+      normalizeNullableString(trimmed.personalWebsite ?? null) ===
+        normalizeNullableString(member.personalWebsite ?? null)
+    ) {
+      delete trimmed.personalWebsite;
+    }
+
+    if (
+      "email" in trimmed &&
+      normalizeNullableString(trimmed.email ?? null) === normalizeNullableString(member.email ?? null)
+    ) {
+      delete trimmed.email;
+    }
+
+    if ("phone" in trimmed) {
+      const patchPhone = normalizePhoneForComparison(trimmed.phone);
+      const memberPhone = normalizePhoneForComparison(member.phone ?? null);
+      if (stableStringify(patchPhone) === stableStringify(memberPhone)) {
+        delete trimmed.phone;
+      }
+    }
+
+    if ("socialLinks" in trimmed) {
+      const patchLinks = normalizeSocialLinks(trimmed.socialLinks as Record<string, string> | null | undefined);
+      const memberLinks = normalizeSocialLinks(member.socialLinks as Record<string, string> | null | undefined);
+      if (stableStringify(patchLinks) === stableStringify(memberLinks)) {
+        delete trimmed.socialLinks;
+      } else {
+        trimmed.socialLinks = patchLinks;
+      }
+    }
+
+    if ("finance" in trimmed) {
+      const patchFinance = normalizeFinanceForComparison(trimmed.finance);
+      const memberFinance = normalizeFinanceForComparison(member.finance ?? null);
+      if (stableStringify(patchFinance) === stableStringify(memberFinance)) {
+        delete trimmed.finance;
+      } else {
+        const financePatch: FamilyMember["finance"] = {
+          bankAccounts: trimmed.finance?.bankAccounts ?? null,
+          pensionDetails: trimmed.finance?.pensionDetails ?? null,
+          insuranceRefs: normalizeNullableString(trimmed.finance?.insuranceRefs ?? null),
+        };
+        trimmed.finance = financePatch;
+      }
+    }
+
+    return trimmed;
+  };
+
   const handleSave = async () => {
     if (!currentMemberId) return;
     if (isSaving) return;
@@ -342,8 +505,19 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
 
     emitLog("INFO", "family.ui.save_clicked", { member_id: currentMemberId, tab: tabs.activeId });
 
-    const patch = buildPatch(member, validation.finance);
+    const rawPatch = buildPatch(member, validation.finance);
+    const patch = pruneUnchangedFields(member, rawPatch);
+    const hasChanges = Object.keys(patch).some((key) => key !== "id");
+    hasPendingChanges = hasChanges;
+    if (!isSaving) {
+      setButtonsDisabled(false);
+    }
+    if (!hasChanges) {
+      toast.show({ kind: "info", message: "No changes to save." });
+      return;
+    }
     isSaving = true;
+    hasPendingChanges = false;
     setButtonsDisabled(true);
 
     try {
@@ -355,6 +529,7 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
       syncMember(saved.id);
     } catch (error) {
       const { message, code } = resolveError(error);
+      hasPendingChanges = true;
       toast.show({ kind: "error", message });
       emitLog("ERROR", "family.ui.save_failed", { member_id: currentMemberId, tab: tabs.activeId, error_code: code });
     } finally {
@@ -394,6 +569,17 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
     }
   };
 
+  const markDirty = () => {
+    if (destroyed || isSaving) {
+      return;
+    }
+    hasPendingChanges = true;
+    setButtonsDisabled(false);
+  };
+
+  container.addEventListener("input", markDirty, { capture: true });
+  container.addEventListener("change", markDirty, { capture: true });
+
   modal.dialog.addEventListener("keydown", handleKeydown);
 
   return {
@@ -421,6 +607,8 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
       destroyed = true;
       modal.setOpen(false);
       modal.dialog.removeEventListener("keydown", handleKeydown);
+      container.removeEventListener("input", markDirty, true);
+      container.removeEventListener("change", markDirty, true);
       modal.root.remove();
     },
     isOpen() {

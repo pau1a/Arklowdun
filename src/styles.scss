@@ -2,6 +2,7 @@
 @use "./ui/styles/logs";
 @use "./styles/family-shell";
 @use "./styles/family-drawer";
+@use "./features/family/modal/AddMemberModal" as *;
 
 :root {
   --radius-sm: 6px;

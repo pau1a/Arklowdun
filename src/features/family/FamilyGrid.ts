@@ -18,6 +18,7 @@ export interface FamilyGridInstance {
   update(members: FamilyMember[]): void;
   getScrollPosition(): number;
   setScrollPosition(position: number): void;
+  focusMember(memberId: string): boolean;
   destroy(): void;
 }
 
@@ -168,6 +169,23 @@ export function createFamilyGrid(
     },
     setScrollPosition(position: number) {
       element.scrollTop = Math.max(0, position);
+    },
+    focusMember(memberId: string) {
+      const card = element.querySelector<HTMLButtonElement>(
+        `.family-card[data-member-id="${memberId}"]`,
+      );
+      if (!card) return false;
+      if (typeof card.scrollIntoView === "function") {
+        card.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+      if (typeof card.focus === "function") {
+        try {
+          card.focus({ preventScroll: true });
+        } catch {
+          card.focus();
+        }
+      }
+      return true;
     },
     destroy() {
       element.removeEventListener("click", handleClick);
