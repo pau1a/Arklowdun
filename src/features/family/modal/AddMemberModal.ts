@@ -410,7 +410,7 @@ export function mountAddMemberModal(
     isOpen = true;
     returnFocusEl = (document.activeElement as HTMLElement) ?? null;
     resetState();
-    logUI("INFO", "ui.family.modal.open", { event: "family_modal", action: "open" });
+    logUI("INFO", "ui.family.modal.open", {});
     modal.setOpen(true);
   }
 
@@ -421,7 +421,7 @@ export function mountAddMemberModal(
     }
     isOpen = false;
     modal.setOpen(false);
-    logUI("INFO", "ui.family.modal.close", { event: "family_modal", action: "close" });
+    logUI("INFO", "ui.family.modal.close", {});
     if (returnFocusEl && typeof returnFocusEl.focus === "function") {
       try {
         returnFocusEl.focus();

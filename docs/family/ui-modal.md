@@ -1,12 +1,12 @@
 # Family add member modal
 
-The PR8 milestone introduces a dedicated modal flow for creating family members from the header CTA. The modal lives in `src/features/family/modal/AddMemberModal.ts` and is mounted by `FamilyView` when both `VITE_ENABLE_FAMILY_EXPANSION` and `VITE_ENABLE_FAMILY_ADD_MEMBER_MODAL` are enabled.
+The PR8 milestone introduces a dedicated modal flow for creating family members from the header CTA. The modal lives in `src/features/family/modal/AddMemberModal.ts` and is mounted by `FamilyView` whenever `VITE_ENABLE_FAMILY_EXPANSION` is enabled (no extra modal flag required).
 
 ## Launch and lifecycle
 
 - `FamilyShell` exposes a setter on the header CTA; when the feature flag is active the view wires this to `mountAddMemberModal`.
-- Opening the modal logs `logUI("INFO", "ui.family.modal.open", { event: "family_modal", action: "open" })` and traps focus using the global modal utilities.
-- Closing the modal (cancel, Esc, overlay click, or after submission) logs `logUI("INFO", "ui.family.modal.close", { event: "family_modal", action: "close" })`, unlocks body scroll, restores focus to the CTA, and resets local state.
+- Opening the modal logs `logUI("INFO", "ui.family.modal.open", {})` and traps focus using the global modal utilities.
+- Closing the modal (cancel, Esc, overlay click, or after submission) logs `logUI("INFO", "ui.family.modal.close", {})`, unlocks body scroll, restores focus to the CTA, and resets local state.
 
 ## Form structure
 

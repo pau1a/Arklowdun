@@ -1,8 +1,5 @@
 // src/FamilyView.ts
-import {
-  ENABLE_FAMILY_ADD_MEMBER_MODAL,
-  ENABLE_FAMILY_EXPANSION,
-} from "./config/flags";
+import { ENABLE_FAMILY_EXPANSION } from "./config/flags";
 import { familyStore } from "./features/family/family.store";
 import type { FamilyMember } from "./features/family/family.types";
 import { createFamilyShell } from "./features/family/FamilyShell";
@@ -19,6 +16,7 @@ import {
 } from "./state/householdStore";
 import type { HouseholdRecord } from "./api/households";
 import { on } from "./store/events";
+import { updatePageBanner } from "./ui/updatePageBanner";
 
 type FamilyViewDeps = {
   getHouseholdId?: () => Promise<string>;
@@ -29,6 +27,11 @@ export async function FamilyView(container: HTMLElement, deps?: FamilyViewDeps) 
   runViewCleanups(container);
 
   const shell = createFamilyShell(container);
+  try {
+    updatePageBanner({ id: "family", display: { label: "Family" } });
+  } catch {
+    // Router may already manage the banner; ignore failures.
+  }
   const section = shell.contentHost;
 
   const emitLog = deps?.log ?? logUI;
@@ -138,13 +141,17 @@ export async function FamilyView(container: HTMLElement, deps?: FamilyViewDeps) 
     updateWidgets();
   };
 
-  if (ENABLE_FAMILY_EXPANSION && ENABLE_FAMILY_ADD_MEMBER_MODAL) {
+  if (ENABLE_FAMILY_EXPANSION) {
     addMemberModal = mountAddMemberModal({
       householdId,
       getMemberCount: () => familyStore.getAll().length,
     });
     shell.header.setAddMemberHandler(() => {
       addMemberModal?.open();
+    });
+    console.log("PR8 wiring", {
+      wired: true,
+      EXP: ENABLE_FAMILY_EXPANSION,
     });
     removeMemberAddedListener = on("family:memberAdded", (payload) => {
       if (payload.householdId !== householdId) return;

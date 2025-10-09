@@ -11,7 +11,5 @@ function readBoolean(key: string, fallback: boolean): boolean {
 }
 
 export const ENABLE_FAMILY_EXPANSION = readBoolean("VITE_ENABLE_FAMILY_EXPANSION", true);
-export const ENABLE_FAMILY_ADD_MEMBER_MODAL = readBoolean(
-  "VITE_ENABLE_FAMILY_ADD_MEMBER_MODAL",
-  false,
-);
+// Modal is now part of the base Family expansion; keep the export for compatibility.
+export const ENABLE_FAMILY_ADD_MEMBER_MODAL = true;
