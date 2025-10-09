@@ -9,6 +9,7 @@ import type {
   MemberAttachment,
   MemberRenewal,
 } from "./family.types";
+import type { RenewalInput } from "@lib/ipc/contracts";
 
 type AppError = {
   message: string;
@@ -636,14 +637,21 @@ export const familyStore = {
   },
 
   renewals: {
+    get(memberId: string): MemberRenewal[] {
+      if (!memberId) return [];
+      const cached = state.renewals[memberId];
+      if (!cached) return [];
+      return cached.map(cloneRenewal);
+    },
+
     async list(memberId: string): Promise<MemberRenewal[]> {
-      ensureHydrated();
+      const householdId = ensureHydrated();
       if (state.renewals[memberId]) {
         return state.renewals[memberId].map(cloneRenewal);
       }
       const start = now();
       try {
-        const renewals = await familyRepo.renewals.list(memberId);
+        const renewals = await familyRepo.renewals.list(memberId, householdId);
         state = {
           ...state,
           renewals: { ...state.renewals, [memberId]: renewals },
@@ -703,17 +711,16 @@ export const familyStore = {
 
       try {
         const payload = {
-          ...data,
+          id: data.id,
+          householdId,
+          memberId,
           kind: optimistic.kind,
+          label: optimistic.label,
           expiresAt: optimistic.expiresAt,
           remindOnExpiry: optimistic.remindOnExpiry,
           remindOffsetDays: optimistic.remindOffsetDays,
-          householdId,
-          memberId,
-          id: data.id,
-          label: optimistic.label,
-        };
-        const saved = await familyRepo.renewals.upsert(payload as any);
+        } satisfies RenewalInput;
+        const saved = await familyRepo.renewals.upsert(payload);
         const reconciled = [...next];
         const index = reconciled.findIndex((item) => item.id === optimistic.id);
         if (index >= 0) reconciled.splice(index, 1, saved);
@@ -754,7 +761,7 @@ export const familyStore = {
     },
 
     async delete(memberId: string, renewalId: string): Promise<void> {
-      ensureHydrated();
+      const householdId = ensureHydrated();
       const previous = state.renewals[memberId] ?? [];
       const next = previous.filter((item) => item.id !== renewalId);
       state = {
@@ -770,7 +777,7 @@ export const familyStore = {
       });
 
       try {
-        await familyRepo.renewals.delete(renewalId);
+        await familyRepo.renewals.delete(renewalId, householdId);
         logUI("INFO", "ui.family.renewal.delete", {
           member_id: memberId,
           renewal_id: renewalId,

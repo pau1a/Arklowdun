@@ -1,4 +1,4 @@
-export type FamilyDrawerTabId = "personal" | "documents" | "finance" | "audit";
+export type FamilyDrawerTabId = "personal" | "documents" | "renewals" | "finance" | "audit";
 
 export interface DrawerTabDefinition {
   id: FamilyDrawerTabId;

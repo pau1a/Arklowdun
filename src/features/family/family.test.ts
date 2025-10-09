@@ -95,9 +95,9 @@ describe("familyRepo adapters", () => {
       },
     ]);
 
-    const renewals = await familyRepo.renewals.list("mem-1");
+    const renewals = await familyRepo.renewals.list("mem-1", "hh-1");
 
-    expect(callMock).toHaveBeenCalledWith("member_renewals_list", { memberId: "mem-1" });
+    expect(callMock).toHaveBeenCalledWith("member_renewals_list", { memberId: "mem-1", householdId: "hh-1" });
     expect(renewals[0].remindOnExpiry).toBe(true);
   });
 

@@ -132,7 +132,9 @@ describe("familyStore", () => {
     });
 
     const created = await familyStore.upsert({ name: "Ada", position: 1 });
-    expect(createMock).toHaveBeenCalledWith("hh-1", expect.any(Object));
+    expect(createMock).toHaveBeenCalledWith(
+      expect.objectContaining({ householdId: "hh-1", name: "Ada" }),
+    );
     expect(created.id).toBe("mem-2");
     expect(familyStore.get("mem-2")?.name).toBe("Ada");
     expect(logSpy).toHaveBeenCalledWith(
@@ -242,6 +244,7 @@ describe("familyStore", () => {
 
     const renewals = await familyStore.renewals.list("mem-1");
     expect(renewals).toHaveLength(1);
+    expect(renewalsListMock).toHaveBeenCalledWith("mem-1", "hh-1");
 
     renewalsUpsertMock.mockResolvedValue({
       id: "ren-2",
@@ -275,6 +278,7 @@ describe("familyStore", () => {
     await familyStore.load("hh-1");
     renewalsDeleteMock.mockRejectedValue(new Error("delete"));
     await expect(familyStore.renewals.delete("mem-1", "ren-x")).rejects.toThrow("delete");
+    expect(renewalsDeleteMock).toHaveBeenCalledWith("ren-x", "hh-1");
     expect(logSpy).toHaveBeenCalledWith(
       "WARN",
       "ui.family.rollback",

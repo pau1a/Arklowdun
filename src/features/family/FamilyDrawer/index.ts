@@ -1,15 +1,16 @@
-import { ENABLE_FAMILY_EXPANSION } from "../../../config/flags";
+import { ENABLE_FAMILY_EXPANSION, ENABLE_FAMILY_RENEWALS } from "../../../config/flags";
 import { createModal } from "@ui/Modal";
 import { toast } from "@ui/Toast";
 import { normalizeError, DB_UNHEALTHY_WRITE_BLOCKED, DB_UNHEALTHY_WRITE_BLOCKED_MESSAGE } from "@lib/ipc/call";
 import { logUI, type UiLogLevel } from "@lib/uiLog";
 import type { FamilyMember } from "../family.types";
 import { familyStore } from "../family.store";
-import { createDrawerTabs, type FamilyDrawerTabId } from "./DrawerTabs";
+import { createDrawerTabs, type DrawerTabDefinition, type FamilyDrawerTabId } from "./DrawerTabs";
 import { createPersonalTab, type PersonalFormData } from "./TabPersonal";
 import { createDocumentsTab } from "./TabDocuments";
 import { createFinanceTab } from "./TabFinance";
 import { createAuditTab } from "./TabAudit";
+import { createRenewalsTab } from "./TabRenewals";
 
 const ERROR_MESSAGE_BY_CODE: Record<string, string> = {
   [DB_UNHEALTHY_WRITE_BLOCKED]: DB_UNHEALTHY_WRITE_BLOCKED_MESSAGE,
@@ -116,17 +117,27 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
 
   const personalTab = createPersonalTab();
   const documentsTab = createDocumentsTab();
+  const renewalsTab = ENABLE_FAMILY_RENEWALS ? createRenewalsTab() : null;
   const financeTab = createFinanceTab();
   const auditTab = createAuditTab();
 
   type FinanceValidation = ReturnType<typeof financeTab.validate>;
 
-  const tabs = createDrawerTabs([
+  const tabDefinitions: DrawerTabDefinition[] = [
     { id: "personal", label: "Personal", panel: personalTab.element },
     { id: "documents", label: "Documents", panel: documentsTab.element },
+  ];
+
+  if (ENABLE_FAMILY_RENEWALS && renewalsTab) {
+    tabDefinitions.push({ id: "renewals", label: "Renewals", panel: renewalsTab.element });
+  }
+
+  tabDefinitions.push(
     { id: "finance", label: "Finance", panel: financeTab.element },
     { id: "audit", label: "Audit", panel: auditTab.element },
-  ]);
+  );
+
+  const tabs = createDrawerTabs(tabDefinitions);
 
   const summary = document.createElement("p");
   summary.id = descriptionId;
@@ -143,6 +154,7 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
         const memberId = currentMemberId;
         pendingCloseReason = null;
         documentsTab.setMember(null);
+        renewalsTab?.setMember(null);
         if (memberId) {
           emitLog("INFO", "family.ui.drawer_closed", { member_id: memberId, reason });
           options.onClose?.(reason);
@@ -269,9 +281,14 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
     const member = options.getMember(memberId);
     if (!member) {
       documentsTab.setMember(null);
+      renewalsTab?.setMember(null);
       return;
     }
     documentsTab.setMember(member);
+    if (ENABLE_FAMILY_RENEWALS && renewalsTab) {
+      renewalsTab.setMember(member);
+      renewalsTab.updateRenewals(familyStore.renewals.get(member.id));
+    }
     documentsTab.updateAttachments(familyStore.attachments.get(member.id));
     personalTab.setData(toPersonalData(member));
     financeTab.setData(toFinanceData(member));
@@ -291,6 +308,9 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
     const financeResult = financeTab.validate();
 
     markTabError("personal", !personalResult.valid);
+    if (ENABLE_FAMILY_RENEWALS && renewalsTab) {
+      markTabError("renewals", false);
+    }
     markTabError("finance", !financeResult.valid);
     markTabError("audit", false);
 
@@ -587,8 +607,12 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
     }
   };
 
-  const markDirty = () => {
+  const markDirty = (event: Event) => {
     if (destroyed || isSaving) {
+      return;
+    }
+    const target = event.target as Node | null;
+    if (ENABLE_FAMILY_RENEWALS && renewalsTab && target && renewalsTab.element.contains(target)) {
       return;
     }
     hasPendingChanges = true;
@@ -628,6 +652,7 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
       container.removeEventListener("input", markDirty, true);
       container.removeEventListener("change", markDirty, true);
       documentsTab.destroy();
+      renewalsTab?.destroy();
       modal.root.remove();
     },
     isOpen() {

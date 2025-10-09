@@ -9,9 +9,8 @@ use arklowdun_lib::{
         AttachmentAddPayload, AttachmentRemovePayload, AttachmentsListRequest,
         RenewalDeletePayload, RenewalInput, RenewalsListRequest, ATTACHMENTS_INVALID_INPUT,
         ATTACHMENTS_INVALID_ROOT, ATTACHMENTS_OUT_OF_VAULT, ATTACHMENTS_PATH_CONFLICT,
-        RENEWALS_INVALID_EXPIRY, RENEWALS_INVALID_KIND, RENEWALS_INVALID_LABEL,
-        RENEWALS_INVALID_OFFSET, VALIDATION_HOUSEHOLD_MISMATCH, VALIDATION_MEMBER_MISSING,
-        VALIDATION_SCOPE_REQUIRED,
+        RENEWALS_INVALID_KIND, RENEWALS_INVALID_LABEL, RENEWALS_INVALID_OFFSET,
+        RENEWALS_PAST_EXPIRY, VALIDATION_HOUSEHOLD_MISMATCH, VALIDATION_MEMBER_MISSING,
     },
     repo_family,
     vault::Vault,
@@ -345,7 +344,7 @@ async fn renewals_upsert_rejects_invalid_expiry() -> Result<()> {
     let err = repo_family::renewals_upsert(&pool, input)
         .await
         .expect_err("expiry must be positive");
-    assert_eq!(err.code(), RENEWALS_INVALID_EXPIRY);
+    assert_eq!(err.code(), RENEWALS_PAST_EXPIRY);
     Ok(())
 }
 
@@ -354,7 +353,7 @@ async fn renewals_upsert_rejects_long_labels() -> Result<()> {
     let (pool, _dir, _vault) = setup().await?;
 
     let mut input = renewal_input();
-    input.label = Some("x".repeat(101));
+    input.label = Some("x".repeat(121));
     let err = repo_family::renewals_upsert(&pool, input)
         .await
         .expect_err("label too long");
@@ -379,8 +378,8 @@ async fn renewals_list_orders_by_expiry() -> Result<()> {
     let rows = repo_family::renewals_list(
         &pool,
         &RenewalsListRequest {
-            member_id: Some("mem-1".into()),
-            household_id: None,
+            member_id: "mem-1".into(),
+            household_id: "hh-1".into(),
         },
     )
     .await?;
@@ -399,6 +398,7 @@ async fn renewals_delete_is_idempotent() -> Result<()> {
         &pool,
         RenewalDeletePayload {
             id: created.id.to_string(),
+            household_id: "hh-1".into(),
         },
     )
     .await?;
@@ -407,6 +407,7 @@ async fn renewals_delete_is_idempotent() -> Result<()> {
         &pool,
         RenewalDeletePayload {
             id: created.id.to_string(),
+            household_id: "hh-1".into(),
         },
     )
     .await?;
@@ -420,13 +421,13 @@ async fn renewals_list_requires_scope() -> Result<()> {
     let err = repo_family::renewals_list(
         &pool,
         &RenewalsListRequest {
-            member_id: None,
-            household_id: None,
+            member_id: "missing".into(),
+            household_id: "hh-1".into(),
         },
     )
     .await
-    .expect_err("scope required");
-    assert_eq!(err.code(), VALIDATION_SCOPE_REQUIRED);
+    .expect_err("member must exist");
+    assert_eq!(err.code(), VALIDATION_MEMBER_MISSING);
     Ok(())
 }
 

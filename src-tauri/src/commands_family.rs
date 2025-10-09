@@ -209,18 +209,15 @@ pub async fn member_renewals_list(
     state: State<'_, AppState>,
     request: RenewalsListRequest,
 ) -> AppResult<Vec<repo_family::Renewal>> {
-    let household = request.household_id.as_deref();
-    let member = request.member_id.as_deref();
     let scope = LogScope::new(
         "member_renewals_list",
-        household.map(|id| id.to_string()),
-        member.map(|id| id.to_string()),
+        Some(request.household_id.clone()),
+        Some(request.member_id.clone()),
     );
     let pool = state.pool_clone();
-    let request_clone = RenewalsListRequest {
-        member_id: request.member_id.clone(),
-        household_id: request.household_id.clone(),
-    };
+    let request_clone = request.clone();
+    let household_id = request.household_id.clone();
+    let member_id = request.member_id.clone();
 
     let result = dispatch_async_app_result(move || {
         let pool = pool.clone();
@@ -232,8 +229,8 @@ pub async fn member_renewals_list(
     match result {
         Ok(records) => {
             scope.success_with_ids(
-                household,
-                member,
+                Some(&household_id),
+                Some(&member_id),
                 json!({
                     "rows": records.len(),
                     "message": "renewals listed",
@@ -311,7 +308,11 @@ pub async fn member_renewals_delete(
     state: State<'_, AppState>,
     payload: RenewalDeletePayload,
 ) -> AppResult<()> {
-    let scope = LogScope::new("member_renewals_delete", None, None);
+    let scope = LogScope::new(
+        "member_renewals_delete",
+        Some(payload.household_id.clone()),
+        None,
+    );
     let permit = match guard::ensure_db_writable(&state) {
         Ok(permit) => permit,
         Err(err) => {
@@ -323,6 +324,7 @@ pub async fn member_renewals_delete(
     let pool = state.pool_clone();
     let payload_clone = RenewalDeletePayload {
         id: payload.id.clone(),
+        household_id: payload.household_id.clone(),
     };
 
     let result = dispatch_async_app_result(move || {
@@ -340,6 +342,7 @@ pub async fn member_renewals_delete(
                 json!({
                     "rows": 0,
                     "renewal_id": payload.id,
+                    "household_id": payload.household_id,
                     "message": "renewal deleted",
                 }),
             );
