@@ -137,6 +137,7 @@ pub mod export;
 pub mod file_ops;
 pub mod files_indexer;
 pub mod files_validation;
+pub mod family_logging;
 mod household; // declare module; avoid `use` to prevent name collision
 pub mod household_active;
 pub use household::{
@@ -698,7 +699,33 @@ macro_rules! gen_domain_cmds {
                     state: State<'_, AppState>,
                     data: serde_json::Map<String, serde_json::Value>,
                 ) -> AppResult<serde_json::Value> {
-                    let _permit = guard::ensure_db_writable(&state)?;
+                    let family_scope_info = if stringify!($table) == "family_members" {
+                        let household = data
+                            .get("household_id")
+                            .and_then(|value| value.as_str())
+                            .map(|value| value.to_string());
+                        let member = data
+                            .get("id")
+                            .and_then(|value| value.as_str())
+                            .map(|value| value.to_string());
+                        Some((household, member))
+                    } else {
+                        None
+                    };
+                    let _permit = match guard::ensure_db_writable(&state) {
+                        Ok(permit) => permit,
+                        Err(err) => {
+                            if let Some((household, member)) = family_scope_info.clone() {
+                                let scope = crate::family_logging::LogScope::new(
+                                    "family_members_create",
+                                    household,
+                                    member,
+                                );
+                                scope.fail(&err);
+                            }
+                            return Err(err);
+                        }
+                    };
                     let pool = state.pool_clone();
                     let vault = state.vault();
                     let active_household = state.active_household_id.clone();
@@ -734,7 +761,32 @@ macro_rules! gen_domain_cmds {
                     data: serde_json::Map<String, serde_json::Value>,
                     household_id: Option<String>,
                 ) -> AppResult<()> {
-                    let _permit = guard::ensure_db_writable(&state)?;
+                    let family_scope_info = if stringify!($table) == "family_members" {
+                        let household = household_id
+                            .clone()
+                            .or_else(|| {
+                                data.get("household_id")
+                                    .and_then(|value| value.as_str())
+                                    .map(|value| value.to_string())
+                            });
+                        Some((household, Some(id.clone())))
+                    } else {
+                        None
+                    };
+                    let _permit = match guard::ensure_db_writable(&state) {
+                        Ok(permit) => permit,
+                        Err(err) => {
+                            if let Some((household, member)) = family_scope_info.clone() {
+                                let scope = crate::family_logging::LogScope::new(
+                                    "family_members_update",
+                                    household,
+                                    member,
+                                );
+                                scope.fail(&err);
+                            }
+                            return Err(err);
+                        }
+                    };
                     let pool = state.pool_clone();
                     let vault = state.vault();
                     let active_household = state.active_household_id.clone();
@@ -778,7 +830,25 @@ macro_rules! gen_domain_cmds {
                     household_id: String,
                     id: String,
                 ) -> AppResult<()> {
-                    let _permit = guard::ensure_db_writable(&state)?;
+                    let family_scope_info = if stringify!($table) == "family_members" {
+                        Some((Some(household_id.clone()), Some(id.clone())))
+                    } else {
+                        None
+                    };
+                    let _permit = match guard::ensure_db_writable(&state) {
+                        Ok(permit) => permit,
+                        Err(err) => {
+                            if let Some((household, member)) = family_scope_info.clone() {
+                                let scope = crate::family_logging::LogScope::new(
+                                    "family_members_delete",
+                                    household,
+                                    member,
+                                );
+                                scope.fail(&err);
+                            }
+                            return Err(err);
+                        }
+                    };
                     let pool = state.pool_clone();
                     let vault = state.vault();
                     let active_household = state.active_household_id.clone();
@@ -818,7 +888,25 @@ macro_rules! gen_domain_cmds {
                     household_id: String,
                     id: String,
                 ) -> AppResult<()> {
-                    let _permit = guard::ensure_db_writable(&state)?;
+                    let family_scope_info = if stringify!($table) == "family_members" {
+                        Some((Some(household_id.clone()), Some(id.clone())))
+                    } else {
+                        None
+                    };
+                    let _permit = match guard::ensure_db_writable(&state) {
+                        Ok(permit) => permit,
+                        Err(err) => {
+                            if let Some((household, member)) = family_scope_info.clone() {
+                                let scope = crate::family_logging::LogScope::new(
+                                    "family_members_restore",
+                                    household,
+                                    member,
+                                );
+                                scope.fail(&err);
+                            }
+                            return Err(err);
+                        }
+                    };
                     let pool = state.pool_clone();
                     dispatch_async_app_result(move || {
                         let household_id = household_id;
@@ -4238,6 +4326,11 @@ async fn attachments_repair_manifest_export<R: tauri::Runtime>(
 }
 
 #[tauri::command]
+fn family_ui_log(entry: crate::family_logging::UiLogRecord) {
+    crate::family_logging::emit_ui_log(entry);
+}
+
+#[tauri::command]
 #[allow(clippy::result_large_err)]
 async fn time_invariants_check(
     state: State<'_, AppState>,
@@ -4283,6 +4376,7 @@ macro_rules! app_commands {
             household_list_all,
             household_list,
             household_get,
+            family_ui_log,
             household_create,
             household_update,
             household_delete,

@@ -1,4 +1,4 @@
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 use sqlx::{sqlite::SqliteRow, Column, Row, SqlitePool, TypeInfo, ValueRef};
 
 use crate::attachment_category::AttachmentCategory;
@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     exdate::{inspect_exdates, parse_rrule_until, split_csv_exdates, ExdateContext},
+    family_logging::LogScope,
     id::new_uuid_v7,
     repo,
     time::now_ms,
@@ -1012,13 +1013,39 @@ pub async fn list_command(
     limit: Option<i64>,
     offset: Option<i64>,
 ) -> AppResult<Vec<Value>> {
-    list(pool, table, household_id, order_by, limit, offset)
-        .await
-        .map_err(|err| {
-            err.with_context("operation", "list")
+    let scope = if table == "family_members" {
+        Some(LogScope::new(
+            "family_members_list",
+            Some(household_id.to_string()),
+            None,
+        ))
+    } else {
+        None
+    };
+
+    match list(pool, table, household_id, order_by, limit, offset).await {
+        Ok(rows) => {
+            if let Some(scope) = scope.as_ref() {
+                scope.success(
+                    None,
+                    json!({
+                        "rows": rows.len(),
+                        "message": "family members listed",
+                    }),
+                );
+            }
+            Ok(rows)
+        }
+        Err(err) => {
+            if let Some(scope) = scope.as_ref() {
+                scope.fail(&err);
+            }
+            Err(err
+                .with_context("operation", "list")
                 .with_context("table", table.to_string())
-                .with_context("household_id", household_id.to_string())
-        })
+                .with_context("household_id", household_id.to_string()))
+        }
+    }
 }
 
 pub async fn get_command(
@@ -1027,13 +1054,41 @@ pub async fn get_command(
     household_id: Option<&str>,
     id: &str,
 ) -> AppResult<Option<Value>> {
-    get(pool, table, household_id, id).await.map_err(|err| {
-        let household = household_id.unwrap_or("");
-        err.with_context("operation", "get")
-            .with_context("table", table.to_string())
-            .with_context("household_id", household.to_string())
-            .with_context("id", id.to_string())
-    })
+    let scope = if table == "family_members" {
+        Some(LogScope::new(
+            "family_members_get",
+            household_id.map(|hh| hh.to_string()),
+            Some(id.to_string()),
+        ))
+    } else {
+        None
+    };
+
+    match get(pool, table, household_id, id).await {
+        Ok(row) => {
+            if let Some(scope) = scope.as_ref() {
+                scope.success(
+                    Some(id),
+                    json!({
+                        "found": row.is_some(),
+                        "message": "family member fetched",
+                    }),
+                );
+            }
+            Ok(row)
+        }
+        Err(err) => {
+            if let Some(scope) = scope.as_ref() {
+                scope.fail(&err);
+            }
+            let household = household_id.unwrap_or("");
+            Err(err
+                .with_context("operation", "get")
+                .with_context("table", table.to_string())
+                .with_context("household_id", household.to_string())
+                .with_context("id", id.to_string()))
+        }
+    }
 }
 
 // TXN: domain=OUT OF SCOPE tables=*
@@ -1043,12 +1098,47 @@ pub async fn create_command(
     data: Map<String, Value>,
     attachment: Option<AttachmentMutationGuard>,
 ) -> AppResult<Value> {
-    create(pool, table, data, attachment.as_ref())
-        .await
-        .map_err(|err| {
-            err.with_context("operation", "create")
-                .with_context("table", table.to_string())
-        })
+    let scope = if table == "family_members" {
+        let household_id = data
+            .get("household_id")
+            .and_then(Value::as_str)
+            .map(|value| value.to_string());
+        let member_id = data
+            .get("id")
+            .and_then(Value::as_str)
+            .map(|value| value.to_string());
+        Some(LogScope::new(
+            "family_members_create",
+            household_id,
+            member_id,
+        ))
+    } else {
+        None
+    };
+
+    match create(pool, table, data, attachment.as_ref()).await {
+        Ok(value) => {
+            if let Some(scope) = scope.as_ref() {
+                let member_id = value.get("id").and_then(Value::as_str);
+                scope.success(
+                    member_id,
+                    json!({
+                        "rows": 1,
+                        "message": "family member created",
+                    }),
+                );
+            }
+            Ok(value)
+        }
+        Err(err) => {
+            if let Some(scope) = scope.as_ref() {
+                scope.fail(&err);
+            }
+            Err(err
+                .with_context("operation", "create")
+                .with_context("table", table.to_string()))
+        }
+    }
 }
 
 // TXN: domain=OUT OF SCOPE tables=*
@@ -1060,15 +1150,44 @@ pub async fn update_command(
     household_id: Option<&str>,
     attachment: Option<AttachmentMutationGuard>,
 ) -> AppResult<()> {
-    update(pool, table, id, data, household_id, attachment.as_ref())
-        .await
-        .map_err(|err| {
+    let scope = if table == "family_members" {
+        let household = household_id
+            .map(|value| value.to_string())
+            .or_else(|| data.get("household_id").and_then(Value::as_str).map(|s| s.to_string()));
+        Some(LogScope::new(
+            "family_members_update",
+            household,
+            Some(id.to_string()),
+        ))
+    } else {
+        None
+    };
+
+    match update(pool, table, id, data, household_id, attachment.as_ref()).await {
+        Ok(()) => {
+            if let Some(scope) = scope.as_ref() {
+                scope.success(
+                    Some(id),
+                    json!({
+                        "rows": 1,
+                        "message": "family member updated",
+                    }),
+                );
+            }
+            Ok(())
+        }
+        Err(err) => {
+            if let Some(scope) = scope.as_ref() {
+                scope.fail(&err);
+            }
             let household = household_id.unwrap_or("");
-            err.with_context("operation", "update")
+            Err(err
+                .with_context("operation", "update")
                 .with_context("table", table.to_string())
                 .with_context("household_id", household.to_string())
-                .with_context("id", id.to_string())
-        })
+                .with_context("id", id.to_string()))
+        }
+    }
 }
 
 // TXN: domain=OUT OF SCOPE tables=*
@@ -1079,6 +1198,16 @@ pub async fn delete_command(
     id: &str,
     attachment: Option<AttachmentMutationGuard>,
 ) -> AppResult<()> {
+    let scope = if table == "family_members" {
+        Some(LogScope::new(
+            "family_members_delete",
+            Some(household_id.to_string()),
+            Some(id.to_string()),
+        ))
+    } else {
+        None
+    };
+
     if ATTACHMENT_TABLES.contains(&table) {
         if let Some(guard) = attachment {
             if let Some(resolved) = guard.resolved_path().map(Path::to_path_buf) {
@@ -1105,15 +1234,31 @@ pub async fn delete_command(
                     .with_context("id", id.to_string())
             });
     }
-    repo::set_deleted_at(pool, table, household_id, id)
-        .await
-        .map_err(|err| {
-            AppError::from(err)
+    match repo::set_deleted_at(pool, table, household_id, id).await {
+        Ok(()) => {
+            if let Some(scope) = scope.as_ref() {
+                scope.success(
+                    Some(id),
+                    json!({
+                        "rows": 1,
+                        "message": "family member deleted",
+                    }),
+                );
+            }
+            Ok(())
+        }
+        Err(err) => {
+            let app_err = AppError::from(err)
                 .with_context("operation", "delete")
                 .with_context("table", table.to_string())
                 .with_context("household_id", household_id.to_string())
-                .with_context("id", id.to_string())
-        })
+                .with_context("id", id.to_string());
+            if let Some(scope) = scope.as_ref() {
+                scope.fail(&app_err);
+            }
+            Err(app_err)
+        }
+    }
 }
 
 // TXN: domain=OUT OF SCOPE tables=*
@@ -1123,6 +1268,16 @@ pub async fn restore_command(
     household_id: &str,
     id: &str,
 ) -> AppResult<()> {
+    let scope = if table == "family_members" {
+        Some(LogScope::new(
+            "family_members_restore",
+            Some(household_id.to_string()),
+            Some(id.to_string()),
+        ))
+    } else {
+        None
+    };
+
     if table == "inventory_items" || table == "shopping_items" {
         return repo::items::restore_item(pool, table, household_id, id)
             .await
@@ -1134,15 +1289,31 @@ pub async fn restore_command(
                     .with_context("id", id.to_string())
             });
     }
-    repo::clear_deleted_at(pool, table, household_id, id)
-        .await
-        .map_err(|err| {
-            AppError::from(err)
+    match repo::clear_deleted_at(pool, table, household_id, id).await {
+        Ok(()) => {
+            if let Some(scope) = scope.as_ref() {
+                scope.success(
+                    Some(id),
+                    json!({
+                        "rows": 1,
+                        "message": "family member restored",
+                    }),
+                );
+            }
+            Ok(())
+        }
+        Err(err) => {
+            let app_err = AppError::from(err)
                 .with_context("operation", "restore")
                 .with_context("table", table.to_string())
                 .with_context("household_id", household_id.to_string())
-                .with_context("id", id.to_string())
-        })
+                .with_context("id", id.to_string());
+            if let Some(scope) = scope.as_ref() {
+                scope.fail(&app_err);
+            }
+            Err(app_err)
+        }
+    }
 }
 
 pub async fn events_list_range_command(
