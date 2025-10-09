@@ -1,0 +1,438 @@
+import { ENABLE_FAMILY_EXPANSION } from "../../../config/flags";
+import { createModal } from "@ui/Modal";
+import { toast } from "@ui/Toast";
+import { normalizeError, DB_UNHEALTHY_WRITE_BLOCKED, DB_UNHEALTHY_WRITE_BLOCKED_MESSAGE } from "@lib/ipc/call";
+import { logUI, type UiLogLevel } from "@lib/uiLog";
+import type { FamilyMember } from "../family.types";
+import { createDrawerTabs, type FamilyDrawerTabId } from "./DrawerTabs";
+import { createPersonalTab, type PersonalFormData } from "./TabPersonal";
+import { createFinanceTab } from "./TabFinance";
+import { createAuditTab } from "./TabAudit";
+
+const ERROR_MESSAGE_BY_CODE: Record<string, string> = {
+  [DB_UNHEALTHY_WRITE_BLOCKED]: DB_UNHEALTHY_WRITE_BLOCKED_MESSAGE,
+  "FAMILY/VALIDATION": "We couldn’t save these details because they didn’t pass validation.",
+  "FAMILY/CONFLICT": "This member was updated elsewhere. Refresh and try again.",
+};
+
+function resolveError(error: unknown): { message: string; code: string } {
+  const normalized = normalizeError(error);
+  const fallback =
+    typeof normalized.message === "string" && normalized.message.trim().length > 0
+      ? normalized.message
+      : "An unexpected error occurred.";
+  return {
+    message: ERROR_MESSAGE_BY_CODE[normalized.code] ?? fallback,
+    code: normalized.code,
+  };
+}
+
+export type DrawerCloseReason = "save" | "cancel" | "programmatic";
+
+export interface FamilyDrawerOptions {
+  getMember: (id: string) => FamilyMember | undefined;
+  saveMember: (patch: Partial<FamilyMember>) => Promise<FamilyMember>;
+  onClose?: (reason: DrawerCloseReason) => void;
+  log?: typeof logUI;
+  resolveVerifierName?: () => Promise<string> | string;
+}
+
+export interface FamilyDrawerInstance {
+  open(memberId: string): void;
+  close(reason?: DrawerCloseReason): void;
+  destroy(): void;
+  isOpen(): boolean;
+  sync(): void;
+  getActiveMemberId(): string | null;
+}
+
+function toNullable(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function toPersonalData(member: FamilyMember): PersonalFormData {
+  const emails: string[] = [];
+  if (member.email) {
+    emails.push(member.email);
+  }
+  const socialEntries: PersonalFormData["socialLinks"] = [];
+  if (member.socialLinks && typeof member.socialLinks === "object") {
+    const entries = Object.entries(member.socialLinks as Record<string, unknown>);
+    for (const [key, value] of entries) {
+      if (typeof value === "string" && value.trim().length > 0) {
+        socialEntries.push({ key, value });
+      }
+    }
+  }
+  return {
+    nickname: member.nickname ?? member.name ?? "",
+    fullName: member.fullName ?? "",
+    relationship: member.relationship ?? "",
+    address: member.address ?? "",
+    emails,
+    phoneMobile: member.phone?.mobile ?? "",
+    phoneHome: member.phone?.home ?? "",
+    phoneWork: member.phone?.work ?? "",
+    website: member.personalWebsite ?? "",
+    socialLinks: socialEntries,
+  };
+}
+
+function toFinanceData(member: FamilyMember) {
+  return {
+    bankAccounts: member.finance?.bankAccounts ?? null,
+    pensionDetails: member.finance?.pensionDetails ?? null,
+    insuranceRefs: member.finance?.insuranceRefs ?? "",
+  };
+}
+
+function toAuditData(member: FamilyMember) {
+  return {
+    createdAt: member.createdAt ?? null,
+    updatedAt: member.updatedAt ?? null,
+    lastVerified: member.lastVerified ?? null,
+    verifiedBy: member.verifiedBy ?? null,
+  };
+}
+
+export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerInstance {
+  const titleId = "family-drawer-title";
+  const descriptionId = "family-drawer-description";
+
+  let currentMemberId: string | null = null;
+  let isSaving = false;
+  let destroyed = false;
+  const logFn = options.log ?? logUI;
+  let pendingCloseReason: DrawerCloseReason | null = null;
+
+  const emitLog = (level: UiLogLevel, cmd: string, details: Record<string, unknown>) => {
+    if (!ENABLE_FAMILY_EXPANSION) return;
+    logFn(level, cmd, details);
+  };
+
+  const personalTab = createPersonalTab();
+  const financeTab = createFinanceTab();
+  const auditTab = createAuditTab();
+
+  type FinanceValidation = ReturnType<typeof financeTab.validate>;
+
+  const tabs = createDrawerTabs([
+    { id: "personal", label: "Personal", panel: personalTab.element },
+    { id: "finance", label: "Finance", panel: financeTab.element },
+    { id: "audit", label: "Audit", panel: auditTab.element },
+  ]);
+
+  const summary = document.createElement("p");
+  summary.id = descriptionId;
+  summary.className = "family-drawer__summary";
+  summary.textContent = "View and edit member details.";
+
+  const modal = createModal({
+    open: false,
+    titleId,
+    descriptionId,
+    onOpenChange(open) {
+      if (!open) {
+        const reason = pendingCloseReason ?? "cancel";
+        const memberId = currentMemberId;
+        pendingCloseReason = null;
+        if (memberId) {
+          emitLog("INFO", "family.ui.drawer_closed", { member_id: memberId, reason });
+          options.onClose?.(reason);
+          currentMemberId = null;
+        }
+      }
+    },
+    closeOnOverlayClick: true,
+  });
+
+  modal.root.classList.add("family-drawer__overlay");
+  modal.dialog.classList.add("family-drawer");
+  modal.dialog.setAttribute("aria-label", "Member details");
+  modal.dialog.setAttribute("role", "dialog");
+  modal.dialog.setAttribute("aria-modal", "true");
+
+  const container = document.createElement("div");
+  container.className = "family-drawer__container";
+  modal.dialog.appendChild(container);
+
+  const header = document.createElement("header");
+  header.className = "family-drawer__header";
+  container.appendChild(header);
+
+  const heading = document.createElement("h2");
+  heading.id = titleId;
+  heading.className = "family-drawer__title";
+  heading.textContent = "Member details";
+  header.appendChild(heading);
+  header.appendChild(summary);
+
+  const buttonRow = document.createElement("div");
+  buttonRow.className = "family-drawer__actions";
+  container.appendChild(buttonRow);
+
+  const saveButton = document.createElement("button");
+  saveButton.type = "button";
+  saveButton.className = "family-drawer__primary";
+  saveButton.textContent = "Save";
+  saveButton.setAttribute("aria-label", "Save member details");
+  buttonRow.appendChild(saveButton);
+
+  const cancelButton = document.createElement("button");
+  cancelButton.type = "button";
+  cancelButton.className = "family-drawer__ghost";
+  cancelButton.textContent = "Cancel";
+  cancelButton.setAttribute("aria-label", "Cancel editing member details");
+  buttonRow.appendChild(cancelButton);
+
+  container.appendChild(tabs.element);
+
+  const content = document.createElement("div");
+  content.className = "family-drawer__content";
+  content.appendChild(tabs.panelsHost);
+  container.appendChild(content);
+
+  const getVerifierName = async (): Promise<string> => {
+    try {
+      if (typeof options.resolveVerifierName === "function") {
+        const result = await options.resolveVerifierName();
+        if (typeof result === "string" && result.trim().length > 0) {
+          return result.trim();
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return "You";
+  };
+
+  const setButtonsDisabled = (disabled: boolean) => {
+    saveButton.disabled = disabled;
+    cancelButton.disabled = disabled;
+  };
+
+  auditTab.setMarkVerifiedHandler(async () => {
+    if (!currentMemberId || isSaving) return;
+    const name = await getVerifierName();
+    const timestamp = Date.now();
+    auditTab.applyVerification({ lastVerified: timestamp, verifiedBy: name });
+    emitLog("INFO", "family.ui.mark_verified", { member_id: currentMemberId, tab: "audit", action: "attempt" });
+    isSaving = true;
+    setButtonsDisabled(true);
+    try {
+      const saved = await options.saveMember({
+        id: currentMemberId,
+        lastVerified: timestamp,
+        verifiedBy: name,
+      });
+      toast.show({ kind: "success", message: "Verified." });
+      emitLog("INFO", "family.ui.mark_verified", {
+        member_id: currentMemberId,
+        tab: "audit",
+        action: "success",
+        success: true,
+      });
+      syncMember(saved.id);
+    } catch (error) {
+      const { message, code } = resolveError(error);
+      toast.show({ kind: "error", message });
+      emitLog("ERROR", "family.ui.mark_verified", {
+        member_id: currentMemberId,
+        tab: "audit",
+        action: "failed",
+        success: false,
+        error_code: code,
+      });
+      syncMember(currentMemberId);
+    } finally {
+      isSaving = false;
+      setButtonsDisabled(false);
+    }
+  });
+
+  const syncMember = (memberId: string) => {
+    const member = options.getMember(memberId);
+    if (!member) return;
+    personalTab.setData(toPersonalData(member));
+    financeTab.setData(toFinanceData(member));
+    auditTab.setData(toAuditData(member));
+  };
+
+  const markTabError = (id: FamilyDrawerTabId, hasError: boolean) => {
+    tabs.setHasError(id, hasError);
+  };
+
+  const handleValidation = () => {
+    const personalResult = personalTab.validate();
+    const financeResult = financeTab.validate();
+
+    markTabError("personal", !personalResult.valid);
+    markTabError("finance", !financeResult.valid);
+    markTabError("audit", false);
+
+    if (!personalResult.valid) {
+      personalResult.focus?.();
+      return { ok: false, finance: financeResult };
+    }
+    if (!financeResult.valid) {
+      financeResult.focus?.();
+      return { ok: false, finance: financeResult };
+    }
+    return {
+      ok: true,
+      finance: financeResult,
+    };
+  };
+
+  const buildPatch = (member: FamilyMember, financeResult: FinanceValidation): Partial<FamilyMember> => {
+    const personal = personalTab.getData();
+    const financeState = financeResult;
+    const financeData = financeTab.getData();
+
+    const phone = {
+      mobile: toNullable(personal.phoneMobile),
+      home: toNullable(personal.phoneHome),
+      work: toNullable(personal.phoneWork),
+    };
+
+    const socialLinks = personal.socialLinks.reduce<Record<string, string>>((acc, entry) => {
+      if (entry.key && entry.value) {
+        acc[entry.key] = entry.value;
+      }
+      return acc;
+    }, {});
+
+    const patch: Partial<FamilyMember> = {
+      id: member.id,
+      nickname: toNullable(personal.nickname),
+      fullName: toNullable(personal.fullName),
+      relationship: toNullable(personal.relationship),
+      address: toNullable(personal.address),
+      personalWebsite: toNullable(personal.website),
+      email: personal.emails.length > 0 ? personal.emails[0] : null,
+      phone,
+      socialLinks: Object.keys(socialLinks).length > 0 ? socialLinks : null,
+      finance: {
+        bankAccounts: financeState.bankAccounts ?? null,
+        pensionDetails: financeState.pensionDetails ?? null,
+        insuranceRefs: toNullable(financeData.insuranceRefs),
+      },
+    };
+
+    if (!patch.nickname) {
+      patch.nickname = member.nickname ?? member.name ?? "";
+    }
+
+    return patch;
+  };
+
+  const handleSave = async () => {
+    if (!currentMemberId) return;
+    if (isSaving) return;
+    const member = options.getMember(currentMemberId);
+    if (!member) return;
+
+    const validation = handleValidation();
+    if (!validation.ok) {
+      emitLog("WARN", "family.ui.validation_blocked", { member_id: currentMemberId, tab: tabs.activeId });
+      toast.show({ kind: "info", message: "Please correct highlighted fields." });
+      return;
+    }
+
+    emitLog("INFO", "family.ui.save_clicked", { member_id: currentMemberId, tab: tabs.activeId });
+
+    const patch = buildPatch(member, validation.finance);
+    isSaving = true;
+    setButtonsDisabled(true);
+
+    try {
+      const saved = await options.saveMember(patch);
+      toast.show({ kind: "success", message: "Member details saved." });
+      emitLog("INFO", "family.ui.save_completed", { member_id: currentMemberId, tab: tabs.activeId });
+      pendingCloseReason = "save";
+      modal.setOpen(false);
+      syncMember(saved.id);
+    } catch (error) {
+      const { message, code } = resolveError(error);
+      toast.show({ kind: "error", message });
+      emitLog("ERROR", "family.ui.save_failed", { member_id: currentMemberId, tab: tabs.activeId, error_code: code });
+    } finally {
+      isSaving = false;
+      setButtonsDisabled(false);
+    }
+  };
+
+  const handleCancel = () => {
+    if (!currentMemberId) {
+      modal.setOpen(false);
+      return;
+    }
+    emitLog("INFO", "family.ui.cancel_clicked", { member_id: currentMemberId, tab: tabs.activeId });
+    pendingCloseReason = "cancel";
+    modal.setOpen(false);
+  };
+
+  saveButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    void handleSave();
+  });
+
+  cancelButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    handleCancel();
+  });
+
+  const handleKeydown = (event: KeyboardEvent) => {
+    if (!modal.isOpen()) return;
+    const key = event.key.toLowerCase();
+    if ((event.metaKey || event.ctrlKey) && key === "s") {
+      event.preventDefault();
+      if (!isSaving) {
+        void handleSave();
+      }
+    }
+  };
+
+  modal.dialog.addEventListener("keydown", handleKeydown);
+
+  return {
+    open(memberId) {
+      if (destroyed) return;
+      const member = options.getMember(memberId);
+      if (!member) return;
+      currentMemberId = memberId;
+      syncMember(memberId);
+      modal.setOpen(true);
+      emitLog("INFO", "family.ui.drawer_opened", { member_id: memberId });
+    },
+    close(reason = "programmatic") {
+      if (!modal.isOpen()) return;
+      if (reason === "cancel") {
+        handleCancel();
+      } else if (reason === "save") {
+        void handleSave();
+      } else {
+        pendingCloseReason = reason;
+        modal.setOpen(false);
+      }
+    },
+    destroy() {
+      destroyed = true;
+      modal.setOpen(false);
+      modal.dialog.removeEventListener("keydown", handleKeydown);
+      modal.root.remove();
+    },
+    isOpen() {
+      return modal.isOpen();
+    },
+    sync() {
+      if (currentMemberId) {
+        syncMember(currentMemberId);
+      }
+    },
+    getActiveMemberId() {
+      return currentMemberId;
+    },
+  };
+}

@@ -1,8 +1,10 @@
 // src/FamilyView.ts
+import { ENABLE_FAMILY_EXPANSION } from "./config/flags";
 import { familyStore } from "./features/family/family.store";
 import type { FamilyMember } from "./features/family/family.types";
 import { createFamilyShell } from "./features/family/FamilyShell";
 import { createFamilyGrid, type FamilyGridInstance } from "./features/family/FamilyGrid";
+import { createFamilyDrawer, type FamilyDrawerInstance } from "./features/family/FamilyDrawer";
 import { getNextBirthday, getUpcomingBirthdays } from "./features/family/family.utils";
 import { getHouseholdIdForCalls } from "./db/household";
 import { logUI } from "@lib/uiLog";
@@ -31,6 +33,7 @@ export async function FamilyView(container: HTMLElement, deps?: FamilyViewDeps) 
 
   let members: FamilyMember[] = familyStore.getAll();
   let grid: FamilyGridInstance | null = null;
+  let drawer: FamilyDrawerInstance | null = null;
   let gridScrollTop = 0;
   let unsubscribed = false;
   let household: HouseholdRecord | null = null;
@@ -55,6 +58,9 @@ export async function FamilyView(container: HTMLElement, deps?: FamilyViewDeps) 
       grid.update(members);
       grid.setScrollPosition(gridScrollTop);
     }
+    if (drawer?.isOpen()) {
+      drawer.sync();
+    }
     updateWidgets();
   });
 
@@ -74,8 +80,26 @@ export async function FamilyView(container: HTMLElement, deps?: FamilyViewDeps) 
       grid.destroy();
       grid = null;
     }
+    if (drawer) {
+      drawer.destroy();
+      drawer = null;
+    }
     shell.destroy();
   });
+
+  const ensureDrawer = () => {
+    if (!drawer) {
+      drawer = createFamilyDrawer({
+        getMember: (id) => familyStore.get(id),
+        saveMember: (patch) => familyStore.upsert(patch),
+        resolveVerifierName: async () => household?.name ?? "You",
+        onClose: () => {
+          grid?.setScrollPosition(gridScrollTop);
+        },
+      });
+    }
+    return drawer;
+  };
 
   const mountGrid = () => {
     grid?.destroy();
@@ -84,13 +108,15 @@ export async function FamilyView(container: HTMLElement, deps?: FamilyViewDeps) 
       householdId,
       onSelect(member, context) {
         gridScrollTop = context.scrollTop;
-        emitLog("INFO", "ui.family.grid.select", {
+        emitLog("INFO", "family.ui.grid.select", {
           household_id: householdId,
           member_id: member.id,
         });
         context.restoreScroll();
-        // Drawer integration arrives in PR7; stub for now.
-        console.info("FamilyGrid:select", { member });
+        if (!ENABLE_FAMILY_EXPANSION) {
+          return;
+        }
+        ensureDrawer().open(member.id);
       },
     });
     grid.setScrollPosition(gridScrollTop);
