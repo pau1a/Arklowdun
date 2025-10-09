@@ -182,7 +182,7 @@ export type AttachmentRef = z.infer<typeof AttachmentRefSchema>;
 export const AttachmentInputSchema = z.object({
   householdId: z.string(),
   memberId: z.string(),
-  rootKey: z.string(),
+  rootKey: z.literal("appData"),
   relativePath: z.string().max(255),
   title: z.string().max(120).optional(),
   mimeHint: mimeHint.optional(),

@@ -58,7 +58,7 @@ async fn attachments_add_and_list_round_trip() -> Result<()> {
     let payload = AttachmentAddPayload {
         household_id: "hh-1".into(),
         member_id: "mem-1".into(),
-        root_key: "attachments".into(),
+        root_key: "appData".into(),
         relative_path: "docs/passport.pdf".into(),
         title: Some("Passport".into()),
         mime_hint: Some("application/pdf".into()),
@@ -87,7 +87,7 @@ async fn attachments_add_rejects_duplicate_paths() -> Result<()> {
     let payload = AttachmentAddPayload {
         household_id: "hh-1".into(),
         member_id: "mem-1".into(),
-        root_key: "attachments".into(),
+        root_key: "appData".into(),
         relative_path: "docs/id.png".into(),
         title: None,
         mime_hint: None,
@@ -108,7 +108,7 @@ async fn attachments_add_rejects_out_of_vault_paths() -> Result<()> {
     let payload = AttachmentAddPayload {
         household_id: "hh-1".into(),
         member_id: "mem-1".into(),
-        root_key: "attachments".into(),
+        root_key: "appData".into(),
         relative_path: "../escape".into(),
         title: None,
         mime_hint: None,
@@ -148,7 +148,7 @@ async fn attachments_add_rejects_empty_path() -> Result<()> {
     let payload = AttachmentAddPayload {
         household_id: "hh-1".into(),
         member_id: "mem-1".into(),
-        root_key: "attachments".into(),
+        root_key: "appData".into(),
         relative_path: "".into(),
         title: None,
         mime_hint: None,
@@ -168,7 +168,7 @@ async fn attachments_add_rejects_symlinks() -> Result<()> {
 
     let (pool, dir, vault) = setup().await?;
 
-    let attachments_dir = dir.path().join("hh-1").join("attachments");
+    let attachments_dir = dir.path().join("hh-1").join("misc");
     std::fs::create_dir_all(&attachments_dir)?;
     let target_dir = dir.path().join("external");
     std::fs::create_dir_all(&target_dir)?;
@@ -178,7 +178,7 @@ async fn attachments_add_rejects_symlinks() -> Result<()> {
     let payload = AttachmentAddPayload {
         household_id: "hh-1".into(),
         member_id: "mem-1".into(),
-        root_key: "attachments".into(),
+        root_key: "appData".into(),
         relative_path: "docs/secret.txt".into(),
         title: None,
         mime_hint: None,
@@ -201,7 +201,7 @@ async fn attachments_remove_is_idempotent() -> Result<()> {
         AttachmentAddPayload {
             household_id: "hh-1".into(),
             member_id: "mem-1".into(),
-            root_key: "attachments".into(),
+            root_key: "appData".into(),
             relative_path: "docs/delete.txt".into(),
             title: None,
             mime_hint: None,
@@ -253,7 +253,7 @@ async fn attachments_cascade_when_member_removed() -> Result<()> {
         AttachmentAddPayload {
             household_id: "hh-1".into(),
             member_id: "mem-1".into(),
-            root_key: "attachments".into(),
+            root_key: "appData".into(),
             relative_path: "docs/passport.pdf".into(),
             title: None,
             mime_hint: None,

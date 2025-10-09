@@ -179,21 +179,21 @@ export const familyRepo = {
       const payload = AttachmentInputSchema.parse(input);
       const start = performance.now();
       logUI("DEBUG", "ui.family.attachments.add.start", {
-        member_id: payload.member_id,
-        household_id: payload.household_id,
+        member_id: payload.memberId,
+        household_id: payload.householdId,
       });
       try {
         const response = await call("member_attachments_add", payload);
         const parsed = AttachmentRefSchema.parse(response);
         logUI("INFO", "ui.family.attachments.add.complete", {
-          member_id: payload.member_id,
+          member_id: payload.memberId,
           attachment_id: parsed.id,
           duration_ms: Math.round(performance.now() - start),
         });
         return parsed;
       } catch (error) {
         logUI("ERROR", "ui.family.attachments.add.error", {
-          member_id: payload.member_id,
+          member_id: payload.memberId,
           message: (error as Error)?.message ?? String(error),
         });
         throw error;
@@ -244,23 +244,23 @@ export const familyRepo = {
       const payload = RenewalInputSchema.parse(input);
       const start = performance.now();
       logUI("DEBUG", "ui.family.renewals.upsert.start", {
-        member_id: payload.member_id,
-        household_id: payload.household_id,
+        member_id: payload.memberId,
+        household_id: payload.householdId,
       });
       try {
         const response = await call("member_renewals_upsert", payload);
         const parsed = RenewalSchema.parse(response);
         logUI("INFO", "ui.family.renewals.upsert.complete", {
-          member_id: payload.member_id,
-          household_id: payload.household_id,
+          member_id: payload.memberId,
+          household_id: payload.householdId,
           renewal_id: parsed.id,
           duration_ms: Math.round(performance.now() - start),
         });
         return parsed;
       } catch (error) {
         logUI("ERROR", "ui.family.renewals.upsert.error", {
-          member_id: payload.member_id,
-          household_id: payload.household_id,
+          member_id: payload.memberId,
+          household_id: payload.householdId,
           message: (error as Error)?.message ?? String(error),
         });
         throw error;

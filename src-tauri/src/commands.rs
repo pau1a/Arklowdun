@@ -1151,9 +1151,11 @@ pub async fn update_command(
     attachment: Option<AttachmentMutationGuard>,
 ) -> AppResult<()> {
     let scope = if table == "family_members" {
-        let household = household_id
-            .map(|value| value.to_string())
-            .or_else(|| data.get("household_id").and_then(Value::as_str).map(|s| s.to_string()));
+        let household = household_id.map(|value| value.to_string()).or_else(|| {
+            data.get("household_id")
+                .and_then(Value::as_str)
+                .map(|s| s.to_string())
+        });
         Some(LogScope::new(
             "family_members_update",
             household,

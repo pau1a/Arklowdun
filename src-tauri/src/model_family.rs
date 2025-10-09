@@ -19,7 +19,7 @@ pub const VALIDATION_HOUSEHOLD_MISMATCH: &str = "VALIDATION/HOUSEHOLD_MISMATCH";
 pub const VALIDATION_MEMBER_MISSING: &str = "VALIDATION/MEMBER_NOT_FOUND";
 pub const VALIDATION_SCOPE_REQUIRED: &str = "VALIDATION/HOUSEHOLD_OR_MEMBER_REQUIRED";
 
-pub const ALLOWED_ATTACHMENT_ROOTS: &[&str] = &["attachments"];
+pub const ALLOWED_ATTACHMENT_ROOTS: &[&str] = &["appData"];
 pub const RENEWAL_KINDS: &[&str] = &[
     "passport",
     "driving_licence",

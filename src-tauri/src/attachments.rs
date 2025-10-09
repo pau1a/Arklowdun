@@ -26,6 +26,50 @@ pub async fn load_attachment_descriptor(
         AppError::from(err).with_context("operation", "load_attachment_descriptor")
     })?;
 
+    if table == "member_attachments" {
+        let row =
+            sqlx::query("SELECT household_id, relative_path FROM member_attachments WHERE id = ?1")
+                .bind(id)
+                .fetch_optional(pool)
+                .await
+                .map_err(|err| {
+                    AppError::from(err)
+                        .with_context("operation", "load_attachment_descriptor")
+                        .with_context("table", table.to_string())
+                        .with_context("id", id.to_string())
+                })?;
+
+        let Some(row) = row else {
+            return Err(AppError::new("DB/NOT_FOUND", "Record not found")
+                .with_context("table", table.to_string())
+                .with_context("id", id.to_string()));
+        };
+
+        let household_id: Option<String> = row.try_get("household_id").ok();
+        let relative_path: Option<String> = row.try_get("relative_path").ok();
+
+        let household_id = household_id
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                AppError::new(
+                    ERR_INVALID_HOUSEHOLD,
+                    "Attachment record is missing a valid household.",
+                )
+            })?;
+
+        let relative_path = relative_path.filter(|v| !v.is_empty()).ok_or_else(|| {
+            AppError::new("IO/ENOENT", "No attachment on this record")
+                .with_context("table", table.to_string())
+                .with_context("id", id.to_string())
+        })?;
+
+        return Ok(AttachmentDescriptor {
+            household_id,
+            category: AttachmentCategory::Misc,
+            relative_path,
+        });
+    }
+
     let sql = format!(
         "SELECT household_id, category, relative_path FROM {} WHERE id = ?1 AND deleted_at IS NULL",
         table

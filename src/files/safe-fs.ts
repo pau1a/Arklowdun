@@ -13,6 +13,7 @@ export type FsEntry = fsTypes.DirEntry;
 interface FsImpl {
   readTextFile: typeof fsTypes.readTextFile;
   writeTextFile: typeof fsTypes.writeTextFile;
+  writeFile: typeof fsTypes.writeFile;
   readDir: typeof fsTypes.readDir;
   mkdir: typeof fsTypes.mkdir;
   remove: typeof fsTypes.remove;
@@ -27,6 +28,7 @@ async function getFs(): Promise<FsImpl> {
     fsImpl = {
       readTextFile: mod.readTextFile,
       writeTextFile: mod.writeTextFile,
+      writeFile: mod.writeFile,
       readDir: mod.readDir,
       mkdir: mod.mkdir,
       remove: mod.remove,
@@ -77,6 +79,20 @@ export async function writeText(
   await rejectSymlinksImpl(realPath, root);
   const fs = await getFs();
   await fs.writeTextFile(realPath, data);
+}
+
+export async function writeBinary(
+  relPath: string,
+  root: RootKey,
+  data: Uint8Array,
+): Promise<void> {
+  if (looksAbsolute(relPath)) {
+    throw new PathError("OUTSIDE_ROOT", "Path outside allowlisted root");
+  }
+  const { realPath } = await canonicalizeAndVerifyImpl(relPath, root);
+  await rejectSymlinksImpl(realPath, root);
+  const fs = await getFs();
+  await fs.writeFile(realPath, data);
 }
 
 export async function readDir(

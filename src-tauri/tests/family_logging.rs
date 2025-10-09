@@ -18,9 +18,9 @@ use arklowdun_lib::{
     household_active::StoreHandle,
     ipc::guard,
     migrate,
-    AppState,
     vault::Vault,
     vault_migration::VaultMigrationManager,
+    AppState,
 };
 
 struct BufferWriter(Arc<StdMutex<Vec<u8>>>);

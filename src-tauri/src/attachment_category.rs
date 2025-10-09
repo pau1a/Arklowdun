@@ -66,6 +66,7 @@ impl AttachmentCategory {
             "vehicles" => Some(AttachmentCategory::Vehicles),
             "vehicle_maintenance" => Some(AttachmentCategory::VehicleMaintenance),
             "notes" => Some(AttachmentCategory::Notes),
+            "member_attachments" => Some(AttachmentCategory::Misc),
             _ => None,
         }
     }

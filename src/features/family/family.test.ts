@@ -27,7 +27,7 @@ describe("familyRepo adapters", () => {
         id: "a2dd8b2f-1e11-4130-bc5a-3c7cdb0b9d6a",
         household_id: "hh-1",
         member_id: "mem-1",
-        root_key: "attachments",
+        root_key: "appData",
         relative_path: "docs/passport.pdf",
         title: "Passport",
         mime_hint: "application/pdf",
@@ -43,7 +43,7 @@ describe("familyRepo adapters", () => {
         id: "a2dd8b2f-1e11-4130-bc5a-3c7cdb0b9d6a",
         householdId: "hh-1",
         memberId: "mem-1",
-        rootKey: "attachments",
+        rootKey: "appData",
         relativePath: "docs/passport.pdf",
         title: "Passport",
         mimeHint: "application/pdf",
@@ -57,7 +57,7 @@ describe("familyRepo adapters", () => {
       id: "0d8882b0-3d02-4f86-9010-64b718a0a820",
       household_id: "hh-1",
       member_id: "mem-1",
-      root_key: "attachments",
+      root_key: "appData",
       relative_path: "docs/id.png",
       title: null,
       mime_hint: null,
@@ -67,14 +67,14 @@ describe("familyRepo adapters", () => {
     const attachment = await familyRepo.attachments.add({
       householdId: "hh-1",
       memberId: "mem-1",
-      rootKey: "attachments",
+      rootKey: "appData",
       relativePath: "docs/id.png",
     });
 
     expect(callMock).toHaveBeenCalledWith("member_attachments_add", {
       householdId: "hh-1",
       memberId: "mem-1",
-      rootKey: "attachments",
+      rootKey: "appData",
       relativePath: "docs/id.png",
     });
     expect(attachment.relativePath).toBe("docs/id.png");
@@ -153,7 +153,7 @@ describe("schema guards", () => {
       AttachmentInputSchema.parse({
         householdId: "hh-1",
         memberId: "mem-1",
-        rootKey: "attachments",
+        rootKey: "appData",
         relativePath: "docs/id.png",
         mimeHint: "not/mime/extra",
       }),
