@@ -1,4 +1,3 @@
-import { ENABLE_FAMILY_EXPANSION } from "../config/flags";
 import { bannerFor } from "./banner";
 
 export interface PageBannerRouteLike {
@@ -11,21 +10,8 @@ export function updatePageBanner(route: PageBannerRouteLike): void {
   const bannerEl = document.getElementById("page-banner") as HTMLDivElement | null;
   if (!bannerEl) return;
   const body = document.body;
-  const isFamilyInteractive = ENABLE_FAMILY_EXPANSION && route.id === "family";
 
-  if (isFamilyInteractive) {
-    bannerEl.hidden = false;
-    bannerEl.style.removeProperty("background-image");
-    bannerEl.style.removeProperty("--banner-pos-x");
-    bannerEl.style.removeProperty("--banner-pos-y");
-    bannerEl.setAttribute("aria-hidden", "false");
-    bannerEl.setAttribute("role", "complementary");
-    bannerEl.removeAttribute("aria-label");
-    bannerEl.dataset.bannerMode = "interactive";
-    body.dataset.bannerVisibility = "visible";
-    return;
-  }
-
+  // Ensure interactive mode is cleared in case a previous route enabled it.
   if (bannerEl.dataset.bannerMode === "interactive") {
     delete bannerEl.dataset.bannerMode;
     bannerEl.innerHTML = "";

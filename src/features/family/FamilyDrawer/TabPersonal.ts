@@ -12,6 +12,7 @@ export interface PersonalFormData {
   nickname: string;
   fullName: string;
   relationship: string;
+  birthday?: string; // yyyy-mm-dd for <input type="date">
   address: string;
   emails: string[];
   phoneMobile: string;
@@ -291,6 +292,10 @@ export function createPersonalTab(): TabPersonalInstance {
   const relationshipField = createField("Relationship", { name: "relationship" });
   element.appendChild(relationshipField.wrapper);
 
+  const birthdayField = createField("Birthday", { name: "birthday" });
+  (birthdayField.input as HTMLInputElement).type = "date";
+  element.appendChild(birthdayField.wrapper);
+
   const addressField = createField("Address", { multiline: true, name: "address" });
   element.appendChild(addressField.wrapper);
 
@@ -487,6 +492,7 @@ export function createPersonalTab(): TabPersonalInstance {
       nickname: normalizeString((nicknameField.input as HTMLInputElement).value),
       fullName: normalizeString((fullNameField.input as HTMLInputElement).value),
       relationship: normalizeString((relationshipField.input as HTMLInputElement).value),
+      birthday: normalizeString((birthdayField.input as HTMLInputElement).value),
       address: normalizeString((addressField.input as HTMLTextAreaElement).value),
       emails,
       phoneMobile: normalizeString((phoneEntries.phoneMobile.input as HTMLInputElement).value),
@@ -504,6 +510,7 @@ export function createPersonalTab(): TabPersonalInstance {
     (nicknameField.input as HTMLInputElement).value = data.nickname ?? "";
     (fullNameField.input as HTMLInputElement).value = data.fullName ?? "";
     (relationshipField.input as HTMLInputElement).value = data.relationship ?? "";
+    (birthdayField.input as HTMLInputElement).value = data.birthday ?? "";
     (addressField.input as HTMLTextAreaElement).value = data.address ?? "";
     (websiteField.input as HTMLInputElement).value = data.website ?? "";
 

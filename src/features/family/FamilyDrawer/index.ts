@@ -33,6 +33,36 @@ function resolveError(error: unknown): { message: string; code: string } {
 
 export type DrawerCloseReason = "save" | "cancel" | "programmatic";
 
+// Date helpers for birthday handling
+function alignToLocalNoon(timestamp: number): number {
+  const d = new Date(timestamp);
+  d.setHours(12, 0, 0, 0);
+  return d.getTime();
+}
+
+function toDateInputValue(timestamp: number): string {
+  const date = new Date(timestamp);
+  const y = date.getFullYear();
+  const m = `${date.getMonth() + 1}`.padStart(2, "0");
+  const d = `${date.getDate()}`.padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function fromDateInput(value: string): number | null {
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  const parts = value.split("-");
+  if (parts.length !== 3) return null;
+  const [ys, ms, ds] = parts;
+  const y = Number(ys);
+  const m = Number(ms);
+  const d = Number(ds);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
+  const date = new Date();
+  date.setFullYear(y, m - 1, d);
+  date.setHours(12, 0, 0, 0);
+  return date.getTime();
+}
+
 export interface FamilyDrawerOptions {
   getMember: (id: string) => FamilyMember | undefined;
   saveMember: (patch: Partial<FamilyMember>) => Promise<FamilyMember>;
@@ -69,10 +99,14 @@ function toPersonalData(member: FamilyMember): PersonalFormData {
       }
     }
   }
+  const birthdayStr = typeof member.birthday === "number" && Number.isFinite(member.birthday)
+    ? toDateInputValue(member.birthday)
+    : "";
   return {
     nickname: member.nickname ?? member.name ?? "",
     fullName: member.fullName ?? "",
     relationship: member.relationship ?? "",
+    birthday: birthdayStr,
     address: member.address ?? "",
     emails,
     phoneMobile: member.phone?.mobile ?? "",
@@ -353,6 +387,7 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
       nickname: toNullable(personal.nickname),
       fullName: toNullable(personal.fullName),
       relationship: toNullable(personal.relationship),
+      birthday: fromDateInput(personal.birthday ?? ""),
       address: toNullable(personal.address),
       personalWebsite: toNullable(personal.website),
       email: personal.emails.length > 0 ? personal.emails[0] : null,
@@ -508,6 +543,15 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
         normalizeNullableString(member.relationship ?? null)
     ) {
       delete trimmed.relationship;
+    }
+
+    if (
+      "birthday" in trimmed &&
+      ((trimmed.birthday == null && (member.birthday == null)) ||
+        (typeof trimmed.birthday === "number" && typeof member.birthday === "number" &&
+          alignToLocalNoon(trimmed.birthday) === alignToLocalNoon(member.birthday)))
+    ) {
+      delete trimmed.birthday;
     }
 
     if (
