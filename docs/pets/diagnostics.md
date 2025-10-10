@@ -84,6 +84,15 @@ If Python redaction fails or is unavailable, collectors revert to raw output und
 
 ### 5.1 UI logs
 
+`src/PetsView.ts` and `src/PetDetailView.ts` emit structured logs through the shared `logUI` helper.
+
+| Event                     | Level | Fields                                |
+| ------------------------- | ----- | -------------------------------------- |
+| `perf.pets.window_render` | info  | rows_rendered, from_idx, to_idx        |
+| `pets.medical_added`      | info  | pet_id, description, date              |
+| `pets.medical_deleted`    | warn  | pet_id, medical_id                     |
+| `pets.reminder_scheduled` | info  | pet_id, delay_ms                       |
+| `pets.reminder_fired`     | info  | pet_id, reminder_at                    |
 `src/features/pets/reminderScheduler.ts` together with `PetsView`/`PetDetailView` emit structured logs through the shared
 `logUI` helper.
 

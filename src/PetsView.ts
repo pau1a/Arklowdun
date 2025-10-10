@@ -58,6 +58,11 @@ function toReminderRecords(pets: Pet[]): {
   return { records, petNames };
 }
 
+interface FiltersState {
+  query: string;
+  models: FilteredPet[];
+}
+
 export async function PetsView(container: HTMLElement) {
   runViewCleanups(container);
   const section = document.createElement("section");
@@ -71,8 +76,7 @@ export async function PetsView(container: HTMLElement) {
   const hh = await getHouseholdIdForCalls();
 
   async function loadPets(): Promise<Pet[]> {
-    // Ordered to match other views (position, created_at, id)
-    return await petsRepo.list({ householdId: hh, orderBy: "position, created_at, id" });
+    return await petsRepo.list({ householdId, orderBy: "position, created_at, id" });
   }
 
   let pets: Pet[] = await loadPets();
@@ -106,31 +110,32 @@ export async function PetsView(container: HTMLElement) {
     });
   }
 
+  async function handleCreate(input: { name: string; type: string }): Promise<Pet> {
+    const created = await petsRepo.create(householdId, {
+      name: input.name,
+      type: input.type,
+      position: pets.length,
+    } as Partial<Pet>);
+    pets = [...pets, created];
+    applyFilters();
+    await schedulePetReminders([created]);
+    return created;
+  }
+
+  async function handleEdit(pet: Pet, patch: { name: string; type: string }) {
+    const next: Partial<Pet> = { name: patch.name, type: patch.type };
+    await petsRepo.update(householdId, pet.id, next);
+    const idx = pets.findIndex((p) => p.id === pet.id);
+    if (idx !== -1) {
+      pets[idx] = { ...pets[idx], name: patch.name, type: patch.type };
+    }
+    applyFilters();
+  }
+
   function showList() {
-    section.innerHTML = `
-      <ul id="pet-list"></ul>
-      <form id="pet-form">
-        <input id="pet-name" type="text" placeholder="Name" required />
-        <input id="pet-type" type="text" placeholder="Type" required />
-        <button type="submit">Add Pet</button>
-      </form>
-    `;
-    const listEl = section.querySelector<HTMLUListElement>("#pet-list");
-    const form = section.querySelector<HTMLFormElement>("#pet-form");
-    const nameInput = section.querySelector<HTMLInputElement>("#pet-name");
-    const typeInput = section.querySelector<HTMLInputElement>("#pet-type");
-
-    if (listEl) renderPets(listEl, pets);
-
-    form?.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      if (!nameInput || !typeInput || !listEl) return;
-
-      const created = await petsRepo.create(hh, {
-        name: nameInput.value,
-        type: typeInput.value,
-        position: pets.length,
-      } as Partial<Pet>);
+    page.showList();
+    page.setScrollOffset(lastScroll);
+  }
 
       pets.push(created);
       renderPets(listEl, pets);
@@ -166,5 +171,29 @@ export async function PetsView(container: HTMLElement) {
     });
   }
 
-  showList();
+  page.setCallbacks({
+    onCreate: handleCreate,
+    onOpenPet: (pet) => {
+      void openDetail(pet);
+    },
+    onEditPet: (pet, patch) => {
+      void handleEdit(pet, patch);
+    },
+    onSearchChange: (value: string) => {
+      if (searchHandle) {
+        window.clearTimeout(searchHandle);
+      }
+      searchHandle = window.setTimeout(() => {
+        filters = { ...filters, query: value.trim() };
+        applyFilters();
+      }, 200);
+    },
+  });
+
+  registerViewCleanup(container, () => {
+    if (searchHandle) {
+      window.clearTimeout(searchHandle);
+      searchHandle = undefined;
+    }
+  });
 }

@@ -3,6 +3,7 @@
 @use "./styles/family-shell";
 @use "./styles/family-drawer";
 @use "./features/family/modal/AddMemberModal" as *;
+@use "./styles/pets";
 
 :root {
   --radius-sm: 6px;
