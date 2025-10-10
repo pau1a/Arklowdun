@@ -41,6 +41,14 @@ export function mountPetsView(container: HTMLElement) {
 * `PetsPage.destroy()` tears down scroll/resize observers and event listeners. The shell itself is removed when the router replaces the container contents.
 * Reminder timers created through `scheduleAt` are **not** cancelled; they fire even if navigation occurs.
 * Search debounce timers are cleared via `registerViewCleanup`.
+* **wrapLegacyView** clears previous DOM content, calls `runViewCleanups`, and then invokes `PetsView(container)`.
+* `PetsView` creates a new `<section>` wrapper and inserts it into the container.
+* A fresh render is triggered each time the route hash changes to `#/pets`.
+
+### 2.2 Clean-up
+
+* `wrapLegacyView` wipes innerHTML and cancels listeners. `PetsView` registers a cleanup that calls `reminderScheduler.cancelAll()` so timers do not survive unmount.
+* No persistent UI state is preserved between mounts; the list always reloads.
 
 ---
 
@@ -78,6 +86,147 @@ Key properties:
 * The shell is created once by `createPetsPage(container)` and persists even when the list data changes.
 * `pets__viewport` is the scroll container used by the virtualiser.
 * `pets__detail` is a hidden host where `PetDetailView` mounts when a row is opened.
+* Fetches household via `getHouseholdIdForCalls()`.
+* Calls `petsRepo.list(orderBy: "position, created_at, id")`.
+* Stores results in local `pets` array.
+* Calls `reminderScheduler.init()` and `reminderScheduler.scheduleMany()` to queue any reminders for the fetched pets.
+* Calls `renderPets()` to generate `<li>` entries.
+
+### 3.2 `renderPets()`
+
+* Clears existing `<ul>` content.
+* Iterates through cached pets, creating `<li>` entries:
+
+```html
+<li>
+  <span class="pet-name">Skye</span>
+  <span class="pet-type">Husky</span>
+  <button data-id="uuid">Open</button>
+</li>
+```
+
+* No dedicated SCSS; relies on base element styles and global spacing tokens.
+* Long names are truncated using `overflow: hidden; text-overflow: ellipsis; white-space: nowrap;`.
+
+### 3.3 Empty state
+
+When no pets exist, `<ul>` is rendered empty — no “No pets yet” copy is displayed.
+This omission is documented and planned for improvement but is not an error.
+
+---
+
+## 4. Pet creation
+
+The creation form is injected at the bottom of the list each render.
+
+**Handler flow:**
+
+1. User submits the form.
+2. Handler reads `#pet-name` and `#pet-type`.
+3. Calls `petsRepo.create()` with these values and `household_id`.
+4. On success, appends returned pet to cached array and re-renders.
+5. Calls `reminderScheduler.scheduleMany()` for the new pet (updating pet-name cache even if no reminders exist).
+6. Does **not** wrap in `try/catch`; any rejection results in an uncaught promise warning in the console.
+
+**Ordering rule:**
+New pets are assigned `position = pets.length` (based on current in-memory list).
+
+---
+
+## 5. Detail view
+
+### 5.1 Entry
+
+Clicking an “Open” button locates the pet in the cache and calls:
+
+```ts
+PetDetailView(section, pet, persist, showList);
+```
+
+Where:
+
+* `section` — the main container,
+* `pet` — the current object,
+* `persist` — callback to push edits,
+* `showList` — callback restoring list view.
+
+### 5.2 Layout
+
+Rendered inline HTML (simplified):
+
+```html
+<section class="pet-detail">
+  <button class="back">Back</button>
+  <h2>Skye (Husky)</h2>
+
+  <ul class="medical-records">
+    <li>
+      <span class="date">2025-09-01</span>
+      <span class="description">Vaccination</span>
+      <button class="open-doc">Open</button>
+      <button class="reveal-doc">Reveal</button>
+      <button class="delete">Delete</button>
+    </li>
+  </ul>
+
+  <form id="medical-add-form">
+    <input id="medical-date" type="date" required>
+    <input id="medical-description" placeholder="Description" required>
+    <input id="medical-reminder" type="date" placeholder="Reminder (optional)">
+    <input id="medical-document" placeholder="Relative path (optional)">
+    <button type="submit">Add record</button>
+  </form>
+</section>
+```
+
+### 5.3 Behaviour
+
+* Loads all medical rows for the household, filters client-side for the current pet.
+* Orders by `date DESC, created_at DESC, id`.
+* Interpolates data into innerHTML directly — unsanitised (trusted context assumed).
+* Renders attachment buttons (`Open`, `Reveal`) if `relative_path` is present.
+* Deletion:
+
+  * Calls `petMedicalRepo.delete(id)`.
+  * Invokes parent `onChange()` (refreshes list).
+  * Logs errors via `console.error` or `showError`.
+
+### 5.4 Adding medical entries
+
+* Parses `YYYY-MM-DD` to UTC-local-noon timestamps.
+* Validates optional reminder date.
+* Trims and sanitises `relative_path` using `sanitizeRelativePath()`.
+* Calls `petMedicalRepo.create()` with `category = "pet_medical"`.
+* Updates parent pet’s `updated_at` timestamp.
+* Refreshes reminders immediately post-creation.
+
+---
+
+## 6. Interaction model
+
+| Action                | Response                                         |
+| --------------------- | ------------------------------------------------ |
+| Click “Open”          | Detail view replaces list in-place.              |
+| Click “Back”          | `showList()` restores list.                      |
+| Submit new pet        | Pet appended to list, reminders scheduled.       |
+| Submit medical record | Record appears instantly, triggers new reminder. |
+| Delete medical record | Row removed and list refreshed.                  |
+| Switch route          | Entire DOM wiped; view rebuilt on next load.     |
+
+---
+
+## 7. Keyboard and accessibility
+
+* **Keyboard cycling:**
+  Global `[` / `]` shortcuts navigate between views; Pets obeys same event mapping.
+* **Escape:**
+  Dismisses modals if any appear (none by default).
+* **ARIA landmarks:**
+  Root `<section>` labelled with `role="main"`.
+* **Focus rings:**
+  Inputs use default CSS outlines (`outline: var(--focus-ring)`).
+* **No skip link:**
+  PetsView does not define a `skip-to-content` anchor yet.
 
 ---
 

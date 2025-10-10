@@ -1,45 +1,61 @@
 import type { Pet } from "./models";
 import { PetDetailView } from "./PetDetailView";
-import { nowMs } from "./db/time";
 import { getHouseholdIdForCalls } from "./db/household";
 import { petsRepo } from "./repos";
-import { isPermissionGranted, requestPermission, sendNotification } from "./notification";
-import { createPetsPage, createFilterModels, type FilteredPet } from "./features/pets/PetsPage";
-import { updatePageBanner } from "./ui/updatePageBanner";
+import { reminderScheduler } from "@features/pets/reminderScheduler";
 import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
 
-const MAX_TIMEOUT = 2_147_483_647; // ~24.8 days
-
-function scheduleAt(ts: number, cb: () => void) {
-  const delay = ts - nowMs();
-  if (delay <= 0) {
-    cb();
-    return;
-  }
-  const chunk = Math.min(delay, MAX_TIMEOUT);
-  setTimeout(() => scheduleAt(ts, cb), chunk);
+function renderPets(listEl: HTMLUListElement, pets: Pet[]) {
+  listEl.innerHTML = "";
+  pets.forEach((p) => {
+    const li = document.createElement("li");
+    li.textContent = `${p.name} (${p.type}) `;
+    const btn = document.createElement("button");
+    btn.textContent = "Open";
+    btn.dataset.id = p.id;
+    li.appendChild(btn);
+    listEl.appendChild(li);
+  });
 }
 
-async function schedulePetReminders(pets: Pet[]) {
-  let granted = await isPermissionGranted();
-  if (!granted) {
-    granted = (await requestPermission()) === "granted";
-  }
-  if (!granted) return;
-
-  const now = nowMs();
+function toReminderRecords(pets: Pet[]): {
+  records: Array<{
+    medical_id: string;
+    pet_id: string;
+    date: string;
+    reminder_at: string;
+    description: string;
+    pet_name: string;
+  }>;
+  petNames: Record<string, string>;
+} {
+  const records: Array<{
+    medical_id: string;
+    pet_id: string;
+    date: string;
+    reminder_at: string;
+    description: string;
+    pet_name: string;
+  }> = [];
+  const petNames: Record<string, string> = {};
   pets.forEach((pet) => {
+    petNames[pet.id] = pet.name;
     (pet.medical ?? []).forEach((record) => {
-      if (!record.reminder) return;
-      if (record.reminder > now) {
-        scheduleAt(record.reminder, () => {
-          sendNotification({ title: "Pet Reminder", body: `${pet.name}: ${record.description}` });
-        });
-      } else if (now < record.date) {
-        sendNotification({ title: "Pet Reminder", body: `${pet.name}: ${record.description}` });
-      }
+      if (record.reminder == null) return;
+      const reminderIso = new Date(record.reminder).toISOString();
+      const baseDateIso = new Date(record.date).toISOString();
+      const dateIso = baseDateIso.split("T")[0] ?? baseDateIso;
+      records.push({
+        medical_id: record.id,
+        pet_id: pet.id,
+        date: dateIso,
+        reminder_at: reminderIso,
+        description: record.description,
+        pet_name: pet.name,
+      });
     });
   });
+  return { records, petNames };
 }
 
 interface FiltersState {
@@ -49,46 +65,49 @@ interface FiltersState {
 
 export async function PetsView(container: HTMLElement) {
   runViewCleanups(container);
-  updatePageBanner({ id: "pets", display: { label: "Pets" } });
+  const section = document.createElement("section");
+  container.innerHTML = "";
+  container.appendChild(section);
 
-  const page = createPetsPage(container);
   registerViewCleanup(container, () => {
-    page.destroy();
+    reminderScheduler.cancelAll();
   });
 
-  const householdId = await getHouseholdIdForCalls();
+  const hh = await getHouseholdIdForCalls();
 
   async function loadPets(): Promise<Pet[]> {
     return await petsRepo.list({ householdId, orderBy: "position, created_at, id" });
   }
 
   let pets: Pet[] = await loadPets();
-  await schedulePetReminders(pets);
+  reminderScheduler.init();
+  const initial = toReminderRecords(pets);
+  reminderScheduler.scheduleMany(initial.records, {
+    householdId: hh,
+    petNames: initial.petNames,
+  });
 
-  let filters: FiltersState = {
-    query: "",
-    models: createFilterModels(pets, ""),
-  };
-  page.setFilter(filters.models);
-
-  let searchHandle: number | undefined;
-  let lastScroll = 0;
-
-  function applyFilters() {
-    filters = {
-      query: filters.query,
-      models: createFilterModels(pets, filters.query),
-    };
-    page.setFilter(filters.models);
-    if (filters.query) {
-      page.setScrollOffset(0);
-    }
-  }
-
-  async function refreshFromSource() {
+  async function refresh(listEl?: HTMLUListElement, affected?: string[]) {
     pets = await loadPets();
-    applyFilters();
-    await schedulePetReminders(pets);
+    if (listEl) renderPets(listEl, pets);
+    if (!affected || affected.length === 0) {
+      reminderScheduler.init();
+      const next = toReminderRecords(pets);
+      reminderScheduler.scheduleMany(next.records, {
+        householdId: hh,
+        petNames: next.petNames,
+      });
+      return;
+    }
+    const unique = Array.from(new Set(affected));
+    unique.forEach((id) => reminderScheduler.rescheduleForPet(id));
+    const subset = pets.filter((p) => unique.includes(p.id));
+    if (subset.length === 0) return;
+    const context = toReminderRecords(subset);
+    reminderScheduler.scheduleMany(context.records, {
+      householdId: hh,
+      petNames: context.petNames,
+    });
   }
 
   async function handleCreate(input: { name: string; type: string }): Promise<Pet> {
@@ -118,22 +137,38 @@ export async function PetsView(container: HTMLElement) {
     page.setScrollOffset(lastScroll);
   }
 
-  async function openDetail(pet: Pet) {
-    lastScroll = page.getScrollOffset();
-    const host = document.createElement("div");
-    host.className = "pets__detail-host";
-    page.showDetail(host);
+      pets.push(created);
+      renderPets(listEl, pets);
+      reminderScheduler.rescheduleForPet(created.id);
+      const scoped = toReminderRecords([created]);
+      reminderScheduler.scheduleMany(scoped.records, {
+        householdId: hh,
+        petNames: scoped.petNames,
+      });
+      form.reset();
+    });
 
-    const persist = async () => {
-      await petsRepo.update(householdId, pet.id, {
-        name: pet.name,
-        type: pet.type,
-        position: pet.position,
-      } as Partial<Pet>);
-      await refreshFromSource();
-    };
+    listEl?.addEventListener("click", (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-id]");
+      if (!btn) return;
+      const id = btn.dataset.id!;
+      const pet = pets.find((p) => p.id === id);
+      if (!pet) return;
 
-    await PetDetailView(host, pet, persist, showList);
+      // Persist callback: update basic fields if PetDetailView modified them,
+      // then refresh the list and reminders.
+      const persist = async () => {
+        // defensively update name/type/position if changed
+        await petsRepo.update(hh, pet.id, {
+          name: pet.name,
+          type: pet.type,
+          position: pet.position,
+        } as Partial<Pet>);
+        await refresh(listEl ?? undefined, [pet.id]);
+      };
+
+      PetDetailView(section, pet, persist, showList);
+    });
   }
 
   page.setCallbacks({
