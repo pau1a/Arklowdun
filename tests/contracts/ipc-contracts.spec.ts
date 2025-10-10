@@ -47,6 +47,33 @@ const vehiclesResponse = {
   position: 0,
 };
 
+const petResponse = {
+  id: "pet-1",
+  household_id: "h1",
+  name: "Skye",
+  type: "Dog",
+  created_at: 0,
+  updated_at: 0,
+  deleted_at: null,
+  position: 0,
+};
+
+const petMedicalResponse = {
+  id: "med-1",
+  household_id: "h1",
+  pet_id: "pet-1",
+  date: 0,
+  description: "Booster",
+  document: null,
+  reminder: null,
+  created_at: 0,
+  updated_at: 0,
+  deleted_at: null,
+  root_key: null,
+  relative_path: null,
+  category: "pet_medical",
+};
+
 const eventsRangeResponse = {
   items: [eventResponse],
   truncated: false,
@@ -80,6 +107,53 @@ const scenarioDefinition: ScenarioDefinition = {
     vehicles_create: async (payload) => {
       assert.equal(payload.data.household_id, "h1");
       return vehiclesResponse;
+    },
+    pets_list: async (payload) => {
+      assert.equal(payload.household_id ?? payload.householdId, "h1");
+      return [petResponse];
+    },
+    pets_create: async (payload) => {
+      assert.equal(payload.data.household_id, "h1");
+      return petResponse;
+    },
+    pets_update: async (payload) => {
+      assert.equal(payload.household_id ?? payload.householdId, "h1");
+      assert.equal(payload.id, "pet-1");
+      return null;
+    },
+    pets_delete: async (payload) => {
+      assert.equal(payload.household_id ?? payload.householdId, "h1");
+      assert.equal(payload.id, "pet-1");
+      return null;
+    },
+    pets_restore: async (payload) => {
+      assert.equal(payload.household_id ?? payload.householdId, "h1");
+      assert.equal(payload.id, "pet-1");
+      return null;
+    },
+    pet_medical_list: async (payload) => {
+      assert.equal(payload.household_id ?? payload.householdId, "h1");
+      return [petMedicalResponse];
+    },
+    pet_medical_create: async (payload) => {
+      assert.equal(payload.data.household_id, "h1");
+      assert.equal(payload.data.category, "pet_medical");
+      return petMedicalResponse;
+    },
+    pet_medical_update: async (payload) => {
+      assert.equal(payload.household_id ?? payload.householdId, "h1");
+      assert.equal(payload.id, "med-1");
+      return null;
+    },
+    pet_medical_delete: async (payload) => {
+      assert.equal(payload.household_id ?? payload.householdId, "h1");
+      assert.equal(payload.id, "med-1");
+      return null;
+    },
+    pet_medical_restore: async (payload) => {
+      assert.equal(payload.household_id ?? payload.householdId, "h1");
+      assert.equal(payload.id, "med-1");
+      return null;
     },
   },
 };
@@ -138,6 +212,52 @@ registerCommand(
   { data: { household_id: "h1", name: "Car" } },
   vehiclesResponse,
 );
+registerCommand(
+  "pets_list",
+  { householdId: "h1", orderBy: "position, created_at, id" },
+  [petResponse],
+);
+registerCommand(
+  "pets_create",
+  { data: { household_id: "h1", name: "Skye", type: "Dog", position: 0 } },
+  petResponse,
+);
+registerCommand(
+  "pets_update",
+  { id: "pet-1", householdId: "h1", data: { name: "Skye" } },
+  null,
+);
+registerCommand("pets_delete", { id: "pet-1", householdId: "h1" }, null);
+registerCommand("pets_restore", { id: "pet-1", householdId: "h1" }, null);
+registerCommand(
+  "pet_medical_list",
+  { householdId: "h1", orderBy: "date DESC, created_at DESC, id" },
+  [petMedicalResponse],
+);
+registerCommand(
+  "pet_medical_create",
+  {
+    data: {
+      household_id: "h1",
+      pet_id: "pet-1",
+      date: 0,
+      description: "Booster",
+      category: "pet_medical",
+    },
+  },
+  petMedicalResponse,
+);
+registerCommand(
+  "pet_medical_update",
+  {
+    id: "med-1",
+    householdId: "h1",
+    data: { description: "Booster" },
+  },
+  null,
+);
+registerCommand("pet_medical_delete", { id: "med-1", householdId: "h1" }, null);
+registerCommand("pet_medical_restore", { id: "med-1", householdId: "h1" }, null);
 
 const windowStub = {
   __TAURI__: {

@@ -52,25 +52,14 @@ No additional endpoints (such as `pets_restore`) are implemented at this stage; 
 
 ### 4.1 Enumerate contracts
 
-Run inspection tool:
+Run the contract sync test:
 
 ```bash
-cargo run --bin list_ipc_commands | grep pets
+npm run test:contracts -- tests/contracts/ipc-command-sync.spec.ts
 ```
 
-Expected output:
-
-```
-pets_list
-pets_create
-pets_update
-pets_delete
-pet_medical_list
-pet_medical_create
-pet_medical_delete
-```
-
-Any missing entry is a blocker.
+The script compares the generated Tauri handler list to the frontend contract map and fails if
+any Pets command is missing on either side.
 
 ### 4.2 Validate Zod schemas
 
@@ -97,7 +86,7 @@ Each request and response object must validate cleanly under `zod` test harness.
 
 ### 4.3 Normalise error codes
 
-Map backend error variants to human-readable UI copy in `src/lib/normalizeError.ts`:
+Map backend error variants to human-readable UI copy in `src/lib/ipc/call.ts`:
 
 | Rust code           | UI message                          |
 | ------------------- | ----------------------------------- |
@@ -155,15 +144,15 @@ Report any mismatches (extra or missing fields) to `/docs/pets/database.md` unde
 
 ## 5. Acceptance checklist
 
-| Condition                                                           | Status | Evidence                   |
-| ------------------------------------------------------------------- | ------ | -------------------------- |
-| All Pets IPC commands registered and callable                       | ☐      | `list_ipc_commands` output |
-| Commands return JSON data with valid shape                          | ☐      | IPC test suite log         |
-| Zod schemas validate both request and response payloads             | ☐      | Unit test pass             |
-| All backend error codes mapped in UI                                | ☐      | normalizeError.ts diff     |
-| Structured logging produces `ipc.dispatch` and `ipc.result` entries | ☐      | Log sample                 |
-| Docs updated (`ipc.md`, `plan/checklist.md`)                        | ☐      | Commit record              |
-| CI integration tests pass on macOS                                  | ☐      | Workflow run log           |
+| Condition                                                           | Status | Evidence |
+| ------------------------------------------------------------------- | ------ | -------- |
+| All Pets IPC commands registered and callable                       | ☑      | `tests/contracts/pets-ipc.spec.ts` |
+| Commands return JSON data with valid shape                          | ☑      | `npm run test:ipc:pets` |
+| Zod schemas validate both request and response payloads             | ☑      | `src/lib/ipc/contracts/pets.ts` |
+| All backend error codes mapped in UI                                | ☑      | `src/lib/ipc/call.ts` |
+| Structured logging produces `ipc.dispatch` and `ipc.result` entries | ☑      | `src/lib/ipc/adapters/tauri.ts` |
+| Docs updated (`ipc.md`, `plan/checklist.md`)                        | ☑      | `docs/pets/ipc.md` |
+| CI integration tests pass on macOS                                  | ☐      | Runs post-merge in CI pipeline |
 
 ---
 

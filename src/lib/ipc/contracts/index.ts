@@ -17,6 +17,29 @@ import type { ImportExecuteDto } from "@bindings/ImportExecuteDto";
 import type { HardRepairOutcome } from "@bindings/HardRepairOutcome";
 import type { DbHealthReport } from "@bindings/DbHealthReport";
 import type { SearchResult } from "@bindings/SearchResult";
+import {
+  PetMedicalCreateRequestSchema,
+  PetMedicalCreateResponseSchema,
+  PetMedicalDeleteRequestSchema,
+  PetMedicalGetRequestSchema,
+  PetMedicalGetResponseSchema,
+  PetMedicalListRequestSchema,
+  PetMedicalListResponseSchema,
+  PetMedicalMutationResponseSchema,
+  PetMedicalRecordSchema,
+  PetMedicalRestoreRequestSchema,
+  PetMedicalUpdateRequestSchema,
+  PetsCreateRequestSchema,
+  PetsCreateResponseSchema,
+  PetsDeleteRequestSchema,
+  PetsGetRequestSchema,
+  PetsGetResponseSchema,
+  PetsListRequestSchema,
+  PetsListResponseSchema,
+  PetsMutationResponseSchema,
+  PetsRestoreRequestSchema,
+  PetsUpdateRequestSchema,
+} from "./pets";
 
 export type ContractEntry<K extends keyof typeof contracts> = (typeof contracts)[K];
 
@@ -673,18 +696,54 @@ export const contracts = {
   note_links_delete: contract({ request: noteLinkRequest, response: z.null() }),
   open_diagnostics_doc: contract({ request: flexibleRequest, response: z.null() }),
   open_path: contract({ request: flexibleRequest, response: z.null() }),
-  pet_medical_list: contract({ request: flexibleRequest, response: z.array(flexibleRequest) }),
-  pet_medical_get: contract({ request: flexibleRequest, response: flexibleRequest.nullable() }),
-  pet_medical_create: contract({ request: flexibleRequest, response: flexibleRequest }),
-  pet_medical_update: contract({ request: flexibleRequest, response: flexibleRequest }),
-  pet_medical_delete: contract({ request: flexibleRequest, response: flexibleRequest }),
-  pet_medical_restore: contract({ request: flexibleRequest, response: flexibleRequest }),
-  pets_list: contract({ request: flexibleRequest, response: z.array(flexibleRequest) }),
-  pets_get: contract({ request: flexibleRequest, response: flexibleRequest.nullable() }),
-  pets_create: contract({ request: flexibleRequest, response: flexibleRequest }),
-  pets_update: contract({ request: flexibleRequest, response: flexibleRequest }),
-  pets_delete: contract({ request: flexibleRequest, response: flexibleRequest }),
-  pets_restore: contract({ request: flexibleRequest, response: flexibleRequest }),
+  pet_medical_list: contract({
+    request: PetMedicalListRequestSchema,
+    response: PetMedicalListResponseSchema,
+  }),
+  pet_medical_get: contract({
+    request: PetMedicalGetRequestSchema,
+    response: PetMedicalGetResponseSchema,
+  }),
+  pet_medical_create: contract({
+    request: PetMedicalCreateRequestSchema,
+    response: PetMedicalCreateResponseSchema,
+  }),
+  pet_medical_update: contract({
+    request: PetMedicalUpdateRequestSchema,
+    response: PetMedicalMutationResponseSchema,
+  }),
+  pet_medical_delete: contract({
+    request: PetMedicalDeleteRequestSchema,
+    response: PetMedicalMutationResponseSchema,
+  }),
+  pet_medical_restore: contract({
+    request: PetMedicalRestoreRequestSchema,
+    response: PetMedicalMutationResponseSchema,
+  }),
+  pets_list: contract({
+    request: PetsListRequestSchema,
+    response: PetsListResponseSchema,
+  }),
+  pets_get: contract({
+    request: PetsGetRequestSchema,
+    response: PetsGetResponseSchema,
+  }),
+  pets_create: contract({
+    request: PetsCreateRequestSchema,
+    response: PetsCreateResponseSchema,
+  }),
+  pets_update: contract({
+    request: PetsUpdateRequestSchema,
+    response: PetsMutationResponseSchema,
+  }),
+  pets_delete: contract({
+    request: PetsDeleteRequestSchema,
+    response: PetsMutationResponseSchema,
+  }),
+  pets_restore: contract({
+    request: PetsRestoreRequestSchema,
+    response: PetsMutationResponseSchema,
+  }),
   policies_list: contract({ request: flexibleRequest, response: z.array(flexibleRequest) }),
   policies_get: contract({ request: flexibleRequest, response: flexibleRequest.nullable() }),
   policies_create: contract({ request: flexibleRequest, response: flexibleRequest }),
