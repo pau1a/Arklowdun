@@ -4,19 +4,7 @@ import { getHouseholdIdForCalls } from "./db/household";
 import { petsRepo } from "./repos";
 import { reminderScheduler } from "@features/pets/reminderScheduler";
 import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
-
-function renderPets(listEl: HTMLUListElement, pets: Pet[]) {
-  listEl.innerHTML = "";
-  pets.forEach((p) => {
-    const li = document.createElement("li");
-    li.textContent = `${p.name} (${p.type}) `;
-    const btn = document.createElement("button");
-    btn.textContent = "Open";
-    btn.dataset.id = p.id;
-    li.appendChild(btn);
-    listEl.appendChild(li);
-  });
-}
+import { createPetsPage, createFilterModels, type FilteredPet } from "@features/pets/PetsPage";
 
 function toReminderRecords(pets: Pet[]): {
   records: Array<{
@@ -65,31 +53,43 @@ interface FiltersState {
 
 export async function PetsView(container: HTMLElement) {
   runViewCleanups(container);
-  const section = document.createElement("section");
-  container.innerHTML = "";
-  container.appendChild(section);
+
+  const page = createPetsPage(container);
 
   registerViewCleanup(container, () => {
+    try {
+      page.destroy();
+    } catch {
+      // ignore
+    }
     reminderScheduler.cancelAll();
   });
 
   const hh = await getHouseholdIdForCalls();
 
   async function loadPets(): Promise<Pet[]> {
-    return await petsRepo.list({ householdId, orderBy: "position, created_at, id" });
+    return await petsRepo.list({ householdId: hh, orderBy: "position, created_at, id" });
   }
 
   let pets: Pet[] = await loadPets();
-  reminderScheduler.init();
-  const initial = toReminderRecords(pets);
-  reminderScheduler.scheduleMany(initial.records, {
-    householdId: hh,
-    petNames: initial.petNames,
-  });
+  let filters: FiltersState = { query: "", models: [] };
+  let searchHandle: number | undefined;
+  let lastScroll = 0;
 
-  async function refresh(listEl?: HTMLUListElement, affected?: string[]) {
+  function applyFilters() {
+    filters = { ...filters, models: createFilterModels(pets, filters.query) };
+    page.setPets(pets);
+    page.setFilter(filters.models);
+  }
+
+  function showList() {
+    page.showList();
+    page.setScrollOffset(lastScroll);
+  }
+
+  async function refresh(affected?: string[]) {
     pets = await loadPets();
-    if (listEl) renderPets(listEl, pets);
+    applyFilters();
     if (!affected || affected.length === 0) {
       reminderScheduler.init();
       const next = toReminderRecords(pets);
@@ -111,20 +111,23 @@ export async function PetsView(container: HTMLElement) {
   }
 
   async function handleCreate(input: { name: string; type: string }): Promise<Pet> {
-    const created = await petsRepo.create(householdId, {
+    const created = await petsRepo.create(hh, {
       name: input.name,
       type: input.type,
       position: pets.length,
     } as Partial<Pet>);
     pets = [...pets, created];
     applyFilters();
-    await schedulePetReminders([created]);
+    // Newly created pets likely have no medical records yet; still update scheduler state
+    reminderScheduler.rescheduleForPet(created.id);
+    const scoped = toReminderRecords([created]);
+    reminderScheduler.scheduleMany(scoped.records, { householdId: hh, petNames: scoped.petNames });
     return created;
   }
 
   async function handleEdit(pet: Pet, patch: { name: string; type: string }) {
     const next: Partial<Pet> = { name: patch.name, type: patch.type };
-    await petsRepo.update(householdId, pet.id, next);
+    await petsRepo.update(hh, pet.id, next);
     const idx = pets.findIndex((p) => p.id === pet.id);
     if (idx !== -1) {
       pets[idx] = { ...pets[idx], name: patch.name, type: patch.type };
@@ -132,57 +135,35 @@ export async function PetsView(container: HTMLElement) {
     applyFilters();
   }
 
-  function showList() {
-    page.showList();
-    page.setScrollOffset(lastScroll);
+  async function openDetail(pet: Pet) {
+    lastScroll = page.getScrollOffset();
+    const host = document.createElement("div");
+    page.showDetail(host);
+
+    const persist = async () => {
+      await petsRepo.update(hh, pet.id, {
+        name: pet.name,
+        type: pet.type,
+        position: pet.position,
+      } as Partial<Pet>);
+      await refresh([pet.id]);
+    };
+
+    await PetDetailView(host, pet, persist, showList);
   }
 
-      pets.push(created);
-      renderPets(listEl, pets);
-      reminderScheduler.rescheduleForPet(created.id);
-      const scoped = toReminderRecords([created]);
-      reminderScheduler.scheduleMany(scoped.records, {
-        householdId: hh,
-        petNames: scoped.petNames,
-      });
-      form.reset();
-    });
-
-    listEl?.addEventListener("click", (e) => {
-      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-id]");
-      if (!btn) return;
-      const id = btn.dataset.id!;
-      const pet = pets.find((p) => p.id === id);
-      if (!pet) return;
-
-      // Persist callback: update basic fields if PetDetailView modified them,
-      // then refresh the list and reminders.
-      const persist = async () => {
-        // defensively update name/type/position if changed
-        await petsRepo.update(hh, pet.id, {
-          name: pet.name,
-          type: pet.type,
-          position: pet.position,
-        } as Partial<Pet>);
-        await refresh(listEl ?? undefined, [pet.id]);
-      };
-
-      PetDetailView(section, pet, persist, showList);
-    });
-  }
+  // Initial render + reminders
+  applyFilters();
+  reminderScheduler.init();
+  const initial = toReminderRecords(pets);
+  reminderScheduler.scheduleMany(initial.records, { householdId: hh, petNames: initial.petNames });
 
   page.setCallbacks({
-    onCreate: handleCreate,
-    onOpenPet: (pet) => {
-      void openDetail(pet);
-    },
-    onEditPet: (pet, patch) => {
-      void handleEdit(pet, patch);
-    },
+    onCreate: (input) => handleCreate(input),
+    onOpenPet: (pet) => { void openDetail(pet); },
+    onEditPet: (pet, patch) => { void handleEdit(pet, patch); },
     onSearchChange: (value: string) => {
-      if (searchHandle) {
-        window.clearTimeout(searchHandle);
-      }
+      if (searchHandle) window.clearTimeout(searchHandle);
       searchHandle = window.setTimeout(() => {
         filters = { ...filters, query: value.trim() };
         applyFilters();
