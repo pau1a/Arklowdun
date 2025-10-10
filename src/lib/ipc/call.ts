@@ -11,6 +11,14 @@ export const DB_UNHEALTHY_WRITE_BLOCKED_MESSAGE = recoveryText(
   "db.unhealthy_banner.subtitle",
 );
 
+const ERROR_MESSAGE_OVERRIDES: Record<string, string> = {
+  INVALID_HOUSEHOLD: "No active household selected.",
+  "SQLX/UNIQUE": "Duplicate entry detected.",
+  "SQLX/NOTNULL": "Required field missing.",
+  "PATH_OUT_OF_VAULT": "File path outside vault boundary.",
+  [FALLBACK_CODE]: "Unexpected error occurred.",
+};
+
 type UnknownRecord = Record<string, unknown>;
 const isRecord = (v: unknown): v is UnknownRecord =>
   typeof v === "object" && v !== null;
@@ -48,7 +56,13 @@ export function normalizeError(error: unknown): AppError {
       crashId = record.crashId;
     }
 
-    const out: AppError = { code, message, context: ctx, crash_id: crashId };
+    const override = ERROR_MESSAGE_OVERRIDES[code];
+    const out: AppError = {
+      code,
+      message: override ?? message,
+      context: ctx,
+      crash_id: crashId,
+    };
 
     if (code === DB_UNHEALTHY_WRITE_BLOCKED) {
       out.message = DB_UNHEALTHY_WRITE_BLOCKED_MESSAGE;

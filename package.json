@@ -23,6 +23,7 @@
     "test:a11y": "playwright test tests/a11y/*.spec.ts",
     "test:contracts": "node --import ./scripts/test-preload.mjs --test tests/contracts/*.spec.ts",
     "test:parity": "node --import ./scripts/test-preload.mjs --test tests/contracts/ipc-contracts.spec.ts",
+    "test:ipc:pets": "node --import ./scripts/test-preload.mjs --test tests/contracts/pets-ipc.spec.ts",
     "dev:fake": "VITE_IPC_ADAPTER=fake VITE_IPC_SCENARIO=defaultHousehold vite",
     "lint:rs": "cargo clippy --manifest-path src-tauri/Cargo.toml --lib --bins --examples --all-features -- -D clippy::unwrap_used -D clippy::expect_used && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features",
     "gen:models": "cargo test --no-default-features --manifest-path src-tauri/Cargo.toml",

@@ -3,6 +3,18 @@ import { call } from "@lib/ipc/call";
 import { logUI } from "@lib/uiLog";
 import { z } from "zod";
 import {
+  PetMedicalCreateRequestSchema,
+  PetMedicalDeleteRequestSchema,
+  PetMedicalListRequestSchema,
+  PetMedicalRestoreRequestSchema,
+  PetMedicalUpdateRequestSchema,
+  PetsCreateRequestSchema,
+  PetsDeleteRequestSchema,
+  PetsListRequestSchema,
+  PetsRestoreRequestSchema,
+  PetsUpdateRequestSchema,
+} from "@lib/ipc/contracts/pets";
+import {
   AttachmentInputSchema,
   AttachmentRefSchema,
   RenewalInputSchema,
@@ -40,6 +52,15 @@ type ListOpts = {
 };
 
 const SEARCH_TABLES = new Set(["notes", "events", "vehicles", "pets"]);
+
+const PETS_DEFAULT_ORDER = "position, created_at, id" as const;
+const PET_MEDICAL_DEFAULT_ORDER = "date DESC, created_at DESC, id" as const;
+
+const isEmptyUpdatePayload = (value: unknown): boolean => {
+  if (value == null) return true;
+  if (typeof value !== "object") return false;
+  return Object.keys(value as Record<string, unknown>).length === 0;
+};
 
 // Generic repo factory with per-table default ordering
 function domainRepo<T extends object>(table: string, defaultOrderBy: string) {
@@ -115,8 +136,120 @@ function domainRepo<T extends object>(table: string, defaultOrderBy: string) {
 export const billsRepo            = domainRepo<Bill>("bills", "position, created_at, id");
 export const policiesRepo         = domainRepo<Policy>("policies", "position, created_at, id");
 export const propertyDocsRepo     = domainRepo<PropertyDocument>("property_documents", "position, created_at, id");
-export const petsRepo             = domainRepo<Pet>("pets", "position, created_at, id");
-export const petMedicalRepo       = domainRepo<PetMedicalRecord>("pet_medical", "date DESC, created_at DESC, id");
+export const petsRepo = {
+  async list(opts: ListOpts): Promise<Pet[]> {
+    const payload = PetsListRequestSchema.parse({
+      householdId: opts.householdId,
+      household_id: opts.householdId,
+      orderBy: opts.orderBy ?? PETS_DEFAULT_ORDER,
+      order_by: opts.orderBy ?? PETS_DEFAULT_ORDER,
+      limit: opts.limit,
+      offset: opts.offset,
+    });
+    return await call("pets_list", payload);
+  },
+
+  async create(householdId: string, data: Partial<Pet>): Promise<Pet> {
+    const payload = PetsCreateRequestSchema.parse({
+      data: { ...data, household_id: householdId },
+    });
+    const response = await call("pets_create", payload);
+    clearSearchCache();
+    return response;
+  },
+
+  async update(householdId: string, id: string, data: Partial<Pet>): Promise<void> {
+    if (isEmptyUpdatePayload(data)) {
+      logUI("INFO", "repo.update.noop", { table: "pets", id });
+      return;
+    }
+    const payload = PetsUpdateRequestSchema.parse({
+      id,
+      householdId,
+      household_id: householdId,
+      data,
+    });
+    await call("pets_update", payload);
+    clearSearchCache();
+  },
+
+  async delete(householdId: string, id: string): Promise<void> {
+    const payload = PetsDeleteRequestSchema.parse({
+      id,
+      householdId,
+      household_id: householdId,
+    });
+    await call("pets_delete", payload);
+    clearSearchCache();
+  },
+
+  async restore(householdId: string, id: string): Promise<void> {
+    const payload = PetsRestoreRequestSchema.parse({
+      id,
+      householdId,
+      household_id: householdId,
+    });
+    await call("pets_restore", payload);
+    clearSearchCache();
+  },
+};
+
+export const petMedicalRepo = {
+  async list(opts: ListOpts): Promise<PetMedicalRecord[]> {
+    const payload = PetMedicalListRequestSchema.parse({
+      householdId: opts.householdId,
+      household_id: opts.householdId,
+      orderBy: opts.orderBy ?? PET_MEDICAL_DEFAULT_ORDER,
+      order_by: opts.orderBy ?? PET_MEDICAL_DEFAULT_ORDER,
+      limit: opts.limit,
+      offset: opts.offset,
+    });
+    return await call("pet_medical_list", payload);
+  },
+
+  async create(householdId: string, data: Partial<PetMedicalRecord>): Promise<PetMedicalRecord> {
+    const payload = PetMedicalCreateRequestSchema.parse({
+      data: { ...data, household_id: householdId },
+    });
+    return await call("pet_medical_create", payload);
+  },
+
+  async update(
+    householdId: string,
+    id: string,
+    data: Partial<PetMedicalRecord>,
+  ): Promise<void> {
+    if (isEmptyUpdatePayload(data)) {
+      logUI("INFO", "repo.update.noop", { table: "pet_medical", id });
+      return;
+    }
+    const payload = PetMedicalUpdateRequestSchema.parse({
+      id,
+      householdId,
+      household_id: householdId,
+      data,
+    });
+    await call("pet_medical_update", payload);
+  },
+
+  async delete(householdId: string, id: string): Promise<void> {
+    const payload = PetMedicalDeleteRequestSchema.parse({
+      id,
+      householdId,
+      household_id: householdId,
+    });
+    await call("pet_medical_delete", payload);
+  },
+
+  async restore(householdId: string, id: string): Promise<void> {
+    const payload = PetMedicalRestoreRequestSchema.parse({
+      id,
+      householdId,
+      household_id: householdId,
+    });
+    await call("pet_medical_restore", payload);
+  },
+};
 const familyMembersRepo           = domainRepo<FamilyMember>("family_members", "position, created_at, id");
 
 const FamilyMemberCreateRequestSchema = z

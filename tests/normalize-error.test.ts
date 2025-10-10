@@ -75,3 +75,20 @@ test("normalizeError surfaces database health report", async () => {
   assert.equal(n.message, DB_UNHEALTHY_WRITE_BLOCKED_MESSAGE);
   assert.deepEqual(n.health_report, report);
 });
+
+test("normalizeError maps persistence error codes to user copy", async () => {
+  const { normalizeError } = await import("../src/lib/ipc/call.ts");
+  const cases = [
+    { code: "INVALID_HOUSEHOLD", expected: "No active household selected." },
+    { code: "SQLX/UNIQUE", expected: "Duplicate entry detected." },
+    { code: "SQLX/NOTNULL", expected: "Required field missing." },
+    { code: "PATH_OUT_OF_VAULT", expected: "File path outside vault boundary." },
+    { code: "APP/UNKNOWN", expected: "Unexpected error occurred." },
+  ] as const;
+
+  for (const { code, expected } of cases) {
+    const result = normalizeError({ code, message: "raw" });
+    assert.equal(result.code, code);
+    assert.equal(result.message, expected);
+  }
+});
