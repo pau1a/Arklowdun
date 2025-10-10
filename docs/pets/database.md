@@ -2,9 +2,7 @@
 
 ### Purpose
 
-This document defines the persistent data structures that support the Pets domain.
-It describes the tables, columns, indexes, and constraints that govern pet and pet-medical information inside the Arklowdun SQLite database.
-All Pets data are stored in the same `arklowdun.sqlite3` file as other household-scoped entities and share the same integrity guarantees, PRAGMAs, and write guards.
+This document describes the SQLite structures that back the Pets domain. It covers the table layouts, indexes, integrity rules, and validation artefacts that were exercised in Pets PR1.
 
 ---
 
@@ -12,258 +10,82 @@ All Pets data are stored in the same `arklowdun.sqlite3` file as other household
 
 ### 1.1 `pets`
 
-Stores the primary record for each animal owned by a household.
-
-```sql
-CREATE TABLE pets (
-    id              TEXT PRIMARY KEY,            -- UUIDv7 generated in Rust
-    household_id    TEXT NOT NULL,               -- FK to households.id
-    name            TEXT NOT NULL,
-    type            TEXT,                        -- species or general type
-    breed           TEXT,
-    sex             TEXT,
-    neutered        INTEGER DEFAULT 0,           -- boolean flag (0/1)
-    colour          TEXT,
-    markings        TEXT,
-    dob             TEXT,                        -- ISO date string
-    weight_kg       REAL,
-    size_category   TEXT,
-    microchip       TEXT UNIQUE,                 -- may be NULL but unique if present
-    insurance_provider TEXT,
-    insurance_policy   TEXT,
-    vet_name        TEXT,
-    vet_contact     TEXT,
-    avatar_relpath  TEXT,                        -- relative path under vault
-    position        INTEGER DEFAULT 0,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    deleted_at      TEXT,                        -- soft-delete marker
-    FOREIGN KEY(household_id) REFERENCES households(id)
-        ON DELETE CASCADE ON UPDATE CASCADE
-);
-```
-
-**Notes**
-
-* `id` is a UUIDv7; no autoincrement integers are used.
-* `household_id` scoping prevents orphaned pets when a household is deleted.
-* `microchip` uses a `UNIQUE` constraint but accepts `NULL`, allowing multiple unchipped pets.
-* Timestamps follow UTC and ISO-8601 string storage for cross-platform compatibility.
+| Column        | Type    | Constraints                                                                 | Notes                                                      |
+| ------------- | ------- | --------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `id`          | TEXT    | Primary key                                                                 | UUIDv7 generated in Rust.                                  |
+| `name`        | TEXT    | `NOT NULL`                                                                  | Display name in the UI.                                    |
+| `type`        | TEXT    | `NOT NULL`                                                                  | Species/breed descriptor (free-form text).                 |
+| `household_id`| TEXT    | `NOT NULL`, `REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE`  | Keeps records scoped to a household; historical dumps may spell the table `household` or `households`, and the validation test accepts whichever exists. |
+| `created_at`  | INTEGER | `NOT NULL`                                                                  | Millisecond epoch set at insert time.                      |
+| `updated_at`  | INTEGER | `NOT NULL`                                                                  | Millisecond epoch refreshed on writes.                     |
+| `deleted_at`  | INTEGER | Nullable                                                                    | Soft-delete marker; null when active.                      |
+| `position`    | INTEGER | `NOT NULL DEFAULT 0`                                                        | Ordering slot for UI drag and drop.                        |
 
 ### 1.2 `pet_medical`
 
-Holds dated medical entries, treatments, and reminder timestamps for each pet.
-
-```sql
-CREATE TABLE pet_medical (
-    id               TEXT PRIMARY KEY,            -- UUIDv7
-    household_id     TEXT NOT NULL,
-    pet_id           TEXT NOT NULL,
-    date             TEXT NOT NULL,               -- event date
-    description      TEXT NOT NULL,
-    diagnosis        TEXT,
-    medication       TEXT,
-    dosage           TEXT,
-    allergy_flag     INTEGER DEFAULT 0,
-    reminder_at      TEXT,                        -- UTC timestamp for next reminder
-    root_key         TEXT DEFAULT 'appdata',
-    relative_path    TEXT,                        -- may be NULL
-    category         TEXT DEFAULT 'pet_medical' CHECK(category = 'pet_medical'),
-    created_at       TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY(household_id) REFERENCES households(id)
-        ON DELETE CASCADE ON UPDATE CASCADE,
-    FOREIGN KEY(pet_id) REFERENCES pets(id)
-        ON DELETE CASCADE ON UPDATE CASCADE
-);
-```
-
-**Notes**
-
-* `household_id` is duplicated intentionally to allow efficient scoped queries without joining through `pets`.
-* `reminder_at` drives the in-memory notification scheduler.
-* `root_key` + `relative_path` identify the attachment location within the vault system.
-* `category` is fixed to `"pet_medical"` and validated via a `CHECK` constraint to maintain consistency with vault categories.
-* `description` and `diagnosis` accept arbitrary text; content is user-supplied.
+| Column         | Type    | Constraints                                                                 | Notes                                                                                     |
+| -------------- | ------- | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `id`           | TEXT    | Primary key                                                                 | UUIDv7 generated in Rust.                                                                  |
+| `pet_id`       | TEXT    | `NOT NULL`, `REFERENCES pets(id) ON DELETE CASCADE ON UPDATE CASCADE`       | Cascades away whenever the parent pet is deleted.                                         |
+| `date`         | INTEGER | `NOT NULL`                                                                  | Millisecond epoch for the medical event (local-noon normalised in the UI).                |
+| `description`  | TEXT    | `NOT NULL`                                                                  | User supplied summary of the treatment/visit.                                             |
+| `document`     | TEXT    | Nullable                                                                    | Optional legacy attachment pointer, retained for backwards compatibility.                 |
+| `reminder`     | INTEGER | Nullable                                                                    | Millisecond epoch for follow-up notifications.                                            |
+| `household_id` | TEXT    | `NOT NULL`, `REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE`  | Matches the parent pet’s household; validation tolerates either `household` or `households` table names in the FK target.                                   |
+| `created_at`   | INTEGER | `NOT NULL`                                                                  | Millisecond epoch set during insert.                                                       |
+| `updated_at`   | INTEGER | `NOT NULL`                                                                  | Millisecond epoch refreshed on mutation.                                                  |
+| `deleted_at`   | INTEGER | Nullable                                                                    | Soft-delete marker.                                                                         |
+| `root_key`     | TEXT    | Nullable                                                                    | Vault root identifier when an attachment exists.                                           |
+| `relative_path`| TEXT    | Nullable                                                                    | Vault-relative path for attachments; enforced unique per household/category when present. |
+| `category`     | TEXT    | `NOT NULL DEFAULT 'pet_medical'`, `CHECK (category IN ('bills','policies','property_documents','inventory_items','pet_medical','vehicles','vehicle_maintenance','notes','misc'))` | Keeps attachment rows aligned with the shared vault taxonomy.                              |
 
 ---
 
 ## 2. Indexes
 
-```sql
-CREATE INDEX pets_household_position_idx
-    ON pets (household_id, position, created_at, id);
+The schema ships with the following indexes relevant to the Pets domain:
 
-CREATE INDEX pets_updated_idx
-    ON pets (updated_at DESC);
+| Name                                         | Definition / Purpose |
+| -------------------------------------------- | ------------------------------------------------------------------------------ |
+| `pets_household_position_idx`                | Partial **unique** index on `(household_id, position)` constrained to `deleted_at IS NULL`; preserves per-household ordering. |
+| `pets_household_updated_idx`                 | Tracks `(household_id, updated_at)` to accelerate change feeds. |
+| `pet_medical_pet_date_idx`                   | Orders medical history by `(pet_id, date)` for timeline rendering. |
+| `pet_medical_household_updated_idx`          | Drives household scoped syncs on medical records. |
+| `pet_medical_household_category_path_idx`    | Partial **unique** index on `(household_id, category, relative_path)` constrained to `deleted_at IS NULL AND relative_path IS NOT NULL`; prevents duplicate attachment slots. |
 
-CREATE INDEX pet_medical_pet_date_idx
-    ON pet_medical (pet_id, date DESC, created_at DESC);
-
-CREATE INDEX pet_medical_household_category_path_idx
-    ON pet_medical (household_id, category, root_key, relative_path);
-```
-
-**Purpose**
-
-* `pets_household_position_idx` supports deterministic ordering and UI reordering.
-* `pets_updated_idx` helps sync and diagnostics queries sort by last change.
-* `pet_medical_pet_date_idx` powers the descending timeline display in the detail view.
-* `pet_medical_household_category_path_idx` enforces vault-path uniqueness per household and category.
+All index names, uniqueness flags, and partial `WHERE` predicates are asserted via `PRAGMA index_list` queries and matching `sqlite_master.sql` text in `tests/pets-schema.test.ts`.
 
 ---
 
-## 3. Constraints and defaults
+## 3. Integrity guarantees
 
-| Column          | Constraint                  | Description                                      |
-| --------------- | --------------------------- | ------------------------------------------------ |
-| `microchip`     | `UNIQUE` (nullable)         | Prevents duplicate chip numbers.                |
-| `category`      | `CHECK(category = 'pet_medical')` | Keeps vault records typed.                  |
-| `household_id`  | `FOREIGN KEY → households.id` | Enforces household scope.                     |
-| `pet_id`        | `FOREIGN KEY → pets.id`        | Cascades medical records on pet delete.       |
-| `deleted_at`    | Soft delete                 | Marks pets hidden from normal queries.          |
-| `position`      | `DEFAULT 0`                 | Starting sort order for new entries.            |
+* **Foreign keys** – `PRAGMA foreign_key_check` returns zero violations after inserting sample pets and medical records, and it remains clean after deleting the parent pet. This verifies that `pet_medical` honours the `ON DELETE CASCADE` contract and that household scoping is enforced for both tables.
+* **Database consistency** – `PRAGMA integrity_check` returns `ok` before and after cascading deletes, confirming there are no hidden corruption states.
+* **Capability probe** – The `db_has_pet_columns` IPC command checks for the presence of the `pets` table and the required scalar columns (`name`, `type`). With the validated schema the probe returns `true`, allowing the capability log (`caps:probe`) to advertise `pets_cols=true` during startup.
+
+These assertions are codified in `tests/pets-schema.test.ts`, which uses an in-memory SQLite database initialised from `src-tauri/schema.sql`.
 
 ---
 
-## 4. Relationships
+## 4. Schema quirks
 
-```
-households 1 ────► N pets 1 ────► N pet_medical
-```
-
-* Deleting a household cascades to delete its pets and all related medical records.
-* Deleting a pet cascades to delete only its own medical records.
-* Attachments in the vault are referenced from `pet_medical.relative_path` but are not cascaded automatically; vault repair handles cleanup.
-* Every `pet_medical` row carries the same `household_id` as its parent pet, ensuring fast scoped queries without joins.
+* The UI layers may attach an in-memory `medical` array to `Pet` models, but this field is populated through separate queries – the `pets` table itself only stores the scalar columns listed above.
+* The legacy `document` column on `pet_medical` remains nullable to support older exports; new attachments exclusively use `root_key` + `relative_path`.
 
 ---
 
-## 5. Data lifecycle
+## 5. Verification artefacts
 
-| Stage   | Operation                                       | Mechanism                                      |
-| ------- | ----------------------------------------------- | ---------------------------------------------- |
-| Create  | Insert pet → optional medical rows → schedule reminders | IPC `pets_create`, `pet_medical_create`. |
-| Update  | Patch mutable fields; bump `updated_at`          | IPC `pets_update`, `pet_medical_update`.       |
-| Delete  | Soft delete pet; cascade hard delete medicals    | IPC `pets_delete`; FK cascade for medicals.    |
-| Restore | Recreate pet with previous ID                    | Handled by app logic; no dedicated restore endpoint yet. |
-| Vacuum  | Optional via household vacuum                    | Compacts deleted rows when user runs repair.   |
+| Artefact                               | Description                                                    |
+| -------------------------------------- | -------------------------------------------------------------- |
+| `tests/pets-schema.test.ts`            | Node-based test suite that checks schema text, indexes, and cascades from a clean database image. |
+| `src/models.ts`                        | Updated TypeScript interfaces for `Pet` and `PetMedicalRecord`, matching the column names, nullability, and defaulted category enforced in SQL. |
+| `docs/pets/plan/pr1.md`                | Acceptance checklist updated with links to the automated evidence captured in this PR. |
 
 ---
 
-## 6. Query conventions
-
-**List pets by household**
-
-```sql
-SELECT * FROM pets
- WHERE household_id = :hid
- ORDER BY position, created_at, id;
-```
-
-**List medical history for a pet**
-
-```sql
-SELECT * FROM pet_medical
- WHERE household_id = :hid
-   AND pet_id = :pid
- ORDER BY date DESC, created_at DESC;
-```
-
-**Find upcoming reminders**
-
-```sql
-SELECT pet_id, description, reminder_at
-  FROM pet_medical
- WHERE household_id = :hid
-   AND reminder_at IS NOT NULL
-   AND reminder_at > datetime('now')
- ORDER BY reminder_at ASC;
-```
-
-**Attachment repair reference**
-
-```sql
-SELECT id, root_key, relative_path
-  FROM pet_medical
- WHERE category = 'pet_medical'
-   AND (relative_path IS NULL OR relative_path = '');
-```
+**Status:** Schema validated during Pets PR1.
+**Scope:** Structural documentation for `pets` and `pet_medical` tables, covering constraints, indexes, and verification coverage.
+**File:** `/docs/pets/database.md`
 
 ---
-
-## 7. Integrity checks
-
-At runtime, the storage health system executes:
-
-```sql
-PRAGMA foreign_key_check;
-PRAGMA integrity_check;
-```
-
-* `storage_sanity` fails if any orphaned `pet_medical` rows or mismatched `household_id` values appear.
-* A failed check blocks write operations and surfaces `DB_UNHEALTHY_WRITE_BLOCKED` in the UI banner.
-
----
-
-## 8. Migration history
-
-| Migration                   | Purpose                    | Key changes                                                                 |
-| --------------------------- | -------------------------- | ---------------------------------------------------------------------------- |
-| `0001_baseline.sql`         | Initial domain schema      | Created `pets` and `pet_medical` tables; basic indexes.                      |
-| `0023_vault_categories.up.sql` | Vault category alignment | Added `category` column, created composite path index, removed legacy document fields. |
-| `0026_cascade_checkpoints.up.sql` | Integrity checkpointing | No Pets schema changes but added health tracking for cascade repair.         |
-
-Future migrations will track foreign-key updates and new columns but must preserve backward compatibility with existing pets data.
-
----
-
-## 9. Referential behaviour
-
-| Action            | Effect                                                 |
-| ----------------- | ------------------------------------------------------ |
-| Delete household  | Cascades to pets → cascades to `pet_medical`.          |
-| Delete pet        | Cascades to its `pet_medical` rows only.               |
-| Update household ID | Propagates automatically to child rows.              |
-| Update pet ID     | Permitted only internally; handled through cascade update. |
-
-All cascades are immediate; no deferred constraint behaviour is used.
-
----
-
-## 10. Data volume and performance notes
-
-* Expected scale per household: `< 100` pets, `< 1000` medical rows.
-* WAL journaling (`synchronous=FULL`, `wal_autocheckpoint=1000`) ensures durability.
-* Index selection keeps read latency below 2 ms for typical list queries.
-* Medical history queries are bounded by `DESC` order and index use; no full scans expected under normal loads.
-* `VACUUM` or `REINDEX` can be triggered via the household maintenance UI if file growth exceeds expectations.
-
----
-
-## 11. Known quirks and gaps
-
-* `relative_path` may be null but UI assumes a non-empty string, producing defensive fallbacks.
-* Medical descriptions interpolate directly into HTML; sanitisation is a UI concern, not a DB rule.
-* No triggers yet enforce timestamp consistency between `created_at` and `updated_at`.
-* Reminder scheduler does not persist its state; `reminder_at` timestamps are re-read on view load.
-* No partial-index support for overdue reminders; handled in memory.
-
----
-
-## 12. Diagnostics references
-
-When the diagnostics collector runs, it queries:
-
-```sql
-SELECT COUNT(*) AS pets_total FROM pets WHERE deleted_at IS NULL;
-SELECT COUNT(*) AS medical_total FROM pet_medical;
-```
-
-and includes those counts in the health report under the family → pets section.
-
----
-
-**Owner:** Ged McSneggle  
-**Status:** Schema current as of migration `0026`  
-**Scope:** Defines the persistent data model for the Pets domain
