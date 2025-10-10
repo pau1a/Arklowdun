@@ -78,26 +78,27 @@ export interface PetMedicalRecord {
   pet_id: string;
   date: number; // timestamp ms
   description: string;
-  root_key?: string | null;
-  relative_path: string;
-  category: string;
-  reminder?: number; // timestamp ms
-  household_id?: string;
+  document?: string | null;
+  reminder?: number | null; // timestamp ms
+  household_id: string;
   created_at: number;
   updated_at: number;
-  deleted_at?: number;
+  deleted_at?: number | null;
+  root_key?: string | null;
+  relative_path?: string | null;
+  category: "pet_medical";
 }
 
 export interface Pet {
   id: string;
   name: string;
   type: string;
-  medical: PetMedicalRecord[];
-  household_id?: string;
+  household_id: string;
   position: number;
   created_at: number;
   updated_at: number;
-  deleted_at?: number;
+  deleted_at?: number | null;
+  medical?: PetMedicalRecord[];
 }
 
 export interface FamilyMember {
