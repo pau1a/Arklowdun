@@ -3,9 +3,15 @@
   backdrop-filter: blur(3px);
 }
 
+.modal.family-drawer {
+  /* Override generic .modal sizing */
+  width: 945px;
+  max-width: min(945px, 90vw);
+}
+
 .family-drawer {
-  width: 420px;
-  max-width: min(420px, 90vw);
+  width: 945px; /* was 630px */
+  max-width: min(945px, 90vw);
   height: 100%;
   margin: 0;
   border-radius: 0;
@@ -564,4 +570,36 @@
 .family-drawer__panel [data-invalid] .family-drawer__input,
 .family-drawer__panel [data-invalid] .family-drawer__textarea {
   border-color: var(--color-danger, #dc2626);
+}
+
+// Avatar section in Personal tab
+.family-drawer__avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.family-drawer__avatar {
+  width: 128px;
+  height: 128px;
+  border-radius: 999px;
+  object-fit: cover;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-border, #CBD5E1) 70%, transparent);
+}
+
+.family-drawer__avatar--placeholder {
+  width: 128px;
+  height: 128px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-border, #CBD5E1) 50%, #ffffff);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted, #475569);
+  font-size: 0.8rem;
+}
+
+.family-drawer__avatar-actions {
+  display: flex;
+  gap: 8px;
 }

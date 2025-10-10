@@ -1,4 +1,7 @@
 import { isValidEmail, isValidPhone, isValidUrl } from "./validators";
+import type { FamilyMember } from "../family.types";
+import { canonicalizeAndVerify, type RootKey } from "@files/path";
+import { convertFileSrc } from "@lib/ipc/core";
 
 export interface SocialLinkRow {
   key: string;
@@ -16,6 +19,7 @@ export interface PersonalFormData {
   phoneWork: string;
   website: string;
   socialLinks: SocialLinkRow[];
+  photoPath?: string | null;
 }
 
 export interface PersonalValidationResult {
@@ -28,6 +32,15 @@ export interface TabPersonalInstance {
   setData(data: PersonalFormData): void;
   getData(): PersonalFormData;
   validate(): PersonalValidationResult;
+  setPhotoFromMember(member: FamilyMember | null): void;
+  /** Returns a pending photo source selected by the user (if any). */
+  getPendingPhoto(): { name: string; mimeType: string | null; read: () => Promise<Uint8Array> } | null;
+  /** Clears the pending photo state after a successful save. */
+  clearPendingPhoto(): void;
+  /** Mark that the photo should be removed on save. */
+  markPhotoRemoved(): void;
+  /** Whether the user requested photo removal. */
+  isPhotoRemoved(): boolean;
 }
 
 interface FieldEntry {
@@ -121,6 +134,152 @@ export function createPersonalTab(): TabPersonalInstance {
   const element = document.createElement("div");
   element.className = "family-drawer__panel";
   element.id = "family-drawer-panel-personal";
+
+  // Avatar controls
+  const avatarRow = document.createElement("div");
+  avatarRow.className = "family-drawer__avatar-row";
+
+  const avatarImg = document.createElement("img");
+  avatarImg.className = "family-drawer__avatar";
+  avatarImg.alt = "Profile photo";
+  avatarImg.hidden = true;
+
+  const avatarPlaceholder = document.createElement("div");
+  avatarPlaceholder.className = "family-drawer__avatar--placeholder";
+  avatarPlaceholder.textContent = "No photo";
+
+  const avatarActions = document.createElement("div");
+  avatarActions.className = "family-drawer__avatar-actions";
+
+  const changePhotoBtn = document.createElement("button");
+  changePhotoBtn.type = "button";
+  changePhotoBtn.className = "family-drawer__add";
+  changePhotoBtn.textContent = "Change photo";
+
+  const removePhotoBtn = document.createElement("button");
+  removePhotoBtn.type = "button";
+  removePhotoBtn.className = "family-drawer__remove";
+  removePhotoBtn.textContent = "Remove photo";
+  removePhotoBtn.disabled = true;
+
+  const photoInput = document.createElement("input");
+  photoInput.type = "file";
+  photoInput.accept = "image/*";
+  photoInput.hidden = true;
+
+  avatarActions.append(changePhotoBtn, removePhotoBtn);
+  avatarRow.append(avatarImg, avatarPlaceholder, avatarActions, photoInput);
+  element.appendChild(avatarRow);
+
+  // Local helper: render avatar from vault path using asset URL with blob fallback
+  async function renderAvatarFromVault(householdId: string | null, photoPath: string | null): Promise<void> {
+    if (!photoPath || !householdId) {
+      avatarImg.hidden = true;
+      avatarImg.src = "";
+      avatarPlaceholder.hidden = false;
+      removePhotoBtn.disabled = true;
+      return;
+    }
+
+    const rel = `attachments/${householdId}/misc/${photoPath}`;
+    let real: string | null = null;
+    try {
+      const result = await canonicalizeAndVerify(rel, "appData");
+      real = result.realPath;
+    } catch {
+      real = null;
+    }
+
+    if (!real) {
+      avatarImg.hidden = true;
+      avatarImg.src = "";
+      avatarPlaceholder.hidden = false;
+      removePhotoBtn.disabled = true;
+      return;
+    }
+
+    let loaded = false;
+    const trySet = (src: string) =>
+      new Promise<void>((resolve) => {
+        const onOk = () => {
+          loaded = true;
+          avatarImg.removeEventListener("error", onErr);
+          resolve();
+        };
+        const onErr = () => {
+          avatarImg.removeEventListener("load", onOk);
+          resolve();
+        };
+        avatarImg.addEventListener("load", onOk, { once: true });
+        avatarImg.addEventListener("error", onErr, { once: true });
+        avatarImg.src = src;
+      });
+
+    // Attempt Tauri asset URL
+    try {
+      await trySet(convertFileSrc(real));
+    } catch {
+      /* ignore */
+    }
+
+    // Fallback: read bytes and create blob URL
+    if (!loaded) {
+      try {
+        const mod = await import("@tauri-apps/plugin-fs");
+        const bytes = await mod.readFile(real);
+        const blob = new Blob([bytes], { type: "image/*" });
+        const url = URL.createObjectURL(blob);
+        await trySet(url);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    if (loaded) {
+      avatarImg.hidden = false;
+      avatarPlaceholder.hidden = true;
+      removePhotoBtn.disabled = false;
+    } else {
+      avatarImg.hidden = true;
+      avatarPlaceholder.hidden = false;
+      removePhotoBtn.disabled = true;
+    }
+  }
+
+  // Bind avatar controls locally within the tab instance
+  changePhotoBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    photoInput.click();
+  });
+
+  removePhotoBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    photoRemoved = true;
+    pendingPhoto = null;
+    currentPhotoPath = null;
+    updateAvatarPreview(null, null);
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+
+  photoInput.addEventListener("change", () => {
+    const files = photoInput.files;
+    if (!files || files.length === 0) return;
+    const file = files[0]!;
+    const read = async () => new Uint8Array(await file.arrayBuffer());
+    pendingPhoto = { name: file.name, mimeType: file.type || null, read };
+    photoRemoved = false;
+    try {
+      const blobUrl = URL.createObjectURL(file);
+      avatarImg.src = blobUrl;
+      avatarImg.hidden = false;
+      avatarPlaceholder.hidden = true;
+      removePhotoBtn.disabled = false;
+    } catch {
+      /* ignore preview errors */
+    }
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+    photoInput.value = "";
+  });
 
   const nicknameField = createField("Nickname", { required: true, name: "nickname" });
   nicknameField.input.setAttribute("aria-required", "true");
@@ -337,6 +496,7 @@ export function createPersonalTab(): TabPersonalInstance {
       socialLinks: socialEntries
         .map((entry) => ({ key: normalizeString(entry.keyInput.value), value: normalizeString(entry.valueInput.value) }))
         .filter((item) => item.key.length > 0 || item.value.length > 0),
+      photoPath: currentPhotoPath,
     };
   };
 
@@ -449,5 +609,33 @@ export function createPersonalTab(): TabPersonalInstance {
     setData,
     getData,
     validate,
+    setPhotoFromMember(member: FamilyMember | null) {
+      currentPhotoPath = member?.photoPath ?? null;
+      pendingPhoto = null;
+      photoRemoved = false;
+      void renderAvatarFromVault(member?.householdId ?? null, currentPhotoPath);
+    },
+    getPendingPhoto() {
+      return pendingPhoto;
+    },
+    clearPendingPhoto() {
+      pendingPhoto = null;
+    },
+    markPhotoRemoved() {
+      photoRemoved = true;
+      pendingPhoto = null;
+      currentPhotoPath = null;
+      void renderAvatarFromVault(null, null);
+    },
+    isPhotoRemoved() {
+      return photoRemoved;
+    },
   };
 }
+
+// ---- Avatar helpers (scoped within module) ----
+let currentPhotoPath: string | null = null;
+let pendingPhoto: { name: string; mimeType: string | null; read: () => Promise<Uint8Array> } | null = null;
+let photoRemoved = false;
+
+// (listeners are declared inside createPersonalTab)

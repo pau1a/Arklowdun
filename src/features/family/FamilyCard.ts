@@ -1,4 +1,6 @@
 import type { FamilyMember } from "./family.types";
+import { canonicalizeAndVerify } from "@files/path";
+import { convertFileSrc } from "@lib/ipc/core";
 
 const birthdayFormatter = new Intl.DateTimeFormat(undefined, {
   day: "numeric",
@@ -45,6 +47,18 @@ export function createFamilyCard(member: FamilyMember): HTMLButtonElement {
   const header = document.createElement("div");
   header.className = "family-card__header";
 
+  const avatarWrap = document.createElement("div");
+  avatarWrap.className = "family-card__avatar-wrap";
+  const avatarImg = document.createElement("img");
+  avatarImg.className = "family-card__avatar";
+  avatarImg.alt = "";
+  avatarImg.hidden = true;
+  const avatarFallback = document.createElement("div");
+  avatarFallback.className = "family-card__avatar-fallback";
+  const initials = (formatDisplayName(member).match(/\b\w/g) || []).slice(0, 2).join("").toUpperCase();
+  avatarFallback.textContent = initials || "?";
+  avatarWrap.append(avatarImg, avatarFallback);
+
   const name = document.createElement("h3");
   name.className = "family-card__name";
   name.textContent = formatDisplayName(member);
@@ -59,7 +73,11 @@ export function createFamilyCard(member: FamilyMember): HTMLButtonElement {
     birthday.setAttribute("aria-hidden", "true");
   }
 
-  header.append(name, birthday);
+  const titleWrap = document.createElement("div");
+  titleWrap.className = "family-card__title";
+  titleWrap.append(avatarWrap, name);
+
+  header.append(titleWrap, birthday);
 
   const relationship = document.createElement("p");
   relationship.className = "family-card__relationship";
@@ -74,6 +92,54 @@ export function createFamilyCard(member: FamilyMember): HTMLButtonElement {
 
   button.append(header, relationship);
 
+  // Attempt to show avatar if we have a photoPath
+  const isTauri =
+    (typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__) ||
+    (typeof (import.meta as any).env?.TAURI !== 'undefined' && (import.meta as any).env?.TAURI != null);
+  if (member.photoPath && member.householdId && isTauri) {
+    const rel = `attachments/${member.householdId}/misc/${member.photoPath}`;
+    void (async () => {
+      try {
+        const { realPath } = await canonicalizeAndVerify(rel, "appData");
+        let loaded = false;
+        const trySet = (src: string) =>
+          new Promise<void>((resolve) => {
+            const onOk = () => {
+              loaded = true;
+              avatarImg.removeEventListener('error', onErr);
+              resolve();
+            };
+            const onErr = () => {
+              avatarImg.removeEventListener('load', onOk);
+              resolve();
+            };
+            avatarImg.addEventListener('load', onOk, { once: true });
+            avatarImg.addEventListener('error', onErr, { once: true });
+            avatarImg.src = src;
+          });
+
+        await trySet(convertFileSrc(realPath));
+        if (!loaded) {
+          try {
+            const mod = await import('@tauri-apps/plugin-fs');
+            const bytes = await mod.readFile(realPath);
+            const blob = new Blob([bytes], { type: 'image/*' });
+            const url = URL.createObjectURL(blob);
+            await trySet(url);
+          } catch {
+            // ignore
+          }
+        }
+
+        if (loaded) {
+          avatarImg.hidden = false;
+          avatarFallback.style.display = "none";
+        }
+      } catch {
+        // Ignore failures; fallback remains visible
+      }
+    })();
+  }
+
   return button;
 }
-

@@ -1,8 +1,9 @@
 .family-grid {
-  --family-grid-gap: clamp(18px, 2vw, 28px);
+  --family-grid-gap: clamp(14px, 1.6vw, 22px);
   --family-grid-padding: clamp(18px, 2.5vw, 32px);
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  /* Make cards share the full width in a single column */
+  grid-template-columns: 1fr;
   gap: var(--family-grid-gap);
   padding: var(--family-grid-padding);
   margin: 0;
@@ -33,7 +34,7 @@
   flex-direction: column;
   gap: 12px;
   align-items: flex-start;
-  padding: clamp(18px, 2vw, 26px);
+  padding: clamp(22px, 2.6vw, 32px);
   border-radius: var(--radius-lg, 16px);
   background: var(--surface-panel, var(--color-panel, #ffffff));
   border: none;
@@ -63,9 +64,38 @@
   width: 100%;
 }
 
+.family-card__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.family-card__avatar-wrap {
+  width: clamp(96px, 8.4vw, 128px);
+  height: clamp(96px, 8.4vw, 128px);
+  min-width: clamp(96px, 8.4vw, 128px);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--color-border, #e2e8f0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.family-card__avatar {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.family-card__avatar-fallback {
+  font-weight: 600;
+  color: var(--color-text-muted, #475569);
+}
+
 .family-card__name {
   margin: 0;
-  font-size: 1.15rem;
+  font-size: clamp(1.2rem, 1.4vw, 1.4rem);
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--color-text, #0F172A);
@@ -86,18 +116,18 @@
 
 .family-card__relationship {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: 1rem;
   color: var(--color-text-muted, #475569);
 }
 
 @media (max-width: 640px) {
   .family-grid {
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    /* Keep single column on small screens too */
+    grid-template-columns: 1fr;
     padding: clamp(16px, 6vw, 24px);
   }
 
   .family-card {
-    padding: clamp(16px, 5vw, 22px);
+    padding: clamp(18px, 5vw, 24px);
   }
 }
-

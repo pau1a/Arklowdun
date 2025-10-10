@@ -697,4 +697,11 @@ if (DEV && appWindow) {
       appWindow.setSize({ width: w, height: h }),
   };
   console.log("__win ready:", appWindow.label);
+  // Ensure a sane initial window size during dev to avoid tiny/invisible window edge cases
+  try {
+    void appWindow.setMinSize({ width: 1000, height: 700 });
+    void appWindow.setSize({ width: 1200, height: 800 });
+  } catch {
+    /* ignore */
+  }
 }

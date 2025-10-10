@@ -7,6 +7,7 @@ import type { FamilyMember } from "../family.types";
 import { familyStore } from "../family.store";
 import { createDrawerTabs, type DrawerTabDefinition, type FamilyDrawerTabId } from "./DrawerTabs";
 import { createPersonalTab, type PersonalFormData } from "./TabPersonal";
+import { mkdir, writeBinary } from "@files/safe-fs";
 import { createDocumentsTab } from "./TabDocuments";
 import { createFinanceTab } from "./TabFinance";
 import { createAuditTab } from "./TabAudit";
@@ -291,6 +292,7 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
     }
     documentsTab.updateAttachments(familyStore.attachments.get(member.id));
     personalTab.setData(toPersonalData(member));
+    personalTab.setPhotoFromMember(member);
     financeTab.setData(toFinanceData(member));
     auditTab.setData(toAuditData(member));
     hasPendingChanges = false;
@@ -369,6 +371,45 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
 
     return patch;
   };
+
+  async function applyPendingPhoto(member: FamilyMember): Promise<string | null | undefined> {
+    // Removal takes precedence
+    if (typeof personalTab.isPhotoRemoved === "function" && personalTab.isPhotoRemoved()) {
+      return null; // explicit null to clear existing photo
+    }
+    const pending = typeof personalTab.getPendingPhoto === "function" ? personalTab.getPendingPhoto() : null;
+    if (!pending) return undefined; // no change
+
+    // Derive a stable name, overwrite if exists
+    const name = pending.name || "avatar";
+    const extMatch = name.match(/\.([A-Za-z0-9]+)$/);
+    const ext = extMatch ? `.${extMatch[1].toLowerCase()}` : (pending.mimeType?.includes("png") ? ".png" : ".jpg");
+    const relative = `attachments/${member.householdId}/misc/people/${member.id}/avatar${ext}`;
+    const writeRel = `attachments/${member.householdId}/misc/people/${member.id}`;
+
+    try {
+      await mkdir(writeRel, "appData", { recursive: true });
+      const bytes = await pending.read();
+      await writeBinary(relative, "appData", bytes);
+      // Best-effort verification: ensure file now exists
+      try {
+        const { exists } = await import("@files/safe-fs");
+        const ok = await exists(relative, "appData");
+        if (!ok) {
+          toast.show({ kind: "error", message: "Couldn’t verify saved photo." });
+        }
+      } catch {
+        // ignore verification errors
+      }
+      if (typeof personalTab.clearPendingPhoto === "function") personalTab.clearPendingPhoto();
+      // Store DB field as path relative under misc root
+      return `people/${member.id}/avatar${ext}`;
+    } catch {
+      // If writing fails, inform the user and keep previous value unchanged
+      toast.show({ kind: "error", message: "Failed to save photo." });
+      return undefined;
+    }
+  }
 
   const normalizeNullableString = (value: string | null | undefined): string | null => {
     if (value == null) return null;
@@ -543,7 +584,11 @@ export function createFamilyDrawer(options: FamilyDrawerOptions): FamilyDrawerIn
 
     emitLog("INFO", "family.ui.save_clicked", { member_id: currentMemberId, tab: tabs.activeId });
 
-    const rawPatch = buildPatch(member, validation.finance);
+    const photoPathPatch = await applyPendingPhoto(member);
+    const rawPatch = {
+      ...buildPatch(member, validation.finance),
+      ...(photoPathPatch !== undefined ? { photoPath: photoPathPatch } : {}),
+    };
     const patch = pruneUnchangedFields(member, rawPatch);
     const hasChanges = Object.keys(patch).some((key) => key !== "id");
     hasPendingChanges = hasChanges;
