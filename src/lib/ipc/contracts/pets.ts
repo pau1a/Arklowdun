@@ -156,7 +156,7 @@ const ensurePetMedicalCategory = (value: { category?: string | null }, ctx: z.Re
   }
 };
 
-const petMedicalCreateDataSchema = z
+const petMedicalCreateBase = z
   .object({
     household_id: z.string(),
     pet_id: z.string(),
@@ -168,10 +168,11 @@ const petMedicalCreateDataSchema = z
     root_key: z.string().nullable().optional(),
     category: z.string().optional(),
   })
-  .passthrough()
-  .superRefine(ensurePetMedicalCategory);
+  .passthrough();
 
-const petMedicalUpdateDataSchema = petMedicalCreateDataSchema
+const petMedicalCreateDataSchema = petMedicalCreateBase.superRefine(ensurePetMedicalCategory);
+
+const petMedicalUpdateDataSchema = petMedicalCreateBase
   .partial({
     household_id: true,
     pet_id: true,
@@ -184,7 +185,6 @@ const petMedicalUpdateDataSchema = petMedicalCreateDataSchema
     category: true,
   })
   .extend({ deleted_at: optionalNullableNumber, updated_at: z.number().optional() })
-  .passthrough()
   .superRefine(ensurePetMedicalCategory)
   .refine((value) => Object.keys(value).length > 0, {
     message: "update data must include at least one field",
