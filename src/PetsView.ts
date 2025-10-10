@@ -1,17 +1,9 @@
-import { isPermissionGranted, requestPermission, sendNotification } from "./notification";
 import type { Pet } from "./models";
 import { PetDetailView } from "./PetDetailView";
-import { nowMs } from "./db/time";
 import { getHouseholdIdForCalls } from "./db/household";
 import { petsRepo } from "./repos";
-
-const MAX_TIMEOUT = 2_147_483_647; // ~24.8 days
-function scheduleAt(ts: number, cb: () => void) {
-  const delay = ts - nowMs();
-  if (delay <= 0) return void cb();
-  const chunk = Math.min(delay, MAX_TIMEOUT);
-  setTimeout(() => scheduleAt(ts, cb), chunk);
-}
+import { reminderScheduler } from "@features/pets/reminderScheduler";
+import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
 
 function renderPets(listEl: HTMLUListElement, pets: Pet[]) {
   listEl.innerHTML = "";
@@ -26,35 +18,55 @@ function renderPets(listEl: HTMLUListElement, pets: Pet[]) {
   });
 }
 
-async function schedulePetReminders(pets: Pet[]) {
-  let granted = await isPermissionGranted();
-  if (!granted) {
-    granted = (await requestPermission()) === "granted";
-  }
-  if (!granted) return;
-
-  const now = nowMs();
-  pets.forEach((p) => {
-    (p.medical ?? []).forEach((r) => {
-      if (!r.reminder) return;
-      if (r.reminder > now) {
-        scheduleAt(r.reminder, () => {
-          sendNotification({ title: "Pet Reminder", body: `${p.name}: ${r.description}` });
-        });
-      } else {
-        const due = r.date;
-        if (now < due) {
-          sendNotification({ title: "Pet Reminder", body: `${p.name}: ${r.description}` });
-        }
-      }
+function toReminderRecords(pets: Pet[]): {
+  records: Array<{
+    medical_id: string;
+    pet_id: string;
+    date: string;
+    reminder_at: string;
+    description: string;
+    pet_name: string;
+  }>;
+  petNames: Record<string, string>;
+} {
+  const records: Array<{
+    medical_id: string;
+    pet_id: string;
+    date: string;
+    reminder_at: string;
+    description: string;
+    pet_name: string;
+  }> = [];
+  const petNames: Record<string, string> = {};
+  pets.forEach((pet) => {
+    petNames[pet.id] = pet.name;
+    (pet.medical ?? []).forEach((record) => {
+      if (record.reminder == null) return;
+      const reminderIso = new Date(record.reminder).toISOString();
+      const baseDateIso = new Date(record.date).toISOString();
+      const dateIso = baseDateIso.split("T")[0] ?? baseDateIso;
+      records.push({
+        medical_id: record.id,
+        pet_id: pet.id,
+        date: dateIso,
+        reminder_at: reminderIso,
+        description: record.description,
+        pet_name: pet.name,
+      });
     });
   });
+  return { records, petNames };
 }
 
 export async function PetsView(container: HTMLElement) {
+  runViewCleanups(container);
   const section = document.createElement("section");
   container.innerHTML = "";
   container.appendChild(section);
+
+  registerViewCleanup(container, () => {
+    reminderScheduler.cancelAll();
+  });
 
   const hh = await getHouseholdIdForCalls();
 
@@ -64,12 +76,34 @@ export async function PetsView(container: HTMLElement) {
   }
 
   let pets: Pet[] = await loadPets();
-  await schedulePetReminders(pets);
+  reminderScheduler.init();
+  const initial = toReminderRecords(pets);
+  reminderScheduler.scheduleMany(initial.records, {
+    householdId: hh,
+    petNames: initial.petNames,
+  });
 
-  async function refresh(listEl?: HTMLUListElement) {
+  async function refresh(listEl?: HTMLUListElement, affected?: string[]) {
     pets = await loadPets();
     if (listEl) renderPets(listEl, pets);
-    await schedulePetReminders(pets);
+    if (!affected || affected.length === 0) {
+      reminderScheduler.init();
+      const next = toReminderRecords(pets);
+      reminderScheduler.scheduleMany(next.records, {
+        householdId: hh,
+        petNames: next.petNames,
+      });
+      return;
+    }
+    const unique = Array.from(new Set(affected));
+    unique.forEach((id) => reminderScheduler.rescheduleForPet(id));
+    const subset = pets.filter((p) => unique.includes(p.id));
+    if (subset.length === 0) return;
+    const context = toReminderRecords(subset);
+    reminderScheduler.scheduleMany(context.records, {
+      householdId: hh,
+      petNames: context.petNames,
+    });
   }
 
   function showList() {
@@ -100,7 +134,12 @@ export async function PetsView(container: HTMLElement) {
 
       pets.push(created);
       renderPets(listEl, pets);
-      await schedulePetReminders([created]);
+      reminderScheduler.rescheduleForPet(created.id);
+      const scoped = toReminderRecords([created]);
+      reminderScheduler.scheduleMany(scoped.records, {
+        householdId: hh,
+        petNames: scoped.petNames,
+      });
       form.reset();
     });
 
@@ -120,7 +159,7 @@ export async function PetsView(container: HTMLElement) {
           type: pet.type,
           position: pet.position,
         } as Partial<Pet>);
-        await refresh();
+        await refresh(listEl ?? undefined, [pet.id]);
       };
 
       PetDetailView(section, pet, persist, showList);

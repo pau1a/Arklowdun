@@ -30,7 +30,7 @@ Diagnostics pull from:
 * **Vault category scan:**
   Ensures all `pet_medical` attachments reside under permitted vault roots.
 * **Reminder runtime:**
-  Reports number of active in-memory reminder timers (if any still registered).
+  Reads `reminderScheduler.stats()` for active timers and reminder buckets.
 * **Repo health hooks:**
   The `petsRepo` and `petMedicalRepo` emit `ui.repo.*` events that appear in structured logs.
 
@@ -50,6 +50,8 @@ During a diagnostics run (via Settings → Recovery → Export Diagnostics → �
 | `pet_reminders_overdue`       | integer | `2`     | Count of reminders with `reminder_at < now()` but `date > now()`. |
 | `pets_with_medical_history`   | integer | `4`     | Distinct pets with at least one medical row.                      |
 | `pets_with_birthdate`         | integer | `3`     | Distinct pets where `dob` is not null.                            |
+| `reminder_active_timers`      | integer | `4`     | Snapshot of timers returned by the runtime scheduler.             |
+| `reminder_buckets`            | integer | `4`     | Unique `reminder_at` buckets currently registered.               |
 
 All counts are emitted in the `diagnostics.json` bundle under:
 
@@ -57,7 +59,9 @@ All counts are emitted in the `diagnostics.json` bundle under:
 "pets": {
   "pets_total": 5,
   "pet_medical_total": 27,
-  "pet_reminders_total": 6
+  "pet_reminders_total": 6,
+  "reminder_active_timers": 4,
+  "reminder_buckets": 4
 }
 ```
 
@@ -80,16 +84,20 @@ If Python redaction fails or is unavailable, collectors revert to raw output und
 
 ### 5.1 UI logs
 
-`src/PetsView.ts` and `src/PetDetailView.ts` emit structured logs through the shared `logUI` helper.
+`src/features/pets/reminderScheduler.ts` together with `PetsView`/`PetDetailView` emit structured logs through the shared
+`logUI` helper.
 
-| Event                     | Level | Fields                    |
-| ------------------------- | ----- | ------------------------- |
-| `pets.list_loaded`        | info  | count, duration_ms        |
-| `pets.pet_created`        | info  | id, name, type            |
-| `pets.medical_added`      | info  | pet_id, description, date |
-| `pets.medical_deleted`    | warn  | pet_id, medical_id        |
-| `pets.reminder_scheduled` | info  | pet_id, delay_ms          |
-| `pets.reminder_fired`     | info  | pet_id, reminder_at       |
+| Event                               | Level | Fields                                                                    |
+| ----------------------------------- | ----- | -------------------------------------------------------------------------- |
+| `pets.list_loaded`                  | info  | count, duration_ms                                                        |
+| `pets.pet_created`                  | info  | id, name, type                                                            |
+| `pets.medical_added`                | info  | pet_id, description, date                                                 |
+| `pets.medical_deleted`              | warn  | pet_id, medical_id                                                        |
+| `ui.pets.reminder_scheduled`        | info  | key, pet_id, medical_id, reminder_at, delay_ms, household_id               |
+| `ui.pets.reminder_fired`            | info  | key, pet_id, medical_id, reminder_at, elapsed_ms, household_id            |
+| `ui.pets.reminder_canceled`         | info  | key, household_id                                                         |
+| `ui.pets.reminder_catchup`          | info  | key, pet_id, medical_id, household_id                                     |
+| `ui.pets.reminder_permission_denied`| warn  | household_id                                                              |
 
 These entries appear in the rotating log file (`~/Library/Logs/Arklowdun/arklowdun.log`) as structured JSON objects.
 
@@ -125,7 +133,7 @@ Any non-empty result marks health status as `Error: FOREIGN_KEY_VIOLATION`.
 
 ### 6.3 Reminder runtime audit
 
-On diagnostics collection, the app queries the reminder manager for current active timers and compares count with DB reminder rows, ensuring parity.
+Diagnostics collection queries `reminderScheduler.stats()` and captures both `activeTimers` and `buckets`. Support staff compare these counts against `pet_medical` reminder rows to detect orphaned timers or missing notifications.
 
 ---
 
@@ -158,7 +166,9 @@ If corruption is detected:
     "pet_reminders_total": 6,
     "pet_reminders_overdue": 2,
     "pet_medical_with_attachment": 8,
-    "pets_with_birthdate": 3
+    "pets_with_birthdate": 3,
+    "reminder_active_timers": 4,
+    "reminder_buckets": 4
   },
   "caps": {
     "pets_cols": true
@@ -188,7 +198,7 @@ Logs can be compressed and shared as `.zip` from the same menu.
 ## 10. Known limitations
 
 * Pets counters are **not individually unit tested** in diagnostics tests.
-* Reminder runtime audit may overcount when timers persist after unmount.
+* Reminder runtime stats represent the current renderer session only; separate renderer windows report their own counts.
 * Missing Python interpreter disables redaction and falls back to raw diagnostics.
 * No anomaly detection yet for duplicate microchip IDs or null date entries.
 * UI log timestamps rely on system clock, not monotonic counter.
@@ -197,7 +207,7 @@ Logs can be compressed and shared as `.zip` from the same menu.
 ---
 
 **Owner:** Ged McSneggle
-**Status:** Active and verified under PR14 baseline (macOS-only diagnostics)
+**Status:** Active and verified with PR3 reminder scheduler instrumentation (macOS-only diagnostics)
 **Scope:** Defines diagnostic counters, log behaviour, and recovery workflow for Pets domain in Arklowdun
 
 ---
