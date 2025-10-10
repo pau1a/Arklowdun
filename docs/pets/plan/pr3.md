@@ -58,9 +58,9 @@ export interface SchedulerStats {
 }
 
 export const reminderScheduler = {
-  init(): void,                                    // idempotent; clears internal state
-  scheduleMany(records: Array<{ medical_id: string; pet_id: string; date: string; reminder_at: string; description: string }>, opts: { householdId: string }): void,
-  rescheduleForPet(petId: string): void,           // cancel + reschedule that pet’s timers
+  init(): void,                                    // idempotent; clears active timers & batches
+  scheduleMany(records: Array<{ medical_id: string; pet_id: string; date: string; reminder_at: string; description: string; pet_name?: string }>, opts: { householdId: string; petNames?: Record<string, string> }): void,
+  rescheduleForPet(petId: string): void,           // cancel timers tied to one pet
   cancelAll(): void,                               // cancel everything
   stats(): SchedulerStats,                         // for diagnostics/tests
 };
@@ -68,7 +68,7 @@ export const reminderScheduler = {
 
 Implementation notes:
 
-* Internal `Map<ReminderKey, number>` stores active `setTimeout` IDs.
+* Internal `Map<ReminderKey, ReturnType<typeof setTimeout>>` stores active timeout handles.
 * For delays > 2 147 483 647 ms, schedule a chain of timeouts; keep only the current handle so `clearTimeout()` cancels the chain.
 * One prompt-per-session for Notification permission; cache the result in module state.
 
@@ -139,22 +139,25 @@ Emit structured logs:
 
 | Event                               | Fields                                                     |
 | ----------------------------------- | ---------------------------------------------------------- |
-| `ui.pets.reminder_scheduled`        | key, pet_id, medical_id, reminder_at, delay_ms             |
-| `ui.pets.reminder_chained`          | key, remaining_ms                                          |
-| `ui.pets.reminder_fired`            | key, elapsed_ms                                            |
-| `ui.pets.reminder_canceled`         | key                                                        |
-| `ui.pets.reminder_catchup`          | key                                                        |
-| `ui.pets.reminder_permission_denied`| none                                                       |
+| `ui.pets.reminder_scheduled`        | key, pet_id, medical_id, reminder_at, delay_ms, household_id |
+| `ui.pets.reminder_chained`          | key, remaining_ms, household_id                              |
+| `ui.pets.reminder_fired`            | key, pet_id, medical_id, reminder_at, elapsed_ms, household_id |
+| `ui.pets.reminder_canceled`         | key, household_id                                           |
+| `ui.pets.reminder_catchup`          | key, pet_id, medical_id, household_id                       |
+| `ui.pets.reminder_permission_denied`| household_id                                                |
+| `ui.pets.reminder_invalid`          | key, reason, reminder_at, household_id                       |
 
 ### 3.8 Diagnostics
 
 * `reminderScheduler.stats()` exposes `activeTimers` and `buckets` for diagnostics/tests.
 * Include in diagnostics bundle:
 
+Diagnostics bundle excerpt:
+
 ```json
 "pets": {
-  "reminder_active_timers": 12,
-  "reminder_buckets": 12
+  "reminder_active_timers": 4,
+  "reminder_buckets": 4
 }
 ```
 
@@ -175,7 +178,7 @@ Emit structured logs:
 * **Mount → Unmount → Mount:** timer count stable across cycles.
 * **Create medical with future reminder:** new timer appears; firing triggers `reminder_fired` log.
 * **Permission denied path:** no timers scheduled; `reminder_permission_denied` recorded.
-* Use fake timers (Jest/Vitest `vi.useFakeTimers()`), freeze time, advance deterministically.
+* Use deterministic fake timers (`@sinonjs/fake-timers` via Node's test runner) to freeze time and advance deterministically.
 
 ---
 
@@ -183,14 +186,14 @@ Emit structured logs:
 
 | Condition                                   | Status | Evidence                              |
 | ------------------------------------------- | ------ | ------------------------------------- |
-| Registry cancels timers on unmount          | ☐      | Integration test & `reminder_canceled` |
-| Duplicate schedule avoidance                | ☐      | Unit test (`activeTimers` unchanged)   |
-| Catch-up notification fires once            | ☐      | Unit test with session set             |
-| Long-delay chunking cancellable             | ☐      | Unit + integration tests               |
-| Household switch clears timers              | ☐      | Integration test                       |
-| Structured logs present                     | ☐      | `arklowdun.log` samples                |
-| Docs updated (`reminders.md`)               | ☐      | Commit diff                            |
-| CI green on macOS                           | ☐      | Workflow logs                          |
+| Registry cancels timers on unmount          | ☑      | `tests/ui/pets.reminder.integration.test.ts` |
+| Duplicate schedule avoidance                | ☑      | `tests/ui/pets.reminderScheduler.test.ts`    |
+| Catch-up notification fires once            | ☑      | `tests/ui/pets.reminderScheduler.test.ts`    |
+| Long-delay chunking cancellable             | ☑      | `tests/ui/pets.reminderScheduler.test.ts`    |
+| Household switch clears timers              | ☑      | `tests/ui/pets.reminder.integration.test.ts` |
+| Structured logs present                     | ☑      | `src/features/pets/reminderScheduler.ts` |
+| Docs updated (`reminders.md`)               | ☑      | This PR diff                            |
+| CI green on macOS                           | ☐      | Workflow logs                            |
 
 ---
 

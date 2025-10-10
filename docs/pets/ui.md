@@ -33,12 +33,12 @@ export function mountPetsView(container: HTMLElement) {
 ```
 
 * **wrapLegacyView** clears previous DOM content, calls `runViewCleanups`, and then invokes `PetsView(container)`.
-* **PetsView** creates a new `<section>` wrapper and inserts it into the container.
+* `PetsView` creates a new `<section>` wrapper and inserts it into the container.
 * A fresh render is triggered each time the route hash changes to `#/pets`.
 
 ### 2.2 Clean-up
 
-* `wrapLegacyView` wipes innerHTML and cancels listeners, but **reminder timers** survive because `scheduleAt` stores no handles.
+* `wrapLegacyView` wipes innerHTML and cancels listeners. `PetsView` registers a cleanup that calls `reminderScheduler.cancelAll()` so timers do not survive unmount.
 * No persistent UI state is preserved between mounts; the list always reloads.
 
 ---
@@ -66,7 +66,7 @@ Rendered markup hierarchy (simplified):
 * Fetches household via `getHouseholdIdForCalls()`.
 * Calls `petsRepo.list(orderBy: "position, created_at, id")`.
 * Stores results in local `pets` array.
-* Immediately triggers `schedulePetReminders(pets)` to queue any reminders.
+* Calls `reminderScheduler.init()` and `reminderScheduler.scheduleMany()` to queue any reminders for the fetched pets.
 * Calls `renderPets()` to generate `<li>` entries.
 
 ### 3.2 `renderPets()`
@@ -102,7 +102,7 @@ The creation form is injected at the bottom of the list each render.
 2. Handler reads `#pet-name` and `#pet-type`.
 3. Calls `petsRepo.create()` with these values and `household_id`.
 4. On success, appends returned pet to cached array and re-renders.
-5. Calls `schedulePetReminders()` for the new pet.
+5. Calls `reminderScheduler.scheduleMany()` for the new pet (updating pet-name cache even if no reminders exist).
 6. Does **not** wrap in `try/catch`; any rejection results in an uncaught promise warning in the console.
 
 **Ordering rule:**

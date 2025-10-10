@@ -17,6 +17,8 @@ export async function requestPermission(): Promise<
 export async function sendNotification(options: {
   title: string;
   body: string;
+  tag?: string;
+  silent?: boolean;
 }): Promise<void> {
   await tauriSendNotification(options);
 }
