@@ -82,14 +82,13 @@ If Python redaction fails or is unavailable, collectors revert to raw output und
 
 `src/PetsView.ts` and `src/PetDetailView.ts` emit structured logs through the shared `logUI` helper.
 
-| Event                     | Level | Fields                    |
-| ------------------------- | ----- | ------------------------- |
-| `pets.list_loaded`        | info  | count, duration_ms        |
-| `pets.pet_created`        | info  | id, name, type            |
-| `pets.medical_added`      | info  | pet_id, description, date |
-| `pets.medical_deleted`    | warn  | pet_id, medical_id        |
-| `pets.reminder_scheduled` | info  | pet_id, delay_ms          |
-| `pets.reminder_fired`     | info  | pet_id, reminder_at       |
+| Event                     | Level | Fields                                |
+| ------------------------- | ----- | -------------------------------------- |
+| `perf.pets.window_render` | info  | rows_rendered, from_idx, to_idx        |
+| `pets.medical_added`      | info  | pet_id, description, date              |
+| `pets.medical_deleted`    | warn  | pet_id, medical_id                     |
+| `pets.reminder_scheduled` | info  | pet_id, delay_ms                       |
+| `pets.reminder_fired`     | info  | pet_id, reminder_at                    |
 
 These entries appear in the rotating log file (`~/Library/Logs/Arklowdun/arklowdun.log`) as structured JSON objects.
 
