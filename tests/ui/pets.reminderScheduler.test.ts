@@ -3,22 +3,14 @@ import test, { mock } from "node:test";
 import FakeTimers from "@sinonjs/fake-timers";
 
 import { reminderScheduler, __testing } from "../../src/features/pets/reminderScheduler";
-import * as notificationModule from "../../src/lib/ipc/notification";
-import * as uiLogModule from "../../src/lib/uiLog";
 import { __testing as diagnosticsTesting } from "../../src/diagnostics/runtime";
 
 const MAX_TIMEOUT = 2_147_483_647;
 
-test.beforeEach(() => {
-  diagnosticsTesting.reset();
-  diagnosticsTesting.disableFilePersistence();
-  __testing.reset();
-});
-
-test.afterEach(async () => {
-  mock.restoreAll();
-  await diagnosticsTesting.waitForIdle();
-});
+type DependencyOptions = {
+  permissionGranted?: boolean;
+  sendNotificationImpl?: () => Promise<void> | void;
+};
 
 function installClock(now: number) {
   return FakeTimers.install({
@@ -27,17 +19,36 @@ function installClock(now: number) {
   });
 }
 
-function stubPermission(granted = true) {
-  mock.method(notificationModule, "isPermissionGranted", async () => granted);
-  mock.method(notificationModule, "requestPermission", async () => (granted ? "granted" : "denied"));
+function stubDependencies(options: DependencyOptions = {}) {
+  const granted = options.permissionGranted ?? true;
+  const sendNotificationImpl = options.sendNotificationImpl ?? (async () => {});
+  const sendNotificationMock = mock.fn(async () => {
+    await sendNotificationImpl();
+  });
+  __testing.setDependencies({
+    isPermissionGranted: mock.fn(async () => granted),
+    requestPermission: mock.fn(async () => (granted ? "granted" : "denied")),
+    sendNotification: sendNotificationMock,
+    logUI: mock.fn(() => {}),
+  });
+  return { sendNotificationMock };
 }
 
-test("scheduling the same reminder twice keeps active timer count stable", async () => {
+test.beforeEach(() => {
+  __testing.reset();
+  diagnosticsTesting.reset();
+  diagnosticsTesting.disableFilePersistence();
+});
+
+test.afterEach(async () => {
+  mock.restoreAll();
+  await diagnosticsTesting.waitForIdle();
+});
+
+test("scheduling the same reminder twice keeps active timer count stable", { concurrency: false }, async () => {
   const clock = installClock(Date.UTC(2025, 0, 1, 8, 0, 0));
   try {
-    stubPermission(true);
-    mock.method(notificationModule, "sendNotification", async () => {});
-    mock.method(uiLogModule, "logUI", () => {});
+    stubDependencies();
 
     const record = {
       medical_id: "med-1",
@@ -69,12 +80,10 @@ test("scheduling the same reminder twice keeps active timer count stable", async
   }
 });
 
-test("cancelAll clears timers", async () => {
+test("cancelAll clears timers", { concurrency: false }, async () => {
   const clock = installClock(Date.UTC(2025, 0, 1, 9, 0, 0));
   try {
-    stubPermission(true);
-    mock.method(notificationModule, "sendNotification", async () => {});
-    mock.method(uiLogModule, "logUI", () => {});
+    stubDependencies();
 
     const record = {
       medical_id: "med-2",
@@ -99,12 +108,10 @@ test("cancelAll clears timers", async () => {
   }
 });
 
-test("diagnostics snapshot tracks active timer stats", async () => {
+test("diagnostics snapshot tracks active timer stats", { concurrency: false }, async () => {
   const clock = installClock(Date.UTC(2025, 0, 1, 12, 0, 0));
   try {
-    stubPermission(true);
-    mock.method(notificationModule, "sendNotification", async () => {});
-    mock.method(uiLogModule, "logUI", () => {});
+    stubDependencies();
 
     const record = {
       medical_id: "med-9",
@@ -121,6 +128,7 @@ test("diagnostics snapshot tracks active timer stats", async () => {
       pets: {
         reminder_active_timers: 0,
         reminder_buckets: 0,
+        reminder_queue_depth: 0,
       },
     });
 
@@ -134,6 +142,7 @@ test("diagnostics snapshot tracks active timer stats", async () => {
       pets: {
         reminder_active_timers: 1,
         reminder_buckets: 1,
+        reminder_queue_depth: 1,
       },
     });
 
@@ -143,6 +152,7 @@ test("diagnostics snapshot tracks active timer stats", async () => {
       pets: {
         reminder_active_timers: 0,
         reminder_buckets: 0,
+        reminder_queue_depth: 0,
       },
     });
   } finally {
@@ -150,12 +160,10 @@ test("diagnostics snapshot tracks active timer stats", async () => {
   }
 });
 
-test("catch-up reminders fire only once per session", async () => {
+test("catch-up reminders fire only once per session", { concurrency: false }, async () => {
   const clock = installClock(Date.UTC(2025, 0, 10, 9, 0, 0));
   try {
-    stubPermission(true);
-    const sendMock = mock.method(notificationModule, "sendNotification", async () => {});
-    mock.method(uiLogModule, "logUI", () => {});
+    const { sendNotificationMock } = stubDependencies();
 
     const pastReminder = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     const record = {
@@ -172,25 +180,23 @@ test("catch-up reminders fire only once per session", async () => {
       petNames: { "pet-3": "Luna" },
     });
     await __testing.waitForIdle();
-    assert.equal(sendMock.mock.calls.length, 1);
+    assert.equal(sendNotificationMock.mock.calls.length, 1);
 
     reminderScheduler.scheduleMany([record], {
       householdId: "hh-1",
       petNames: { "pet-3": "Luna" },
     });
     await __testing.waitForIdle();
-    assert.equal(sendMock.mock.calls.length, 1);
+    assert.equal(sendNotificationMock.mock.calls.length, 1);
   } finally {
     clock.uninstall();
   }
 });
 
-test("long delays chain without duplicates", async () => {
+test("long delays chain without duplicates", { concurrency: false }, async () => {
   const clock = installClock(Date.UTC(2025, 0, 1, 0, 0, 0));
   try {
-    stubPermission(true);
-    const sendMock = mock.method(notificationModule, "sendNotification", async () => {});
-    mock.method(uiLogModule, "logUI", () => {});
+    const { sendNotificationMock } = stubDependencies();
 
     const longDelayMs = MAX_TIMEOUT * 2 + 5_000;
     const record = {
@@ -210,27 +216,25 @@ test("long delays chain without duplicates", async () => {
     assert.equal(reminderScheduler.stats().activeTimers, 1);
 
     clock.tick(MAX_TIMEOUT);
-    assert.equal(sendMock.mock.calls.length, 0);
+    assert.equal(sendNotificationMock.mock.calls.length, 0);
     assert.equal(reminderScheduler.stats().activeTimers, 1);
 
     clock.tick(MAX_TIMEOUT);
-    assert.equal(sendMock.mock.calls.length, 0);
+    assert.equal(sendNotificationMock.mock.calls.length, 0);
     assert.equal(reminderScheduler.stats().activeTimers, 1);
 
     clock.tick(5_000);
-    assert.equal(sendMock.mock.calls.length, 1);
+    assert.equal(sendNotificationMock.mock.calls.length, 1);
     assert.equal(reminderScheduler.stats().activeTimers, 0);
   } finally {
     clock.uninstall();
   }
 });
 
-test("canceling chained reminders prevents firing", async () => {
+test("canceling chained reminders prevents firing", { concurrency: false }, async () => {
   const clock = installClock(Date.UTC(2025, 0, 1, 0, 0, 0));
   try {
-    stubPermission(true);
-    const sendMock = mock.method(notificationModule, "sendNotification", async () => {});
-    mock.method(uiLogModule, "logUI", () => {});
+    const { sendNotificationMock } = stubDependencies();
 
     const longDelayMs = MAX_TIMEOUT * 2 + 1_000;
     const record = {
@@ -249,22 +253,20 @@ test("canceling chained reminders prevents firing", async () => {
     await __testing.waitForIdle();
 
     clock.tick(MAX_TIMEOUT);
-    assert.equal(sendMock.mock.calls.length, 0);
+    assert.equal(sendNotificationMock.mock.calls.length, 0);
 
     reminderScheduler.cancelAll();
     clock.tick(MAX_TIMEOUT + 1_000);
-    assert.equal(sendMock.mock.calls.length, 0);
+    assert.equal(sendNotificationMock.mock.calls.length, 0);
   } finally {
     clock.uninstall();
   }
 });
 
-test("rescheduleForPet rebuilds timers for a single pet", async () => {
+test("rescheduleForPet rebuilds timers for a single pet", { concurrency: false }, async () => {
   const clock = installClock(Date.UTC(2025, 0, 1, 12, 0, 0));
   try {
-    stubPermission(true);
-    mock.method(notificationModule, "sendNotification", async () => {});
-    mock.method(uiLogModule, "logUI", () => {});
+    stubDependencies();
 
     const petOneRecord = {
       medical_id: "med-6",

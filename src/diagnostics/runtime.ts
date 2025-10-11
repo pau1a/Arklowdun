@@ -1,6 +1,6 @@
 const DIAGNOSTICS_FILE = "diagnostics.json";
 
-type DiagnosticsSection = Record<string, unknown>;
+export type DiagnosticsSection = Record<string, unknown>;
 type DiagnosticsSnapshot = Record<string, DiagnosticsSection>;
 
 type SafeFsModule = typeof import("../files/safe-fs");
@@ -114,6 +114,14 @@ async function persistSnapshot(snapshot: DiagnosticsSnapshot): Promise<void> {
     );
     filePersistenceDisabled = true;
   }
+}
+
+export async function getDiagnosticsSection(
+  section: string,
+): Promise<DiagnosticsSection | undefined> {
+  const snapshot = await loadSnapshot();
+  const current = snapshot[section];
+  return current ? cloneSection(current as DiagnosticsSection) : undefined;
 }
 
 async function enqueueUpdate(

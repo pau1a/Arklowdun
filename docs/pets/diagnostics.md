@@ -40,37 +40,41 @@ Diagnostics pull from:
 
 During a diagnostics run (via Settings → Recovery → Export Diagnostics → “Yes, redact”), the backend emits the following Pets metrics:
 
-| Field                         | Type    | Example | Description                                                       |
-| ----------------------------- | ------- | ------- | ----------------------------------------------------------------- |
-| `pets_total`                  | integer | `5`     | Count of active (non-deleted) pets.                               |
-| `pets_deleted`                | integer | `1`     | Count of soft-deleted pets (`deleted_at` not null).               |
-| `pet_medical_total`           | integer | `27`    | Count of all medical records for active pets.                     |
-| `pet_medical_with_attachment` | integer | `8`     | Rows where `relative_path` is not null.                           |
-| `pet_attachments_total`       | integer | `8`     | Same as `pet_medical_with_attachment`; exposed for metrics parity |
-| `pet_attachments_missing`     | integer | `2`     | Number of attachments whose files failed the `files_exists` probe |
-| `pet_thumbnails_built`        | integer | `6`     | Cached thumbnail renders triggered via `thumbnails_get_or_create` |
-| `pet_thumbnails_cache_hits`   | integer | `12`    | Requests served from the thumbnail cache without regeneration     |
-| `pet_reminders_total`         | integer | `6`     | Count of future-dated `reminder_at` timestamps.                   |
-| `pet_reminders_overdue`       | integer | `2`     | Count of reminders with `reminder_at < now()` but `date > now()`. |
-| `pets_with_medical_history`   | integer | `4`     | Distinct pets with at least one medical row.                      |
-| `pets_with_birthdate`         | integer | `3`     | Distinct pets where `dob` is not null.                            |
-| `reminder_active_timers`      | integer | `4`     | Snapshot of timers returned by the runtime scheduler.             |
-| `reminder_buckets`            | integer | `4`     | Unique `reminder_at` buckets currently registered.               |
+| Field                   | Type    | Example | Description                                                                 |
+| ----------------------- | ------- | ------- | --------------------------------------------------------------------------- |
+| `pets_total`            | integer | `5`     | Count of active (non-deleted) pets.                                         |
+| `pets_deleted`          | integer | `1`     | Count of soft-deleted pets (`deleted_at` not null).                         |
+| `pet_medical_total`     | integer | `27`    | Total medical records for non-deleted pets.                                 |
+| `pet_attachments_total` | integer | `8`     | Medical rows with a `relative_path` recorded.                               |
+| `pet_attachments_missing` | integer | `2`   | Attachments that failed the latest `files_exists` probe.                    |
+| `pet_thumbnails_built`  | integer | `6`     | Renderer-triggered thumbnail generations.                                   |
+| `pet_thumbnails_cache_hits` | integer | `12` | Thumbnail fetches served from cache.                                        |
+| `reminder_active_timers` | integer | `4`    | Current timers managed by the runtime scheduler.                            |
+| `reminder_buckets`      | integer | `4`     | Unique `reminder_at` buckets currently registered.                          |
+| `reminder_queue_depth`  | integer | `4`     | Total timers plus queued reminder batches awaiting scheduling.              |
+| `last_24h_failures`     | integer | `2`     | Pets mutations that failed within the last 24 hours (tracks retry hot spots). |
+| `missing_attachments`   | array   | `[ ... ]` | Snapshot of unresolved attachment paths (see §4).                          |
+| `failure_events`        | array   | `[ "2025-01-02T14:03:00.000Z" ]` | ISO timestamps used to compute `last_24h_failures`. |
 
 All counts are emitted in the `diagnostics.json` bundle under:
 
 ```json
 "pets": {
   "pets_total": 5,
+  "pets_deleted": 1,
   "pet_medical_total": 27,
-  "pet_medical_with_attachment": 8,
   "pet_attachments_total": 8,
   "pet_attachments_missing": 2,
   "pet_thumbnails_built": 6,
   "pet_thumbnails_cache_hits": 12,
-  "pet_reminders_total": 6,
   "reminder_active_timers": 4,
-  "reminder_buckets": 4
+  "reminder_buckets": 4,
+  "reminder_queue_depth": 4,
+  "last_24h_failures": 2,
+  "failure_events": ["2025-01-02T14:03:00.000Z"],
+  "missing_attachments": [
+    { "household_id": "hh-1", "category": "pet_medical", "relative_path": "fido/vaccine.pdf" }
+  ]
 }
 ```
 
@@ -93,37 +97,28 @@ If Python redaction fails or is unavailable, collectors revert to raw output und
 
 ### 5.1 UI logs
 
-`src/features/pets/PetsPage.ts` and `src/ui/pets/PetDetailView.ts` emit structured logs through the shared `logUI` helper.
+`perf.pets.timing` captures renderer and scheduler latency samples. Every entry includes `duration_ms` and an `ok` flag; when `ok`
+is `false` the event also carries `code` and `crash_id` from `normalizeError`.
 
-| Event                            | Level      | Fields                                               |
-| -------------------------------- | ---------- | ----------------------------------------------------- |
-| `perf.pets.window_render`        | info       | rows_rendered, from_idx, to_idx                       |
-| `ui.pets.detail_opened`          | info       | id, household_id                                      |
-| `ui.pets.medical_create_success` | info       | id, pet_id, household_id                              |
-| `ui.pets.medical_create_fail`    | warn       | pet_id, household_id, code                            |
-| `ui.pets.medical_delete_success` | info       | id, pet_id, household_id                              |
-| `ui.pets.medical_delete_fail`    | warn       | id, pet_id, household_id, code                        |
-| `ui.pets.attach_open`            | info / warn| path, result, record_id, pet_id, household_id         |
-| `ui.pets.attach_reveal`          | info / warn| path, result, record_id, pet_id, household_id         |
-| `ui.pets.attachment_missing`     | info       | medical_id, path, household_id                        |
-| `ui.pets.attachment_fix_opened`  | info       | medical_id, household_id                              |
-| `ui.pets.attachment_fixed`       | info       | medical_id, old_path, new_path, household_id          |
-| `ui.pets.thumbnail_built`        | info       | path, width, height, duration_ms, household_id        |
-| `ui.pets.thumbnail_cache_hit`    | debug      | path, household_id                                    |
+| Name                     | Trigger                                              | Additional fields                                        |
+| ------------------------ | ---------------------------------------------------- | -------------------------------------------------------- |
+| `list.load`              | `petsRepo.list` resolves during view refresh         | `count`, `household_id`                                  |
+| `list.window_render`     | Virtualised list renders a window                    | `rows_rendered`, `from_idx`, `to_idx`                    |
+| `list.create`            | Inline create flow completes                         | `household_id`, `pet_id`                                 |
+| `list.update`            | Inline rename/save finishes                          | `household_id`, `pet_id`                                 |
+| `detail.open`            | Detail drawer mounts                                 | `household_id`, `pet_id`                                 |
+| `detail.medical_create`  | Medical record successfully persisted                | `household_id`, `pet_id`, `record_id`                    |
+| `detail.medical_delete`  | Medical record removed                               | `household_id`, `pet_id`, `record_id`                    |
+| `detail.attach_open`     | Attachment open command (soft failures keep `ok:0`)  | `household_id`, `pet_id`, `record_id`, `result`          |
+| `detail.attach_reveal`   | Reveal-in-finder action                              | `household_id`, `pet_id`, `record_id`, `result`          |
+| `detail.fix_path`        | Broken attachment path replaced                      | `household_id`, `pet_id`, `medical_id`, `outcome`        |
+| `reminders.schedule_many`| Reminder batches queued                              | `household_id`, `scheduled`, `queue_depth`               |
+| `reminders.fire`         | Notification callback executed                       | `household_id`, `pet_id`, `medical_id`                   |
+| `reminders.cancel_all`   | Scheduler cleared (view teardown/household switch)   | `household_id`, `canceled`                               |
 
-`src/features/pets/reminderScheduler.ts` together with the Pets shell emit reminder telemetry through the same helper.
-
-| Event                               | Level | Fields                                                                    |
-| ----------------------------------- | ----- | -------------------------------------------------------------------------- |
-| `ui.pets.reminder_scheduled`        | info  | key, pet_id, medical_id, reminder_at, delay_ms, household_id               |
-| `ui.pets.reminder_chained`          | debug | key, remaining_ms, household_id                                           |
-| `ui.pets.reminder_fired`            | info  | key, pet_id, medical_id, reminder_at, elapsed_ms, household_id            |
-| `ui.pets.reminder_canceled`         | info  | key, household_id                                                         |
-| `ui.pets.reminder_catchup`          | info  | key, pet_id, medical_id, reminder_at, household_id                         |
-| `ui.pets.reminder_permission_denied`| warn  | household_id                                                              |
-| `ui.pets.reminder_invalid`          | warn  | key, reason, reminder_at, household_id                                    |
-
-These entries appear in the rotating log file (`~/Library/Logs/Arklowdun/arklowdun.log`) as structured JSON objects.
+Mutation failures emit `ui.pets.mutation_fail` with `op`, `code`, `crash_id`, and the relevant `household_id` / entity identifiers.
+Legacy success/failure logs (`ui.pets.medical_*`, `ui.pets.attach_*`, `ui.pets.reminder_*`) remain for human-readable breadcrumbs.
+All entries appear in the rotating log file (`~/Library/Logs/Arklowdun/arklowdun.log`) as structured JSON objects.
 
 ### 5.2 Backend logs
 
@@ -187,13 +182,26 @@ If corruption is detected:
 {
   "pets": {
     "pets_total": 5,
+    "pets_deleted": 1,
     "pet_medical_total": 27,
-    "pet_reminders_total": 6,
-    "pet_reminders_overdue": 2,
-    "pet_medical_with_attachment": 8,
-    "pets_with_birthdate": 3,
+    "pet_attachments_total": 8,
+    "pet_attachments_missing": 2,
+    "pet_thumbnails_built": 6,
+    "pet_thumbnails_cache_hits": 12,
     "reminder_active_timers": 4,
-    "reminder_buckets": 4
+    "reminder_buckets": 4,
+    "reminder_queue_depth": 4,
+    "last_24h_failures": 2,
+    "failure_events": [
+      "2025-01-02T14:03:00.000Z"
+    ],
+    "missing_attachments": [
+      {
+        "household_id": "hh-1",
+        "category": "pet_medical",
+        "relative_path": "fido/vaccine.pdf"
+      }
+    ]
   },
   "caps": {
     "pets_cols": true
