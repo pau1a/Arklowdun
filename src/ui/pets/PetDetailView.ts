@@ -6,9 +6,7 @@ import {
 } from "../../files/path";
 import type { Pet, PetMedicalRecord } from "../../models";
 import { petMedicalRepo, petsRepo } from "../../repos";
-import { getHouseholdIdForCalls } from "../../db/household";
 import { toast } from "../../ui/Toast";
-import { openAttachment, revealAttachment, revealLabel } from "../../ui/attachments";
 import { logUI } from "@lib/uiLog";
 import { open as openDialog } from "@lib/ipc/dialog";
 import * as ipcCall from "../../lib/ipc/call";
@@ -20,6 +18,30 @@ import { recordPetsMutationFailure } from "@features/pets/mutationTelemetry";
 type Nullable<T> = T | null | undefined;
 
 const PET_MEDICAL_CATEGORY = "pet_medical" as const;
+
+type GetHouseholdIdForCallsFn = () => Promise<string>;
+type OpenAttachmentFn = (table: string, id: string) => Promise<boolean>;
+type RevealAttachmentFn = (table: string, id: string) => Promise<boolean>;
+type RevealLabelFn = () => string;
+
+export interface PetDetailViewDependencies {
+  getHouseholdIdForCalls?: GetHouseholdIdForCallsFn;
+  petMedicalRepo?: Pick<typeof petMedicalRepo, "list" | "create" | "update" | "delete">;
+  petsRepo?: Pick<typeof petsRepo, "update" | "delete" | "restore">;
+  toast?: typeof toast;
+  logUI?: typeof logUI;
+  openAttachment?: OpenAttachmentFn;
+  revealAttachment?: RevealAttachmentFn;
+  revealLabel?: RevealLabelFn;
+  openDialog?: typeof openDialog;
+  canonicalizeAndVerify?: typeof canonicalizeAndVerify;
+  sanitizeRelativePath?: typeof sanitizeRelativePath;
+  convertFileSrc?: typeof convertFileSrc;
+  ipcCall?: Pick<typeof ipcCall, "call">;
+  updateDiagnosticsSection?: typeof updateDiagnosticsSection;
+  timeIt?: typeof timeIt;
+  recordPetsMutationFailure?: typeof recordPetsMutationFailure;
+}
 
 export interface PetDetailController {
   focusMedicalDate(): void;
@@ -192,41 +214,26 @@ function createMissingBanner(): MissingBannerElements {
   banner.className = "pet-detail__record-missing";
   banner.setAttribute("role", "alert");
   banner.dataset.state = "hidden";
-  banner.style.display = "flex";
-  banner.style.alignItems = "center";
-  banner.style.justifyContent = "space-between";
-  banner.style.gap = "12px";
-  banner.style.padding = "12px 16px";
-  banner.style.borderRadius = "10px";
-  banner.style.background = "rgba(229, 57, 53, 0.12)";
-  banner.style.color = "rgba(95, 0, 0, 0.88)";
 
   const message = document.createElement("span");
   message.className = "pet-detail__record-missing-message";
-  message.textContent = "File not found.";
-  message.style.flex = "1";
-  message.style.fontSize = "13px";
-  message.style.lineHeight = "1.45";
+  message.textContent = "We couldn’t find this file. Update the path or dismiss the warning.";
 
   const fixButton = document.createElement("button");
   fixButton.type = "button";
-  fixButton.textContent = "Fix path";
+  fixButton.textContent = "Locate file";
   fixButton.className = "pet-detail__record-fix";
-  fixButton.style.flexShrink = "0";
-  fixButton.style.alignSelf = "flex-start";
 
   const dismissButton = document.createElement("button");
   dismissButton.type = "button";
   dismissButton.className = "pet-detail__record-dismiss";
   dismissButton.setAttribute("aria-label", "Dismiss missing attachment warning");
-  dismissButton.textContent = "✕";
-  dismissButton.style.flexShrink = "0";
-  dismissButton.style.alignSelf = "flex-start";
-  dismissButton.style.width = "28px";
-  dismissButton.style.height = "28px";
-  dismissButton.style.borderRadius = "14px";
-  dismissButton.style.fontSize = "14px";
-  dismissButton.style.lineHeight = "1";
+  dismissButton.title = "Dismiss missing attachment warning";
+
+  const dismissIcon = document.createElement("span");
+  dismissIcon.setAttribute("aria-hidden", "true");
+  dismissIcon.textContent = "×";
+  dismissButton.append(dismissIcon);
 
   dismissButton.addEventListener("click", () => {
     banner.hidden = true;
@@ -243,17 +250,6 @@ function createThumbnailSlot(recordId: string): HTMLDivElement {
   slot.className = "pet-detail__record-thumbnail";
   slot.dataset.recordId = recordId;
   slot.dataset.thumbnailState = "idle";
-  slot.style.width = `${THUMBNAIL_EDGE}px`;
-  slot.style.height = `${THUMBNAIL_EDGE}px`;
-  slot.style.flex = `0 0 ${THUMBNAIL_EDGE}px`;
-  slot.style.borderRadius = "12px";
-  slot.style.backgroundColor = "var(--thumbnail-surface, rgba(0, 0, 0, 0.08))";
-  slot.style.display = "flex";
-  slot.style.alignItems = "center";
-  slot.style.justifyContent = "center";
-  slot.style.overflow = "hidden";
-  slot.style.position = "relative";
-  slot.style.userSelect = "none";
   return slot;
 }
 
@@ -261,11 +257,6 @@ function createThumbnailLabel(message: string): HTMLSpanElement {
   const label = document.createElement("span");
   label.className = "pet-detail__record-thumbnail-label";
   label.textContent = message;
-  label.style.fontSize = "12px";
-  label.style.lineHeight = "1.4";
-  label.style.color = "var(--thumbnail-foreground, rgba(60, 64, 67, 0.72))";
-  label.style.textAlign = "center";
-  label.style.padding = "0 12px";
   return label;
 }
 
@@ -289,14 +280,7 @@ function renderThumbnailUnsupported(slot: HTMLDivElement): void {
   const icon = document.createElement("div");
   icon.className = "pet-detail__record-thumbnail-icon";
   icon.textContent = "🖼️";
-  icon.style.fontSize = "28px";
-  icon.style.lineHeight = "1";
-  icon.style.marginBottom = "8px";
-  icon.style.opacity = "0.72";
   icon.setAttribute("aria-hidden", "true");
-  icon.style.display = "flex";
-  icon.style.alignItems = "center";
-  icon.style.justifyContent = "center";
   const label = createThumbnailLabel("Preview unavailable");
   slot.append(icon, label);
 }
@@ -318,9 +302,6 @@ function renderThumbnailImage(slot: HTMLDivElement, src: string): void {
   img.loading = "lazy";
   img.decoding = "async";
   img.src = src;
-  img.style.width = "100%";
-  img.style.height = "100%";
-  img.style.objectFit = "cover";
   slot.append(img);
 }
 
@@ -329,12 +310,44 @@ export async function PetDetailView(
   pet: Pet,
   onChange: () => Promise<void> | void,
   onBack: () => void,
+  deps: PetDetailViewDependencies = {},
 ): Promise<PetDetailController> {
   const skipAttachmentProbe =
     typeof window !== "undefined" &&
     Boolean((window as unknown as { __ARKLOWDUN_SKIP_ATTACHMENT_PROBE__?: boolean }).__ARKLOWDUN_SKIP_ATTACHMENT_PROBE__);
   const thumbnailLoaders = new WeakMap<Element, () => void>();
   let diagnosticsUpdateScheduled = false;
+  const detailSuffix = Math.random().toString(36).slice(2, 8);
+  const detailTitleId = `pet-detail-title-${detailSuffix}`;
+  const historyStatusId = `pet-history-status-${detailSuffix}`;
+  const formHelpId = `pet-medical-form-help-${detailSuffix}`;
+
+  const medicalRepo = deps.petMedicalRepo ?? petMedicalRepo;
+  const petsRepoApi = deps.petsRepo ?? petsRepo;
+  const toastApi = deps.toast ?? toast;
+  const log = deps.logUI ?? logUI;
+  let openAttachmentFn = deps.openAttachment;
+  let revealAttachmentFn = deps.revealAttachment;
+  let revealLabelFn = deps.revealLabel;
+
+  if (!openAttachmentFn || !revealAttachmentFn || !revealLabelFn) {
+    const attachments = await import("../../ui/attachments");
+    openAttachmentFn ??= attachments.openAttachment;
+    revealAttachmentFn ??= attachments.revealAttachment;
+    revealLabelFn ??= attachments.revealLabel;
+  }
+
+  const openAttachmentImpl = openAttachmentFn!;
+  const revealAttachmentImpl = revealAttachmentFn!;
+  const revealLabelImpl = revealLabelFn!;
+  const openDialogFn = deps.openDialog ?? openDialog;
+  const canonicalize = deps.canonicalizeAndVerify ?? canonicalizeAndVerify;
+  const sanitizePath = deps.sanitizeRelativePath ?? sanitizeRelativePath;
+  const convertFileSrcFn = deps.convertFileSrc ?? convertFileSrc;
+  const ipcCallFn = deps.ipcCall?.call ?? ipcCall.call;
+  const updateDiagnostics = deps.updateDiagnosticsSection ?? updateDiagnosticsSection;
+  const timeItFn = deps.timeIt ?? timeIt;
+  const recordMutationFailure = deps.recordPetsMutationFailure ?? recordPetsMutationFailure;
 
   function scheduleDiagnosticsUpdate(): void {
     if (skipAttachmentProbe) return;
@@ -342,9 +355,9 @@ export async function PetDetailView(
     diagnosticsUpdateScheduled = true;
     void (async () => {
       try {
-        const counters = (await ipcCall.call("pets_diagnostics_counters")) as PetsDiagnosticsCountersResponse;
+        const counters = (await ipcCallFn("pets_diagnostics_counters")) as PetsDiagnosticsCountersResponse;
         if (counters && typeof counters === "object") {
-          updateDiagnosticsSection("pets", {
+          updateDiagnostics("pets", {
             pets_total: counters.pets_total ?? 0,
             pets_deleted: counters.pets_deleted ?? 0,
             pet_medical_total: counters.pet_medical_total ?? 0,
@@ -363,13 +376,20 @@ export async function PetDetailView(
     })();
   }
 
-  const householdId = await getHouseholdIdForCalls();
-  logUI("INFO", "ui.pets.detail_opened", { id: pet.id, household_id: householdId });
+  let resolveHouseholdId = deps.getHouseholdIdForCalls;
+  if (!resolveHouseholdId) {
+    const householdModule = await import("../../db/household");
+    resolveHouseholdId = householdModule.getHouseholdIdForCalls;
+  }
+  const householdId = await resolveHouseholdId();
+  log("INFO", "ui.pets.detail_opened", { id: pet.id, household_id: householdId });
 
-  const revealText = revealLabel();
+  const revealText = revealLabelImpl();
 
   const root = document.createElement("section");
   root.className = "pet-detail";
+  root.setAttribute("role", "region");
+  root.setAttribute("aria-labelledby", detailTitleId);
 
   const header = document.createElement("header");
   header.className = "pet-detail__header";
@@ -385,6 +405,7 @@ export async function PetDetailView(
   const title = document.createElement("h1");
   title.className = "pet-detail__title";
   title.textContent = pet.name;
+  title.id = detailTitleId;
 
   header.append(backBtn, title);
 
@@ -436,6 +457,7 @@ export async function PetDetailView(
   const form = document.createElement("form");
   form.className = "pet-detail__form";
   form.autocomplete = "off";
+  form.setAttribute("aria-describedby", formHelpId);
 
   const fieldsRow = document.createElement("div");
   fieldsRow.className = "pet-detail__form-row";
@@ -495,13 +517,24 @@ export async function PetDetailView(
 
   form.append(fieldsRow, secondaryRow, submitRow);
 
+  const formAssist = document.createElement("p");
+  formAssist.className = "sr-only";
+  formAssist.id = formHelpId;
+  formAssist.textContent = "Date and description are required. Reminder and attachment path are optional.";
+  form.append(formAssist);
+
   const historyHeading = document.createElement("h3");
   historyHeading.className = "pet-detail__section-title";
   historyHeading.textContent = "Medical history";
+  historyHeading.id = `pet-history-title-${detailSuffix}`;
 
   const historyContainer = document.createElement("div");
   historyContainer.className = "pet-detail__history";
   historyContainer.tabIndex = 0;
+  historyContainer.setAttribute("role", "region");
+  historyContainer.setAttribute("aria-labelledby", historyHeading.id);
+  historyContainer.setAttribute("aria-describedby", historyStatusId);
+  historyContainer.setAttribute("aria-busy", "true");
 
   let thumbnailObserver: IntersectionObserver | null = null;
   const canObserveThumbnails =
@@ -557,7 +590,7 @@ export async function PetDetailView(
       renderThumbnailLoading(slot);
 
       try {
-        const response = (await ipcCall.call("thumbnails_get_or_create", {
+        const response = (await ipcCallFn("thumbnails_get_or_create", {
           household_id: record.household_id ?? householdId,
           category: PET_MEDICAL_CATEGORY,
           relative_path: record.relative_path,
@@ -567,14 +600,14 @@ export async function PetDetailView(
         if (response?.ok && response.relative_thumb_path) {
           const cacheHit = response.cache_hit === true;
           try {
-            const { realPath } = await canonicalizeAndVerify(
+            const { realPath } = await canonicalize(
               response.relative_thumb_path,
               "appData",
             );
-            const src = convertFileSrc(realPath);
+            const src = convertFileSrcFn(realPath);
             renderThumbnailImage(slot, src);
             if (cacheHit) {
-              logUI("INFO", "ui.pets.thumbnail_cache_hit", {
+              log("INFO", "ui.pets.thumbnail_cache_hit", {
                 medical_id: record.id,
                 path: record.relative_path ?? null,
                 household_id: householdId,
@@ -584,7 +617,7 @@ export async function PetDetailView(
               const height = typeof response.height === "number" ? response.height : null;
               const duration =
                 typeof response.duration_ms === "number" ? response.duration_ms : null;
-              logUI("INFO", "ui.pets.thumbnail_built", {
+              log("INFO", "ui.pets.thumbnail_built", {
                 medical_id: record.id,
                 path: record.relative_path ?? null,
                 household_id: householdId,
@@ -623,7 +656,7 @@ export async function PetDetailView(
   }
 
   async function getAttachmentsBase(): Promise<string> {
-    const { base, realPath } = await canonicalizeAndVerify(".", "attachments");
+    const { base, realPath } = await canonicalize(".", "attachments");
     // canonicalize returns base with trailing slash; prefer directory path for dialogs
     if (realPath.endsWith("/")) return realPath.slice(0, -1);
     return realPath;
@@ -664,7 +697,7 @@ export async function PetDetailView(
 
   function presentGuardToast(code: string, fallback: string): void {
     const message = ERROR_MESSAGES[code] ?? fallback;
-    toast.show({ kind: "error", message });
+    toastApi.show({ kind: "error", message });
   }
 
   function updateMissingState(
@@ -708,7 +741,7 @@ export async function PetDetailView(
       return true;
     }
     try {
-      const response = await ipcCall.call("files_exists", {
+      const response = await ipcCallFn("files_exists", {
         household_id: record.household_id,
         category: PET_MEDICAL_CATEGORY,
         relative_path: record.relative_path,
@@ -720,7 +753,7 @@ export async function PetDetailView(
         const previouslyMissing = card.dataset.attachmentMissing === "true";
         updateMissingState(card, banner, slot, true);
         if (!previouslyMissing) {
-          logUI("INFO", "ui.pets.attachment_missing", {
+          log("INFO", "ui.pets.attachment_missing", {
             medical_id: record.id,
             path: record.relative_path,
             household_id: householdId,
@@ -738,7 +771,7 @@ export async function PetDetailView(
     } catch (err) {
       const { code } = resolveError(err, "Attachment check failed.");
       if (code && GUARD_CODES.has(code)) {
-        logUI("WARN", "ui.pets.vault_guard_reject", {
+        log("WARN", "ui.pets.vault_guard_reject", {
           code,
           path: record.relative_path ?? null,
           household_id: householdId,
@@ -760,9 +793,9 @@ export async function PetDetailView(
   ): Promise<string | null> {
     try {
       const defaultLocation = currentPath
-        ? (await canonicalizeAndVerify(currentPath, "attachments")).realPath
+        ? (await canonicalize(currentPath, "attachments")).realPath
         : await getAttachmentsBase();
-      const selection = await openDialog({
+      const selection = await openDialogFn({
         multiple: false,
         directory: false,
         defaultPath: defaultLocation,
@@ -771,15 +804,15 @@ export async function PetDetailView(
       if (!chosen) {
         return null;
       }
-      const { base, realPath } = await canonicalizeAndVerify(chosen, "attachments");
+      const { base, realPath } = await canonicalize(chosen, "attachments");
       const relative = realPath.slice(base.length);
-      const sanitized = sanitizeRelativePath(relative);
+      const sanitized = sanitizePath(relative);
       return sanitized;
     } catch (error) {
       const guardCode = mapPathErrorToGuardCode(error);
       if (guardCode && GUARD_CODES.has(guardCode)) {
         presentGuardToast(guardCode, "Attachment path is invalid.");
-        logUI("WARN", "ui.pets.vault_guard_reject", {
+        log("WARN", "ui.pets.vault_guard_reject", {
           code: guardCode,
           path: currentPath ?? null,
           household_id: householdId,
@@ -787,7 +820,7 @@ export async function PetDetailView(
           stage: "fix_select",
         });
       } else {
-        toast.show({ kind: "error", message: "Could not select an attachment." });
+        toastApi.show({ kind: "error", message: "Could not select an attachment." });
       }
       console.warn("fix-path selection failed", error);
       return null;
@@ -807,7 +840,7 @@ export async function PetDetailView(
     const previousLabel = button.textContent ?? "Fix path";
     button.disabled = true;
     button.textContent = "Fixing…";
-    logUI("INFO", "ui.pets.attachment_fix_opened", {
+    log("INFO", "ui.pets.attachment_fix_opened", {
       medical_id: record.id,
       path: record.relative_path ?? null,
       household_id: householdId,
@@ -819,20 +852,20 @@ export async function PetDetailView(
       }
 
       const currentPath = record.relative_path ?? null;
-      const outcome = await timeIt(
+      const outcome = await timeItFn(
         "detail.fix_path",
         async () => {
           if (replacement === currentPath) {
             return { outcome: "noop" as const };
           }
           try {
-            await petMedicalRepo.update(householdId, record.id, {
+            await medicalRepo.update(householdId, record.id, {
               relative_path: replacement,
               category: PET_MEDICAL_CATEGORY,
             });
             return { outcome: "updated" as const };
           } catch (error) {
-            const normalized = await recordPetsMutationFailure("pet_medical_fix_path", error, {
+            const normalized = await recordMutationFailure("pet_medical_fix_path", error, {
               household_id: householdId,
               pet_id: pet.id,
               medical_id: record.id,
@@ -861,32 +894,25 @@ export async function PetDetailView(
           records[index] = { ...records[index], relative_path: replacement };
         }
         record.relative_path = replacement;
-        updateMissingState(card, banner, slot, false);
         if (slot) {
           resetThumbnail(slot);
           scheduleThumbnailLoad(slot, record, card);
         }
-        logUI("INFO", "ui.pets.attachment_fixed", {
+        log("INFO", "ui.pets.attachment_fixed", {
           medical_id: record.id,
           old_path: currentPath,
           new_path: replacement,
           household_id: householdId,
         });
-      } else {
-        updateMissingState(card, banner, slot, false);
-        if (slot) {
-          resetThumbnail(slot);
-          scheduleThumbnailLoad(slot, record, card);
-        }
       }
 
       await probeAttachment(record, card, slot, banner);
       await onChange?.();
     } catch (err) {
       const { message, code } = resolveError(err, "Could not update attachment path.");
-      toast.show({ kind: "error", message });
+      toastApi.show({ kind: "error", message });
       if (code && GUARD_CODES.has(code)) {
-        logUI("WARN", "ui.pets.vault_guard_reject", {
+        log("WARN", "ui.pets.vault_guard_reject", {
           code,
           path: record.relative_path ?? null,
           household_id: householdId,
@@ -905,16 +931,23 @@ export async function PetDetailView(
   historyList.className = "pet-detail__history-list";
   historyList.setAttribute("role", "list");
 
+  const historyStatus = document.createElement("p");
+  historyStatus.className = "sr-only";
+  historyStatus.id = historyStatusId;
+  historyStatus.setAttribute("role", "status");
+  historyStatus.setAttribute("aria-live", "polite");
+  historyStatus.textContent = "Loading medical history…";
+
   const historyEmpty = document.createElement("p");
   historyEmpty.className = "pet-detail__empty";
-  historyEmpty.textContent = "No medical records yet.";
+  historyEmpty.textContent = "No medical records yet. Add one above to build a history.";
   historyEmpty.hidden = true;
 
   const historyLoading = document.createElement("p");
   historyLoading.className = "pet-detail__loading";
   historyLoading.textContent = "Loading medical history…";
 
-  historyContainer.append(historyLoading, historyEmpty, historyList);
+  historyContainer.append(historyStatus, historyLoading, historyEmpty, historyList);
 
   medicalSection.append(formHeading, form, historyHeading, historyContainer);
 
@@ -926,6 +959,7 @@ export async function PetDetailView(
   let creating = false;
   let sanitizedDocumentPath: string | undefined;
   const pendingDeletes = new Set<string>();
+  let lastHistoryAnnouncement = "Loading medical history…";
 
   function validateDocumentField(opts: { report?: boolean } = {}): boolean {
     const raw = documentInput.value;
@@ -940,7 +974,7 @@ export async function PetDetailView(
     }
 
     try {
-      sanitizedDocumentPath = sanitizeRelativePath(trimmed);
+      sanitizedDocumentPath = sanitizePath(trimmed);
       documentInput.setCustomValidity("");
       documentInput.dataset.errorCode = "";
       if (opts.report) documentInput.reportValidity();
@@ -969,13 +1003,28 @@ export async function PetDetailView(
     submitBtn.disabled = creating || !hasRequired || !pathValid;
   }
 
+  function focusDateField(): void {
+    dateInput.focus();
+    if (typeof queueMicrotask === "function") {
+      queueMicrotask(() => {
+        dateInput.focus();
+      });
+    } else {
+      setTimeout(() => {
+        dateInput.focus();
+      }, 0);
+    }
+  }
+
   function renderRecords() {
     if (thumbnailObserver) {
       thumbnailObserver.disconnect();
     }
     historyList.innerHTML = "";
+    let announcement = "";
     if (records.length === 0) {
       historyEmpty.hidden = false;
+      announcement = historyEmpty.textContent ?? "No medical records yet.";
     } else {
       historyEmpty.hidden = true;
       for (const record of records) {
@@ -1056,9 +1105,9 @@ export async function PetDetailView(
           openBtn.addEventListener("click", (event) => {
             event.preventDefault();
             void (async () => {
-              const result = await timeIt(
+              const result = await timeItFn(
                 "detail.attach_open",
-                async () => await openAttachment(PET_MEDICAL_CATEGORY, record.id),
+                async () => await openAttachmentImpl(PET_MEDICAL_CATEGORY, record.id),
                 {
                   classifySuccess: (value) => value === true,
                   successFields: () => ({
@@ -1075,7 +1124,7 @@ export async function PetDetailView(
                   }),
                 },
               );
-              logUI(result ? "INFO" : "WARN", "ui.pets.attach_open", {
+              log(result ? "INFO" : "WARN", "ui.pets.attach_open", {
                 path: record.relative_path ?? record.document ?? null,
                 result: result ? "ok" : "error",
                 record_id: record.id,
@@ -1095,9 +1144,9 @@ export async function PetDetailView(
           revealBtn.addEventListener("click", (event) => {
             event.preventDefault();
             void (async () => {
-              const result = await timeIt(
+              const result = await timeItFn(
                 "detail.attach_reveal",
-                async () => await revealAttachment(PET_MEDICAL_CATEGORY, record.id),
+                async () => await revealAttachmentImpl(PET_MEDICAL_CATEGORY, record.id),
                 {
                   classifySuccess: (value) => value === true,
                   successFields: () => ({
@@ -1114,7 +1163,7 @@ export async function PetDetailView(
                   }),
                 },
               );
-              logUI(result ? "INFO" : "WARN", "ui.pets.attach_reveal", {
+              log(result ? "INFO" : "WARN", "ui.pets.attach_reveal", {
                 path: record.relative_path ?? record.document ?? null,
                 result: result ? "ok" : "error",
                 record_id: record.id,
@@ -1139,18 +1188,19 @@ export async function PetDetailView(
           pendingDeletes.add(record.id);
           deleteBtn.disabled = true;
           const snapshot = snapshotFocus(historyContainer);
+          historyContainer.setAttribute("aria-busy", "true");
           void (async () => {
             try {
-              await timeIt(
+              await timeItFn(
                 "detail.medical_delete",
                 async () => {
                   try {
-                    await petMedicalRepo.delete(householdId, record.id);
-                    await petsRepo.update(householdId, pet.id, {
+                    await medicalRepo.delete(householdId, record.id);
+                    await petsRepoApi.update(householdId, pet.id, {
                       updated_at: Date.now(),
                     } as Partial<Pet>);
                   } catch (error) {
-                    const normalized = await recordPetsMutationFailure("pet_medical_delete", error, {
+                    const normalized = await recordMutationFailure("pet_medical_delete", error, {
                       household_id: householdId,
                       pet_id: pet.id,
                       record_id: record.id,
@@ -1174,8 +1224,8 @@ export async function PetDetailView(
               records = records.filter((r) => r.id !== record.id);
               renderRecords();
               restoreFocus(historyContainer, snapshot);
-              toast.show({ kind: "success", message: "Medical record deleted." });
-              logUI("INFO", "ui.pets.medical_delete_success", {
+              toastApi.show({ kind: "success", message: "Medical record deleted." });
+              log("INFO", "ui.pets.medical_delete_success", {
                 id: record.id,
                 pet_id: pet.id,
                 household_id: householdId,
@@ -1184,8 +1234,8 @@ export async function PetDetailView(
               scheduleDiagnosticsUpdate();
             } catch (err) {
               const { message, code } = resolveError(err, "Could not delete medical record.");
-              toast.show({ kind: "error", message });
-              logUI("WARN", "ui.pets.medical_delete_fail", {
+              toastApi.show({ kind: "error", message });
+              log("WARN", "ui.pets.medical_delete_fail", {
                 id: record.id,
                 pet_id: pet.id,
                 household_id: householdId,
@@ -1194,6 +1244,7 @@ export async function PetDetailView(
               deleteBtn.disabled = false;
             } finally {
               pendingDeletes.delete(record.id);
+              historyContainer.setAttribute("aria-busy", "false");
             }
           })();
         });
@@ -1215,6 +1266,12 @@ export async function PetDetailView(
           void probeAttachment(record, card, thumbnailSlot, missingBanner);
         }
       }
+      announcement = `${records.length} medical ${records.length === 1 ? "record" : "records"} listed.`;
+    }
+
+    if (announcement && announcement !== lastHistoryAnnouncement) {
+      historyStatus.textContent = announcement;
+      lastHistoryAnnouncement = announcement;
     }
   }
 
@@ -1250,13 +1307,14 @@ export async function PetDetailView(
     creating = true;
     updateSubmitState();
     const snapshot = snapshotFocus(historyContainer);
+    historyContainer.setAttribute("aria-busy", "true");
     void (async () => {
       try {
-        const created = await timeIt(
+        const created = await timeItFn(
           "detail.medical_create",
           async () => {
             try {
-              const inserted = await petMedicalRepo.create(householdId, {
+              const inserted = await medicalRepo.create(householdId, {
                 pet_id: pet.id,
                 date: dateValue,
                 description,
@@ -1264,12 +1322,12 @@ export async function PetDetailView(
                 relative_path: relativePath,
                 category: PET_MEDICAL_CATEGORY,
               });
-              await petsRepo.update(householdId, pet.id, {
+              await petsRepoApi.update(householdId, pet.id, {
                 updated_at: Date.now(),
               } as Partial<Pet>);
               return inserted;
             } catch (error) {
-              const normalized = await recordPetsMutationFailure("pet_medical_create", error, {
+              const normalized = await recordMutationFailure("pet_medical_create", error, {
                 household_id: householdId,
                 pet_id: pet.id,
               });
@@ -1288,8 +1346,8 @@ export async function PetDetailView(
         records = sortRecords([created, ...records]);
         renderRecords();
         restoreFocus(historyContainer, snapshot);
-        toast.show({ kind: "success", message: "Medical record added." });
-        logUI("INFO", "ui.pets.medical_create_success", {
+        toastApi.show({ kind: "success", message: "Medical record added." });
+        log("INFO", "ui.pets.medical_create_success", {
           id: created.id,
           pet_id: pet.id,
           household_id: householdId,
@@ -1297,13 +1355,13 @@ export async function PetDetailView(
         form.reset();
         reminderInput.setCustomValidity("");
         updateSubmitState();
-        dateInput.focus();
         await onChange?.();
         scheduleDiagnosticsUpdate();
+        focusDateField();
       } catch (err) {
         const { message, code } = resolveError(err, "Could not save medical record.");
-        toast.show({ kind: "error", message });
-        logUI("WARN", "ui.pets.medical_create_fail", {
+        toastApi.show({ kind: "error", message });
+        log("WARN", "ui.pets.medical_create_fail", {
           pet_id: pet.id,
           household_id: householdId,
           code,
@@ -1311,12 +1369,13 @@ export async function PetDetailView(
       } finally {
         creating = false;
         updateSubmitState();
+        historyContainer.setAttribute("aria-busy", "false");
       }
     })();
   });
 
   try {
-    const fetched = await petMedicalRepo.list({
+    const fetched = await medicalRepo.list({
       householdId,
       petId: pet.id,
       orderBy: "date DESC, created_at DESC, id",
@@ -1324,11 +1383,12 @@ export async function PetDetailView(
     records = sortRecords(fetched.filter((record) => record.pet_id === pet.id));
   } catch (err) {
     const { message } = resolveError(err, "Could not load medical records.");
-    toast.show({ kind: "error", message });
+    toastApi.show({ kind: "error", message });
     records = [];
   } finally {
     historyLoading.remove();
     renderRecords();
+    historyContainer.setAttribute("aria-busy", "false");
     scheduleDiagnosticsUpdate();
   }
 
@@ -1338,7 +1398,7 @@ export async function PetDetailView(
 
   return {
     focusMedicalDate() {
-      dateInput.focus();
+      focusDateField();
     },
     submitMedicalForm() {
       const isValid = form.checkValidity();

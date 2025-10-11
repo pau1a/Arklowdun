@@ -122,7 +122,14 @@ async function ensureNativeListener(): Promise<void> {
   return listenerReady ?? Promise.resolve();
 }
 
-void ensureNativeListener();
+const listenerDisabled = Boolean(
+  (globalThis as { __ARKLOWDUN_DISABLE_HOUSEHOLD_LISTENER__?: boolean })
+    .__ARKLOWDUN_DISABLE_HOUSEHOLD_LISTENER__,
+);
+
+if (typeof window !== "undefined" && !listenerDisabled) {
+  void ensureNativeListener();
+}
 
 export function getState(): HouseholdStoreState {
   return state;

@@ -1,12 +1,14 @@
 import { strict as assert } from "node:assert";
 import test, { mock } from "node:test";
 import { JSDOM } from "jsdom";
+import type { PetDetailViewDependencies } from "../../src/ui/pets/PetDetailView";
 
 const bootstrapDom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost" });
 (globalThis as any).window = bootstrapDom.window as unknown as typeof globalThis & Window;
 (globalThis as any).document = bootstrapDom.window.document;
 (globalThis as any).HTMLElement = bootstrapDom.window.HTMLElement;
 (globalThis as any).Node = bootstrapDom.window.Node;
+(globalThis as any).__ARKLOWDUN_DISABLE_HOUSEHOLD_LISTENER__ = true;
 
 function resetDom() {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost" });
@@ -27,11 +29,74 @@ function resetDom() {
 
 const waitForMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-function makeMethodConfigurable<T extends object>(module: T, key: keyof T & string): void {
-  const descriptor = Object.getOwnPropertyDescriptor(module, key);
-  if (descriptor && !descriptor.configurable) {
-    Object.defineProperty(module, key, { ...descriptor, configurable: true });
-  }
+type HouseholdResolver = string | (() => string | Promise<string>);
+
+function householdDeps(resolver: HouseholdResolver, overrides: Partial<PetDetailViewDependencies> = {}) {
+  const resolve = typeof resolver === "function" ? resolver : () => resolver;
+  const openAttachment = overrides.openAttachment ?? (async () => true);
+  const revealAttachment = overrides.revealAttachment ?? (async () => true);
+  const revealLabel = overrides.revealLabel ?? (() => "Reveal");
+  const canonicalize =
+    overrides.canonicalizeAndVerify ??
+    (async (input: string, rootKey: "attachments" | "appData") => {
+      const trimmed = input.replace(/^\/+/, "");
+      const base =
+        rootKey === "attachments" ? "/vault/attachments/" : "/appdata/";
+      let realPath: string;
+      if (rootKey === "attachments" && trimmed.startsWith("vault/attachments/")) {
+        realPath = `/${trimmed}`;
+      } else if (rootKey === "appData" && trimmed.startsWith("appdata/")) {
+        realPath = `/${trimmed}`;
+      } else {
+        realPath = `${base}${trimmed}`;
+      }
+      return { input, rootKey, base, realPath };
+    });
+  const convertFileSrc = overrides.convertFileSrc ?? ((path: string) => `app://${path}`);
+  const ipcCall =
+    overrides.ipcCall ??
+    ({
+      call: async (command: string) => {
+        if (command === "pets_diagnostics_counters") {
+          return {
+            pet_attachments_total: 0,
+            pet_attachments_missing: 0,
+            pet_thumbnails_built: 0,
+            pet_thumbnails_cache_hits: 0,
+            missing_attachments: [],
+          };
+        }
+        if (command === "thumbnails_get_or_create") {
+          return { ok: false, code: "UNSUPPORTED" };
+        }
+        if (command === "files_exists") {
+          return { exists: true };
+        }
+        return {};
+      },
+    });
+  const updateDiagnosticsSection = overrides.updateDiagnosticsSection ?? (() => {});
+  const timeIt =
+    overrides.timeIt ??
+    (async (_name: string, task: () => Promise<any>, _opts?: any) => task());
+  const recordPetsMutationFailure =
+    overrides.recordPetsMutationFailure ??
+    (async (_name: string, error: any) => {
+      throw error;
+    });
+  return {
+    ...overrides,
+    openAttachment,
+    revealAttachment,
+    revealLabel,
+    canonicalizeAndVerify: canonicalize,
+    convertFileSrc,
+    ipcCall,
+    updateDiagnosticsSection,
+    timeIt,
+    recordPetsMutationFailure,
+    getHouseholdIdForCalls: async () => resolve(),
+  };
 }
 
 test.beforeEach(() => {
@@ -51,10 +116,6 @@ async function flushAsyncTasks(times = 3): Promise<void> {
 }
 
 test("creating a medical record prepends the entry and focuses the date field", async () => {
-  const householdModule = await import("../../src/db/household.ts");
-  makeMethodConfigurable(householdModule, "getHouseholdIdForCalls");
-  mock.method(householdModule, "getHouseholdIdForCalls", async () => "hh-test");
-
   const reposModule = await import("../../src/repos.ts");
   mock.method(reposModule.petMedicalRepo, "list", async () => [
     {
@@ -90,15 +151,13 @@ test("creating a medical record prepends the entry and focuses the date field", 
   }));
   const updateMock = mock.method(reposModule.petsRepo, "update", async () => {});
 
-  const toastModule = await import("../../src/ui/Toast.ts");
-  const toastMock = mock.method(toastModule.toast, "show", () => {});
-
-  const uiLogModule = await import("../../src/lib/uiLog.ts");
-  const logMock = mock.method(uiLogModule, "logUI", () => {});
+  const toastShow = mock.fn(() => {});
+  const logMock = mock.fn(() => {});
 
   const { PetDetailView } = await import("../../src/ui/pets/PetDetailView.ts");
 
   const container = document.createElement("div");
+  document.body.append(container);
   let onChangeCalls = 0;
   await PetDetailView(
     container,
@@ -115,6 +174,10 @@ test("creating a medical record prepends the entry and focuses the date field", 
       onChangeCalls += 1;
     },
     () => {},
+    householdDeps("hh-test", {
+      toast: { show: toastShow, subscribe: () => () => {} },
+      logUI: logMock,
+    }),
   );
 
   const dateInput = container.querySelector<HTMLInputElement>("#pet-medical-date");
@@ -130,8 +193,7 @@ test("creating a medical record prepends the entry and focuses the date field", 
   documentInput.value = " vet/records/dental.pdf ";
 
   form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
-  await waitForMicrotasks();
-  await waitForMicrotasks();
+  await flushAsyncTasks(10);
 
   assert.equal(createMock.mock.calls.length, 1, "create call issued");
   const [, createPayload] = createMock.mock.calls[0].arguments as [string, any];
@@ -143,34 +205,27 @@ test("creating a medical record prepends the entry and focuses the date field", 
   const firstRecord = container.querySelector<HTMLElement>(".pet-detail__record");
   assert.ok(firstRecord, "new record rendered");
   assert.match(firstRecord!.textContent ?? "", /Dental cleaning/);
-
   assert.equal(document.activeElement, dateInput, "date input regains focus after submit");
-  assert.equal(toastMock.mock.calls.at(-1)?.arguments[0].kind, "success", "success toast shown");
+  assert.equal(toastShow.mock.calls.at(-1)?.arguments[0].kind, "success", "success toast shown");
 
   const createLog = logMock.mock.calls.find((call) => call.arguments[1] === "ui.pets.medical_create_success");
   assert.ok(createLog, "success log emitted");
 });
 
 test("invalid attachment path shows inline error and never calls IPC", async () => {
-  const householdModule = await import("../../src/db/household.ts");
-  makeMethodConfigurable(householdModule, "getHouseholdIdForCalls");
-  mock.method(householdModule, "getHouseholdIdForCalls", async () => "hh-test");
-
   const reposModule = await import("../../src/repos.ts");
   mock.method(reposModule.petMedicalRepo, "list", async () => []);
   const createMock = mock.method(reposModule.petMedicalRepo, "create", async () => {
     throw new Error("should not be called");
   });
 
-  const toastModule = await import("../../src/ui/Toast.ts");
-  mock.method(toastModule.toast, "show", () => {});
-
-  const uiLogModule = await import("../../src/lib/uiLog.ts");
-  mock.method(uiLogModule, "logUI", () => {});
+  const toastShow = mock.fn(() => {});
+  const logMock = mock.fn(() => {});
 
   const { PetDetailView } = await import("../../src/ui/pets/PetDetailView.ts");
 
   const container = document.createElement("div");
+  document.body.append(container);
   await PetDetailView(
     container,
     {
@@ -184,6 +239,10 @@ test("invalid attachment path shows inline error and never calls IPC", async () 
     },
     () => {},
     () => {},
+    householdDeps("hh-test", {
+      toast: { show: toastShow, subscribe: () => () => {} },
+      logUI: logMock,
+    }),
   );
 
   const form = container.querySelector<HTMLFormElement>(".pet-detail__form");
@@ -209,10 +268,6 @@ test("invalid attachment path shows inline error and never calls IPC", async () 
 });
 
 test("deleting a record removes it and logs success", async () => {
-  const householdModule = await import("../../src/db/household.ts");
-  makeMethodConfigurable(householdModule, "getHouseholdIdForCalls");
-  mock.method(householdModule, "getHouseholdIdForCalls", async () => "hh-test");
-
   const reposModule = await import("../../src/repos.ts");
   mock.method(reposModule.petMedicalRepo, "list", async () => [
     {
@@ -234,14 +289,13 @@ test("deleting a record removes it and logs success", async () => {
   const deleteMock = mock.method(reposModule.petMedicalRepo, "delete", async () => {});
   const updateMock = mock.method(reposModule.petsRepo, "update", async () => {});
 
-  const toastModule = await import("../../src/ui/Toast.ts");
-  const toastMock = mock.method(toastModule.toast, "show", () => {});
-  const uiLogModule = await import("../../src/lib/uiLog.ts");
-  const logMock = mock.method(uiLogModule, "logUI", () => {});
+  const toastShow = mock.fn(() => {});
+  const logMock = mock.fn(() => {});
 
   const { PetDetailView } = await import("../../src/ui/pets/PetDetailView.ts");
 
   const container = document.createElement("div");
+  document.body.append(container);
   await PetDetailView(
     container,
     {
@@ -255,6 +309,10 @@ test("deleting a record removes it and logs success", async () => {
     },
     () => {},
     () => {},
+    householdDeps("hh-test", {
+      toast: { show: toastShow, subscribe: () => () => {} },
+      logUI: logMock,
+    }),
   );
 
   const historyList = container.querySelector<HTMLDivElement>(".pet-detail__history-list");
@@ -271,16 +329,12 @@ test("deleting a record removes it and logs success", async () => {
   assert.equal(updateMock.mock.calls.length, 1, "pet update invoked");
   assert.equal(container.querySelectorAll(".pet-detail__record").length, 0, "record removed from DOM");
   assert.equal(historyList.scrollTop, 42, "scroll position restored after delete");
-  assert.equal(toastMock.mock.calls.at(-1)?.arguments[0].kind, "success", "success toast emitted");
+  assert.equal(toastShow.mock.calls.at(-1)?.arguments[0].kind, "success", "success toast emitted");
   const deleteLog = logMock.mock.calls.find((call) => call.arguments[1] === "ui.pets.medical_delete_success");
   assert.ok(deleteLog, "delete success logged");
 });
 
 test("create failures surface mapped error toasts", async () => {
-  const householdModule = await import("../../src/db/household.ts");
-  makeMethodConfigurable(householdModule, "getHouseholdIdForCalls");
-  mock.method(householdModule, "getHouseholdIdForCalls", async () => "hh-test");
-
   const reposModule = await import("../../src/repos.ts");
   mock.method(reposModule.petMedicalRepo, "list", async () => []);
   mock.method(reposModule.petMedicalRepo, "create", async () => {
@@ -290,13 +344,12 @@ test("create failures surface mapped error toasts", async () => {
   });
   mock.method(reposModule.petsRepo, "update", async () => {});
 
-  const toastModule = await import("../../src/ui/Toast.ts");
-  const toastMock = mock.method(toastModule.toast, "show", () => {});
-  const uiLogModule = await import("../../src/lib/uiLog.ts");
-  const logMock = mock.method(uiLogModule, "logUI", () => {});
+  const toastShow = mock.fn(() => {});
+  const logMock = mock.fn(() => {});
 
   const { PetDetailView } = await import("../../src/ui/pets/PetDetailView.ts");
   const container = document.createElement("div");
+  document.body.append(container);
   await PetDetailView(
     container,
     {
@@ -310,6 +363,10 @@ test("create failures surface mapped error toasts", async () => {
     },
     () => {},
     () => {},
+    householdDeps("hh-test", {
+      toast: { show: toastShow, subscribe: () => () => {} },
+      logUI: logMock,
+    }),
   );
 
   const form = container.querySelector<HTMLFormElement>(".pet-detail__form");
@@ -323,20 +380,20 @@ test("create failures surface mapped error toasts", async () => {
   await waitForMicrotasks();
   await waitForMicrotasks();
 
-  const lastToast = toastMock.mock.calls.at(-1)?.arguments[0];
+  const lastToast = toastShow.mock.calls.at(-1)?.arguments[0];
   assert.ok(lastToast);
   assert.equal(lastToast.kind, "error");
-  assert.match(lastToast.message, /vault/, "mapped message mentions vault path");
+  assert.equal(
+    lastToast.message,
+    "That file isn’t inside the app’s attachments folder.",
+    "mapped message matches guard toast",
+  );
 
   const failLog = logMock.mock.calls.find((call) => call.arguments[1] === "ui.pets.medical_create_fail");
   assert.ok(failLog, "failure log emitted");
 });
 
 test("attachment actions delegate to helpers and emit logs", async () => {
-  const householdModule = await import("../../src/db/household.ts");
-  makeMethodConfigurable(householdModule, "getHouseholdIdForCalls");
-  mock.method(householdModule, "getHouseholdIdForCalls", async () => "hh-test");
-
   const reposModule = await import("../../src/repos.ts");
   mock.method(reposModule.petMedicalRepo, "list", async () => [
     {
@@ -360,12 +417,10 @@ test("attachment actions delegate to helpers and emit logs", async () => {
   });
   mock.method(reposModule.petsRepo, "update", async () => {});
 
-  const attachmentsModule = await import("../../src/ui/attachments.ts");
-  const openMock = mock.method(attachmentsModule, "openAttachment", async () => true);
-  const revealMock = mock.method(attachmentsModule, "revealAttachment", async () => false);
-
-  const uiLogModule = await import("../../src/lib/uiLog.ts");
-  const logMock = mock.method(uiLogModule, "logUI", () => {});
+  const openMock = mock.fn(async () => true);
+  const revealMock = mock.fn(async () => false);
+  const logMock = mock.fn(() => {});
+  const toastShow = mock.fn(() => {});
 
   const { PetDetailView } = await import("../../src/ui/pets/PetDetailView.ts");
 
@@ -383,6 +438,12 @@ test("attachment actions delegate to helpers and emit logs", async () => {
     },
     () => {},
     () => {},
+    householdDeps("hh-test", {
+      openAttachment: openMock,
+      revealAttachment: revealMock,
+      toast: { show: toastShow, subscribe: () => () => {} },
+      logUI: logMock,
+    }),
   );
 
   const openBtn = container.querySelector<HTMLButtonElement>(".pet-detail__record-action");
@@ -426,13 +487,11 @@ test("missing attachment fix-path flow repairs the card in place", async () => {
   }
 
   const originalObserver = (window as any).IntersectionObserver;
+  const originalGlobalObserver = (globalThis as any).IntersectionObserver;
   (window as any).IntersectionObserver = ImmediateObserver as any;
+  (globalThis as any).IntersectionObserver = ImmediateObserver as any;
 
   try {
-    const householdModule = await import("../../src/db/household.ts");
-    makeMethodConfigurable(householdModule, "getHouseholdIdForCalls");
-    mock.method(householdModule, "getHouseholdIdForCalls", async () => "hh-missing");
-
     const reposModule = await import("../../src/repos.ts");
     const existingRecords = [
       {
@@ -476,15 +535,11 @@ test("missing attachment fix-path flow repairs the card in place", async () => {
     );
     mock.method(reposModule.petsRepo, "update", async () => {});
 
-    const dialogModule = await import("../../src/lib/ipc/dialog.ts");
-    makeMethodConfigurable(dialogModule, "open");
-    const openDialogMock = mock.method(dialogModule, "open", async () => [
+    const openDialogMock = mock.fn(async () => [
       "/vault/attachments/repaired/report.jpg",
     ]);
 
-    const pathModule = await import("../../src/files/path.ts");
-    makeMethodConfigurable(pathModule, "canonicalizeAndVerify");
-    mock.method(pathModule, "canonicalizeAndVerify", async (input: string, scope: string) => {
+    const canonicalizeMock = mock.fn(async (input: string, scope: string) => {
       const ATTACH_BASE = "/vault/attachments";
       const APPDATA_BASE = "/appdata";
       if (scope === "attachments") {
@@ -492,7 +547,11 @@ test("missing attachment fix-path flow repairs the card in place", async () => {
           return { base: `${ATTACH_BASE}/`, realPath: `${ATTACH_BASE}/` };
         }
         const trimmed = input.replace(/^\/+/, "");
-        return { base: `${ATTACH_BASE}/`, realPath: `${ATTACH_BASE}/${trimmed}` };
+        const normalized = trimmed.startsWith("vault/attachments/")
+          ? trimmed.slice("vault/attachments/".length)
+          : trimmed;
+        const realPath = normalized ? `${ATTACH_BASE}/${normalized}` : `${ATTACH_BASE}/`;
+        return { base: `${ATTACH_BASE}/`, realPath };
       }
       if (scope === "appData") {
         const trimmed = input.replace(/^\.+/, "").replace(/^\/+/, "");
@@ -501,22 +560,20 @@ test("missing attachment fix-path flow repairs the card in place", async () => {
       throw new Error(`Unexpected scope ${scope}`);
     });
 
-    const coreModule = await import("../../src/lib/ipc/core.ts");
-    makeMethodConfigurable(coreModule, "convertFileSrc");
-    mock.method(coreModule, "convertFileSrc", (path: string) => `test://${path}`);
-
-    const diagnosticsModule = await import("../../src/diagnostics/runtime.ts");
-    makeMethodConfigurable(diagnosticsModule, "updateDiagnosticsSection");
-    mock.method(diagnosticsModule, "updateDiagnosticsSection", () => {});
-
-    const ipcModule = await import("../../src/lib/ipc/call.ts");
-    makeMethodConfigurable(ipcModule, "call");
+    const convertFileSrcMock = mock.fn((path: string) => `test://${path}`);
+    const updateDiagnosticsMock = mock.fn(() => {});
     let existsCalls = 0;
     let thumbnailCalls = 0;
-    const callMock = mock.method(ipcModule, "call", async (command: string) => {
+    let resolveProbe: (() => void) | null = null;
+    const ipcCallMock = mock.fn(async (command: string) => {
       if (command === "files_exists") {
         existsCalls += 1;
-        return { exists: existsCalls > 1 };
+        if (existsCalls === 1) {
+          return { exists: false };
+        }
+        return await new Promise<{ exists: boolean }>((resolve) => {
+          resolveProbe = () => resolve({ exists: true });
+        });
       }
       if (command === "thumbnails_get_or_create") {
         thumbnailCalls += 1;
@@ -544,16 +601,13 @@ test("missing attachment fix-path flow repairs the card in place", async () => {
       throw new Error(`Unexpected IPC command ${command}`);
     });
 
-    const toastModule = await import("../../src/ui/Toast.ts");
-    mock.method(toastModule.toast, "show", () => {});
-
-    const logModule = await import("../../src/lib/uiLog.ts");
-    makeMethodConfigurable(logModule, "logUI");
-    const logMock = mock.method(logModule, "logUI", () => {});
+    const toastShow = mock.fn(() => {});
+    const logMock = mock.fn(() => {});
 
     const { PetDetailView } = await import("../../src/ui/pets/PetDetailView.ts");
 
     const container = document.createElement("div");
+    document.body.append(container);
     await PetDetailView(
       container,
       {
@@ -567,6 +621,15 @@ test("missing attachment fix-path flow repairs the card in place", async () => {
       },
       () => {},
       () => {},
+      householdDeps("hh-missing", {
+        openDialog: openDialogMock,
+        canonicalizeAndVerify: canonicalizeMock,
+        convertFileSrc: convertFileSrcMock,
+        updateDiagnosticsSection: updateDiagnosticsMock,
+        ipcCall: { call: ipcCallMock },
+        toast: { show: toastShow, subscribe: () => () => {} },
+        logUI: logMock,
+      }),
     );
 
     await flushAsyncTasks();
@@ -598,13 +661,16 @@ test("missing attachment fix-path flow repairs the card in place", async () => {
     const updateArgs = updateRecordMock.mock.calls[0].arguments as [string, string, { relative_path: string }];
     assert.equal(updateArgs[2].relative_path, "repaired/report.jpg", "relative path sanitised before update");
 
+    assert.ok(!banner!.hidden, "banner remains visible until probe completes");
+
+    resolveProbe?.();
+    resolveProbe = null;
+
+    await flushAsyncTasks(5);
+
     const afterThumbnail = missingCard!.querySelector<HTMLImageElement>(".pet-detail__record-thumbnail-image");
     assert.ok(afterThumbnail, "thumbnail image rendered after repair");
     assert.match(afterThumbnail!.src, /test:\/\//, "thumbnail src uses converted URL");
-
-    assert.ok(!banner!.hidden, "banner remains visible until probe completes");
-
-    await flushAsyncTasks(5);
 
     assert.equal(banner!.hidden, true, "banner hidden after successful probe");
     assert.equal(missingCard!.dataset.attachmentMissing, undefined, "missing state cleared");
@@ -622,7 +688,7 @@ test("missing attachment fix-path flow repairs the card in place", async () => {
     assert.ok(builtLog, "thumbnail build logged");
 
     assert.equal(
-      callMock.mock.calls.filter((call) => call.arguments[0] === "files_exists").length,
+      ipcCallMock.mock.calls.filter((call) => call.arguments[0] === "files_exists").length,
       2,
       "files_exists called twice (before and after repair)",
     );
@@ -631,6 +697,11 @@ test("missing attachment fix-path flow repairs the card in place", async () => {
       (window as any).IntersectionObserver = originalObserver;
     } else {
       delete (window as any).IntersectionObserver;
+    }
+    if (originalGlobalObserver) {
+      (globalThis as any).IntersectionObserver = originalGlobalObserver;
+    } else {
+      delete (globalThis as any).IntersectionObserver;
     }
   }
 });
@@ -655,13 +726,11 @@ test("thumbnail cache hits emit the correct telemetry", async () => {
   }
 
   const originalObserver = (window as any).IntersectionObserver;
+  const originalGlobalObserver = (globalThis as any).IntersectionObserver;
   (window as any).IntersectionObserver = ImmediateObserver as any;
+  (globalThis as any).IntersectionObserver = ImmediateObserver as any;
 
   try {
-    const householdModule = await import("../../src/db/household.ts");
-    makeMethodConfigurable(householdModule, "getHouseholdIdForCalls");
-    mock.method(householdModule, "getHouseholdIdForCalls", async () => "hh-thumb");
-
     const reposModule = await import("../../src/repos.ts");
     mock.method(reposModule.petMedicalRepo, "list", async () => [
       {
@@ -683,9 +752,7 @@ test("thumbnail cache hits emit the correct telemetry", async () => {
     mock.method(reposModule.petMedicalRepo, "update", async () => {});
     mock.method(reposModule.petsRepo, "update", async () => {});
 
-    const pathModule = await import("../../src/files/path.ts");
-    makeMethodConfigurable(pathModule, "canonicalizeAndVerify");
-    mock.method(pathModule, "canonicalizeAndVerify", async (input: string, scope: string) => {
+    const canonicalizeMock = mock.fn(async (input: string, scope: string) => {
       const ATTACH_BASE = "/vault/attachments";
       const APPDATA_BASE = "/appdata";
       if (scope === "attachments") {
@@ -693,7 +760,11 @@ test("thumbnail cache hits emit the correct telemetry", async () => {
           return { base: `${ATTACH_BASE}/`, realPath: `${ATTACH_BASE}/` };
         }
         const trimmed = input.replace(/^\/+/, "");
-        return { base: `${ATTACH_BASE}/`, realPath: `${ATTACH_BASE}/${trimmed}` };
+        const normalized = trimmed.startsWith("vault/attachments/")
+          ? trimmed.slice("vault/attachments/".length)
+          : trimmed;
+        const realPath = normalized ? `${ATTACH_BASE}/${normalized}` : `${ATTACH_BASE}/`;
+        return { base: `${ATTACH_BASE}/`, realPath };
       }
       if (scope === "appData") {
         const trimmed = input.replace(/^\.+/, "").replace(/^\/+/, "");
@@ -702,18 +773,10 @@ test("thumbnail cache hits emit the correct telemetry", async () => {
       throw new Error(`Unexpected scope ${scope}`);
     });
 
-    const coreModule = await import("../../src/lib/ipc/core.ts");
-    makeMethodConfigurable(coreModule, "convertFileSrc");
-    mock.method(coreModule, "convertFileSrc", (path: string) => `cache://${path}`);
-
-    const diagnosticsModule = await import("../../src/diagnostics/runtime.ts");
-    makeMethodConfigurable(diagnosticsModule, "updateDiagnosticsSection");
-    mock.method(diagnosticsModule, "updateDiagnosticsSection", () => {});
-
-    const ipcModule = await import("../../src/lib/ipc/call.ts");
-    makeMethodConfigurable(ipcModule, "call");
+    const convertFileSrcMock = mock.fn((path: string) => `cache://${path}`);
+    const updateDiagnosticsMock = mock.fn(() => {});
     let existsCalls = 0;
-    mock.method(ipcModule, "call", async (command: string) => {
+    const ipcCallMock = mock.fn(async (command: string) => {
       if (command === "files_exists") {
         existsCalls += 1;
         return { exists: true };
@@ -740,16 +803,13 @@ test("thumbnail cache hits emit the correct telemetry", async () => {
       throw new Error(`Unexpected IPC command ${command}`);
     });
 
-    const toastModule = await import("../../src/ui/Toast.ts");
-    mock.method(toastModule.toast, "show", () => {});
-
-    const logModule = await import("../../src/lib/uiLog.ts");
-    makeMethodConfigurable(logModule, "logUI");
-    const logMock = mock.method(logModule, "logUI", () => {});
+    const toastShow = mock.fn(() => {});
+    const logMock = mock.fn(() => {});
 
     const { PetDetailView } = await import("../../src/ui/pets/PetDetailView.ts");
 
     const container = document.createElement("div");
+    document.body.append(container);
     await PetDetailView(
       container,
       {
@@ -763,6 +823,14 @@ test("thumbnail cache hits emit the correct telemetry", async () => {
       },
       () => {},
       () => {},
+      householdDeps("hh-thumb", {
+        canonicalizeAndVerify: canonicalizeMock,
+        convertFileSrc: convertFileSrcMock,
+        updateDiagnosticsSection: updateDiagnosticsMock,
+        ipcCall: { call: ipcCallMock },
+        toast: { show: toastShow, subscribe: () => () => {} },
+        logUI: logMock,
+      }),
     );
 
     await flushAsyncTasks(4);
@@ -781,12 +849,21 @@ test("thumbnail cache hits emit the correct telemetry", async () => {
       1,
       "single record rendered without duplication",
     );
-    assert.equal(existsCalls, 1, "files_exists probed once");
+    assert.equal(
+      ipcCallMock.mock.calls.filter((call) => call.arguments[0] === "files_exists").length,
+      1,
+      "files_exists probed once",
+    );
   } finally {
     if (originalObserver) {
       (window as any).IntersectionObserver = originalObserver;
     } else {
       delete (window as any).IntersectionObserver;
+    }
+    if (originalGlobalObserver) {
+      (globalThis as any).IntersectionObserver = originalGlobalObserver;
+    } else {
+      delete (globalThis as any).IntersectionObserver;
     }
   }
 });

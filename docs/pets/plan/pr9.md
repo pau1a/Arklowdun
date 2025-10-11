@@ -38,7 +38,7 @@ This pass finalises **AA-level contrast**, **focus visibility**, **ARIA navigati
 | **Focus & Keyboard Navigation**   | Visible focus rings on all interactive elements, proper tab order.               |
 | **ARIA Landmarks & Live Regions** | `role="main"`, `role="region"`, and `aria-live` attributes on dynamic lists.     |
 | **Copy Polish**                   | Friendly language for empty/error states and toast notifications.                |
-| **Banner Assets**                 | Two vertical right-edge banners: `pets-light.png` and `pets-dark.png`.           |
+| **Banner Assets**                 | Single vertical banner with CSS tint adjustments for light/dark parity.          |
 | **Theme Sync**                    | Instant swap on theme change; no resize flicker.                                 |
 | **Accessibility Tests**           | Keyboard-only traversal and screen-reader confirmation of region announcements.  |
 | **Documentation**                 | Updates to `docs/pets/ui.md` and `docs/pets/architecture.md`.                    |
@@ -112,8 +112,7 @@ updatePageBanner('pets', currentTheme);
 
 Assets:
 
-* `src/assets/banners/pets/pets-light.png`
-* `src/assets/banners/pets/pets-dark.png`
+* `src/assets/banners/pets/pets.png`
 
 Behaviour:
 
@@ -128,13 +127,15 @@ CSS:
   grid-column: right-edge;
   width: 120px;
   background: var(--banner-pets) center/cover no-repeat;
-  transition: opacity 0.2s ease;
+  transition: opacity 0.2s ease, filter 0.2s ease;
 }
-[data-theme="dark"] .banner--pets {
-  --banner-pets: url('/assets/banners/pets/pets-dark.png');
+.banner--pets[data-banner-theme="dark"] {
+  filter: brightness(0.72) saturate(0.92) contrast(1.05);
 }
-[data-theme="light"] .banner--pets {
-  --banner-pets: url('/assets/banners/pets/pets-light.png');
+@media (prefers-reduced-motion: reduce) {
+  .banner--pets {
+    transition-duration: 0s;
+  }
 }
 ```
 

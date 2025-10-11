@@ -61,11 +61,15 @@ Rendered markup hierarchy (simplified):
   <header class="pets__header">
     <h1>Pets</h1>
     <div class="pets__controls">
-      <input class="pets__search" placeholder="Search pets…">
-      <form class="pets__create">
-        <input class="pets__input" name="pet-name" required>
-        <input class="pets__input" name="pet-type">
-        <button class="pets__submit">Add</button>
+      <label class="sr-only" for="pets-search">Search pets</label>
+      <input class="pets__search" id="pets-search" placeholder="Search pets…" type="search">
+      <form class="pets__create" aria-describedby="pets-create-help">
+        <input class="pets__input" name="pet-name" required aria-label="Pet name">
+        <input class="pets__input" name="pet-type" aria-label="Pet type (optional)">
+        <button class="pets__submit">Add pet</button>
+        <p class="sr-only" id="pets-create-help">
+          Enter a pet name and optional type, then select Add pet.
+        </p>
       </form>
     </div>
   </header>
@@ -75,7 +79,7 @@ Rendered markup hierarchy (simplified):
       <div class="pets__items"></div>
       <div class="pets__spacer pets__spacer--bottom"></div>
     </div>
-    <div class="pets__empty">No pets yet</div>
+    <div class="pets__empty">Add your first pet to keep track of their care.</div>
     <div class="pets__detail"></div>
   </div>
 </section>
@@ -110,8 +114,10 @@ Key properties:
 
 ### 3.3 Empty state
 
-When no pets exist, `<ul>` is rendered empty — no “No pets yet” copy is displayed.
-This omission is documented and planned for improvement but is not an error.
+When no pets exist, the view surfaces guidance copy via `.pets__empty` and a live
+region announcing “Add your first pet to keep track of their care.” When the
+search box hides matching entries, the copy pivots to “No pets match… Clear the
+search to see everything.”
 
 ---
 
@@ -140,7 +146,7 @@ New pets are assigned `position = pets.length` (based on current in-memory list)
 Clicking an “Open” button locates the pet in the cache and calls:
 
 ```ts
-PetDetailView(section, pet, persist, showList);
+PetDetailView(section, pet, persist, showList, deps?);
 ```
 
 Where:
@@ -148,7 +154,8 @@ Where:
 * `section` — the main container,
 * `pet` — the current object,
 * `persist` — callback to push edits,
-* `showList` — callback restoring list view.
+* `showList` — callback restoring list view,
+* `deps` — optional overrides (e.g. `getHouseholdIdForCalls`) used in tests.
 
 ### 5.2 Layout
 

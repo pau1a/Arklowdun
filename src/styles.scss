@@ -128,6 +128,20 @@ main.container {
   opacity: 0.98;
 }
 
+.page-banner[data-banner-key="pets"] {
+  transition: filter 200ms ease-in-out;
+}
+
+.page-banner[data-banner-key="pets"][data-banner-theme="dark"] {
+  filter: brightness(0.72) saturate(0.92) contrast(1.05);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-banner[data-banner-key="pets"] {
+    transition: none;
+  }
+}
+
 .page-banner[data-banner-mode="interactive"] {
   background: none;
   border-left: none;
