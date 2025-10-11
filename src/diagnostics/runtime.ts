@@ -10,6 +10,7 @@ let filePersistenceDisabled = false;
 let memorySnapshot: DiagnosticsSnapshot = {};
 let cachedSnapshot: DiagnosticsSnapshot | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
+const localCounters = new Map<string, Map<string, number>>();
 
 async function importSafeFs(): Promise<SafeFsModule | null> {
   if (filePersistenceDisabled) return null;
@@ -149,6 +150,19 @@ export function updateDiagnosticsSection(
   });
 }
 
+export function incrementDiagnosticsCounter(
+  section: string,
+  key: string,
+  amount = 1,
+): void {
+  const existingSection = localCounters.get(section) ?? new Map<string, number>();
+  const currentValue = existingSection.get(key) ?? 0;
+  const nextValue = currentValue + amount;
+  existingSection.set(key, nextValue);
+  localCounters.set(section, existingSection);
+  updateDiagnosticsSection(section, { [key]: nextValue });
+}
+
 export const __testing = {
   async waitForIdle(): Promise<void> {
     await writeQueue.catch(() => undefined);
@@ -162,6 +176,7 @@ export const __testing = {
     fsModulePromise = null;
     filePersistenceDisabled = false;
     writeQueue = Promise.resolve();
+    localCounters.clear();
   },
   disableFilePersistence(): void {
     filePersistenceDisabled = true;

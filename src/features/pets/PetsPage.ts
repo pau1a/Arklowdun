@@ -6,6 +6,7 @@ export interface PetsPageCallbacks {
   onOpenPet?: (pet: Pet) => void;
   onEditPet?: (pet: Pet, patch: { name: string; type: string }) => Promise<void> | void;
   onSearchChange?: (value: string) => void;
+  onReorderPet?: (id: string, delta: number) => void;
 }
 
 export interface FilteredPet {
@@ -21,6 +22,11 @@ export interface PetsPageInstance {
   setPets(pets: Pet[]): void;
   setFilter(models: FilteredPet[]): void;
   focusCreate(): void;
+  focusSearch(): void;
+  clearSearch(): void;
+  getSearchValue(): string;
+  submitCreateForm(): boolean;
+  focusRow(id: string): void;
   showDetail(content: HTMLElement): void;
   showList(): void;
   getScrollOffset(): number;
@@ -36,6 +42,8 @@ interface RowElements {
   typePill: HTMLSpanElement;
   openBtn: HTMLButtonElement;
   editBtn: HTMLButtonElement;
+  moveUpBtn: HTMLButtonElement;
+  moveDownBtn: HTMLButtonElement;
   nameInput: HTMLInputElement;
   typeInput: HTMLInputElement;
   saveBtn: HTMLButtonElement;
@@ -150,11 +158,10 @@ export function createPetsPage(
 
   let callbacks = { ...initialCallbacks };
   let models: FilteredPet[] = [];
-  let pets: Pet[] = [];
   let scrollRaf = 0;
   let pendingScroll = false;
-  let destroyed = false;
   let perfEnabled = false;
+  let pendingFocusId: string | null = null;
 
   if (typeof window !== "undefined") {
     const hash = window.location?.hash ?? "";
@@ -190,8 +197,9 @@ export function createPetsPage(
     callbacks = { ...callbacks, ...next };
   }
 
-  function setPets(next: Pet[]): void {
-    pets = next;
+  function setPets(_next: Pet[]): void {
+    // The virtualised list relies on the filtered models array.
+    // Retain the method for API compatibility but no internal state is required.
   }
 
   function setFilter(next: FilteredPet[]): void {
@@ -201,6 +209,36 @@ export function createPetsPage(
 
   function focusCreate() {
     nameInput.focus();
+  }
+
+  function focusSearch() {
+    search.focus();
+    search.select();
+  }
+
+  function clearSearch() {
+    if (!search.value) return;
+    search.value = "";
+    callbacks.onSearchChange?.("");
+  }
+
+  function getSearchValue(): string {
+    return search.value;
+  }
+
+  function submitCreateForm(): boolean {
+    const isValid = createForm.checkValidity();
+    if (!isValid) {
+      createForm.reportValidity();
+      return false;
+    }
+    createForm.requestSubmit();
+    return true;
+  }
+
+  function focusRow(id: string) {
+    pendingFocusId = id;
+    scheduleRefresh();
   }
 
   function showDetail(content: HTMLElement) {
@@ -229,15 +267,14 @@ export function createPetsPage(
   }
 
   function destroy() {
-    destroyed = true;
     measureObserver?.disconnect();
     resizeObserver?.disconnect();
     listViewport.removeEventListener("scroll", scheduleRefresh);
+    listViewport.removeEventListener("keydown", handleOrderKey, true);
     if (!resizeObserver && typeof window !== "undefined") {
       window.removeEventListener("resize", scheduleRefresh);
     }
     if (scrollRaf) cancelAnimationFrame(scrollRaf);
-    rowCache.clear();
     visibleRows.clear();
     rowPool.length = 0;
     editing.clear();
@@ -267,6 +304,23 @@ export function createPetsPage(
     const actions = document.createElement("div");
     actions.className = "pets__actions";
 
+    const orderGroup = document.createElement("div");
+    orderGroup.className = "pets__order";
+
+    const moveUpBtn = document.createElement("button");
+    moveUpBtn.type = "button";
+    moveUpBtn.className = "pets__order-btn";
+    moveUpBtn.textContent = "▲";
+    moveUpBtn.setAttribute("aria-label", "Move up");
+
+    const moveDownBtn = document.createElement("button");
+    moveDownBtn.type = "button";
+    moveDownBtn.className = "pets__order-btn";
+    moveDownBtn.textContent = "▼";
+    moveDownBtn.setAttribute("aria-label", "Move down");
+
+    orderGroup.append(moveUpBtn, moveDownBtn);
+
     const openBtn = document.createElement("button");
     openBtn.type = "button";
     openBtn.textContent = "Open";
@@ -277,7 +331,7 @@ export function createPetsPage(
     editBtn.textContent = "Edit";
     editBtn.className = "pets__action";
 
-    actions.append(openBtn, editBtn);
+    actions.append(orderGroup, openBtn, editBtn);
     display.append(text, actions);
 
     const editor = document.createElement("form");
@@ -326,6 +380,8 @@ export function createPetsPage(
       typePill,
       openBtn,
       editBtn,
+      moveUpBtn,
+      moveDownBtn,
       nameInput,
       typeInput,
       saveBtn,
@@ -374,13 +430,14 @@ export function createPetsPage(
   function updateRow(index: number, view: FilteredPet): void {
     let rowState = visibleRows.get(index);
     let row = rowState?.element;
-    if (!row) {
+    if (!rowState || !row) {
       row = acquireRow();
       itemsHost.appendChild(row);
       rowState = { element: row, view };
       visibleRows.set(index, rowState);
+    } else {
+      rowState.view = view;
     }
-    rowState.view = view;
 
     const {
       row: rowEl,
@@ -390,6 +447,8 @@ export function createPetsPage(
       typePill,
       openBtn,
       editBtn,
+      moveUpBtn,
+      moveDownBtn,
       nameInput: editName,
       typeInput: editType,
       saveBtn,
@@ -398,6 +457,22 @@ export function createPetsPage(
 
     rowEl.dataset.index = String(index);
     rowEl.dataset.id = view.pet.id;
+    rowEl.tabIndex = -1;
+
+    const shouldFocus = pendingFocusId === view.pet.id;
+    if (shouldFocus) {
+      pendingFocusId = null;
+      rowEl.tabIndex = 0;
+      requestAnimationFrame(() => {
+        if (!rowEl.isConnected) return;
+        try {
+          rowEl.focus();
+        } catch {
+          /* ignore focus errors */
+        }
+        rowEl.tabIndex = -1;
+      });
+    }
 
     const typeValue = view.pet.type || "";
 
@@ -439,6 +514,14 @@ export function createPetsPage(
       updateRow(index, view);
       editName.focus();
     };
+
+    const canReorder = typeof callbacks.onReorderPet === "function";
+    moveUpBtn.disabled =
+      !canReorder || index === 0 || Boolean(editingState?.saving) || Boolean(editingState);
+    moveDownBtn.disabled =
+      !canReorder || index >= models.length - 1 || Boolean(editingState?.saving) || Boolean(editingState);
+    moveUpBtn.onclick = () => callbacks.onReorderPet?.(view.pet.id, -1);
+    moveDownBtn.onclick = () => callbacks.onReorderPet?.(view.pet.id, 1);
 
     editName.oninput = () => {
       const state = editing.get(view.pet.id);
@@ -544,7 +627,27 @@ export function createPetsPage(
     });
   }
 
+  function handleOrderKey(event: KeyboardEvent) {
+    if (!event.altKey) return;
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    const target = event.target;
+    if (!target || !(target instanceof HTMLElement)) return;
+    const row = target.closest<HTMLDivElement>(".pets__row");
+    if (!row) return;
+    const isEditableTarget =
+      Boolean(target.closest("input, textarea, select, [contenteditable='true']")) ||
+      Boolean((target as HTMLElement).isContentEditable);
+    if (isEditableTarget) return;
+    const id = row.dataset.id;
+    if (!id) return;
+    if (editing.has(id)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    callbacks.onReorderPet?.(id, event.key === "ArrowUp" ? -1 : 1);
+  }
+
   listViewport.addEventListener("scroll", scheduleRefresh, { passive: true });
+  listViewport.addEventListener("keydown", handleOrderKey, true);
 
   search.addEventListener("input", () => {
     callbacks.onSearchChange?.(search.value);
@@ -578,6 +681,11 @@ export function createPetsPage(
     setPets,
     setFilter,
     focusCreate,
+    focusSearch,
+    clearSearch,
+    getSearchValue,
+    submitCreateForm,
+    focusRow,
     showDetail,
     showList,
     getScrollOffset,
