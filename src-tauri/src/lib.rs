@@ -7,7 +7,9 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sha1::{Digest as Sha1Digest, Sha1};
-use sha2::{Digest as Sha2Digest, Sha256};
+use image::codecs::jpeg::JpegEncoder;
+use image::GenericImageView;
+use sha2::Sha256;
 use sqlx::{Row, SqlitePool};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
@@ -4081,8 +4083,9 @@ async fn thumbnails_get_or_create(
         let mut temp = tempfile::NamedTempFile::new_in(&thumb_dir)?;
         {
             let mut writer = BufWriter::new(temp.as_file_mut());
-            resized
-                .write_to(&mut writer, image::ImageOutputFormat::Jpeg(85))
+            let mut encoder = JpegEncoder::new_with_quality(&mut writer, 85);
+            encoder
+                .encode_image(&resized)
                 .map_err(|err| {
                     tracing::error!(
                         target: "arklowdun",
