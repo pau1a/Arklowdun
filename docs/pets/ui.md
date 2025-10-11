@@ -4,7 +4,7 @@
 
 This document defines the **user interface architecture, layout, and behaviour** for the Pets domain within Arklowdun.
 It covers the structure of `PetsView`, its relationship with `PetDetailView`, event handling, visual composition, and interaction flow.
-All content in this document reflects the current shipped implementation under `src/PetsView.ts`, `src/PetDetailView.ts`, `src/features/pets/PetsPage.ts`, and `src/ui/views/petsView.ts`.
+All content in this document reflects the current shipped implementation under `src/PetsView.ts`, `src/ui/pets/PetDetailView.ts`, `src/features/pets/PetsPage.ts`, and `src/ui/views/petsView.ts`.
 
 ---
 
@@ -15,7 +15,7 @@ The Pets UI consists of two principal surfaces:
 | Surface         | Description                                                                                         | File                         |
 | --------------- | --------------------------------------------------------------------------------------------------- | ---------------------------- |
 | **List view**   | Persistent page shell that renders the pets collection, search, inline creation, and row actions.   | `src/PetsView.ts` / `src/features/pets/PetsPage.ts` |
-| **Detail view** | Full medical/reminder editor for a single pet.                                                      | `src/PetDetailView.ts`       |
+| **Detail view** | Full medical/reminder editor for a single pet.                                                      | `src/ui/pets/PetDetailView.ts` |
 
 The router exposes `/pets` but marks it as `display: { placement: "hidden" }`, so it does not appear in the sidebar.
 The command palette (`Cmd/Ctrl + K`) and search remain the main entry points.
@@ -152,53 +152,99 @@ Where:
 
 ### 5.2 Layout
 
-Rendered inline HTML (simplified):
+Rendered markup hierarchy (simplified):
 
 ```html
 <section class="pet-detail">
-  <button class="back">Back</button>
-  <h2>Skye (Husky)</h2>
+  <header class="pet-detail__header">
+    <button class="pet-detail__back">Back</button>
+    <h1 class="pet-detail__title">Skye</h1>
+  </header>
 
-  <ul class="medical-records">
-    <li>
-      <span class="date">2025-09-01</span>
-      <span class="description">Vaccination</span>
-      <button class="open-doc">Open</button>
-      <button class="reveal-doc">Reveal</button>
-      <button class="delete">Delete</button>
-    </li>
-  </ul>
+  <section class="pet-detail__identity">
+    <div class="pet-detail__avatar">S</div>
+    <div class="pet-detail__identity-body">
+      <h2 class="pet-detail__name">Skye</h2>
+      <p class="pet-detail__subtitle">Dog · Husky</p>
+      <dl class="pet-detail__meta">
+        <dt>Species</dt><dd>Dog</dd>
+        <dt>Breed</dt><dd>Husky</dd>
+        <dt>Birthday</dt><dd>12/01/2018</dd>
+      </dl>
+      <span class="pet-detail__age">5 years</span>
+    </div>
+  </section>
 
-  <form id="medical-add-form">
-    <input id="medical-date" type="date" required>
-    <input id="medical-description" placeholder="Description" required>
-    <input id="medical-reminder" type="date" placeholder="Reminder (optional)">
-    <input id="medical-document" placeholder="Relative path (optional)">
-    <button type="submit">Add record</button>
-  </form>
+  <section class="pet-detail__section">
+    <h3 class="pet-detail__section-title">Add medical record</h3>
+    <form class="pet-detail__form">
+      <div class="pet-detail__form-row">
+        <label class="pet-detail__field">Date <input type="date" required></label>
+        <label class="pet-detail__field">Description <textarea required></textarea></label>
+      </div>
+      <div class="pet-detail__form-row">
+        <label class="pet-detail__field">Reminder <input type="date"></label>
+        <label class="pet-detail__field">Attachment path <input type="text"></label>
+      </div>
+      <div class="pet-detail__actions">
+        <button class="pet-detail__submit" type="submit" disabled>Add record</button>
+      </div>
+    </form>
+
+    <h3 class="pet-detail__section-title">Medical history</h3>
+    <div class="pet-detail__history">
+      <p class="pet-detail__loading">Loading medical history…</p>
+      <p class="pet-detail__empty" hidden>No medical records yet.</p>
+      <div class="pet-detail__history-list" role="list">
+        <article class="pet-detail__record" role="listitem">
+          <header class="pet-detail__record-header">
+            <time class="pet-detail__record-date">09/01/2025</time>
+            <span class="pet-detail__record-reminder">Reminder 08/25/2025</span>
+          </header>
+          <p class="pet-detail__record-description">Vaccination booster</p>
+          <div class="pet-detail__record-actions">
+            <button class="pet-detail__record-action">Open</button>
+            <button class="pet-detail__record-action">Reveal in Finder</button>
+            <button class="pet-detail__record-delete">Delete</button>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
 </section>
 ```
 
-### 5.3 Behaviour
+### 5.3 Identity panel
 
-* Loads all medical rows for the household, filters client-side for the current pet.
-* Orders by `date DESC, created_at DESC, id`.
-* Interpolates data into innerHTML directly — unsanitised (trusted context assumed).
-* Renders attachment buttons (`Open`, `Reveal`) if `relative_path` is present.
-* Deletion:
+* Populated entirely from the cached `Pet` model — no extra IPC call.
+* Shows name, species (`pet.species` or falls back to `pet.type`), breed, birthday, and an auto-computed age chip when the birthday is known.
+* Avatar renders the first letter of the pet name for quick recognition.
 
-  * Calls `petMedicalRepo.delete(id)`.
-  * Invokes parent `onChange()` (refreshes list).
-  * Logs errors via `console.error` or `showError`.
+### 5.4 Medical form
 
-### 5.4 Adding medical entries
+* Required fields: **Date** and **Description**. Submit button is disabled until both are populated.
+* Optional fields: **Reminder** (validated to be on/after the visit date) and **Attachment path** (sanitised via `sanitizeRelativePath()` before persistence).
+* Submissions call `petMedicalRepo.create()` with `category = "pet_medical"`, then bump `pets.updated_at` through `petsRepo.update()`.
+* Success resets the form, focuses the date input, shows a success toast, emits `ui.pets.medical_create_success`, and re-renders the list with the new record optimistically prepended.
+* Failures surface mapped error toasts (invalid household/category/path/file) and log `ui.pets.medical_create_fail { code }` for diagnostics.
 
-* Parses `YYYY-MM-DD` to UTC-local-noon timestamps.
-* Validates optional reminder date.
-* Trims and sanitises `relative_path` using `sanitizeRelativePath()`.
-* Calls `petMedicalRepo.create()` with `category = "pet_medical"`.
-* Updates parent pet’s `updated_at` timestamp.
-* Refreshes reminders immediately post-creation.
+### 5.5 Medical history list
+
+* Records load newest-first via `petMedicalRepo.list({ orderBy: "date DESC, created_at DESC, id" })` scoped to the active pet.
+* Each card includes the visit date, optional reminder chip, description, and action buttons.
+* Attachments:
+  * “Open” and “Reveal in Finder/Explorer” call `openAttachment("pet_medical", id)` / `revealAttachment("pet_medical", id)`.
+  * Outcomes are logged through `ui.pets.attach_open` / `ui.pets.attach_reveal` with `{ path, result }`.
+* Delete button disables during in-flight calls, invokes `petMedicalRepo.delete()`, refreshes the local list, emits success/failure logs, and mirrors the list back to the parent via `onChange()`.
+
+### 5.6 Focus & feedback
+
+* Detail view snapshots the history scroll offset and focused button before mutations and restores them post-render so keyboard focus stays stable.
+* After successful creates the date input regains focus; after deletes the scroll position is restored.
+* All CRUD errors surface toasts (`toast.show({ kind: "error", … })`) with mapped copy, while successes emit lightweight confirmation toasts.
+* Additional instrumentation:
+  * `ui.pets.detail_opened { id }` when the drawer mounts.
+  * `ui.pets.medical_delete_success` / `_fail` per deletion attempt.
 
 ---
 
