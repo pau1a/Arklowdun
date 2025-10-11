@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sha1::{Digest as Sha1Digest, Sha1};
 use image::codecs::jpeg::JpegEncoder;
-use image::GenericImageView;
+use image::{GenericImageView, ImageEncoder};
 use sha2::Sha256;
 use sqlx::{Row, SqlitePool};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -3840,14 +3840,14 @@ async fn attachment_reveal<R: tauri::Runtime>(
 
 #[derive(Debug, Deserialize)]
 pub struct FilesExistsRequest {
-    household_id: String,
-    category: String,
-    relative_path: String,
+    pub household_id: String,
+    pub category: String,
+    pub relative_path: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct FilesExistsResponse {
-    exists: bool,
+    pub exists: bool,
 }
 
 #[cfg(test)]
@@ -3896,27 +3896,27 @@ async fn files_exists(
 
 #[derive(Debug, Deserialize)]
 pub struct ThumbnailsGetOrCreateRequest {
-    household_id: String,
-    category: String,
-    relative_path: String,
-    max_edge: u32,
+    pub household_id: String,
+    pub category: String,
+    pub relative_path: String,
+    pub max_edge: u32,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ThumbnailsGetOrCreateResponse {
-    ok: bool,
+    pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    relative_thumb_path: Option<String>,
+    pub relative_thumb_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    code: Option<String>,
+    pub code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    cache_hit: Option<bool>,
+    pub cache_hit: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    width: Option<u32>,
+    pub width: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    height: Option<u32>,
+    pub height: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    duration_ms: Option<u64>,
+    pub duration_ms: Option<u64>,
 }
 
 #[cfg(test)]
@@ -4154,12 +4154,12 @@ async fn thumbnails_get_or_create(
 
 #[derive(Debug, Serialize, Clone)]
 pub struct PetsDiagnosticsCounters {
-    pet_attachments_total: u64,
-    pet_attachments_missing: u64,
-    pet_thumbnails_built: u64,
-    pet_thumbnails_cache_hits: u64,
+    pub pet_attachments_total: u64,
+    pub pet_attachments_missing: u64,
+    pub pet_thumbnails_built: u64,
+    pub pet_thumbnails_cache_hits: u64,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    missing_attachments: Vec<MissingAttachmentSnapshot>,
+    pub missing_attachments: Vec<MissingAttachmentSnapshot>,
 }
 
 #[cfg_attr(test, allow(dead_code))]
