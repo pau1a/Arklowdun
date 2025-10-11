@@ -1,5 +1,11 @@
 # Changelog
 
+## Pets PR6
+- Enforced `sanitizeRelativePath()` across pet medical create/update flows with inline validation and friendly guard copy.
+- Added attachment existence probes, vault-scoped Fix Path dialog, and live card refresh without remounting the detail view.
+- Introduced IPC-backed thumbnail caching for image attachments plus diagnostics counters and logs for missing/fixed files.
+- Updated Pets documentation (UI, diagnostics, IPC, rollout checklist) to describe the new attachment experience.
+
 ## Pets PR3
 - Added cancellable reminder scheduler module (`src/features/pets/reminderScheduler.ts`) with dedupe, catch-up, and long-delay chaining.
 - Wired PetsView lifecycle to initialise, reschedule, and cancel reminders, and registered cleanup on unmount/household switch.

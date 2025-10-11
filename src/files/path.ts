@@ -1,4 +1,8 @@
-export { sanitizeRelativePath } from "./sanitize";
+export {
+  PathValidationError,
+  type PathValidationErrorCode,
+  sanitizeRelativePath,
+} from "./sanitize";
 
 let appDataDirImpl: (() => Promise<string>) | undefined;
 let lstatImpl: ((path: string) => Promise<any>) | undefined;

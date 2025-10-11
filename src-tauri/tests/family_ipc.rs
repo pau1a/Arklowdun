@@ -22,6 +22,7 @@ use arklowdun_lib::{
         RENEWALS_INVALID_OFFSET, RENEWALS_PAST_EXPIRY, VALIDATION_HOUSEHOLD_MISMATCH,
         VALIDATION_MEMBER_MISSING,
     },
+    pets::metrics::PetAttachmentMetrics,
     vault::Vault,
     vault_migration::VaultMigrationManager,
     AppState,
@@ -71,6 +72,7 @@ async fn build_app_state(dir: &TempDir) -> Result<(AppState, SqlitePool, PathBuf
         vault_migration: Arc::new(VaultMigrationManager::new(&attachments_root)?),
         maintenance: Arc::new(AtomicBool::new(false)),
         files_indexer,
+        pet_metrics: Arc::new(PetAttachmentMetrics::new()),
     };
 
     Ok((state, pool, db_path))

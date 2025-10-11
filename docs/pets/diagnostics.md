@@ -46,6 +46,10 @@ During a diagnostics run (via Settings → Recovery → Export Diagnostics → �
 | `pets_deleted`                | integer | `1`     | Count of soft-deleted pets (`deleted_at` not null).               |
 | `pet_medical_total`           | integer | `27`    | Count of all medical records for active pets.                     |
 | `pet_medical_with_attachment` | integer | `8`     | Rows where `relative_path` is not null.                           |
+| `pet_attachments_total`       | integer | `8`     | Same as `pet_medical_with_attachment`; exposed for metrics parity |
+| `pet_attachments_missing`     | integer | `2`     | Number of attachments whose files failed the `files_exists` probe |
+| `pet_thumbnails_built`        | integer | `6`     | Cached thumbnail renders triggered via `thumbnails_get_or_create` |
+| `pet_thumbnails_cache_hits`   | integer | `12`    | Requests served from the thumbnail cache without regeneration     |
 | `pet_reminders_total`         | integer | `6`     | Count of future-dated `reminder_at` timestamps.                   |
 | `pet_reminders_overdue`       | integer | `2`     | Count of reminders with `reminder_at < now()` but `date > now()`. |
 | `pets_with_medical_history`   | integer | `4`     | Distinct pets with at least one medical row.                      |
@@ -59,6 +63,11 @@ All counts are emitted in the `diagnostics.json` bundle under:
 "pets": {
   "pets_total": 5,
   "pet_medical_total": 27,
+  "pet_medical_with_attachment": 8,
+  "pet_attachments_total": 8,
+  "pet_attachments_missing": 2,
+  "pet_thumbnails_built": 6,
+  "pet_thumbnails_cache_hits": 12,
   "pet_reminders_total": 6,
   "reminder_active_timers": 4,
   "reminder_buckets": 4
@@ -96,6 +105,11 @@ If Python redaction fails or is unavailable, collectors revert to raw output und
 | `ui.pets.medical_delete_fail`    | warn       | id, pet_id, household_id, code                        |
 | `ui.pets.attach_open`            | info / warn| path, result, record_id, pet_id, household_id         |
 | `ui.pets.attach_reveal`          | info / warn| path, result, record_id, pet_id, household_id         |
+| `ui.pets.attachment_missing`     | info       | medical_id, path, household_id                        |
+| `ui.pets.attachment_fix_opened`  | info       | medical_id, household_id                              |
+| `ui.pets.attachment_fixed`       | info       | medical_id, old_path, new_path, household_id          |
+| `ui.pets.thumbnail_built`        | info       | path, width, height, duration_ms, household_id        |
+| `ui.pets.thumbnail_cache_hit`    | debug      | path, household_id                                    |
 
 `src/features/pets/reminderScheduler.ts` together with the Pets shell emit reminder telemetry through the same helper.
 
@@ -136,10 +150,11 @@ PRAGMA foreign_key_check(pet_medical);
 
 Any non-empty result marks health status as `Error: FOREIGN_KEY_VIOLATION`.
 
-### 6.2 Attachment validation
+### 6.2 Attachment validation & repair telemetry
 
-* Validates every `pet_medical.relative_path` against vault root allowlist.
-* Logs anomalies with `code: PATH_OUT_OF_VAULT`.
+* Validates every `pet_medical.relative_path` against the vault root allowlist and records the aggregate counters described above.
+* During diagnostics the collector replays the cached “missing attachment” set recorded by the renderer so support can spot stale rows without forcing a fresh disk scan.
+* Logs anomalies with `code: PATH_OUT_OF_VAULT` plus the friendly toast copy used in the UI (`presentFsError`). The repair flow adds explicit audit events (`ui.pets.attachment_fix_opened` / `_fixed`) so support can confirm that users resolved issues.
 
 ### 6.3 Reminder runtime audit
 
