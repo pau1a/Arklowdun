@@ -3851,7 +3851,7 @@ pub struct FilesExistsResponse {
 }
 
 #[tauri::command]
-pub async fn files_exists(
+async fn files_exists(
     state: tauri::State<'_, crate::state::AppState>,
     request: FilesExistsRequest,
 ) -> AppResult<FilesExistsResponse> {
@@ -3891,6 +3891,14 @@ pub async fn files_exists(
     Ok(FilesExistsResponse { exists })
 }
 
+#[cfg(test)]
+pub async fn files_exists_command(
+    state: tauri::State<'_, crate::state::AppState>,
+    request: FilesExistsRequest,
+) -> AppResult<FilesExistsResponse> {
+    files_exists(state, request).await
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct ThumbnailsGetOrCreateRequest {
     pub household_id: String,
@@ -3917,7 +3925,7 @@ pub struct ThumbnailsGetOrCreateResponse {
 }
 
 #[tauri::command]
-pub async fn thumbnails_get_or_create(
+async fn thumbnails_get_or_create(
     state: tauri::State<'_, crate::state::AppState>,
     request: ThumbnailsGetOrCreateRequest,
 ) -> AppResult<ThumbnailsGetOrCreateResponse> {
@@ -4144,6 +4152,14 @@ pub async fn thumbnails_get_or_create(
     }
 }
 
+#[cfg(test)]
+pub async fn thumbnails_get_or_create_command(
+    state: tauri::State<'_, crate::state::AppState>,
+    request: ThumbnailsGetOrCreateRequest,
+) -> AppResult<ThumbnailsGetOrCreateResponse> {
+    thumbnails_get_or_create(state, request).await
+}
+
 #[derive(Debug, Serialize, Clone)]
 pub struct PetsDiagnosticsCounters {
     pub pet_attachments_total: u64,
@@ -4160,7 +4176,7 @@ fn normalize_count(value: i64) -> u64 {
 }
 
 #[tauri::command]
-pub async fn pets_diagnostics_counters(
+async fn pets_diagnostics_counters(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> AppResult<PetsDiagnosticsCounters> {
     let pool = state.pool_clone();
@@ -4184,6 +4200,13 @@ pub async fn pets_diagnostics_counters(
         pet_thumbnails_cache_hits: cache_hits,
         missing_attachments: missing_snapshot,
     })
+}
+
+#[cfg(test)]
+pub async fn pets_diagnostics_counters_command(
+    state: tauri::State<'_, crate::state::AppState>,
+) -> AppResult<PetsDiagnosticsCounters> {
+    pets_diagnostics_counters(state).await
 }
 
 #[tauri::command]
