@@ -3839,24 +3839,19 @@ async fn attachment_reveal<R: tauri::Runtime>(
 }
 
 #[derive(Debug, Deserialize)]
-struct FilesExistsRequest {
+pub struct FilesExistsRequest {
     household_id: String,
     category: String,
     relative_path: String,
 }
 
 #[derive(Debug, Serialize)]
-struct FilesExistsResponse {
+pub struct FilesExistsResponse {
     exists: bool,
 }
 
 #[cfg(test)]
-pub use FilesExistsRequest as TestFilesExistsRequest;
-#[cfg(test)]
-pub use FilesExistsResponse as TestFilesExistsResponse;
-
-#[cfg(test)]
-pub use files_exists as test_files_exists;
+pub use files_exists as __cmd__test_files_exists;
 
 #[tauri::command]
 async fn files_exists(
@@ -3900,7 +3895,7 @@ async fn files_exists(
 }
 
 #[derive(Debug, Deserialize)]
-struct ThumbnailsGetOrCreateRequest {
+pub struct ThumbnailsGetOrCreateRequest {
     household_id: String,
     category: String,
     relative_path: String,
@@ -3908,7 +3903,7 @@ struct ThumbnailsGetOrCreateRequest {
 }
 
 #[derive(Debug, Serialize)]
-struct ThumbnailsGetOrCreateResponse {
+pub struct ThumbnailsGetOrCreateResponse {
     ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     relative_thumb_path: Option<String>,
@@ -3925,12 +3920,7 @@ struct ThumbnailsGetOrCreateResponse {
 }
 
 #[cfg(test)]
-pub use ThumbnailsGetOrCreateRequest as TestThumbnailsGetOrCreateRequest;
-#[cfg(test)]
-pub use ThumbnailsGetOrCreateResponse as TestThumbnailsGetOrCreateResponse;
-
-#[cfg(test)]
-pub use thumbnails_get_or_create as test_thumbnails_get_or_create;
+pub use thumbnails_get_or_create as __cmd__test_thumbnails_get_or_create;
 
 #[tauri::command]
 async fn thumbnails_get_or_create(
@@ -4163,7 +4153,7 @@ async fn thumbnails_get_or_create(
 }
 
 #[derive(Debug, Serialize, Clone)]
-struct PetsDiagnosticsCounters {
+pub struct PetsDiagnosticsCounters {
     pet_attachments_total: u64,
     pet_attachments_missing: u64,
     pet_thumbnails_built: u64,
@@ -4171,9 +4161,6 @@ struct PetsDiagnosticsCounters {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     missing_attachments: Vec<MissingAttachmentSnapshot>,
 }
-
-#[cfg(test)]
-pub use PetsDiagnosticsCounters as TestPetsDiagnosticsCounters;
 
 #[cfg_attr(test, allow(dead_code))]
 fn normalize_count(value: i64) -> u64 {
@@ -4208,7 +4195,7 @@ async fn pets_diagnostics_counters(
 }
 
 #[cfg(test)]
-pub use pets_diagnostics_counters as test_pets_diagnostics_counters;
+pub use pets_diagnostics_counters as __cmd__test_pets_diagnostics_counters;
 
 #[tauri::command]
 async fn attachments_migration_status(
