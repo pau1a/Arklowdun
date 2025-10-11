@@ -13,9 +13,10 @@ use tauri::{App, Manager};
 use tempfile::TempDir;
 use tokio::time::sleep;
 
-use arklowdun::{
-    db, events_tz_backfill::BackfillCoordinator, files_indexer::FilesIndexer,
-    household_active::StoreHandle, migrate, pets::metrics::PetAttachmentMetrics, vault::Vault,
+use arklowdun_lib::{
+    db, events_tz_backfill::BackfillCoordinator, files_exists_command, files_indexer::FilesIndexer,
+    household_active::StoreHandle, migrate, pets::metrics::PetAttachmentMetrics,
+    pets_diagnostics_counters_command, thumbnails_get_or_create_command, vault::Vault,
     vault_migration::VaultMigrationManager, AppState, FilesExistsRequest, PetsDiagnosticsCounters,
     ThumbnailsGetOrCreateRequest,
 };
@@ -134,7 +135,7 @@ async fn files_exists_reports_presence_and_missing() -> Result<()> {
     let record_path = pet_medical_dir(&attachments_root).join("scan.png");
     write_sample_png(&record_path, [255, 0, 0, 255])?;
 
-    let exists = arklowdun::files_exists_command(
+    let exists = files_exists_command(
         app.state(),
         FilesExistsRequest {
             household_id: make_household().into(),
@@ -147,7 +148,7 @@ async fn files_exists_reports_presence_and_missing() -> Result<()> {
 
     std::fs::remove_file(&record_path)?;
 
-    let missing = arklowdun::files_exists_command(
+    let missing = files_exists_command(
         app.state(),
         FilesExistsRequest {
             household_id: make_household().into(),
@@ -184,7 +185,7 @@ async fn thumbnails_build_cache_and_regenerate() -> Result<()> {
         max_edge: 160,
     };
 
-    let first = arklowdun::thumbnails_get_or_create_command(app.state(), request.clone()).await?;
+    let first = thumbnails_get_or_create_command(app.state(), request.clone()).await?;
     assert!(first.ok, "expected thumbnail build to succeed");
     let first_rel = first
         .relative_thumb_path
@@ -201,7 +202,7 @@ async fn thumbnails_build_cache_and_regenerate() -> Result<()> {
     );
     clear_buffer(&buffer);
 
-    let cached = arklowdun::thumbnails_get_or_create_command(app.state(), request.clone()).await?;
+    let cached = thumbnails_get_or_create_command(app.state(), request.clone()).await?;
     assert!(cached.ok, "cache hit should still be ok");
     assert_eq!(cached.cache_hit, Some(true));
     let cache_logs = read_buffer(&buffer);
@@ -214,7 +215,7 @@ async fn thumbnails_build_cache_and_regenerate() -> Result<()> {
     sleep(Duration::from_millis(1100)).await;
     write_sample_png(&record_path, [0, 255, 128, 255])?;
 
-    let rebuilt = arklowdun::thumbnails_get_or_create_command(app.state(), request).await?;
+    let rebuilt = thumbnails_get_or_create_command(app.state(), request).await?;
     assert!(rebuilt.ok, "expected rebuild to succeed");
     assert_eq!(rebuilt.cache_hit, Some(false));
     let rebuild_logs = read_buffer(&buffer);
@@ -277,14 +278,13 @@ async fn diagnostics_counters_track_metrics() -> Result<()> {
         relative_path: "record.png".into(),
     };
 
-    let missing = arklowdun::files_exists_command(app.state(), make_exists_request()).await?;
+    let missing = files_exists_command(app.state(), make_exists_request()).await?;
     assert!(
         !missing.exists,
         "expected initial probe to mark attachment missing"
     );
 
-    let counters: PetsDiagnosticsCounters =
-        arklowdun::pets_diagnostics_counters_command(app.state()).await?;
+    let counters: PetsDiagnosticsCounters = pets_diagnostics_counters_command(app.state()).await?;
     assert_eq!(counters.pet_attachments_total, 1);
     assert_eq!(counters.pet_attachments_missing, 1);
     assert_eq!(counters.pet_thumbnails_built, 0);
@@ -294,11 +294,10 @@ async fn diagnostics_counters_track_metrics() -> Result<()> {
     let record_path = pet_medical_dir(&attachments_root).join("record.png");
     write_sample_png(&record_path, [16, 64, 160, 255])?;
 
-    let present = arklowdun::files_exists_command(app.state(), make_exists_request()).await?;
+    let present = files_exists_command(app.state(), make_exists_request()).await?;
     assert!(present.exists, "expected probe to succeed after file write");
 
-    let fixed: PetsDiagnosticsCounters =
-        arklowdun::pets_diagnostics_counters_command(app.state()).await?;
+    let fixed: PetsDiagnosticsCounters = pets_diagnostics_counters_command(app.state()).await?;
     assert_eq!(fixed.pet_attachments_missing, 0);
 
     let make_thumb_request = || ThumbnailsGetOrCreateRequest {
@@ -308,22 +307,20 @@ async fn diagnostics_counters_track_metrics() -> Result<()> {
         max_edge: 160,
     };
 
-    let built =
-        arklowdun::thumbnails_get_or_create_command(app.state(), make_thumb_request()).await?;
+    let built = thumbnails_get_or_create_command(app.state(), make_thumb_request()).await?;
     assert!(built.ok, "thumbnail build should succeed");
 
     let after_build: PetsDiagnosticsCounters =
-        arklowdun::pets_diagnostics_counters_command(app.state()).await?;
+        pets_diagnostics_counters_command(app.state()).await?;
     assert_eq!(after_build.pet_thumbnails_built, 1);
     assert_eq!(after_build.pet_thumbnails_cache_hits, 0);
     assert_eq!(after_build.pet_attachments_missing, 0);
 
-    let cached =
-        arklowdun::thumbnails_get_or_create_command(app.state(), make_thumb_request()).await?;
+    let cached = thumbnails_get_or_create_command(app.state(), make_thumb_request()).await?;
     assert!(cached.ok, "thumbnail cache fetch should succeed");
 
     let after_cache: PetsDiagnosticsCounters =
-        arklowdun::pets_diagnostics_counters_command(app.state()).await?;
+        pets_diagnostics_counters_command(app.state()).await?;
     assert_eq!(after_cache.pet_thumbnails_built, 1);
     assert_eq!(after_cache.pet_thumbnails_cache_hits, 1);
     assert_eq!(after_cache.pet_attachments_total, 1);
@@ -343,7 +340,7 @@ async fn thumbnails_report_unsupported_format() -> Result<()> {
     let doc_path = record_dir.join("notes.txt");
     std::fs::write(&doc_path, b"not an image")?;
 
-    let response = arklowdun::thumbnails_get_or_create_command(
+    let response = thumbnails_get_or_create_command(
         app.state(),
         ThumbnailsGetOrCreateRequest {
             household_id: make_household().into(),
