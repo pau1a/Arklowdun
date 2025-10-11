@@ -480,6 +480,9 @@ const thumbnailsGetOrCreateResponse = z
 
 const petsDiagnosticsCountersResponse = z
   .object({
+    pets_total: z.number().nonnegative().optional(),
+    pets_deleted: z.number().nonnegative().optional(),
+    pet_medical_total: z.number().nonnegative().optional(),
     pet_attachments_total: z.number().nonnegative().optional(),
     pet_attachments_missing: z.number().nonnegative().optional(),
     pet_thumbnails_built: z.number().nonnegative().optional(),
