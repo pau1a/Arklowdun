@@ -1,14 +1,14 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use anyhow::{Context, Result as AnyResult};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use image::codecs::jpeg::JpegEncoder;
+use image::{GenericImageView, ImageEncoder};
 use once_cell::sync::OnceCell;
 use paste::paste;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sha1::{Digest as Sha1Digest, Sha1};
-use image::codecs::jpeg::JpegEncoder;
-use image::{GenericImageView, ImageEncoder};
 use sha2::Sha256;
 use sqlx::{Row, SqlitePool};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -3838,14 +3838,14 @@ async fn attachment_reveal<R: tauri::Runtime>(
     .await
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct FilesExistsRequest {
     pub household_id: String,
     pub category: String,
     pub relative_path: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct FilesExistsResponse {
     pub exists: bool,
 }
@@ -3854,7 +3854,7 @@ pub struct FilesExistsResponse {
 pub use files_exists as __cmd__test_files_exists;
 
 #[tauri::command]
-async fn files_exists(
+pub async fn files_exists(
     state: tauri::State<'_, crate::state::AppState>,
     request: FilesExistsRequest,
 ) -> AppResult<FilesExistsResponse> {
@@ -3894,7 +3894,7 @@ async fn files_exists(
     Ok(FilesExistsResponse { exists })
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ThumbnailsGetOrCreateRequest {
     pub household_id: String,
     pub category: String,
@@ -3902,7 +3902,7 @@ pub struct ThumbnailsGetOrCreateRequest {
     pub max_edge: u32,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct ThumbnailsGetOrCreateResponse {
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3923,7 +3923,7 @@ pub struct ThumbnailsGetOrCreateResponse {
 pub use thumbnails_get_or_create as __cmd__test_thumbnails_get_or_create;
 
 #[tauri::command]
-async fn thumbnails_get_or_create(
+pub async fn thumbnails_get_or_create(
     state: tauri::State<'_, crate::state::AppState>,
     request: ThumbnailsGetOrCreateRequest,
 ) -> AppResult<ThumbnailsGetOrCreateResponse> {
@@ -4077,19 +4077,17 @@ async fn thumbnails_get_or_create(
         {
             let mut writer = BufWriter::new(temp.as_file_mut());
             let mut encoder = JpegEncoder::new_with_quality(&mut writer, 85);
-            encoder
-                .encode_image(&resized)
-                .map_err(|err| {
-                    tracing::error!(
-                        target: "arklowdun",
-                        event = "ui.pets.thumbnail_encode_failed",
-                        household_id = %household_id,
-                        path = %relative_path,
-                        code = "THUMBNAIL/ENCODE_FAILED",
-                        error = %err
-                    );
-                    AppError::new("THUMBNAIL/ENCODE_FAILED", err.to_string())
-                })?;
+            encoder.encode_image(&resized).map_err(|err| {
+                tracing::error!(
+                    target: "arklowdun",
+                    event = "ui.pets.thumbnail_encode_failed",
+                    household_id = %household_id,
+                    path = %relative_path,
+                    code = "THUMBNAIL/ENCODE_FAILED",
+                    error = %err
+                );
+                AppError::new("THUMBNAIL/ENCODE_FAILED", err.to_string())
+            })?;
             writer.flush()?;
         }
         if thumb_path.exists() {
@@ -4168,7 +4166,7 @@ fn normalize_count(value: i64) -> u64 {
 }
 
 #[tauri::command]
-async fn pets_diagnostics_counters(
+pub async fn pets_diagnostics_counters(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> AppResult<PetsDiagnosticsCounters> {
     let pool = state.pool_clone();

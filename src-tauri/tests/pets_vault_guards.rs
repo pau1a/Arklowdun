@@ -6,18 +6,19 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use anyhow::Result;
-use image::{ImageBuffer, ImageEncoder, Rgba};
+use image::codecs::png::PngEncoder;
+use image::{ExtendedColorType, ImageBuffer, ImageEncoder, Rgba};
 use sqlx::SqlitePool;
 use tauri::{App, Manager};
 use tempfile::TempDir;
 use tokio::time::sleep;
 
-use arklowdun_lib::{
+use arklowdun::{
     db, events_tz_backfill::BackfillCoordinator, files_indexer::FilesIndexer,
     household_active::StoreHandle, migrate, pets::metrics::PetAttachmentMetrics, vault::Vault,
-    vault_migration::VaultMigrationManager, AppState, FilesExistsRequest,
-    PetsDiagnosticsCounters, ThumbnailsGetOrCreateRequest,
-    __cmd__test_files_exists, __cmd__test_pets_diagnostics_counters, __cmd__test_thumbnails_get_or_create,
+    vault_migration::VaultMigrationManager, AppState, FilesExistsRequest, PetsDiagnosticsCounters,
+    ThumbnailsGetOrCreateRequest, __cmd__test_files_exists, __cmd__test_pets_diagnostics_counters,
+    __cmd__test_thumbnails_get_or_create,
 };
 
 fn make_household() -> &'static str {
@@ -60,9 +61,9 @@ fn build_app(state: AppState) -> App<tauri::test::MockRuntime> {
     tauri::test::mock_builder()
         .manage(state)
         .invoke_handler(tauri::generate_handler![
-            arklowdun_lib::__cmd__test_files_exists,
-            arklowdun_lib::__cmd__test_thumbnails_get_or_create,
-            arklowdun_lib::__cmd__test_pets_diagnostics_counters
+            arklowdun::__cmd__test_files_exists,
+            arklowdun::__cmd__test_thumbnails_get_or_create,
+            arklowdun::__cmd__test_pets_diagnostics_counters
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("build tauri app")
@@ -120,11 +121,11 @@ fn write_sample_png(path: &PathBuf, color: [u8; 4]) -> Result<()> {
     std::fs::create_dir_all(dir)?;
     let image: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_pixel(16, 16, Rgba(color));
     let mut file = std::fs::File::create(path)?;
-    image::codecs::png::PngEncoder::new(&mut file).write_image(
+    PngEncoder::new(&mut file).write_image(
         image.as_raw(),
         image.width(),
         image.height(),
-        image::ColorType::Rgba8,
+        ExtendedColorType::Rgba8,
     )?;
     file.flush()?;
     Ok(())
@@ -302,8 +303,7 @@ async fn diagnostics_counters_track_metrics() -> Result<()> {
     let present = __cmd__test_files_exists(app.state(), make_exists_request()).await?;
     assert!(present.exists, "expected probe to succeed after file write");
 
-    let fixed: PetsDiagnosticsCounters =
-        __cmd__test_pets_diagnostics_counters(app.state()).await?;
+    let fixed: PetsDiagnosticsCounters = __cmd__test_pets_diagnostics_counters(app.state()).await?;
     assert_eq!(fixed.pet_attachments_missing, 0);
 
     let make_thumb_request = || ThumbnailsGetOrCreateRequest {
