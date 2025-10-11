@@ -4160,6 +4160,9 @@ pub async fn thumbnails_get_or_create_command(
 
 #[derive(Debug, Serialize, Clone)]
 pub struct PetsDiagnosticsCounters {
+    pub pets_total: u64,
+    pub pets_deleted: u64,
+    pub pet_medical_total: u64,
     pub pet_attachments_total: u64,
     pub pet_attachments_missing: u64,
     pub pet_thumbnails_built: u64,
@@ -4178,6 +4181,27 @@ async fn pets_diagnostics_counters(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> AppResult<PetsDiagnosticsCounters> {
     let pool = state.pool_clone();
+    let pets_total = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(1) FROM pets WHERE deleted_at IS NULL",
+    )
+    .fetch_one(&pool)
+    .await
+    .map_err(|err| AppError::from(err).with_context("operation", "pets_diagnostics_counters"))?;
+
+    let pets_deleted = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(1) FROM pets WHERE deleted_at IS NOT NULL",
+    )
+    .fetch_one(&pool)
+    .await
+    .map_err(|err| AppError::from(err).with_context("operation", "pets_diagnostics_counters"))?;
+
+    let pet_medical_total = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(1) FROM pet_medical WHERE deleted_at IS NULL",
+    )
+    .fetch_one(&pool)
+    .await
+    .map_err(|err| AppError::from(err).with_context("operation", "pets_diagnostics_counters"))?;
+
     let attachments_total = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(1) FROM pet_medical WHERE deleted_at IS NULL AND relative_path IS NOT NULL",
     )
@@ -4192,6 +4216,9 @@ async fn pets_diagnostics_counters(
     let cache_hits = metrics.thumbnails_cache_hits();
 
     Ok(PetsDiagnosticsCounters {
+        pets_total: normalize_count(pets_total),
+        pets_deleted: normalize_count(pets_deleted),
+        pet_medical_total: normalize_count(pet_medical_total),
         pet_attachments_total: normalize_count(attachments_total),
         pet_attachments_missing: missing,
         pet_thumbnails_built: built,

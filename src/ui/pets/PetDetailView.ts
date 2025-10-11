@@ -14,6 +14,8 @@ import { open as openDialog } from "@lib/ipc/dialog";
 import * as ipcCall from "../../lib/ipc/call";
 import { convertFileSrc } from "../../lib/ipc/core";
 import { updateDiagnosticsSection } from "../../diagnostics/runtime";
+import { timeIt } from "@lib/obs/timeIt";
+import { recordPetsMutationFailure } from "@features/pets/mutationTelemetry";
 
 type Nullable<T> = T | null | undefined;
 
@@ -175,6 +177,9 @@ interface MissingAttachmentSnapshot {
 }
 
 interface PetsDiagnosticsCountersResponse {
+  pets_total?: number;
+  pets_deleted?: number;
+  pet_medical_total?: number;
   pet_attachments_total?: number;
   pet_attachments_missing?: number;
   pet_thumbnails_built?: number;
@@ -340,6 +345,9 @@ export async function PetDetailView(
         const counters = (await ipcCall.call("pets_diagnostics_counters")) as PetsDiagnosticsCountersResponse;
         if (counters && typeof counters === "object") {
           updateDiagnosticsSection("pets", {
+            pets_total: counters.pets_total ?? 0,
+            pets_deleted: counters.pets_deleted ?? 0,
+            pet_medical_total: counters.pet_medical_total ?? 0,
             pet_attachments_total: counters.pet_attachments_total ?? 0,
             pet_attachments_missing: counters.pet_attachments_missing ?? 0,
             pet_thumbnails_built: counters.pet_thumbnails_built ?? 0,
@@ -811,39 +819,66 @@ export async function PetDetailView(
       }
 
       const currentPath = record.relative_path ?? null;
-      if (replacement === currentPath) {
+      const outcome = await timeIt(
+        "detail.fix_path",
+        async () => {
+          if (replacement === currentPath) {
+            return { outcome: "noop" as const };
+          }
+          try {
+            await petMedicalRepo.update(householdId, record.id, {
+              relative_path: replacement,
+              category: PET_MEDICAL_CATEGORY,
+            });
+            return { outcome: "updated" as const };
+          } catch (error) {
+            const normalized = await recordPetsMutationFailure("pet_medical_fix_path", error, {
+              household_id: householdId,
+              pet_id: pet.id,
+              medical_id: record.id,
+            });
+            throw normalized;
+          }
+        },
+        {
+          successFields: (result) => ({
+            household_id: householdId,
+            pet_id: pet.id,
+            medical_id: record.id,
+            outcome: result.outcome,
+          }),
+          errorFields: () => ({
+            household_id: householdId,
+            pet_id: pet.id,
+            medical_id: record.id,
+          }),
+        },
+      );
+
+      if (outcome.outcome === "updated") {
+        const index = records.findIndex((item) => item.id === record.id);
+        if (index >= 0) {
+          records[index] = { ...records[index], relative_path: replacement };
+        }
+        record.relative_path = replacement;
         updateMissingState(card, banner, slot, false);
         if (slot) {
           resetThumbnail(slot);
           scheduleThumbnailLoad(slot, record, card);
         }
-        await probeAttachment(record, card, slot, banner);
-        return;
+        logUI("INFO", "ui.pets.attachment_fixed", {
+          medical_id: record.id,
+          old_path: currentPath,
+          new_path: replacement,
+          household_id: householdId,
+        });
+      } else {
+        updateMissingState(card, banner, slot, false);
+        if (slot) {
+          resetThumbnail(slot);
+          scheduleThumbnailLoad(slot, record, card);
+        }
       }
-
-      await petMedicalRepo.update(householdId, record.id, {
-        relative_path: replacement,
-        category: PET_MEDICAL_CATEGORY,
-      });
-
-      const index = records.findIndex((item) => item.id === record.id);
-      if (index >= 0) {
-        records[index] = { ...records[index], relative_path: replacement };
-      }
-      record.relative_path = replacement;
-
-      updateMissingState(card, banner, slot, false);
-      if (slot) {
-        resetThumbnail(slot);
-        scheduleThumbnailLoad(slot, record, card);
-      }
-
-      logUI("INFO", "ui.pets.attachment_fixed", {
-        medical_id: record.id,
-        old_path: currentPath,
-        new_path: replacement,
-        household_id: householdId,
-      });
 
       await probeAttachment(record, card, slot, banner);
       await onChange?.();
@@ -1021,7 +1056,25 @@ export async function PetDetailView(
           openBtn.addEventListener("click", (event) => {
             event.preventDefault();
             void (async () => {
-              const result = await openAttachment(PET_MEDICAL_CATEGORY, record.id);
+              const result = await timeIt(
+                "detail.attach_open",
+                async () => await openAttachment(PET_MEDICAL_CATEGORY, record.id),
+                {
+                  classifySuccess: (value) => value === true,
+                  successFields: () => ({
+                    household_id: householdId,
+                    pet_id: pet.id,
+                    record_id: record.id,
+                    result: "ok",
+                  }),
+                  softErrorFields: () => ({
+                    household_id: householdId,
+                    pet_id: pet.id,
+                    record_id: record.id,
+                    result: "error",
+                  }),
+                },
+              );
               logUI(result ? "INFO" : "WARN", "ui.pets.attach_open", {
                 path: record.relative_path ?? record.document ?? null,
                 result: result ? "ok" : "error",
@@ -1042,7 +1095,25 @@ export async function PetDetailView(
           revealBtn.addEventListener("click", (event) => {
             event.preventDefault();
             void (async () => {
-              const result = await revealAttachment(PET_MEDICAL_CATEGORY, record.id);
+              const result = await timeIt(
+                "detail.attach_reveal",
+                async () => await revealAttachment(PET_MEDICAL_CATEGORY, record.id),
+                {
+                  classifySuccess: (value) => value === true,
+                  successFields: () => ({
+                    household_id: householdId,
+                    pet_id: pet.id,
+                    record_id: record.id,
+                    result: "ok",
+                  }),
+                  softErrorFields: () => ({
+                    household_id: householdId,
+                    pet_id: pet.id,
+                    record_id: record.id,
+                    result: "error",
+                  }),
+                },
+              );
               logUI(result ? "INFO" : "WARN", "ui.pets.attach_reveal", {
                 path: record.relative_path ?? record.document ?? null,
                 result: result ? "ok" : "error",
@@ -1070,8 +1141,36 @@ export async function PetDetailView(
           const snapshot = snapshotFocus(historyContainer);
           void (async () => {
             try {
-              await petMedicalRepo.delete(householdId, record.id);
-              await petsRepo.update(householdId, pet.id, { updated_at: Date.now() } as Partial<Pet>);
+              await timeIt(
+                "detail.medical_delete",
+                async () => {
+                  try {
+                    await petMedicalRepo.delete(householdId, record.id);
+                    await petsRepo.update(householdId, pet.id, {
+                      updated_at: Date.now(),
+                    } as Partial<Pet>);
+                  } catch (error) {
+                    const normalized = await recordPetsMutationFailure("pet_medical_delete", error, {
+                      household_id: householdId,
+                      pet_id: pet.id,
+                      record_id: record.id,
+                    });
+                    throw normalized;
+                  }
+                },
+                {
+                  successFields: () => ({
+                    household_id: householdId,
+                    pet_id: pet.id,
+                    record_id: record.id,
+                  }),
+                  errorFields: () => ({
+                    household_id: householdId,
+                    pet_id: pet.id,
+                    record_id: record.id,
+                  }),
+                },
+              );
               records = records.filter((r) => r.id !== record.id);
               renderRecords();
               restoreFocus(historyContainer, snapshot);
@@ -1153,15 +1252,39 @@ export async function PetDetailView(
     const snapshot = snapshotFocus(historyContainer);
     void (async () => {
       try {
-        const created = await petMedicalRepo.create(householdId, {
-          pet_id: pet.id,
-          date: dateValue,
-          description,
-          reminder: reminderValue ?? undefined,
-          relative_path: relativePath,
-          category: PET_MEDICAL_CATEGORY,
-        });
-        await petsRepo.update(householdId, pet.id, { updated_at: Date.now() } as Partial<Pet>);
+        const created = await timeIt(
+          "detail.medical_create",
+          async () => {
+            try {
+              const inserted = await petMedicalRepo.create(householdId, {
+                pet_id: pet.id,
+                date: dateValue,
+                description,
+                reminder: reminderValue ?? undefined,
+                relative_path: relativePath,
+                category: PET_MEDICAL_CATEGORY,
+              });
+              await petsRepo.update(householdId, pet.id, {
+                updated_at: Date.now(),
+              } as Partial<Pet>);
+              return inserted;
+            } catch (error) {
+              const normalized = await recordPetsMutationFailure("pet_medical_create", error, {
+                household_id: householdId,
+                pet_id: pet.id,
+              });
+              throw normalized;
+            }
+          },
+          {
+            successFields: (createdRecord) => ({
+              household_id: householdId,
+              pet_id: pet.id,
+              record_id: createdRecord.id,
+            }),
+            errorFields: () => ({ household_id: householdId, pet_id: pet.id }),
+          },
+        );
         records = sortRecords([created, ...records]);
         renderRecords();
         restoreFocus(historyContainer, snapshot);

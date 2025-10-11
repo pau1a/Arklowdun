@@ -185,12 +185,12 @@ These do **not** change behavior; they enrich logs if RUST_LOG enables them.
 
 | Condition                                     | Status | Evidence                           |
 | --------------------------------------------- | ------ | ---------------------------------- |
-| Timings emitted for list/detail/reminders     | ☐      | `perf.pets.timing` samples in log  |
-| Mutation failures always include `crash_id`   | ☐      | `ui.pets.mutation_fail` sample     |
-| Diagnostics bundle shows counts + queue depth | ☐      | JSON snippet from one-click export |
-| Log spam avoided on scroll (rate-limit)       | ☐      | Max ~5 window_render logs/sec      |
-| Redacted export contains no PII               | ☐      | Inspection of bundle               |
-| Docs updated (`diagnostics.md`)               | ☐      | Commit diff                        |
+| Timings emitted for list/detail/reminders     | ☑      | `perf.pets.timing` samples in log  |
+| Mutation failures always include `crash_id`   | ☑      | `ui.pets.mutation_fail` sample     |
+| Diagnostics bundle shows counts + queue depth | ☑      | JSON snippet from one-click export |
+| Log spam avoided on scroll (rate-limit)       | ☑      | Max ~5 window_render logs/sec      |
+| Redacted export contains no PII               | ☑      | Inspection of bundle               |
+| Docs updated (`diagnostics.md`)               | ☑      | Commit diff                        |
 | macOS CI passes integration                   | ☐      | Workflow log                       |
 
 ---

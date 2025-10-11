@@ -1,5 +1,9 @@
-import { isPermissionGranted, requestPermission, sendNotification } from "@lib/ipc/notification";
-import { logUI } from "@lib/uiLog";
+import {
+  isPermissionGranted as defaultIsPermissionGranted,
+  requestPermission as defaultRequestPermission,
+  sendNotification as defaultSendNotification,
+} from "@lib/ipc/notification";
+import { logUI as defaultLogUI } from "@lib/uiLog";
 
 import { updateDiagnosticsSection } from "../../diagnostics/runtime";
 
@@ -8,6 +12,7 @@ export type ReminderKey = `${string}:${string}`;
 export interface SchedulerStats {
   activeTimers: number;
   buckets: number;
+  queueDepth: number;
 }
 
 type ReminderRecord = {
@@ -31,6 +36,20 @@ type ScheduleBatch = {
 
 const MAX_TIMEOUT = 2_147_483_647;
 
+type ReminderDependencies = {
+  isPermissionGranted: typeof defaultIsPermissionGranted;
+  requestPermission: typeof defaultRequestPermission;
+  sendNotification: typeof defaultSendNotification;
+  logUI: typeof defaultLogUI;
+};
+
+let deps: ReminderDependencies = {
+  isPermissionGranted: defaultIsPermissionGranted,
+  requestPermission: defaultRequestPermission,
+  sendNotification: defaultSendNotification,
+  logUI: defaultLogUI,
+};
+
 const registry = new Map<ReminderKey, ReturnType<typeof setTimeout>>();
 const keyToPet = new Map<ReminderKey, string>();
 const petToKeys = new Map<string, Set<ReminderKey>>();
@@ -43,6 +62,12 @@ let permissionState: "unknown" | "granted" | "denied" = "unknown";
 let permissionRequest: Promise<"granted" | "denied"> | null = null;
 let permissionDeniedLogged = false;
 let currentHouseholdId: string | null = null;
+
+function now(): number {
+  return typeof performance !== "undefined" && typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
+}
 
 function buildKey(record: Pick<ReminderRecord, "medical_id" | "reminder_at">): ReminderKey {
   return `${record.medical_id}:${record.reminder_at}`;
@@ -82,7 +107,7 @@ function cancelKey(key: ReminderKey): void {
     clearTimeout(handle);
     registry.delete(key);
     untrackKey(key);
-    logUI("INFO", "ui.pets.reminder_canceled", {
+    deps.logUI("INFO", "ui.pets.reminder_canceled", {
       key,
       household_id: currentHouseholdId ?? undefined,
     });
@@ -123,7 +148,7 @@ function resolvePetName(record: ReminderRecord): string {
 function logPermissionDenied(): void {
   if (permissionDeniedLogged) return;
   permissionDeniedLogged = true;
-  logUI("WARN", "ui.pets.reminder_permission_denied", {
+  deps.logUI("WARN", "ui.pets.reminder_permission_denied", {
     household_id: currentHouseholdId ?? undefined,
   });
 }
@@ -139,9 +164,9 @@ async function ensurePermission(): Promise<"granted" | "denied"> {
     return state;
   }
   permissionRequest = (async () => {
-    let granted = await isPermissionGranted();
+    let granted = await deps.isPermissionGranted();
     if (!granted) {
-      const result = await requestPermission();
+      const result = await deps.requestPermission();
       granted = result === "granted";
     }
     permissionState = granted ? "granted" : "denied";
@@ -159,20 +184,29 @@ async function ensurePermission(): Promise<"granted" | "denied"> {
 }
 
 function scheduleNotification(record: ReminderRecord, reminderAtMs: number, key: ReminderKey): void {
+  const start = now();
   const title = `Reminder: ${resolvePetName(record)} medical due`;
   const body = `${record.description} (${formatEventDate(record.date)})`;
-  void sendNotification({
+  void deps.sendNotification({
     title,
     body,
     tag: `pets:${record.medical_id}`,
     silent: false,
   });
-  logUI("INFO", "ui.pets.reminder_fired", {
+  deps.logUI("INFO", "ui.pets.reminder_fired", {
     key,
     pet_id: record.pet_id,
     medical_id: record.medical_id,
     reminder_at: record.reminder_at,
     elapsed_ms: Math.max(0, Date.now() - reminderAtMs),
+    household_id: currentHouseholdId ?? undefined,
+  });
+  deps.logUI("INFO", "perf.pets.timing", {
+    name: "reminders.fire",
+    duration_ms: Math.max(0, Math.round(now() - start)),
+    ok: true,
+    pet_id: record.pet_id,
+    medical_id: record.medical_id,
     household_id: currentHouseholdId ?? undefined,
   });
 }
@@ -183,7 +217,7 @@ function processCatchup(record: ReminderRecord, key: ReminderKey, reminderAtMs: 
   }
   catchupKeys.add(key);
   scheduleNotification(record, reminderAtMs, key);
-  logUI("INFO", "ui.pets.reminder_catchup", {
+  deps.logUI("INFO", "ui.pets.reminder_catchup", {
     key,
     pet_id: record.pet_id,
     medical_id: record.medical_id,
@@ -198,7 +232,7 @@ function scheduleAt(record: ReminderRecord, key: ReminderKey, reminderAtMs: numb
 
   const handle = setTimeout(() => {
     if (delay > MAX_TIMEOUT) {
-      logUI("DEBUG", "ui.pets.reminder_chained", {
+      deps.logUI("DEBUG", "ui.pets.reminder_chained", {
         key,
         remaining_ms: Math.max(0, reminderAtMs - Date.now()),
         household_id: currentHouseholdId ?? undefined,
@@ -231,7 +265,7 @@ function scheduleRecord(record: ReminderRecord): void {
   }
   const reminderAtMs = parseReminder(record.reminder_at);
   if (reminderAtMs === null) {
-    logUI("WARN", "ui.pets.reminder_invalid", {
+    deps.logUI("WARN", "ui.pets.reminder_invalid", {
       key,
       reason: "invalid_reminder_at",
       reminder_at: record.reminder_at,
@@ -256,7 +290,7 @@ function scheduleRecord(record: ReminderRecord): void {
     return;
   }
 
-  logUI("INFO", "ui.pets.reminder_scheduled", {
+  deps.logUI("INFO", "ui.pets.reminder_scheduled", {
     key,
     pet_id: record.pet_id,
     medical_id: record.medical_id,
@@ -312,12 +346,27 @@ export const reminderScheduler = {
     pendingBatches = [];
   },
   scheduleMany(records: ReminderRecord[], opts: ScheduleOptions): void {
-    if (!records.length) {
-      // Still ensure permission cache is populated for future calls.
-      if (permissionState === "unknown") {
-        pendingBatches.push({ records: [], opts });
-        triggerProcessing();
+    const start = now();
+    let ok = true;
+    try {
+      if (!records.length) {
+        // Still ensure permission cache is populated for future calls.
+        if (permissionState === "unknown") {
+          pendingBatches.push({ records: [], opts });
+          triggerProcessing();
+        }
+        if (opts.petNames) {
+          for (const [petId, name] of Object.entries(opts.petNames)) {
+            if (typeof name === "string" && name.trim().length > 0) {
+              knownPetNames.set(petId, name);
+            }
+          }
+        }
+        currentHouseholdId = opts.householdId;
+        return;
       }
+
+      pendingBatches.push({ records: [...records], opts });
       if (opts.petNames) {
         for (const [petId, name] of Object.entries(opts.petNames)) {
           if (typeof name === "string" && name.trim().length > 0) {
@@ -326,19 +375,22 @@ export const reminderScheduler = {
         }
       }
       currentHouseholdId = opts.householdId;
-      return;
+      triggerProcessing();
+    } catch (error) {
+      ok = false;
+      throw error;
+    } finally {
+      const duration = Math.max(0, Math.round(now() - start));
+      const stats = reminderScheduler.stats();
+      deps.logUI("INFO", "perf.pets.timing", {
+        name: "reminders.schedule_many",
+        duration_ms: duration,
+        ok,
+        scheduled: records.length,
+        household_id: opts.householdId,
+        queue_depth: stats.queueDepth,
+      });
     }
-
-    pendingBatches.push({ records: [...records], opts });
-    if (opts.petNames) {
-      for (const [petId, name] of Object.entries(opts.petNames)) {
-        if (typeof name === "string" && name.trim().length > 0) {
-          knownPetNames.set(petId, name);
-        }
-      }
-    }
-    currentHouseholdId = opts.householdId;
-    triggerProcessing();
   },
   rescheduleForPet(petId: string): void {
     const keys = petToKeys.get(petId);
@@ -350,6 +402,9 @@ export const reminderScheduler = {
     publishDiagnostics();
   },
   cancelAll(): void {
+    const start = now();
+    const canceled = registry.size;
+    const previousHousehold = currentHouseholdId;
     for (const key of Array.from(registry.keys())) {
       cancelKey(key);
     }
@@ -359,6 +414,13 @@ export const reminderScheduler = {
     pendingProcessing = null;
     currentHouseholdId = null;
     publishDiagnostics();
+    deps.logUI("INFO", "perf.pets.timing", {
+      name: "reminders.cancel_all",
+      duration_ms: Math.max(0, Math.round(now() - start)),
+      ok: true,
+      canceled,
+      household_id: previousHousehold ?? undefined,
+    });
   },
   stats(): SchedulerStats {
     const bucketIds = new Set<string>();
@@ -366,9 +428,14 @@ export const reminderScheduler = {
       const [, reminderAt] = key.split(":");
       if (reminderAt) bucketIds.add(reminderAt);
     }
+    let queueDepth = registry.size;
+    for (const batch of pendingBatches) {
+      queueDepth += batch.records.length;
+    }
     return {
       activeTimers: registry.size,
       buckets: bucketIds.size,
+      queueDepth,
     };
   },
 };
@@ -378,11 +445,16 @@ function publishDiagnostics(): void {
   updateDiagnosticsSection("pets", {
     reminder_active_timers: stats.activeTimers,
     reminder_buckets: stats.buckets,
+    reminder_queue_depth: stats.queueDepth,
   });
 }
 
 export const __testing = {
   reset(): void {
+    deps = {
+      ...deps,
+      logUI: () => {},
+    };
     reminderScheduler.cancelAll();
     catchupKeys.clear();
     knownPetNames.clear();
@@ -392,6 +464,18 @@ export const __testing = {
     pendingBatches = [];
     pendingProcessing = null;
     currentHouseholdId = null;
+    deps = {
+      isPermissionGranted: defaultIsPermissionGranted,
+      requestPermission: defaultRequestPermission,
+      sendNotification: defaultSendNotification,
+      logUI: defaultLogUI,
+    };
+  },
+  setDependencies(overrides: Partial<ReminderDependencies>): void {
+    deps = {
+      ...deps,
+      ...overrides,
+    };
   },
   waitForIdle(): Promise<void> {
     return pendingProcessing ?? Promise.resolve();

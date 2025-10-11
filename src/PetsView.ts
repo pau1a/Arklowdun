@@ -14,6 +14,8 @@ import {
   type PetsListController,
 } from "@features/pets/pageController";
 import { isMacPlatform } from "@ui/keys";
+import { timeIt } from "@lib/obs/timeIt";
+import { recordPetsMutationFailure } from "@features/pets/mutationTelemetry";
 
 function toReminderRecords(pets: Pet[]): {
   records: Array<{
@@ -92,7 +94,14 @@ export async function PetsView(container: HTMLElement) {
   const hh = await getHouseholdIdForCalls();
 
   async function loadPets(): Promise<Pet[]> {
-    return await petsRepo.list({ householdId: hh, orderBy: "position, created_at, id" });
+    return await timeIt(
+      "list.load",
+      async () => await petsRepo.list({ householdId: hh, orderBy: "position, created_at, id" }),
+      {
+        successFields: (result) => ({ count: result.length, household_id: hh }),
+        errorFields: () => ({ household_id: hh }),
+      },
+    );
   }
 
   let pets: Pet[] = await loadPets();
@@ -211,6 +220,7 @@ export async function PetsView(container: HTMLElement) {
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error ?? "unknown");
       logUI("WARN", "ui.pets.order_revert", { reason, household_id: hh });
+      await recordPetsMutationFailure("pets_reorder", error, { household_id: hh });
       toast.show({ kind: "error", message: "Could not reorder pets." });
       pets = snapshot.map((pet) => ({ ...pet }));
       applyFilters();
@@ -289,28 +299,63 @@ export async function PetsView(container: HTMLElement) {
   }
 
   async function handleCreate(input: { name: string; type: string }): Promise<Pet> {
-    const created = await petsRepo.create(hh, {
-      name: input.name,
-      type: input.type,
-      position: pets.length,
-    } as Partial<Pet>);
-    pets = [...pets, created];
-    applyFilters();
-    // Newly created pets likely have no medical records yet; still update scheduler state
-    reminderScheduler.rescheduleForPet(created.id);
-    const scoped = toReminderRecords([created]);
-    reminderScheduler.scheduleMany(scoped.records, { householdId: hh, petNames: scoped.petNames });
-    return created;
+    return await timeIt(
+      "list.create",
+      async () => {
+        try {
+          const created = await petsRepo.create(hh, {
+            name: input.name,
+            type: input.type,
+            position: pets.length,
+          } as Partial<Pet>);
+          pets = [...pets, created];
+          applyFilters();
+          reminderScheduler.rescheduleForPet(created.id);
+          const scoped = toReminderRecords([created]);
+          reminderScheduler.scheduleMany(scoped.records, {
+            householdId: hh,
+            petNames: scoped.petNames,
+          });
+          return created;
+        } catch (error) {
+          const normalized = await recordPetsMutationFailure("pets_create", error, {
+            household_id: hh,
+          });
+          throw normalized;
+        }
+      },
+      {
+        successFields: (created) => ({ household_id: hh, pet_id: created.id }),
+        errorFields: () => ({ household_id: hh }),
+      },
+    );
   }
 
   async function handleEdit(pet: Pet, patch: { name: string; type: string }) {
-    const next: Partial<Pet> = { name: patch.name, type: patch.type };
-    await petsRepo.update(hh, pet.id, next);
-    const idx = pets.findIndex((p) => p.id === pet.id);
-    if (idx !== -1) {
-      pets[idx] = { ...pets[idx], name: patch.name, type: patch.type };
-    }
-    applyFilters();
+    await timeIt(
+      "list.update",
+      async () => {
+        try {
+          const next: Partial<Pet> = { name: patch.name, type: patch.type };
+          await petsRepo.update(hh, pet.id, next);
+          const idx = pets.findIndex((p) => p.id === pet.id);
+          if (idx !== -1) {
+            pets[idx] = { ...pets[idx], name: patch.name, type: patch.type };
+          }
+          applyFilters();
+        } catch (error) {
+          const normalized = await recordPetsMutationFailure("pets_update", error, {
+            household_id: hh,
+            pet_id: pet.id,
+          });
+          throw normalized;
+        }
+      },
+      {
+        successFields: () => ({ household_id: hh, pet_id: pet.id }),
+        errorFields: () => ({ household_id: hh, pet_id: pet.id }),
+      },
+    );
   }
 
   async function openDetail(pet: Pet) {
@@ -328,9 +373,17 @@ export async function PetsView(container: HTMLElement) {
       await refresh([pet.id]);
     };
 
-    detailController = await PetDetailView(host, pet, persist, () => {
-      showList();
-    });
+    detailController = await timeIt(
+      "detail.open",
+      async () =>
+        await PetDetailView(host, pet, persist, () => {
+          showList();
+        }),
+      {
+        successFields: () => ({ household_id: hh, pet_id: pet.id }),
+        errorFields: () => ({ household_id: hh, pet_id: pet.id }),
+      },
+    );
   }
 
   // Initial render + reminders

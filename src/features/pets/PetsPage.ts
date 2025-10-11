@@ -162,6 +162,7 @@ export function createPetsPage(
   let pendingScroll = false;
   let perfEnabled = false;
   let pendingFocusId: string | null = null;
+  let lastTimingSample = 0;
 
   if (typeof window !== "undefined") {
     const hash = window.location?.hash ?? "";
@@ -564,6 +565,10 @@ export function createPetsPage(
 
   function refresh(): void {
     const total = models.length;
+    const startTime =
+      typeof performance !== "undefined" && typeof performance.now === "function"
+        ? performance.now()
+        : Date.now();
     emptyState.hidden = total > 0;
     const viewportHeight = listViewport.clientHeight || 0;
     const visibleCount = Math.ceil(viewportHeight / ROW_HEIGHT) + BUFFER_ROWS * 2;
@@ -606,15 +611,26 @@ export function createPetsPage(
     if (rendered > 0) {
       const fromIdx = firstIndex;
       const toIdx = Math.min(lastIndex, total - 1);
+      const nowTs =
+        typeof performance !== "undefined" && typeof performance.now === "function"
+          ? performance.now()
+          : Date.now();
+      const duration = Math.max(0, Math.round(nowTs - startTime));
       if (perfEnabled) {
         // eslint-disable-next-line no-console
-        console.debug("perf.pets.window_render", { rendered, fromIdx, toIdx });
+        console.debug("perf.pets.window_render", { rendered, fromIdx, toIdx, duration });
       }
-      logUI("INFO", "perf.pets.window_render", {
-        rows_rendered: rendered,
-        from_idx: fromIdx,
-        to_idx: toIdx,
-      });
+      if (nowTs - lastTimingSample >= 200) {
+        lastTimingSample = nowTs;
+        logUI("INFO", "perf.pets.timing", {
+          name: "list.window_render",
+          duration_ms: duration,
+          ok: true,
+          rows_rendered: rendered,
+          from_idx: fromIdx,
+          to_idx: toIdx,
+        });
+      }
     }
   }
 
