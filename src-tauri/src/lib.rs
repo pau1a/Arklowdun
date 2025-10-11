@@ -4038,6 +4038,9 @@ async fn thumbnails_get_or_create(
         .parent()
         .map(PathBuf::from)
         .unwrap_or_else(|| attachments_root.clone());
+    let relative_path_log = request.relative_path.clone();
+    let household_id_log = request.household_id.clone();
+
     let relative_path = request.relative_path.clone();
     let household_id = request.household_id.clone();
 
@@ -4131,8 +4134,8 @@ async fn thumbnails_get_or_create(
             tracing::info!(
                 target: "arklowdun",
                 event = "ui.pets.thumbnail_built",
-                household_id = %household_id,
-                path = %relative_path,
+                household_id = %household_id_log,
+                path = %relative_path_log,
                 width,
                 height,
                 ms = duration_ms,
