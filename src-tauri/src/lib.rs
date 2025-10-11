@@ -3891,7 +3891,6 @@ async fn files_exists(
     Ok(FilesExistsResponse { exists })
 }
 
-#[cfg(test)]
 pub async fn files_exists_command(
     state: tauri::State<'_, crate::state::AppState>,
     request: FilesExistsRequest,
@@ -4152,7 +4151,6 @@ async fn thumbnails_get_or_create(
     }
 }
 
-#[cfg(test)]
 pub async fn thumbnails_get_or_create_command(
     state: tauri::State<'_, crate::state::AppState>,
     request: ThumbnailsGetOrCreateRequest,
@@ -4202,7 +4200,6 @@ async fn pets_diagnostics_counters(
     })
 }
 
-#[cfg(test)]
 pub async fn pets_diagnostics_counters_command(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> AppResult<PetsDiagnosticsCounters> {

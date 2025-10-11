@@ -297,7 +297,8 @@ async fn diagnostics_counters_track_metrics() -> Result<()> {
     let present = arklowdun::files_exists_command(app.state(), make_exists_request()).await?;
     assert!(present.exists, "expected probe to succeed after file write");
 
-    let fixed: PetsDiagnosticsCounters = arklowdun::pets_diagnostics_counters_command(app.state()).await?;
+    let fixed: PetsDiagnosticsCounters =
+        arklowdun::pets_diagnostics_counters_command(app.state()).await?;
     assert_eq!(fixed.pet_attachments_missing, 0);
 
     let make_thumb_request = || ThumbnailsGetOrCreateRequest {
@@ -307,7 +308,8 @@ async fn diagnostics_counters_track_metrics() -> Result<()> {
         max_edge: 160,
     };
 
-    let built = arklowdun::thumbnails_get_or_create_command(app.state(), make_thumb_request()).await?;
+    let built =
+        arklowdun::thumbnails_get_or_create_command(app.state(), make_thumb_request()).await?;
     assert!(built.ok, "thumbnail build should succeed");
 
     let after_build: PetsDiagnosticsCounters =
@@ -316,7 +318,8 @@ async fn diagnostics_counters_track_metrics() -> Result<()> {
     assert_eq!(after_build.pet_thumbnails_cache_hits, 0);
     assert_eq!(after_build.pet_attachments_missing, 0);
 
-    let cached = arklowdun::thumbnails_get_or_create_command(app.state(), make_thumb_request()).await?;
+    let cached =
+        arklowdun::thumbnails_get_or_create_command(app.state(), make_thumb_request()).await?;
     assert!(cached.ok, "thumbnail cache fetch should succeed");
 
     let after_cache: PetsDiagnosticsCounters =
