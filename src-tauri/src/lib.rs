@@ -3850,8 +3850,6 @@ pub struct FilesExistsResponse {
     pub exists: bool,
 }
 
-#[cfg(test)]
-
 #[tauri::command]
 pub async fn files_exists(
     state: tauri::State<'_, crate::state::AppState>,
@@ -3917,8 +3915,6 @@ pub struct ThumbnailsGetOrCreateResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
 }
-
-#[cfg(test)]
 
 #[tauri::command]
 pub async fn thumbnails_get_or_create(
@@ -4189,8 +4185,6 @@ pub async fn pets_diagnostics_counters(
         missing_attachments: missing_snapshot,
     })
 }
-
-#[cfg(test)]
 
 #[tauri::command]
 async fn attachments_migration_status(
