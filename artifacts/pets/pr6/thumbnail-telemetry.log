@@ -1,0 +1,5 @@
+2025-01-12T14:03:11.214Z INFO  ui.pets.thumbnail_built household_id=hh-demo medical_id=med-123 path=lab/bloodwork.jpg width=160 height=120 ms=38
+2025-01-12T14:03:11.861Z INFO  ui.pets.thumbnail_cache_hit household_id=hh-demo medical_id=med-123 path=lab/bloodwork.jpg
+2025-01-12T14:05:44.009Z WARN  ui.pets.attachment_missing household_id=hh-demo medical_id=med-456 path=immunizations/2019.pdf
+2025-01-12T14:06:07.642Z INFO  ui.pets.attachment_fix_opened household_id=hh-demo medical_id=med-456 path=immunizations/2019.pdf
+2025-01-12T14:06:19.875Z INFO  ui.pets.attachment_fixed household_id=hh-demo medical_id=med-456 old_path=immunizations/2019.pdf new_path=immunizations/2020.png

@@ -6,7 +6,8 @@ use paste::paste;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use sha2::{Digest, Sha256};
+use sha1::{Digest as Sha1Digest, Sha1};
+use sha2::{Digest as Sha2Digest, Sha256};
 use sqlx::{Row, SqlitePool};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
@@ -18,6 +19,7 @@ use std::{
 use tauri::{Emitter, Manager, State};
 use thiserror::Error;
 use tokio::{
+    fs,
     sync::mpsc,
     time::{sleep, Duration as TokioDuration},
 };
@@ -49,6 +51,7 @@ use crate::{
     files_indexer::{IndexProgress, IndexerState, RebuildMode},
     household_active::ActiveSetError,
     ipc::guard,
+    pets::metrics::{MissingAttachmentSnapshot, PetAttachmentMetrics},
     vault_migration::ATTACHMENT_TABLES,
 };
 
@@ -140,6 +143,7 @@ pub mod files_indexer;
 pub mod files_validation;
 mod household; // declare module; avoid `use` to prevent name collision
 pub mod household_active;
+pub mod pets;
 pub use household::{
     acknowledge_vacuum, assert_household_active, cascade_phase_tables, create_household,
     default_household_id, delete_household, ensure_household_invariants, get_household,
@@ -240,6 +244,7 @@ mod cascade_health_tests {
             ),
             maintenance: Arc::new(AtomicBool::new(false)),
             files_indexer: Arc::new(crate::files_indexer::FilesIndexer::new(pool.clone(), vault)),
+            pet_metrics: Arc::new(PetAttachmentMetrics::new()),
         };
 
         let household = crate::household::create_household(&pool, "Health", None).await?;
@@ -3831,6 +3836,374 @@ async fn attachment_reveal<R: tauri::Runtime>(
     .await
 }
 
+#[derive(Debug, Deserialize)]
+struct FilesExistsRequest {
+    household_id: String,
+    category: String,
+    relative_path: String,
+}
+
+#[derive(Debug, Serialize)]
+struct FilesExistsResponse {
+    exists: bool,
+}
+
+#[cfg(test)]
+pub use FilesExistsRequest as TestFilesExistsRequest;
+#[cfg(test)]
+pub use FilesExistsResponse as TestFilesExistsResponse;
+
+#[cfg(test)]
+pub use files_exists as test_files_exists;
+
+#[tauri::command]
+async fn files_exists(
+    state: tauri::State<'_, crate::state::AppState>,
+    request: FilesExistsRequest,
+) -> AppResult<FilesExistsResponse> {
+    let category = AttachmentCategory::from_str(&request.category).map_err(|_| {
+        AppError::new(
+            crate::vault::ERR_INVALID_CATEGORY,
+            "Attachment category is not supported.",
+        )
+        .with_context("category", request.category.clone())
+    })?;
+
+    let vault = state.vault();
+    let resolved = match vault.resolve(&request.household_id, category, &request.relative_path) {
+        Ok(path) => path,
+        Err(err) => {
+            tracing::warn!(
+                target: "arklowdun",
+                event = "ui.pets.vault_guard_reject",
+                household_id = %request.household_id,
+                path = %request.relative_path,
+                code = %err.code()
+            );
+            return Err(err
+                .with_context("household_id", request.household_id.clone())
+                .with_context("category", request.category.clone())
+                .with_context("operation", "files_exists"));
+        }
+    };
+
+    let exists = fs::metadata(&resolved).await.is_ok();
+    state.pet_metrics().record_probe(
+        &request.household_id,
+        &request.category,
+        &request.relative_path,
+        exists,
+    );
+    Ok(FilesExistsResponse { exists })
+}
+
+#[derive(Debug, Deserialize)]
+struct ThumbnailsGetOrCreateRequest {
+    household_id: String,
+    category: String,
+    relative_path: String,
+    max_edge: u32,
+}
+
+#[derive(Debug, Serialize)]
+struct ThumbnailsGetOrCreateResponse {
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    relative_thumb_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_hit: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    height: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    duration_ms: Option<u64>,
+}
+
+#[cfg(test)]
+pub use ThumbnailsGetOrCreateRequest as TestThumbnailsGetOrCreateRequest;
+#[cfg(test)]
+pub use ThumbnailsGetOrCreateResponse as TestThumbnailsGetOrCreateResponse;
+
+#[cfg(test)]
+pub use thumbnails_get_or_create as test_thumbnails_get_or_create;
+
+#[tauri::command]
+async fn thumbnails_get_or_create(
+    state: tauri::State<'_, crate::state::AppState>,
+    request: ThumbnailsGetOrCreateRequest,
+) -> AppResult<ThumbnailsGetOrCreateResponse> {
+    let metrics = state.pet_metrics();
+    let category = AttachmentCategory::from_str(&request.category).map_err(|_| {
+        AppError::new(
+            crate::vault::ERR_INVALID_CATEGORY,
+            "Attachment category is not supported.",
+        )
+        .with_context("category", request.category.clone())
+    })?;
+
+    let vault = state.vault();
+    let resolved = match vault.resolve(&request.household_id, category, &request.relative_path) {
+        Ok(path) => path,
+        Err(err) => {
+            tracing::warn!(
+                target: "arklowdun",
+                event = "ui.pets.vault_guard_reject",
+                household_id = %request.household_id,
+                path = %request.relative_path,
+                code = %err.code()
+            );
+            return Err(err
+                .with_context("household_id", request.household_id.clone())
+                .with_context("category", request.category.clone())
+                .with_context("operation", "thumbnails_get_or_create"));
+        }
+    };
+
+    let max_edge = request.max_edge.clamp(32, 1024);
+    let mut hash_input = String::new();
+    hash_input.push_str(&request.household_id);
+    hash_input.push(':');
+    hash_input.push_str(category.as_str());
+    hash_input.push(':');
+    hash_input.push_str(&request.relative_path);
+    let mut hasher = Sha1::new();
+    Sha1Digest::update(&mut hasher, hash_input.as_bytes());
+    let hash = format!("{:x}", hasher.finalize());
+
+    let thumb_name = format!("{}-{}.jpg", hash, max_edge);
+    let relative_thumb = PathBuf::from(".thumbnails").join(thumb_name);
+    let attachments_root = vault.base().to_path_buf();
+    let full_thumb = attachments_root.join(&relative_thumb);
+
+    if let Some(parent) = full_thumb.parent() {
+        fs::create_dir_all(parent).await?;
+    }
+
+    let source_meta = fs::metadata(&resolved).await.map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "thumbnails_get_or_create")
+            .with_context("path", request.relative_path.clone())
+    })?;
+
+    let needs_rebuild = match fs::metadata(&full_thumb).await {
+        Ok(meta) => match (source_meta.modified(), meta.modified()) {
+            (Ok(src), Ok(existing)) => existing < src,
+            _ => true,
+        },
+        Err(_) => true,
+    };
+
+    let thumb_display = format!(
+        "attachments/{}",
+        relative_thumb.to_string_lossy().replace('\\', "/")
+    );
+
+    if !needs_rebuild {
+        tracing::info!(
+            target: "arklowdun",
+            event = "ui.pets.thumbnail_cache_hit",
+            household_id = %request.household_id,
+            path = %request.relative_path,
+        );
+        metrics.record_thumbnail_cache_hit();
+        return Ok(ThumbnailsGetOrCreateResponse {
+            ok: true,
+            relative_thumb_path: Some(thumb_display),
+            code: None,
+            cache_hit: Some(true),
+            width: None,
+            height: None,
+            duration_ms: None,
+        });
+    }
+
+    #[derive(Debug)]
+    enum ThumbnailBuildResult {
+        Built {
+            width: u32,
+            height: u32,
+            duration_ms: u64,
+        },
+        Unsupported,
+    }
+
+    let resolved_path = resolved.clone();
+    let thumb_path = full_thumb.clone();
+    let thumb_dir = full_thumb
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| attachments_root.clone());
+    let relative_path = request.relative_path.clone();
+    let household_id = request.household_id.clone();
+
+    let build_result = tokio::task::spawn_blocking(move || -> AppResult<ThumbnailBuildResult> {
+        use std::fs::File;
+        use std::io::{BufWriter, Read, Write};
+        use std::time::Instant;
+
+        let mut header = [0_u8; 32];
+        let mut file = File::open(&resolved_path)?;
+        let read = file.read(&mut header)?;
+        drop(file);
+
+        let kind = infer::get(&header[..read]);
+        let supported = kind
+            .map(|k| matches!(k.mime_type(), "image/jpeg" | "image/png" | "image/gif"))
+            .unwrap_or(false);
+        if !supported {
+            return Ok(ThumbnailBuildResult::Unsupported);
+        }
+
+        let start = Instant::now();
+        let image = image::open(&resolved_path).map_err(|err| {
+            tracing::error!(
+                target: "arklowdun",
+                event = "ui.pets.thumbnail_decode_failed",
+                household_id = %household_id,
+                path = %relative_path,
+                code = "THUMBNAIL/DECODE_FAILED",
+                error = %err
+            );
+            AppError::new("THUMBNAIL/DECODE_FAILED", err.to_string())
+        })?;
+        let resized = image.resize(
+            max_edge.into(),
+            max_edge.into(),
+            image::imageops::FilterType::CatmullRom,
+        );
+        let (width, height) = resized.dimensions();
+
+        std::fs::create_dir_all(&thumb_dir)?;
+
+        let mut temp = tempfile::NamedTempFile::new_in(&thumb_dir)?;
+        {
+            let mut writer = BufWriter::new(temp.as_file_mut());
+            resized
+                .write_to(&mut writer, image::ImageOutputFormat::Jpeg(85))
+                .map_err(|err| {
+                    tracing::error!(
+                        target: "arklowdun",
+                        event = "ui.pets.thumbnail_encode_failed",
+                        household_id = %household_id,
+                        path = %relative_path,
+                        code = "THUMBNAIL/ENCODE_FAILED",
+                        error = %err
+                    );
+                    AppError::new("THUMBNAIL/ENCODE_FAILED", err.to_string())
+                })?;
+            writer.flush()?;
+        }
+        if thumb_path.exists() {
+            let _ = std::fs::remove_file(&thumb_path);
+        }
+        temp.persist(&thumb_path)
+            .map_err(|err| AppError::from(err.error))?;
+
+        let duration_ms = start.elapsed().as_millis() as u64;
+        Ok(ThumbnailBuildResult::Built {
+            width,
+            height,
+            duration_ms,
+        })
+    })
+    .await
+    .map_err(|err| {
+        AppError::new(
+            "THUMBNAIL/TASK_FAILED",
+            format!("Thumbnail worker failed: {err}"),
+        )
+        .with_context("operation", "thumbnails_get_or_create")
+    })??;
+
+    match build_result {
+        ThumbnailBuildResult::Built {
+            width,
+            height,
+            duration_ms,
+        } => {
+            metrics.record_thumbnail_built();
+            tracing::info!(
+                target: "arklowdun",
+                event = "ui.pets.thumbnail_built",
+                household_id = %household_id,
+                path = %relative_path,
+                width,
+                height,
+                ms = duration_ms,
+            );
+            Ok(ThumbnailsGetOrCreateResponse {
+                ok: true,
+                relative_thumb_path: Some(thumb_display),
+                code: None,
+                cache_hit: Some(false),
+                width: Some(width),
+                height: Some(height),
+                duration_ms: Some(duration_ms),
+            })
+        }
+        ThumbnailBuildResult::Unsupported => Ok(ThumbnailsGetOrCreateResponse {
+            ok: false,
+            relative_thumb_path: None,
+            code: Some("UNSUPPORTED".to_string()),
+            cache_hit: None,
+            width: None,
+            height: None,
+            duration_ms: None,
+        }),
+    }
+}
+
+#[derive(Debug, Serialize, Clone)]
+struct PetsDiagnosticsCounters {
+    pet_attachments_total: u64,
+    pet_attachments_missing: u64,
+    pet_thumbnails_built: u64,
+    pet_thumbnails_cache_hits: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    missing_attachments: Vec<MissingAttachmentSnapshot>,
+}
+
+#[cfg(test)]
+pub use PetsDiagnosticsCounters as TestPetsDiagnosticsCounters;
+
+#[cfg_attr(test, allow(dead_code))]
+fn normalize_count(value: i64) -> u64 {
+    value.max(0) as u64
+}
+
+#[tauri::command]
+async fn pets_diagnostics_counters(
+    state: tauri::State<'_, crate::state::AppState>,
+) -> AppResult<PetsDiagnosticsCounters> {
+    let pool = state.pool_clone();
+    let attachments_total = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(1) FROM pet_medical WHERE deleted_at IS NULL AND relative_path IS NOT NULL",
+    )
+    .fetch_one(&pool)
+    .await
+    .map_err(|err| AppError::from(err).with_context("operation", "pets_diagnostics_counters"))?;
+
+    let metrics = state.pet_metrics();
+    let missing = metrics.missing_count();
+    let missing_snapshot = metrics.missing_snapshot();
+    let built = metrics.thumbnails_built();
+    let cache_hits = metrics.thumbnails_cache_hits();
+
+    Ok(PetsDiagnosticsCounters {
+        pet_attachments_total: normalize_count(attachments_total),
+        pet_attachments_missing: missing,
+        pet_thumbnails_built: built,
+        pet_thumbnails_cache_hits: cache_hits,
+        missing_attachments: missing_snapshot,
+    })
+}
+
+#[cfg(test)]
+pub use pets_diagnostics_counters as test_pets_diagnostics_counters;
+
 #[tauri::command]
 async fn attachments_migration_status(
     state: tauri::State<'_, crate::state::AppState>,
@@ -4489,6 +4862,8 @@ macro_rules! app_commands {
             shopping_items_restore,
             attachment_open,
             attachment_reveal,
+            files_exists,
+            thumbnails_get_or_create,
             attachments_migration_status,
             attachments_migrate,
             attachments_resume_migration,
@@ -4658,6 +5033,7 @@ pub fn run() {
                 vault_migration,
                 maintenance: Arc::new(AtomicBool::new(false)),
                 files_indexer: files_indexer.clone(),
+                pet_metrics: Arc::new(PetAttachmentMetrics::new()),
             });
 
             spawn_idle_index_scheduler(app.handle().clone());
@@ -4679,7 +5055,8 @@ pub fn run() {
             db_has_pet_columns,
             // Database health IPC commands consumed by the frontend shell.
             db_get_health_report,
-            db_recheck
+            db_recheck,
+            pets_diagnostics_counters
         ])
         .run(tauri::generate_context!("tauri.conf.json5"))
         .unwrap_or_else(|e| {
@@ -4905,6 +5282,7 @@ mod db_health_command_tests {
             ),
             maintenance: Arc::new(AtomicBool::new(false)),
             files_indexer: Arc::new(crate::files_indexer::FilesIndexer::new(pool.clone(), vault)),
+            pet_metrics: Arc::new(PetAttachmentMetrics::new()),
         };
 
         let app = mock_builder()
@@ -5364,6 +5742,7 @@ mod attachment_ipc_command_tests {
             vault_migration: migration,
             maintenance: Arc::new(AtomicBool::new(false)),
             files_indexer,
+            pet_metrics: Arc::new(PetAttachmentMetrics::new()),
         }
     }
 
@@ -5588,6 +5967,7 @@ mod write_guard_tests {
             ),
             maintenance: Arc::new(AtomicBool::new(false)),
             files_indexer,
+            pet_metrics: Arc::new(PetAttachmentMetrics::new()),
         };
 
         let app = mock_builder()

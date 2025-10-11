@@ -120,7 +120,13 @@ async function enqueueUpdate(
   payload: DiagnosticsSection,
 ): Promise<void> {
   const current = await loadSnapshot();
-  const nextSection = cloneSection(payload);
+  const previousSection = current[section]
+    ? cloneSection(current[section] as DiagnosticsSection)
+    : {};
+  const nextSection = {
+    ...(previousSection as DiagnosticsSection),
+    ...cloneSection(payload),
+  };
   const nextSnapshot: DiagnosticsSnapshot = {
     ...current,
     [section]: nextSection,

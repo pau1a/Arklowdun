@@ -18,6 +18,7 @@ use arklowdun_lib::{
     household_active::StoreHandle,
     ipc::guard,
     migrate,
+    pets::metrics::PetAttachmentMetrics,
     vault::Vault,
     vault_migration::VaultMigrationManager,
     AppState,
@@ -131,6 +132,7 @@ fn unhealthy_state() -> (AppState, TempDir) {
         ),
         maintenance: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         files_indexer,
+        pet_metrics: Arc::new(PetAttachmentMetrics::new()),
     };
 
     (state, dir)

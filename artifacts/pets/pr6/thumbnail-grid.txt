@@ -1,0 +1,1 @@
+PR6 evidence placeholder: Thumbnail grid screenshot removed per binary cleanup request.

@@ -449,6 +449,53 @@ const notesDeadlineRangeRequest = z
   })
   .passthrough();
 
+const petsAttachmentPathRequest = z
+  .object({
+    household_id: z.string(),
+    householdId: z.string().optional(),
+    category: z.string(),
+    relative_path: z.string(),
+    relativePath: z.string().optional(),
+  })
+  .passthrough();
+
+const petsThumbnailRequest = petsAttachmentPathRequest.extend({
+  max_edge: z.number().optional(),
+  maxEdge: z.number().optional(),
+});
+
+const filesExistsResponse = z.object({ exists: z.boolean() }).passthrough();
+
+const thumbnailsGetOrCreateResponse = z
+  .object({
+    ok: z.boolean(),
+    relative_thumb_path: z.string().nullable().optional(),
+    code: z.string().nullable().optional(),
+    cache_hit: z.boolean().optional(),
+    width: z.number().nonnegative().optional(),
+    height: z.number().nonnegative().optional(),
+    duration_ms: z.number().nonnegative().optional(),
+  })
+  .passthrough();
+
+const petsDiagnosticsCountersResponse = z
+  .object({
+    pet_attachments_total: z.number().nonnegative().optional(),
+    pet_attachments_missing: z.number().nonnegative().optional(),
+    pet_thumbnails_built: z.number().nonnegative().optional(),
+    pet_thumbnails_cache_hits: z.number().nonnegative().optional(),
+    missing_attachments: z
+      .array(
+        z.object({
+          household_id: z.string(),
+          category: z.string(),
+          relative_path: z.string(),
+        }),
+      )
+      .optional(),
+  })
+  .passthrough();
+
 const vehicleCreateData = z
   .object({
     household_id: z.string(),
@@ -479,6 +526,14 @@ export const contracts = {
   about_metadata: contract({ request: flexibleRequest, response: flexibleRequest }),
   attachment_open: contract({ request: flexibleRequest, response: z.null() }),
   attachment_reveal: contract({ request: flexibleRequest, response: z.null() }),
+  files_exists: contract({
+    request: petsAttachmentPathRequest,
+    response: filesExistsResponse,
+  }),
+  thumbnails_get_or_create: contract({
+    request: petsThumbnailRequest,
+    response: thumbnailsGetOrCreateResponse,
+  }),
   attachments_repair: contract({
     request: attachmentsRepairRequest,
     response: attachmentsRepairResponse,
@@ -529,6 +584,10 @@ export const contracts = {
   diagnostics_doc_path: contract({ request: flexibleRequest, response: z.string() }),
   diagnostics_household_stats: contract({ request: flexibleRequest, response: flexibleRequest }),
   diagnostics_summary: contract({ request: flexibleRequest, response: flexibleRequest }),
+  pets_diagnostics_counters: contract({
+    request: flexibleRequest,
+    response: petsDiagnosticsCountersResponse,
+  }),
   events_backfill_timezone: contract({ request: flexibleRequest, response: flexibleRequest }),
   events_backfill_timezone_cancel: contract({ request: flexibleRequest, response: z.null() }),
   events_backfill_timezone_status: contract({ request: flexibleRequest, response: flexibleRequest }),

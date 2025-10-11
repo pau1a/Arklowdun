@@ -6,9 +6,9 @@ use std::time::Instant;
 use chrono::{SecondsFormat, Utc};
 use futures::TryStreamExt;
 use serde::Serialize;
-use serde_json::Value;
 #[cfg(test)]
 use serde_json::json;
+use serde_json::Value;
 use sqlx::SqlitePool;
 use tempfile::TempDir;
 use tracing::{error, info, warn};

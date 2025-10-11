@@ -1,0 +1,1 @@
+PR6 evidence placeholder: Guard toasts screenshot removed per binary cleanup request.

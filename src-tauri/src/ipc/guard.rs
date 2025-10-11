@@ -106,6 +106,7 @@ mod tests {
     use crate::events_tz_backfill::BackfillCoordinator;
     use crate::files_indexer::FilesIndexer;
     use crate::household_active::StoreHandle;
+    use crate::pets::metrics::PetAttachmentMetrics;
     use crate::vault::Vault;
     use crate::vault_migration::VaultMigrationManager;
     use sqlx::sqlite::SqlitePoolOptions;
@@ -143,6 +144,7 @@ mod tests {
             ),
             maintenance: Arc::new(AtomicBool::new(false)),
             files_indexer,
+            pet_metrics: Arc::new(PetAttachmentMetrics::new()),
         }
     }
 

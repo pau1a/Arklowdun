@@ -224,18 +224,48 @@ Rendered markup hierarchy (simplified):
 
 * Required fields: **Date** and **Description**. Submit button is disabled until both are populated.
 * Optional fields: **Reminder** (validated to be on/after the visit date) and **Attachment path** (sanitised via `sanitizeRelativePath()` before persistence).
+* The attachment input is normalised to NFC, trimmed, stripped of leading `/`, and rejected if it contains traversal (`./`, `../`), reserved names, or exceeds the max length enforced by the vault guard. Inline helper text surfaces the specific sanitiser error before any IPC call is attempted.
 * Submissions call `petMedicalRepo.create()` with `category = "pet_medical"`, then bump `pets.updated_at` through `petsRepo.update()`.
 * Success resets the form, focuses the date input, shows a success toast, emits `ui.pets.medical_create_success`, and re-renders the list with the new record optimistically prepended.
-* Failures surface mapped error toasts (invalid household/category/path/file) and log `ui.pets.medical_create_fail { code }` for diagnostics.
+* Failures surface mapped error toasts (invalid household/category/path/file) and log `ui.pets.medical_create_fail { code }` for diagnostics. Vault guard rejections use the friendly copy listed in §5.5.3.
 
 ### 5.5 Medical history list
 
 * Records load newest-first via `petMedicalRepo.list({ orderBy: "date DESC, created_at DESC, id" })` scoped to the active pet.
 * Each card includes the visit date, optional reminder chip, description, and action buttons.
-* Attachments:
-  * “Open” and “Reveal in Finder/Explorer” call `openAttachment("pet_medical", id)` / `revealAttachment("pet_medical", id)`.
-  * Outcomes are logged through `ui.pets.attach_open` / `ui.pets.attach_reveal` with `{ path, result }`.
 * Delete button disables during in-flight calls, invokes `petMedicalRepo.delete()`, refreshes the local list, emits success/failure logs, and mirrors the list back to the parent via `onChange()`.
+
+#### 5.5.1 Attachment preview surface
+
+* Each card renders a `160×160` reserved media box that lazy-loads a thumbnail using an `IntersectionObserver` once the card enters the viewport window.
+* Thumbnails are requested through `thumbnails_get_or_create({ root_key, relative_path, max_edge: 160 })`. Successful responses resolve to a cached JPEG (`$APPDATA/attachments/.thumbnails/<sha1>.jpg`) that the UI displays via an `<img>` tag with aspect-fit styling.
+* When the IPC call returns `{ ok: false, code: 'UNSUPPORTED' }`, the card shows the generic file icon instead of an image preview. Cache hits emit `ui.pets.thumbnail_cache_hit`; fresh renders log `ui.pets.thumbnail_built` with dimensions and build time.
+* The lazy loader batches requests per animation frame to avoid layout thrash; cards outside the viewport never trigger thumbnail IPC work.
+
+#### 5.5.2 Attachment actions & existence checks
+
+* “Open” and “Reveal in Finder/Explorer” continue to call `openAttachment("pet_medical", id)` / `revealAttachment("pet_medical", id)`. Outcomes are logged through `ui.pets.attach_open` / `ui.pets.attach_reveal` with `{ path, result }`.
+* On render, each card issues a lightweight `files_exists({ root_key, relative_path })` probe. A missing file toggles the card into the broken state: the thumbnail area shows a warning banner (“File not found.”) and a primary **Fix path** button.
+* Broken cards emit `ui.pets.attachment_missing { medical_id, path }` exactly once per session so diagnostics capture how many attachments need repair.
+
+#### 5.5.3 Fix path flow & messaging
+
+* Clicking **Fix path** opens the vault-scoped file dialog seeded to `$APPDATA/attachments/`. The renderer re-runs `sanitizeRelativePath()` on the chosen file before calling `petMedicalRepo.update({ id, relative_path })`.
+* Successful updates:
+  * log `ui.pets.attachment_fix_opened` when the dialog appears and `ui.pets.attachment_fixed` once the IPC write resolves;
+  * immediately patch the in-memory record and re-render only the affected card (the parent list and other cards keep their DOM identity);
+  * invalidate the cached thumbnail (remove the local cache entry) and trigger a fresh `thumbnails_get_or_create` fetch.
+* Guard failures bubble an `AppError` with codes mapped to friendly copy via `presentFsError`:
+
+  | Code                     | Toast copy                                                                  |
+  | ------------------------ | ---------------------------------------------------------------------------- |
+  | `PATH_OUT_OF_VAULT`      | “That file isn’t inside the app’s attachments folder.”                       |
+  | `PATH_SYMLINK_REJECTED`  | “Links aren’t allowed. Choose the real file.”                                |
+  | `FILENAME_INVALID`       | “That name can’t be used. Try letters, numbers, dashes or underscores.”      |
+  | `ROOT_KEY_NOT_SUPPORTED` | “This location isn’t allowed for Pets documents.”                            |
+  | `NAME_TOO_LONG`          | “That name is too long for the filesystem.”                                  |
+
+* The inline helper text near the attachment input mirrors these messages when sanitiser validation fails before IPC dispatch.
 
 ### 5.6 Focus & feedback
 

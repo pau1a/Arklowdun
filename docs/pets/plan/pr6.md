@@ -161,7 +161,19 @@ Add counters to pets section:
 
 ---
 
-## 6) Verification workflow
+## 6) Delivered features
+
+| Area        | Delivered outcome                                                                                 | Evidence |
+| ----------- | ------------------------------------------------------------------------------------------------- | -------- |
+| IPC         | `files_exists`, `thumbnails_get_or_create`, and `pets_diagnostics_counters` registered, instrumented, and covered by integration tests. | [src-tauri/src/lib.rs](../../src-tauri/src/lib.rs), [src-tauri/tests/pets_vault_guards.rs](../../src-tauri/tests/pets_vault_guards.rs) |
+| Renderer    | Medical cards render thumbnails lazily, surface missing banners with Fix Path repairs, and update diagnostics without remounting the list. | [src/ui/pets/PetDetailView.ts](../../src/ui/pets/PetDetailView.ts) |
+| Observability | UI logs for missing attachments, repair starts/completions, thumbnail cache hits/builds, and vault guard rejects captured in tests. | [tests/ui/pet-detail-view.test.ts](../../tests/ui/pet-detail-view.test.ts) |
+| Diagnostics | Attachment counters and missing snapshots exported through `pets_diagnostics_counters` and merged into diagnostics bundles. | [src-tauri/src/lib.rs](../../src-tauri/src/lib.rs) |
+| Evidence    | Screenshots, log snippets, and diagnostics JSON stored under `artifacts/pets/pr6/` for review. | [artifacts/pets/pr6](../../artifacts/pets/pr6) |
+
+---
+
+## 7) Verification workflow
 
 1. Open a pet with a known missing `relative_path` → card shows "File not found. Fix path."
 2. Click **Fix path**, pick a valid file within `$APPDATA/attachments/` → card updates; thumbnail appears; no view remount.
@@ -173,7 +185,7 @@ Add counters to pets section:
 
 ---
 
-## 7) Risks & mitigations
+## 8) Risks & mitigations
 
 | Risk                            | Mitigation                                                   |
 | ------------------------------- | ------------------------------------------------------------ |
@@ -185,7 +197,7 @@ Add counters to pets section:
 
 ---
 
-## 8) Documentation updates required
+## 9) Documentation updates required
 
 | File                          | Update                                                          |
 | ----------------------------- | --------------------------------------------------------------- |
@@ -197,7 +209,7 @@ Add counters to pets section:
 
 ---
 
-## 9) Sign-off
+## 10) Sign-off
 
 | Role          | Name              | Responsibility                                       |
 | ------------- | ----------------- | ---------------------------------------------------- |

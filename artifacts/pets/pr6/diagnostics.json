@@ -1,0 +1,15 @@
+{
+  "pets": {
+    "pet_attachments_total": 12,
+    "pet_attachments_missing": 1,
+    "pet_thumbnails_built": 9,
+    "pet_thumbnails_cache_hits": 14,
+    "missing_attachments": [
+      {
+        "household_id": "hh-demo",
+        "category": "pet_medical",
+        "relative_path": "immunizations/2019.pdf"
+      }
+    ]
+  }
+}

@@ -26,6 +26,8 @@ user-facing copy.【F:src/lib/ipc/contracts/pets.ts†L1-L158】【F:src/repos.t
 |               | `pet_medical_update`| Patch mutable medical fields with category enforcement.【F:src/lib/ipc/contracts/pets.ts†L151-L167】 |
 |               | `pet_medical_delete`| Soft delete a medical record (including attachment metadata).【F:src/repos.ts†L116-L141】 |
 |               | `pet_medical_restore`| Restore a soft-deleted medical record.【F:src/repos.ts†L116-L141】 |
+| Attachments   | `files_exists`     | Lightweight probe to confirm an attachment is present under the requested vault root. |
+|               | `thumbnails_get_or_create` | Generate or reuse a cached thumbnail for a vault-backed attachment. |
 
 All commands are registered through `gen_domain_cmds!` in the Tauri backend so they participate in
 shared logging and attachment guards.【F:src-tauri/src/lib.rs†L642-L735】
@@ -142,6 +144,46 @@ scope.
 Updates, deletes, and restores for medical records mirror the pets variants: they accept
 `householdId` + `id` and resolve to `null` on success.
 
+### 2.5 `files_exists`
+```jsonc
+// Request
+{
+  "root_key": "attachments",
+  "relative_path": "pets/skye/booster.jpg"
+}
+
+// Response
+{
+  "exists": true
+}
+```
+
+Requests are rejected when the caller attempts traversal (`./`, `../`), reserved filenames, or out-of-vault paths. The renderer still runs `sanitizeRelativePath()` before dispatch so invalid strings are caught inline, but the backend vault guard remains authoritative.
+
+### 2.6 `thumbnails_get_or_create`
+```jsonc
+// Request
+{
+  "root_key": "attachments",
+  "relative_path": "pets/skye/booster.jpg",
+  "max_edge": 160
+}
+
+// Response (success)
+{
+  "ok": true,
+  "relative_thumb_path": "attachments/.thumbnails/1f85c8b0-160.jpg"
+}
+
+// Response (unsupported file)
+{
+  "ok": false,
+  "code": "UNSUPPORTED"
+}
+```
+
+When the source file’s modification time exceeds the cached thumbnail, the backend rebuilds the JPEG before returning. The command emits `ui.pets.thumbnail_built` / `_cache_hit` events so diagnostics can distinguish cold renders from cache hits, and the renderer invalidates stale cache entries after a successful Fix Path flow.
+
 ---
 
 ## 3. Error normalisation
@@ -149,13 +191,17 @@ Updates, deletes, and restores for medical records mirror the pets variants: the
 Common persistence errors are mapped to explicit UI copy in the IPC caller so renderer code can
 surface friendly messages without inspecting backend payloads.【F:src/lib/ipc/call.ts†L9-L108】
 
-| Code                | Message                                 |
-| ------------------- | --------------------------------------- |
-| `INVALID_HOUSEHOLD` | “No active household selected.”         |
-| `SQLX/UNIQUE`       | “Duplicate entry detected.”             |
-| `SQLX/NOTNULL`      | “Required field missing.”               |
-| `PATH_OUT_OF_VAULT` | “File path outside vault boundary.”     |
-| `APP/UNKNOWN`       | “Unexpected error occurred.”            |
+| Code                    | Message                                                                      |
+| ----------------------- | ---------------------------------------------------------------------------- |
+| `INVALID_HOUSEHOLD`     | “No active household selected.”                                              |
+| `SQLX/UNIQUE`           | “Duplicate entry detected.”                                                  |
+| `SQLX/NOTNULL`          | “Required field missing.”                                                    |
+| `PATH_OUT_OF_VAULT`     | “That file isn’t inside the app’s attachments folder.”                       |
+| `PATH_SYMLINK_REJECTED` | “Links aren’t allowed. Choose the real file.”                                |
+| `FILENAME_INVALID`      | “That name can’t be used. Try letters, numbers, dashes or underscores.”      |
+| `ROOT_KEY_NOT_SUPPORTED`| “This location isn’t allowed for Pets documents.”                            |
+| `NAME_TOO_LONG`         | “That name is too long for the filesystem.”                                  |
+| `APP/UNKNOWN`           | “Unexpected error occurred.”                                                 |
 
 The behaviour is verified by `tests/normalize-error.test.ts` to guard against regressions in the
 error taxonomy.【F:tests/normalize-error.test.ts†L1-L53】
@@ -177,8 +223,10 @@ error taxonomy.【F:tests/normalize-error.test.ts†L1-L53】
 
 `petsRepo` and `petMedicalRepo` now coerce payloads through the new schemas before dispatch,
 ensure no-op updates short-circuit, and clear the search cache after pets mutations so the
-command palette remains fresh.【F:src/repos.ts†L33-L141】 Typed round-trips keep search and
-reminder flows unchanged while guaranteeing that invalid payloads are rejected at the call site.
+command palette remains fresh.【F:src/repos.ts†L33-L141】 Attachment paths are normalised via
+`sanitizeRelativePath()` prior to every `pet_medical_create/update` call, mirroring the
+backend guard logic so user-facing errors can surface instantly while the vault remains
+authoritative on traversal, symlinks, and reserved-name enforcement.
 
 ---
 
