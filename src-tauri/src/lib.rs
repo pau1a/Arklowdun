@@ -2,7 +2,7 @@
 use anyhow::{Context, Result as AnyResult};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use image::codecs::jpeg::JpegEncoder;
-use image::{GenericImageView, ImageEncoder};
+use image::GenericImageView;
 use once_cell::sync::OnceCell;
 use paste::paste;
 use semver::Version;
@@ -3851,7 +3851,6 @@ pub struct FilesExistsResponse {
 }
 
 #[cfg(test)]
-pub use files_exists as __cmd__test_files_exists;
 
 #[tauri::command]
 pub async fn files_exists(
@@ -3920,7 +3919,6 @@ pub struct ThumbnailsGetOrCreateResponse {
 }
 
 #[cfg(test)]
-pub use thumbnails_get_or_create as __cmd__test_thumbnails_get_or_create;
 
 #[tauri::command]
 pub async fn thumbnails_get_or_create(
@@ -4193,7 +4191,6 @@ pub async fn pets_diagnostics_counters(
 }
 
 #[cfg(test)]
-pub use pets_diagnostics_counters as __cmd__test_pets_diagnostics_counters;
 
 #[tauri::command]
 async fn attachments_migration_status(
