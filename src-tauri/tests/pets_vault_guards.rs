@@ -188,7 +188,8 @@ async fn thumbnails_build_cache_and_regenerate() -> Result<()> {
     let first_logs = read_buffer(&buffer);
     assert!(
         first_logs.contains("ui.pets.thumbnail_built"),
-        "expected thumbnail_built log, got {first_logs}";
+        "expected thumbnail_built log, got {}",
+        first_logs
     );
     clear_buffer(&buffer);
 
@@ -198,7 +199,8 @@ async fn thumbnails_build_cache_and_regenerate() -> Result<()> {
     let cache_logs = read_buffer(&buffer);
     assert!(
         cache_logs.contains("ui.pets.thumbnail_cache_hit"),
-        "expected thumbnail_cache_hit log, got {cache_logs}";
+        "expected thumbnail_cache_hit log, got {}",
+        cache_logs
     );
     clear_buffer(&buffer);
 
@@ -211,7 +213,8 @@ async fn thumbnails_build_cache_and_regenerate() -> Result<()> {
     let rebuild_logs = read_buffer(&buffer);
     assert!(
         rebuild_logs.contains("ui.pets.thumbnail_built"),
-        "expected thumbnail_built after source change, got {rebuild_logs}";
+        "expected thumbnail_built after source change, got {}",
+        rebuild_logs
     );
 
     let relative = rebuilt.relative_thumb_path.expect("thumbnail path present");
