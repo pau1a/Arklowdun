@@ -21,6 +21,8 @@ use arklowdun_lib::{
     ThumbnailsGetOrCreateRequest,
 };
 
+use tracing_subscriber::fmt::writer::BoxMakeWriter;
+
 fn make_household() -> &'static str {
     "hh-pets"
 }
@@ -64,26 +66,12 @@ fn build_app(state: AppState) -> App<tauri::test::MockRuntime> {
         .expect("build tauri app")
 }
 
-fn make_writer(buffer: Arc<Mutex<Vec<u8>>>) -> impl tracing_subscriber::fmt::MakeWriter<'static> {
-    struct BufferWriter {
-        buf: Arc<Mutex<Vec<u8>>>,
-    }
-
-    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for BufferWriter {
-        type Writer = BufferGuard;
-
-        fn make_writer(&'a self) -> Self::Writer {
-            BufferGuard {
-                buf: self.buf.clone(),
-            }
-        }
-    }
-
+fn make_writer(buffer: Arc<Mutex<Vec<u8>>>) -> BoxMakeWriter {
     struct BufferGuard {
         buf: Arc<Mutex<Vec<u8>>>,
     }
 
-    impl std::io::Write for BufferGuard {
+    impl Write for BufferGuard {
         fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
             let mut guard = self.buf.lock().expect("buffer poisoned");
             guard.extend_from_slice(data);
@@ -95,7 +83,9 @@ fn make_writer(buffer: Arc<Mutex<Vec<u8>>>) -> impl tracing_subscriber::fmt::Mak
         }
     }
 
-    BufferWriter { buf: buffer }
+    BoxMakeWriter::new(move || BufferGuard {
+        buf: buffer.clone(),
+    })
 }
 
 fn read_buffer(buffer: &Arc<Mutex<Vec<u8>>>) -> String {
