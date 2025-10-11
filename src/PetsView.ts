@@ -1,5 +1,5 @@
 import type { Pet } from "./models";
-import { PetDetailView } from "./PetDetailView";
+import { PetDetailView } from "./ui/pets/PetDetailView";
 import { getHouseholdIdForCalls } from "./db/household";
 import { petsRepo } from "./repos";
 import { reminderScheduler } from "@features/pets/reminderScheduler";

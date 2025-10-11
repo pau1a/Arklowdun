@@ -84,29 +84,30 @@ If Python redaction fails or is unavailable, collectors revert to raw output und
 
 ### 5.1 UI logs
 
-`src/PetsView.ts` and `src/PetDetailView.ts` emit structured logs through the shared `logUI` helper.
+`src/features/pets/PetsPage.ts` and `src/ui/pets/PetDetailView.ts` emit structured logs through the shared `logUI` helper.
 
-| Event                     | Level | Fields                                |
-| ------------------------- | ----- | -------------------------------------- |
-| `perf.pets.window_render` | info  | rows_rendered, from_idx, to_idx        |
-| `pets.medical_added`      | info  | pet_id, description, date              |
-| `pets.medical_deleted`    | warn  | pet_id, medical_id                     |
-| `pets.reminder_scheduled` | info  | pet_id, delay_ms                       |
-| `pets.reminder_fired`     | info  | pet_id, reminder_at                    |
-`src/features/pets/reminderScheduler.ts` together with `PetsView`/`PetDetailView` emit structured logs through the shared
-`logUI` helper.
+| Event                            | Level      | Fields                                               |
+| -------------------------------- | ---------- | ----------------------------------------------------- |
+| `perf.pets.window_render`        | info       | rows_rendered, from_idx, to_idx                       |
+| `ui.pets.detail_opened`          | info       | id, household_id                                      |
+| `ui.pets.medical_create_success` | info       | id, pet_id, household_id                              |
+| `ui.pets.medical_create_fail`    | warn       | pet_id, household_id, code                            |
+| `ui.pets.medical_delete_success` | info       | id, pet_id, household_id                              |
+| `ui.pets.medical_delete_fail`    | warn       | id, pet_id, household_id, code                        |
+| `ui.pets.attach_open`            | info / warn| path, result, record_id, pet_id, household_id         |
+| `ui.pets.attach_reveal`          | info / warn| path, result, record_id, pet_id, household_id         |
+
+`src/features/pets/reminderScheduler.ts` together with the Pets shell emit reminder telemetry through the same helper.
 
 | Event                               | Level | Fields                                                                    |
 | ----------------------------------- | ----- | -------------------------------------------------------------------------- |
-| `pets.list_loaded`                  | info  | count, duration_ms                                                        |
-| `pets.pet_created`                  | info  | id, name, type                                                            |
-| `pets.medical_added`                | info  | pet_id, description, date                                                 |
-| `pets.medical_deleted`              | warn  | pet_id, medical_id                                                        |
 | `ui.pets.reminder_scheduled`        | info  | key, pet_id, medical_id, reminder_at, delay_ms, household_id               |
+| `ui.pets.reminder_chained`          | debug | key, remaining_ms, household_id                                           |
 | `ui.pets.reminder_fired`            | info  | key, pet_id, medical_id, reminder_at, elapsed_ms, household_id            |
 | `ui.pets.reminder_canceled`         | info  | key, household_id                                                         |
-| `ui.pets.reminder_catchup`          | info  | key, pet_id, medical_id, household_id                                     |
+| `ui.pets.reminder_catchup`          | info  | key, pet_id, medical_id, reminder_at, household_id                         |
 | `ui.pets.reminder_permission_denied`| warn  | household_id                                                              |
+| `ui.pets.reminder_invalid`          | warn  | key, reason, reminder_at, household_id                                    |
 
 These entries appear in the rotating log file (`~/Library/Logs/Arklowdun/arklowdun.log`) as structured JSON objects.
 
