@@ -19,6 +19,12 @@ type Nullable<T> = T | null | undefined;
 
 const PET_MEDICAL_CATEGORY = "pet_medical" as const;
 
+export interface PetDetailController {
+  focusMedicalDate(): void;
+  submitMedicalForm(): boolean;
+  handleEscape(): void;
+}
+
 const ERROR_MESSAGES: Record<string, string> = {
   INVALID_HOUSEHOLD: "No active household selected. Refresh and try again.",
   PATH_OUT_OF_VAULT: "That file isn’t inside the app’s attachments folder.",
@@ -318,7 +324,7 @@ export async function PetDetailView(
   pet: Pet,
   onChange: () => Promise<void> | void,
   onBack: () => void,
-): Promise<void> {
+): Promise<PetDetailController> {
   const skipAttachmentProbe =
     typeof window !== "undefined" &&
     Boolean((window as unknown as { __ARKLOWDUN_SKIP_ATTACHMENT_PROBE__?: boolean }).__ARKLOWDUN_SKIP_ATTACHMENT_PROBE__);
@@ -1206,4 +1212,22 @@ export async function PetDetailView(
   updateSubmitState();
   dateInput.value = toDateInputValue(Date.now());
   updateSubmitState();
+
+  return {
+    focusMedicalDate() {
+      dateInput.focus();
+    },
+    submitMedicalForm() {
+      const isValid = form.checkValidity();
+      if (!isValid) {
+        form.reportValidity();
+        return false;
+      }
+      form.requestSubmit();
+      return true;
+    },
+    handleEscape() {
+      onBack();
+    },
+  };
 }

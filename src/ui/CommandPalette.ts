@@ -2,8 +2,15 @@ import type { SearchResult } from "../bindings/SearchResult";
 import { showError } from "./errors";
 import { highlight } from "../utils/highlight";
 import { formatShortcut, registerOverlay } from "./keys";
+import { logUI } from "@lib/uiLog";
+import { incrementDiagnosticsCounter } from "../diagnostics/runtime";
+import {
+  getPetsListController,
+  requestPetsFocus,
+} from "@features/pets/pageController";
 
 interface PaletteItem {
+  id?: string;
   kind: string;
   title: string;
   subtitle?: string;
@@ -41,6 +48,81 @@ export function initCommandPalette(): CommandPaletteController | null {
   let releaseOverlay: (() => void) | null = null;
   let openState = false;
   let restoreOverflow = "";
+
+  type StaticCommandDefinition = PaletteItem & { keywords: string[] };
+
+  function markPaletteInvocation(id: string, logEvent: string) {
+    incrementDiagnosticsCounter("pets", "palette_invocations");
+    logUI("INFO", logEvent, { id });
+  }
+
+  function isPetsRoute(): boolean {
+    if (typeof window === "undefined") return false;
+    const hash = window.location?.hash ?? "";
+    return hash.startsWith("#/pets");
+  }
+
+  function goToPets(anchor: "focus-search" | "focus-create") {
+    if (typeof window === "undefined") return;
+    window.location.hash = `#/pets#${anchor}`;
+  }
+
+  function runOpenPets() {
+    markPaletteInvocation("cmd.pets.open", "ui.pets.palette_open");
+    const controller = getPetsListController();
+    if (controller && isPetsRoute()) {
+      controller.focusSearch();
+      return;
+    }
+    requestPetsFocus("search");
+    if (!isPetsRoute()) {
+      goToPets("focus-search");
+    }
+  }
+
+  function runNewPet() {
+    markPaletteInvocation("cmd.pets.new", "ui.pets.palette_new");
+    const controller = getPetsListController();
+    if (controller && isPetsRoute()) {
+      controller.focusCreate();
+      return;
+    }
+    requestPetsFocus("create");
+    if (!isPetsRoute()) {
+      goToPets("focus-create");
+    }
+  }
+
+  const staticCommands: StaticCommandDefinition[] = [
+    {
+      id: "cmd.pets.open",
+      kind: "Command",
+      title: "Open: Pets",
+      subtitle: "Jump to the Pets list",
+      icon: "fa-solid fa-paw",
+      action: runOpenPets,
+      keywords: ["pets", "pet", "animals", "open pets", "list pets"],
+    },
+    {
+      id: "cmd.pets.new",
+      kind: "Action",
+      title: "Pets: New Pet…",
+      subtitle: "Start a new pet entry",
+      icon: "fa-solid fa-plus",
+      action: runNewPet,
+      keywords: ["new pet", "add pet", "create pet", "pets new"],
+    },
+  ];
+
+  function getStaticMatches(query: string): PaletteItem[] {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) return [];
+    return staticCommands.filter((command) =>
+      command.keywords.some((keyword) =>
+        keyword.includes(normalized) || normalized.includes(keyword),
+      ),
+    );
+  }
 
   function announce(text: string) {
     if (live) live.textContent = text;
@@ -159,6 +241,14 @@ export function initCommandPalette(): CommandPaletteController | null {
     list.innerHTML = "";
     activeIndex = -1;
     input.removeAttribute("aria-activedescendant");
+    if (q.length >= MINLEN) {
+      const staticItems = getStaticMatches(q);
+      if (staticItems.length > 0) {
+        render(staticItems, q);
+        input.setAttribute("aria-expanded", "true");
+        input.removeAttribute("aria-busy");
+      }
+    }
     if (!q || q.length < MINLEN) {
       input.setAttribute("aria-expanded", "false");
       announce("");
@@ -179,18 +269,28 @@ export function initCommandPalette(): CommandPaletteController | null {
       const search = await resolveSearch();
       const results = await search(q, 50, 0);
       if (my !== reqId) return;
-      if (results.length === 0) {
+      const staticItems = getStaticMatches(q);
+      const dynamicItems = results.map(mapResult);
+      const items = [...staticItems, ...dynamicItems];
+      if (items.length === 0) {
         showStatus("No results", "empty");
         announce(`No results for ${q}`);
         return;
       }
-      const items: PaletteItem[] = results.map(mapResult);
       render(items, q);
-      announce(`${results.length} results for ${q}`);
+      announce(`${items.length} results for ${q}`);
     } catch (err) {
       if (my !== reqId) return;
-      showStatus("Error", "error");
-      announce("Search error");
+      const staticItems = getStaticMatches(q);
+      if (staticItems.length > 0) {
+        render(staticItems, q);
+        input.setAttribute("aria-expanded", "true");
+        input.removeAttribute("aria-busy");
+        announce(`${staticItems.length} results for ${q}`);
+      } else {
+        showStatus("Error", "error");
+        announce("Search error");
+      }
       showError(err);
     }
   }
