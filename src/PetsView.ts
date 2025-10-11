@@ -190,11 +190,20 @@ export async function PetsView(container: HTMLElement) {
     });
 
     try {
-      await Promise.all(
-        changed.map((pet) =>
-          petsRepo.update(hh, pet.id, { position: pet.position } as Partial<Pet>),
-        ),
-      );
+      const TEMP_OFFSET = pets.length + 1000;
+
+      for (let i = 0; i < changed.length; i += 1) {
+        const pet = changed[i]!;
+        await petsRepo.update(
+          hh,
+          pet.id,
+          { position: TEMP_OFFSET + i } as Partial<Pet>,
+        );
+      }
+
+      for (const pet of changed) {
+        await petsRepo.update(hh, pet.id, { position: pet.position } as Partial<Pet>);
+      }
       logUI("INFO", "ui.pets.order_persist", {
         changed: changed.length,
         household_id: hh,
