@@ -17,7 +17,7 @@ user-facing copy.【F:src/lib/ipc/contracts/pets.ts†L1-L158】【F:src/repos.t
 | Pets          | `pets_list`        | List active pets for a household ordered by `position, created_at, id`.【F:src/lib/ipc/contracts/pets.ts†L17-L60】 |
 |               | `pets_get`         | Fetch a single pet by ID; household scope is optional for legacy callers.【F:src/lib/ipc/contracts/pets.ts†L62-L66】 |
 |               | `pets_create`      | Insert a pet row with generated identifiers and timestamps.【F:src/lib/ipc/contracts/pets.ts†L68-L85】 |
-|               | `pets_update`      | Patch mutable pet fields; rejects empty updates.【F:src/lib/ipc/contracts/pets.ts†L87-L98】 |
+|               | `pets_update`      | Patch mutable pet fields (including `image_path`); rejects empty updates.【F:src/lib/ipc/contracts/pets.ts†L87-L109】【F:src/repos.ts†L119-L137】 |
 |               | `pets_delete`      | Soft delete a pet and renumber siblings via the shared command helpers.【F:src/repos.ts†L71-L114】【F:src-tauri/src/lib.rs†L657-L735】 |
 |               | `pets_restore`     | Clear `deleted_at`, bump position, and renumber siblings.【F:src/repos.ts†L71-L114】 |
 | Pet Medical   | `pet_medical_list` | List active medical records for a household with default ordering `date DESC, created_at DESC, id`.【F:src/lib/ipc/contracts/pets.ts†L113-L126】 |
@@ -59,6 +59,7 @@ Below are the canonical shapes; optional fields may be omitted when not relevant
     "name": "Skye",
     "type": "Dog",
     "position": 0,
+    "image_path": null,
     "created_at": 1735771800000,
     "updated_at": 1735771800000,
     "deleted_at": null
@@ -85,6 +86,7 @@ Below are the canonical shapes; optional fields may be omitted when not relevant
   "name": "Skye",
   "type": "Dog",
   "position": 0,
+  "image_path": null,
   "created_at": 1735771800123,
   "updated_at": 1735771800123,
   "deleted_at": null
@@ -99,15 +101,17 @@ Below are the canonical shapes; optional fields may be omitted when not relevant
   "householdId": "hh-1",
   "data": {
     "name": "Skye",
-    "updated_at": 1735775400456
+    "updated_at": 1735775400456,
+    "image_path": "photos/whiskey.jpg"
   }
 }
 
 // Response
 null
 ```
-`pets_delete` and `pets_restore` share the same response shape and require `id` plus the household
-scope.
+`pets_update` is also wrapped by `petsUpdateImage(householdId, id, relativePath)` so UI flows can change a photo without touching other fields.【F:src/repos.ts†L119-L137】
+
+`pets_delete` and `pets_restore` share the same response shape and require `id` plus the household scope.
 
 ### 2.4 `pet_medical_create`
 ```jsonc

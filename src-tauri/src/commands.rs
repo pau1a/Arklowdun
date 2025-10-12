@@ -822,6 +822,20 @@ fn prepare_attachment_create(
     data: &mut Map<String, Value>,
     guard: Option<&AttachmentMutationGuard>,
 ) -> AppResult<()> {
+    if table == "pets" {
+        if let Some(guard) = guard {
+            match guard.normalized_relative_path() {
+                Some(value) => {
+                    data.insert("image_path".into(), Value::String(value.to_string()));
+                }
+                None => {
+                    data.insert("image_path".into(), Value::Null);
+                }
+            }
+        }
+        return Ok(());
+    }
+
     if !ATTACHMENT_TABLES.contains(&table) {
         if data.contains_key("root_key") {
             data.insert("root_key".into(), Value::Null);
@@ -882,6 +896,27 @@ async fn prepare_attachment_update(
     household_id: Option<&str>,
     guard: Option<&AttachmentMutationGuard>,
 ) -> AppResult<()> {
+    if table == "pets" {
+        if let Some(guard) = guard {
+            if data.contains_key("image_path") {
+                match guard.normalized_relative_path() {
+                    Some(value) => {
+                        data.insert("image_path".into(), Value::String(value.to_string()));
+                    }
+                    None => {
+                        data.insert("image_path".into(), Value::Null);
+                    }
+                }
+            }
+        } else if data.contains_key("image_path") {
+            return Err(AppError::new(
+                "VAULT/UNAVAILABLE",
+                "Vault resolver is not available.",
+            ));
+        }
+        return Ok(());
+    }
+
     if !ATTACHMENT_TABLES.contains(&table) {
         if data.contains_key("root_key") {
             data.insert("root_key".into(), Value::Null);
@@ -1210,7 +1245,7 @@ pub async fn delete_command(
         None
     };
 
-    if ATTACHMENT_TABLES.contains(&table) {
+    if ATTACHMENT_TABLES.contains(&table) || table == "pets" {
         if let Some(guard) = attachment {
             if let Some(resolved) = guard.resolved_path().map(Path::to_path_buf) {
                 if let Err(err) = fs::remove_file(&resolved).await {

@@ -15,6 +15,7 @@ This checklist tracks verification evidence for each Pets rollout phase. Update 
 | PR7 | Household sharing                     | ☐ Pending  | [pr7.md](./pr7.md) |
 | PR8 | Vault sync                             | ☐ Pending  | [pr8.md](./pr8.md) |
 | PR9 | Offline cache hardening               | ☐ Pending  | [pr9.md](./pr9.md) |
+| PR9.5 | Pet images & vault integration      | ☐ Pending  | [pr9_5.md](./pr9_5.md) |
 | PR10 | Rollout gating & guardrails          | ☐ Pending  | [pr10.md](./pr10.md) |
 
 ## PR6 – Attachments & Thumbnails

@@ -194,6 +194,21 @@ export const petsRepo = {
   },
 };
 
+export async function petsUpdateImage(
+  householdId: string,
+  id: string,
+  relativePath: string | null,
+): Promise<void> {
+  const payload = PetsUpdateRequestSchema.parse({
+    id,
+    householdId,
+    household_id: householdId,
+    data: { image_path: relativePath },
+  });
+  await call("pets_update", payload);
+  clearSearchCache();
+}
+
 export const petMedicalRepo = {
   async list(opts: ListOpts): Promise<PetMedicalRecord[]> {
     const payload = PetMedicalListRequestSchema.parse({

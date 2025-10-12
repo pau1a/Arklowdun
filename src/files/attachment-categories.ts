@@ -6,6 +6,7 @@ export const ATTACHMENT_CATEGORIES = [
   "property_documents",
   "inventory_items",
   "pet_medical",
+  "pet_image",
   "vehicles",
   "vehicle_maintenance",
   "notes",
@@ -13,6 +14,8 @@ export const ATTACHMENT_CATEGORIES = [
 ] as const satisfies readonly BackendAttachmentCategory[];
 
 export type AttachmentCategory = (typeof ATTACHMENT_CATEGORIES)[number];
+
+export const PET_IMAGE_CATEGORY = "pet_image" as const;
 
 type EnsureParity = BackendAttachmentCategory extends AttachmentCategory
   ? AttachmentCategory extends BackendAttachmentCategory

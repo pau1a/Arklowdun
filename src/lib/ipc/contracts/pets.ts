@@ -50,6 +50,7 @@ export const PetRecordSchema = z
     name: z.string(),
     type: z.string(),
     household_id: z.string(),
+    image_path: z.string().nullable().optional(),
     created_at: z.number(),
     updated_at: z.number(),
     deleted_at: optionalNullableNumber,
@@ -73,6 +74,7 @@ const petCreateDataSchema = z
     household_id: z.string(),
     name: z.string().min(1),
     type: z.string().min(1),
+    image_path: z.string().nullable().optional(),
     position: z.number().int().nonnegative().optional(),
   })
   .passthrough();

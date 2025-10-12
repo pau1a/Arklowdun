@@ -357,6 +357,36 @@ pub async fn move_file<R: tauri::Runtime>(
                 updated_rows += result.rows_affected() as u32;
             }
 
+            if request.to_category == AttachmentCategory::PetImage {
+                let clause = os_eq_clause("image_path", "?3");
+                let sql = format!(
+                    "UPDATE pets SET image_path = ?1 WHERE household_id = ?2 AND {clause}",
+                );
+                sqlx::query(&sql)
+                    .bind(&new_relative)
+                    .bind(&request.household_id)
+                    .bind(&from_relative)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|err| {
+                        AppError::from(err)
+                            .with_context("operation", "file_move_update_pets")
+                    })?;
+            } else if request.from_category == AttachmentCategory::PetImage {
+                let clause = os_eq_clause("image_path", "?2");
+                let sql = format!(
+                    "UPDATE pets SET image_path = NULL WHERE household_id = ?1 AND {clause}",
+                );
+                sqlx::query(&sql)
+                    .bind(&request.household_id)
+                    .bind(&from_relative)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|err| {
+                        AppError::from(err)
+                            .with_context("operation", "file_move_clear_pets")
+                    })?;
+            }
             let new_index_name = index_basename(&new_relative);
             let from_index_name = index_basename(&from_relative);
             let files_index_clause = os_eq_clause("filename", "?5");
@@ -625,6 +655,52 @@ async fn run_repair_scan<R: tauri::Runtime>(
         }
     }
 
+    if !cancelled {
+        let mut rows = sqlx::query(
+            "SELECT rowid AS row_id, image_path FROM pets WHERE household_id = ?1 AND deleted_at IS NULL AND image_path IS NOT NULL",
+        )
+        .bind(household_id)
+        .fetch(&mut *conn);
+
+        while let Some(row) = rows.try_next().await.map_err(|err| {
+            AppError::from(err).with_context("operation", "attachments_repair_scan_pets")
+        })? {
+            if REPAIR_CANCEL_FLAG.load(Ordering::SeqCst) {
+                cancelled = true;
+                break;
+            }
+            scanned += 1;
+            let relative_path: String = row.try_get("image_path").unwrap_or_default();
+            if relative_path.trim().is_empty() {
+                continue;
+            }
+            let resolved =
+                match vault.resolve(household_id, AttachmentCategory::PetImage, &relative_path) {
+                    Ok(path) => path,
+                    Err(_) => continue,
+                };
+            if !resolved.exists() {
+                missing += 1;
+                record_missing(
+                    pool,
+                    household_id,
+                    "pets",
+                    row.try_get::<i64, _>("row_id").unwrap_or_default(),
+                    AttachmentCategory::PetImage.as_str(),
+                    &relative_path,
+                )
+                .await?;
+                emit_repair_progress(app, "pets", scanned, missing);
+            }
+
+            if scanned % 100 == 0 {
+                sleep(Duration::from_millis(10)).await;
+            } else {
+                yield_now().await;
+            }
+        }
+    }
+
     if REPAIR_CANCEL_FLAG.load(Ordering::SeqCst) {
         REPAIR_CANCEL_FLAG.store(false, Ordering::SeqCst);
     }
@@ -660,9 +736,10 @@ async fn run_repair_apply<R: tauri::Runtime>(
 
     for action in &request.actions {
         processed += 1;
-        if !ATTACHMENT_TABLES
-            .iter()
-            .any(|candidate| candidate == &action.table_name.as_str())
+        if action.table_name.as_str() != "pets"
+            && !ATTACHMENT_TABLES
+                .iter()
+                .any(|candidate| candidate == &action.table_name.as_str())
         {
             return Err(AppError::new(
                 "REPAIR_TABLE_UNSUPPORTED",
@@ -672,21 +749,35 @@ async fn run_repair_apply<R: tauri::Runtime>(
 
         match action.action {
             RepairActionKind::Detach => {
-                let sql = format!(
-                    "UPDATE {table} SET category = NULL, relative_path = NULL WHERE household_id = ?1 AND rowid = ?2",
-                    table = action.table_name,
-                );
-                let result = sqlx::query(&sql)
+                let result = if action.table_name == "pets" {
+                    sqlx::query(
+                        "UPDATE pets SET image_path = NULL WHERE household_id = ?1 AND rowid = ?2",
+                    )
                     .bind(&request.household_id)
                     .bind(action.row_id)
                     .execute(&mut *tx)
                     .await
                     .map_err(|err| {
-                        AppError::from(err).with_context(
-                            "operation",
-                            format!("attachments_repair_detach_{}", action.table_name),
-                        )
-                    })?;
+                        AppError::from(err)
+                            .with_context("operation", "attachments_repair_detach_pets")
+                    })?
+                } else {
+                    let sql = format!(
+                        "UPDATE {table} SET category = NULL, relative_path = NULL WHERE household_id = ?1 AND rowid = ?2",
+                        table = action.table_name,
+                    );
+                    sqlx::query(&sql)
+                        .bind(&request.household_id)
+                        .bind(action.row_id)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(|err| {
+                            AppError::from(err).with_context(
+                                "operation",
+                                format!("attachments_repair_detach_{}", action.table_name),
+                            )
+                        })?
+                };
                 if result.rows_affected() == 0 {
                     return Err(AppError::new(
                         "REPAIR_ROW_MISSING",
@@ -721,6 +812,77 @@ async fn run_repair_apply<R: tauri::Runtime>(
                 repaired += 1;
             }
             RepairActionKind::Relink => {
+                if action.table_name == "pets" {
+                    let new_category = action.new_category.unwrap_or(AttachmentCategory::PetImage);
+                    if new_category != AttachmentCategory::PetImage {
+                        return Err(AppError::new(
+                            "REPAIR_RELINK_CATEGORY_REQUIRED",
+                            "Pet images must use the pet_image category.",
+                        ));
+                    }
+                    let new_relative_raw = action.new_relative_path.clone().ok_or_else(|| {
+                        AppError::new(
+                            "REPAIR_RELINK_RELATIVE_REQUIRED",
+                            "Relink action requires a new relative path.",
+                        )
+                    })?;
+                    let normalized = normalize_relative(&new_relative_raw).map_err(|err| {
+                        AppError::from(err).with_context("operation", "normalize_repair_relink")
+                    })?;
+                    let new_relative = normalized.to_string_lossy().replace('\\', "/");
+                    let resolved = vault.resolve(
+                        &request.household_id,
+                        AttachmentCategory::PetImage,
+                        &new_relative,
+                    )?;
+                    if !resolved.exists() {
+                        return Err(AppError::new(
+                            "REPAIR_RELINK_TARGET_MISSING",
+                            "Relink target file does not exist in the vault.",
+                        ));
+                    }
+                    let metadata = fs::metadata(&resolved).await.map_err(|err| {
+                        AppError::from(err).with_context("operation", "relink_metadata")
+                    })?;
+                    if metadata.is_dir() {
+                        return Err(AppError::new(
+                            "REPAIR_RELINK_TARGET_INVALID",
+                            "Relink target must be a file.",
+                        ));
+                    }
+                    let result = sqlx::query(
+                        "UPDATE pets SET image_path = ?1 WHERE household_id = ?2 AND rowid = ?3",
+                    )
+                    .bind(&new_relative)
+                    .bind(&request.household_id)
+                    .bind(action.row_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|err| {
+                        AppError::from(err)
+                            .with_context("operation", "attachments_repair_relink_pets")
+                    })?;
+                    if result.rows_affected() == 0 {
+                        return Err(AppError::new(
+                            "REPAIR_ROW_MISSING",
+                            "Attachment row could not be updated for relink action.",
+                        ));
+                    }
+                    repaired += result.rows_affected() as u64;
+                    update_missing_manifest(
+                        &mut tx,
+                        &request.household_id,
+                        &action.table_name,
+                        action.row_id,
+                        "relink",
+                        Some(new_category.as_str().to_string()),
+                        Some(new_relative),
+                        now,
+                    )
+                    .await?;
+                    continue;
+                }
+
                 let new_category = action.new_category.ok_or_else(|| {
                     AppError::new(
                         "REPAIR_RELINK_CATEGORY_REQUIRED",

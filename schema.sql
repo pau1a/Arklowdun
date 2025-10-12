@@ -212,6 +212,7 @@ CREATE TABLE pets (
   name TEXT NOT NULL,
   type TEXT NOT NULL,
   household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  image_path TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER,
@@ -350,6 +351,7 @@ CREATE INDEX pet_medical_household_updated_idx ON pet_medical(household_id, upda
 CREATE INDEX pet_medical_pet_date_idx ON pet_medical(pet_id, date);
 CREATE UNIQUE INDEX pets_household_position_idx ON pets(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX pets_household_updated_idx ON pets(household_id, updated_at);
+CREATE INDEX pets_household_image_idx ON pets(household_id, image_path);
 CREATE UNIQUE INDEX policies_household_position_idx ON policies(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX policies_household_updated_idx ON policies(household_id, updated_at);
 CREATE UNIQUE INDEX property_documents_household_position_idx ON property_documents(household_id, position) WHERE deleted_at IS NULL;

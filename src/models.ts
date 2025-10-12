@@ -96,6 +96,7 @@ export interface Pet {
   species?: string | null;
   breed?: string | null;
   birthday?: number | null;
+  image_path?: string | null;
   household_id: string;
   position: number;
   created_at: number;

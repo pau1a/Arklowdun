@@ -18,6 +18,7 @@ pub enum AttachmentCategory {
     PropertyDocuments,
     InventoryItems,
     PetMedical,
+    PetImage,
     Vehicles,
     VehicleMaintenance,
     Notes,
@@ -25,12 +26,13 @@ pub enum AttachmentCategory {
 }
 
 impl AttachmentCategory {
-    pub const ALL: [AttachmentCategory; 9] = [
+    pub const ALL: [AttachmentCategory; 10] = [
         AttachmentCategory::Bills,
         AttachmentCategory::Policies,
         AttachmentCategory::PropertyDocuments,
         AttachmentCategory::InventoryItems,
         AttachmentCategory::PetMedical,
+        AttachmentCategory::PetImage,
         AttachmentCategory::Vehicles,
         AttachmentCategory::VehicleMaintenance,
         AttachmentCategory::Notes,
@@ -44,6 +46,7 @@ impl AttachmentCategory {
             AttachmentCategory::PropertyDocuments => "property_documents",
             AttachmentCategory::InventoryItems => "inventory_items",
             AttachmentCategory::PetMedical => "pet_medical",
+            AttachmentCategory::PetImage => "pet_image",
             AttachmentCategory::Vehicles => "vehicles",
             AttachmentCategory::VehicleMaintenance => "vehicle_maintenance",
             AttachmentCategory::Notes => "notes",
@@ -63,6 +66,7 @@ impl AttachmentCategory {
             "property_documents" => Some(AttachmentCategory::PropertyDocuments),
             "inventory_items" => Some(AttachmentCategory::InventoryItems),
             "pet_medical" => Some(AttachmentCategory::PetMedical),
+            "pets" => Some(AttachmentCategory::PetImage),
             "vehicles" => Some(AttachmentCategory::Vehicles),
             "vehicle_maintenance" => Some(AttachmentCategory::VehicleMaintenance),
             "notes" => Some(AttachmentCategory::Notes),
@@ -100,6 +104,7 @@ impl FromStr for AttachmentCategory {
             "property_documents" => Ok(AttachmentCategory::PropertyDocuments),
             "inventory_items" => Ok(AttachmentCategory::InventoryItems),
             "pet_medical" => Ok(AttachmentCategory::PetMedical),
+            "pet_image" => Ok(AttachmentCategory::PetImage),
             "vehicles" => Ok(AttachmentCategory::Vehicles),
             "vehicle_maintenance" => Ok(AttachmentCategory::VehicleMaintenance),
             "notes" => Ok(AttachmentCategory::Notes),
