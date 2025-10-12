@@ -17,7 +17,8 @@ import { isMacPlatform } from "@ui/keys";
 import { timeIt } from "@lib/obs/timeIt";
 import { recordPetsMutationFailure } from "@features/pets/mutationTelemetry";
 import { open as openDialog } from "@lib/ipc/dialog";
-import { sanitizeRelativePath, canonicalizeAndVerify } from "./files/path";
+import { sanitizeRelativePath, canonicalizeAndVerify, PathValidationError } from "./files/path";
+import { mkdir, writeBinary } from "./files/safe-fs";
 import { presentFsError } from "@lib/ipc";
 import { revealAttachment } from "./ui/attachments";
 
@@ -380,16 +381,21 @@ export async function PetsView(container: HTMLElement) {
     if (!filePath) return;
 
     try {
-      const canonical = await canonicalizeAndVerify(filePath, "attachments");
-      const relativeFull = canonical.realPath.slice(canonical.base.length).replace(/^[/\\]+/, "");
-      const expectedPrefix = `${pet.household_id}/pet_image/`;
-      if (!relativeFull.startsWith(expectedPrefix)) {
-        presentFsError({ code: "PATH_OUT_OF_VAULT", message: "Attachment path must stay inside the vault." });
-        return;
-      }
+      const fs = await import("@tauri-apps/plugin-fs");
+      const bytes = await fs.readFile(filePath);
 
-      const rawRelative = relativeFull.slice(expectedPrefix.length);
-      const sanitized = sanitizeRelativePath(rawRelative);
+      const attachmentDir = `${pet.household_id}/pet_image`;
+      await mkdir(attachmentDir, "attachments", { recursive: true });
+
+      const pathTail = filePath.split(/[/\\]/).pop() ?? "";
+      const extMatch = pathTail.match(/\.([A-Za-z0-9]{1,10})$/);
+      const ext = extMatch ? `.${extMatch[1].toLowerCase()}` : "";
+      const idFragment = pet.id.replace(/[^A-Za-z0-9_-]/g, "");
+      const nameSeed = idFragment ? `pet-${idFragment}` : "pet";
+      const candidate = `${nameSeed}-${Date.now()}${ext}`;
+      const sanitized = sanitizeRelativePath(candidate);
+
+      await writeBinary(`${attachmentDir}/${sanitized}`, "attachments", bytes);
       await petsUpdateImage(hh, pet.id, sanitized);
 
       const updated: Pet = { ...pet, image_path: sanitized };
@@ -404,6 +410,15 @@ export async function PetsView(container: HTMLElement) {
       logUI("INFO", "ui.pets.photo_updated", { pet_id: pet.id, household_id: hh });
     } catch (error) {
       const maybe = error as { code?: string; message?: string } | undefined;
+      if (error instanceof PathValidationError) {
+        presentFsError({ code: error.code, message: error.message });
+        logUI("WARN", "ui.pets.photo_update_failed", {
+          pet_id: pet.id,
+          household_id: hh,
+          code: error.code,
+        });
+        return;
+      }
       if (maybe?.code) {
         const normalizedCode =
           maybe.code === "OUTSIDE_ROOT" ||

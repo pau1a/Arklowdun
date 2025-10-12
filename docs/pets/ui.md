@@ -152,7 +152,7 @@ Key properties:
 
 * Species-specific placeholders (dog/cat/other) live under `src/assets/pets/placeholders/` and are inferred from `pet.species` or `pet.type`.
 * When `image_path` is set, Tauri builds resolve to `attachments/<household_id>/pet_image/<relative>` via `canonicalizeAndVerify` + `convertFileSrc`, falling back to Blob URLs if direct loading fails.
-* `Change photo` launches a single-file dialog for images only. The selected path passes through `canonicalizeAndVerify`, `sanitizeRelativePath`, and persists via `petsUpdateImage`. On success `page.patchPet()` updates just that card.
+* `Change photo` launches a single-file dialog for images only. The renderer reads the chosen file, copies it into `attachments/<household_id>/pet_image/`, generates a sanitised name, and then calls `petsUpdateImage`. On success `page.patchPet()` updates just that card.
 * Guard failures call `presentFsError` (vault copy) and show a toast (`toast.show({ kind: "error", message: "Couldn’t update pet photo." })`).
 * `Reveal` reuses the shared attachment opener for the `pet_image` category, matching Family’s “Reveal in folder” affordance.
 * Arrow keys traverse cards, `Enter` opens details, `Escape` restores the grid, and focus rings reuse the Family card token.

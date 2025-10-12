@@ -64,7 +64,29 @@ vi.mock('@lib/ipc/dialog', () => ({ open: openDialog }));
 
 const sanitizeRelativePath = vi.fn((value: string) => value.trim());
 const canonicalizeAndVerify = vi.fn(async (value: string) => ({ base: '/attachments/', realPath: value }));
-vi.mock('../../src/files/path', () => ({ sanitizeRelativePath, canonicalizeAndVerify }));
+class PathValidationErrorMock extends Error {
+  code: string;
+  constructor(code: string, message = '') {
+    super(message);
+    this.code = code;
+    this.name = 'PathValidationError';
+  }
+}
+vi.mock('../../src/files/path', () => ({
+  sanitizeRelativePath,
+  canonicalizeAndVerify,
+  PathValidationError: PathValidationErrorMock,
+}));
+
+const readFile = vi.fn(async () => new Uint8Array([1, 2, 3]));
+vi.mock('@tauri-apps/plugin-fs', () => ({ readFile }));
+
+const mkdir = vi.fn(async () => {});
+const writeBinary = vi.fn(async () => {});
+vi.mock('../../src/files/safe-fs', () => ({
+  mkdir,
+  writeBinary,
+}));
 
 const presentFsError = vi.fn();
 vi.mock('@lib/ipc', () => ({ presentFsError }));
@@ -90,9 +112,14 @@ beforeEach(() => {
   listMock.mockResolvedValue(samplePets);
   petsUpdateImage.mockReset();
   openDialog.mockReset();
-  sanitizeRelativePath.mockClear();
-  canonicalizeAndVerify.mockClear();
+  sanitizeRelativePath.mockReset();
+  sanitizeRelativePath.mockImplementation((value: string) => value.trim());
+  canonicalizeAndVerify.mockReset();
   presentFsError.mockClear();
+  readFile.mockReset();
+  readFile.mockImplementation(async () => new Uint8Array([1, 2, 3]));
+  mkdir.mockReset();
+  writeBinary.mockReset();
   pageInstances.splice(0, pageInstances.length);
 });
 
@@ -106,7 +133,8 @@ async function mountView(container: HTMLElement) {
 
 describe('PetsView change photo flow', () => {
   test('happy path updates repository and patches card', async () => {
-    openDialog.mockResolvedValue('/attachments/hh/pet_image/new.png');
+    openDialog.mockResolvedValue('/Users/tester/Pictures/Portrait.JPG');
+    const dateSpy = vi.spyOn(Date, 'now').mockReturnValue(1234567890);
 
     const container = document.createElement('div');
     document.body.appendChild(container);
@@ -114,28 +142,32 @@ describe('PetsView change photo flow', () => {
     const page = await mountView(container);
     expect(page).toBeDefined();
 
-    canonicalizeAndVerify.mockResolvedValue({ base: '/attachments/', realPath: '/attachments/hh/pet_image/new.png' });
-    sanitizeRelativePath.mockImplementation((value: string) => value.replace(/^.*pet_image\//, ''));
+    sanitizeRelativePath.mockImplementation((value: string) => value);
 
     page.__callbacks.onChangePhoto(samplePets[0]);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(openDialog).toHaveBeenCalled();
-    expect(canonicalizeAndVerify).toHaveBeenCalledWith('/attachments/hh/pet_image/new.png', 'attachments');
-    expect(sanitizeRelativePath).toHaveBeenCalledWith('new.png');
-    expect(petsUpdateImage).toHaveBeenCalledWith('hh', 'pet-1', 'new.png');
+    expect(readFile).toHaveBeenCalledWith('/Users/tester/Pictures/Portrait.JPG');
+    expect(mkdir).toHaveBeenCalledWith('hh/pet_image', 'attachments', { recursive: true });
+    expect(writeBinary).toHaveBeenCalledWith(
+      'hh/pet_image/pet-pet-1-1234567890.jpg',
+      'attachments',
+      expect.any(Uint8Array),
+    );
+    expect(sanitizeRelativePath).toHaveBeenCalledWith('pet-pet-1-1234567890.jpg');
+    expect(petsUpdateImage).toHaveBeenCalledWith('hh', 'pet-1', 'pet-pet-1-1234567890.jpg');
     expect(page.patchPet).toHaveBeenCalled();
     expect(presentFsError).not.toHaveBeenCalled();
 
+    dateSpy.mockRestore();
     container.remove();
   });
 
   test('guard rejection surfaces toast', async () => {
-    openDialog.mockResolvedValue('/attachments/hh/pet_image/invalid.png');
+    openDialog.mockResolvedValue('/tmp/image.png');
     sanitizeRelativePath.mockImplementation(() => {
-      const error: any = new Error('invalid');
-      error.code = 'PATH_OUT_OF_VAULT';
-      throw error;
+      throw new PathValidationErrorMock('FILENAME_INVALID', 'invalid');
     });
 
     const container = document.createElement('div');
