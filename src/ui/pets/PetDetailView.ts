@@ -514,19 +514,41 @@ export async function PetDetailView(
   };
   applyInitialFallback();
 
-  const resolveThumbnailPath = async (
+  const resolveThumbnailAbsolute = async (
     relativeThumbPath: string | null | undefined,
   ): Promise<string | null> => {
     if (!relativeThumbPath) return null;
-    const trimmed = relativeThumbPath.replace(/^attachments\//, "");
-    if (!trimmed) return null;
-    try {
-      const { realPath } = await canonicalize(trimmed, "attachments");
-      return realPath;
-    } catch (error) {
-      console.warn("pet detail: resolve thumbnail path failed", error);
-      return null;
+
+    const errors: unknown[] = [];
+
+    const tryResolve = async (root: "appData" | "attachments") => {
+      try {
+        const { realPath } = await canonicalize(relativeThumbPath, root);
+        return realPath;
+      } catch (error) {
+        errors.push(error);
+        return null;
+      }
+    };
+
+    const fromAppData = await tryResolve("appData");
+    if (fromAppData) {
+      return fromAppData;
     }
+
+    const fromAttachments = await tryResolve("attachments");
+    if (fromAttachments) {
+      return fromAttachments;
+    }
+
+    if (errors.length > 0) {
+      console.warn("pet detail: resolve thumbnail path failed", {
+        path: relativeThumbPath,
+        errors,
+      });
+    }
+
+    return null;
   };
 
   if (isTauri && pet.image_path) {
@@ -539,7 +561,7 @@ export async function PetDetailView(
       })) as ThumbnailCommandResponse | undefined;
 
       if (response?.ok && response.relative_thumb_path) {
-        const absoluteThumbPath = await resolveThumbnailPath(
+        const absoluteThumbPath = await resolveThumbnailAbsolute(
           response.relative_thumb_path,
         );
         const src = absoluteThumbPath ? convertFileSrcFn?.(absoluteThumbPath) : null;
@@ -675,7 +697,7 @@ export async function PetDetailView(
         if (response?.ok && response.relative_thumb_path) {
           const cacheHit = response.cache_hit === true;
           try {
-            const absoluteThumbPath = await resolveThumbnailPath(
+            const absoluteThumbPath = await resolveThumbnailAbsolute(
               response.relative_thumb_path,
             );
             if (!absoluteThumbPath) {
