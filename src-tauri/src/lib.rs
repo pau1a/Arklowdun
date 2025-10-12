@@ -950,6 +950,173 @@ gen_domain_cmds!(
     shopping_items,
 );
 
+#[tauri::command]
+async fn pets_delete_soft(
+    state: State<'_, AppState>,
+    household_id: String,
+    id: String,
+) -> AppResult<()> {
+    let _permit = guard::ensure_db_writable(&state)?;
+    let pool = state.pool_clone();
+    dispatch_async_app_result(move || {
+        let pool = pool.clone();
+        let household_id = household_id.clone();
+        let id = id.clone();
+        async move {
+            crate::repo::set_deleted_at(&pool, "pets", &household_id, &id)
+                .await
+                .map_err(|err| {
+                    AppError::from(err)
+                        .with_context("operation", "pets_delete_soft")
+                        .with_context("table", "pets".to_string())
+                        .with_context("household_id", household_id.clone())
+                        .with_context("id", id.clone())
+                })?;
+            Ok(())
+        }
+    })
+    .await
+}
+
+#[tauri::command]
+async fn pets_delete_hard(
+    state: State<'_, AppState>,
+    household_id: String,
+    id: String,
+) -> AppResult<()> {
+    let _permit = guard::ensure_db_writable(&state)?;
+    let pool = state.pool_clone();
+    let vault = state.vault();
+    let active_household = state.active_household_id.clone();
+    dispatch_async_app_result(move || {
+        let pool = pool.clone();
+        let vault = vault.clone();
+        let active_household = active_household.clone();
+        let household_id = household_id.clone();
+        let id = id.clone();
+        async move {
+            let mut tx = pool
+                .begin()
+                .await
+                .map_err(|err| {
+                    AppError::from(err)
+                        .with_context("operation", "pets_delete_hard")
+                        .with_context("table", "pets".to_string())
+                        .with_context("household_id", household_id.clone())
+                        .with_context("id", id.clone())
+                })?;
+
+            let row = sqlx::query("SELECT image_path FROM pets WHERE id = ?1 AND household_id = ?2")
+                .bind(&id)
+                .bind(&household_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|err| {
+                    AppError::from(err)
+                        .with_context("operation", "pets_delete_hard")
+                        .with_context("table", "pets".to_string())
+                        .with_context("household_id", household_id.clone())
+                        .with_context("id", id.clone())
+                })?;
+
+            let Some(row) = row else {
+                return Err(
+                    AppError::new("DB/NOT_FOUND", "Record not found")
+                        .with_context("operation", "pets_delete_hard")
+                        .with_context("table", "pets".to_string())
+                        .with_context("household_id", household_id.clone())
+                        .with_context("id", id.clone()),
+                );
+            };
+
+            let image_path = row
+                .try_get::<Option<String>, _>("image_path")
+                .unwrap_or(None)
+                .and_then(|value| {
+                    let trimmed = value.trim();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed.to_string())
+                    }
+                });
+
+            if let Some(relative_path) = image_path {
+                ensure_active_household_for_ipc(
+                    &active_household,
+                    &household_id,
+                    AttachmentCategory::PetImage,
+                    &relative_path,
+                    "pets_delete_hard",
+                    "pets",
+                    Some(&id),
+                )?;
+
+                match vault.resolve(&household_id, AttachmentCategory::PetImage, &relative_path) {
+                    Ok(resolved) => {
+                        if let Err(err) = fs::remove_file(&resolved).await {
+                            if err.kind() != io::ErrorKind::NotFound {
+                                tracing::warn!(
+                                    target: "arklowdun",
+                                    event = "pets.delete_hard_file_failed",
+                                    household_id = %household_id,
+                                    pet_id = %id,
+                                    relative_path = %relative_path,
+                                    error = %err
+                                );
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            target: "arklowdun",
+                            event = "pets.delete_hard_resolve_failed",
+                            household_id = %household_id,
+                            pet_id = %id,
+                            relative_path = %relative_path,
+                            code = %err.code()
+                        );
+                    }
+                }
+            }
+
+            sqlx::query("DELETE FROM pets WHERE id = ?1 AND household_id = ?2")
+                .bind(&id)
+                .bind(&household_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|err| {
+                    AppError::from(err)
+                        .with_context("operation", "pets_delete_hard")
+                        .with_context("table", "pets".to_string())
+                        .with_context("household_id", household_id.clone())
+                        .with_context("id", id.clone())
+                })?;
+
+            crate::repo::renumber_positions(&mut *tx, "pets", &household_id)
+                .await
+                .map_err(|err| {
+                    AppError::from(err)
+                        .with_context("operation", "pets_delete_hard")
+                        .with_context("table", "pets".to_string())
+                        .with_context("household_id", household_id.clone())
+                        .with_context("id", id.clone())
+                })?;
+
+            tx.commit().await.map_err(|err| {
+                AppError::from(err)
+                    .with_context("operation", "pets_delete_hard")
+                    .with_context("table", "pets".to_string())
+                    .with_context("household_id", household_id.clone())
+                    .with_context("id", id.clone())
+            })?;
+
+            Ok(())
+        }
+    })
+    .await
+}
+
 #[derive(Serialize, Deserialize, Clone, TS, sqlx::FromRow)]
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct Vehicle {
@@ -5258,6 +5425,8 @@ macro_rules! app_commands {
             pets_get,
             pets_create,
             pets_update,
+            pets_delete_soft,
+            pets_delete_hard,
             pets_delete,
             pets_restore,
             pet_medical_list,

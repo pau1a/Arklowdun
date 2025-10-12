@@ -31,7 +31,9 @@ import {
   PetMedicalUpdateRequestSchema,
   PetsCreateRequestSchema,
   PetsCreateResponseSchema,
+  PetsDeleteHardRequestSchema,
   PetsDeleteRequestSchema,
+  PetsDeleteSoftRequestSchema,
   PetsGetRequestSchema,
   PetsGetResponseSchema,
   PetsListRequestSchema,
@@ -796,6 +798,14 @@ export const contracts = {
   }),
   pets_update: contract({
     request: PetsUpdateRequestSchema,
+    response: PetsMutationResponseSchema,
+  }),
+  pets_delete_soft: contract({
+    request: PetsDeleteSoftRequestSchema,
+    response: PetsMutationResponseSchema,
+  }),
+  pets_delete_hard: contract({
+    request: PetsDeleteHardRequestSchema,
     response: PetsMutationResponseSchema,
   }),
   pets_delete: contract({

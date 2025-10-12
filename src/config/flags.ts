@@ -14,3 +14,9 @@ export const ENABLE_FAMILY_EXPANSION = readBoolean("VITE_ENABLE_FAMILY_EXPANSION
 export const ENABLE_FAMILY_RENEWALS = true;
 // Modal is now part of the base Family expansion; keep the export for compatibility.
 export const ENABLE_FAMILY_ADD_MEMBER_MODAL = true;
+
+const devFallback =
+  typeof import.meta !== "undefined" &&
+  Boolean((import.meta as unknown as { env?: Record<string, unknown> }).env?.DEV);
+
+export const ENABLE_PETS_HARD_DELETE = readBoolean("VITE_ENABLE_PETS_HARD_DELETE", devFallback);

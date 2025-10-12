@@ -12,6 +12,8 @@ export interface PetsPageCallbacks {
   onReorderPet?: (id: string, delta: number) => void;
   onChangePhoto?: (pet: Pet) => void;
   onRevealImage?: (pet: Pet) => void;
+  onDeletePet?: (pet: Pet) => Promise<void> | void;
+  onDeletePetHard?: (pet: Pet) => Promise<void> | void;
 }
 
 export interface FilteredPet {
@@ -59,6 +61,12 @@ interface RowElements {
   typeInput: HTMLInputElement;
   saveBtn: HTMLButtonElement;
   cancelBtn: HTMLButtonElement;
+  menu: HTMLDetailsElement;
+  menuTrigger: HTMLElement;
+  menuPanel: HTMLDivElement;
+  softDeleteBtn: HTMLButtonElement;
+  hardDeleteBtn: HTMLButtonElement;
+  menuDivider: HTMLDivElement;
 }
 
 interface RowState {
@@ -101,7 +109,7 @@ const isTauri =
   (typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__) ||
   (typeof (import.meta as any).env?.TAURI !== "undefined" && (import.meta as any).env?.TAURI != null);
 
-function toDisplayName(pet: Pet): string {
+function toDisplayName(pet: { name?: string | null }): string {
   const raw = pet.name ?? "";
   const trimmed = raw.trim();
   return trimmed.length > 0 ? trimmed : "Unnamed pet";
@@ -309,6 +317,38 @@ export function createPetsPage(
   let lastEmptyMessage = "";
 
   let callbacks = { ...initialCallbacks };
+  let openMenu: HTMLDetailsElement | null = null;
+  let detachMenuOutside: (() => void) | null = null;
+
+  function closeActiveMenu(details?: HTMLDetailsElement | null) {
+    const target = details ?? openMenu;
+    if (target && target.open) {
+      target.open = false;
+    }
+  }
+
+  function ensureMenuOutsideListener() {
+    if (detachMenuOutside || typeof document === "undefined") return;
+    const handle = (event: PointerEvent) => {
+      const current = openMenu;
+      if (!current) return;
+      const target = event.target as Node | null;
+      if (target && current.contains(target)) {
+        return;
+      }
+      current.open = false;
+    };
+    document.addEventListener("pointerdown", handle, true);
+    detachMenuOutside = () => {
+      document.removeEventListener("pointerdown", handle, true);
+    };
+  }
+
+  function releaseMenuOutsideListener() {
+    if (openMenu) return;
+    detachMenuOutside?.();
+    detachMenuOutside = null;
+  }
   let models: FilteredPet[] = [];
   let scrollRaf = 0;
   let pendingScroll = false;
@@ -446,6 +486,11 @@ export function createPetsPage(
     visibleRows.clear();
     rowPool.length = 0;
     editing.clear();
+    if (openMenu) {
+      openMenu.open = false;
+      openMenu = null;
+    }
+    releaseMenuOutsideListener();
   }
 
   function ensureRowStructure(row: HTMLDivElement): RowElements {
@@ -532,7 +577,61 @@ export function createPetsPage(
     moveDownBtn.textContent = "▼";
 
     orderGroup.append(moveUpBtn, moveDownBtn);
-    actions.append(openBtn, editBtn, orderGroup);
+    const menu = document.createElement("details");
+    menu.className = "pets__menu";
+    menu.addEventListener("toggle", () => {
+      if (menu.open) {
+        if (openMenu && openMenu !== menu) {
+          openMenu.open = false;
+        }
+        openMenu = menu;
+        ensureMenuOutsideListener();
+      } else if (openMenu === menu) {
+        openMenu = null;
+        releaseMenuOutsideListener();
+      }
+    });
+    menu.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && menu.open) {
+        event.preventDefault();
+        menu.open = false;
+      }
+    });
+
+    const menuTrigger = document.createElement("summary");
+    menuTrigger.className = "pets__menu-trigger";
+    menuTrigger.setAttribute("aria-label", "More actions");
+    menuTrigger.setAttribute("aria-haspopup", "menu");
+    menuTrigger.textContent = "⋯";
+    menuTrigger.addEventListener("click", (event) => {
+      if (menuTrigger.getAttribute("aria-disabled") === "true") {
+        event.preventDefault();
+      }
+    });
+
+    const menuPanel = document.createElement("div");
+    menuPanel.className = "pets__menu-panel";
+    menuPanel.setAttribute("role", "menu");
+
+    const softDeleteBtn = document.createElement("button");
+    softDeleteBtn.type = "button";
+    softDeleteBtn.className = "pets__menu-item";
+    softDeleteBtn.textContent = "Delete";
+    softDeleteBtn.setAttribute("role", "menuitem");
+
+    const menuDivider = document.createElement("div");
+    menuDivider.className = "pets__menu-divider";
+
+    const hardDeleteBtn = document.createElement("button");
+    hardDeleteBtn.type = "button";
+    hardDeleteBtn.className = "pets__menu-item pets__menu-item--danger";
+    hardDeleteBtn.textContent = "Delete Permanently";
+    hardDeleteBtn.setAttribute("role", "menuitem");
+
+    menuPanel.append(softDeleteBtn, menuDivider, hardDeleteBtn);
+    menu.append(menuTrigger, menuPanel);
+
+    actions.append(openBtn, editBtn, orderGroup, menu);
 
     display.append(media, mediaActions, body, actions);
 
@@ -593,6 +692,12 @@ export function createPetsPage(
       typeInput,
       saveBtn,
       cancelBtn,
+      menu,
+      menuTrigger,
+      menuPanel,
+      softDeleteBtn,
+      hardDeleteBtn,
+      menuDivider,
     };
     rowCache.set(row, cached);
     return cached;
@@ -725,6 +830,12 @@ export function createPetsPage(
       typeInput: editType,
       saveBtn,
       cancelBtn,
+      menu,
+      menuTrigger,
+      menuPanel,
+      softDeleteBtn,
+      hardDeleteBtn,
+      menuDivider,
     } = ensureRowStructure(row);
 
     rowEl.dataset.index = String(index);
@@ -1039,11 +1150,50 @@ export function createPetsPage(
       });
     };
 
-    cancelBtn.onclick = () => {
+      cancelBtn.onclick = () => {
       if (!editing.has(view.pet.id)) return;
       editing.delete(view.pet.id);
       updateRow(index, view);
     };
+
+    const hasSoftDelete = typeof callbacks.onDeletePet === "function";
+    const hasHardDelete = typeof callbacks.onDeletePetHard === "function";
+    const menuEnabled = (hasSoftDelete || hasHardDelete) && !isSaving;
+
+    if (!menuEnabled) {
+      closeActiveMenu(menu);
+    }
+
+    menu.hidden = !(hasSoftDelete || hasHardDelete);
+    menuTrigger.setAttribute("aria-disabled", menuEnabled ? "false" : "true");
+    menuTrigger.tabIndex = menuEnabled ? 0 : -1;
+
+    const softEnabled = hasSoftDelete && !isSaving;
+    const hardEnabled = hasHardDelete && !isSaving;
+
+    softDeleteBtn.hidden = !hasSoftDelete;
+    softDeleteBtn.disabled = !softEnabled;
+    hardDeleteBtn.hidden = !hasHardDelete;
+    hardDeleteBtn.disabled = !hardEnabled;
+    menuDivider.hidden = hardDeleteBtn.hidden || softDeleteBtn.hidden;
+
+    softDeleteBtn.onclick = () => {
+      if (!softEnabled) return;
+      closeActiveMenu(menu);
+      void Promise.resolve(callbacks.onDeletePet?.(view.pet));
+    };
+
+    hardDeleteBtn.onclick = () => {
+      if (!hardEnabled) return;
+      closeActiveMenu(menu);
+      void Promise.resolve(callbacks.onDeletePetHard?.(view.pet));
+    };
+
+    if (!menuEnabled) {
+      menuPanel.setAttribute("aria-hidden", "true");
+    } else {
+      menuPanel.removeAttribute("aria-hidden");
+    }
   }
 
   function refresh(): void {

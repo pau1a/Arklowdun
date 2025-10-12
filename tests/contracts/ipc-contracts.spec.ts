@@ -121,6 +121,16 @@ const scenarioDefinition: ScenarioDefinition = {
       assert.equal(payload.id, "pet-1");
       return null;
     },
+    pets_delete_soft: async (payload) => {
+      assert.equal(payload.household_id ?? payload.householdId, "h1");
+      assert.equal(payload.id, "pet-1");
+      return null;
+    },
+    pets_delete_hard: async (payload) => {
+      assert.equal(payload.household_id ?? payload.householdId, "h1");
+      assert.equal(payload.id, "pet-1");
+      return null;
+    },
     pets_delete: async (payload) => {
       assert.equal(payload.household_id ?? payload.householdId, "h1");
       assert.equal(payload.id, "pet-1");
@@ -227,6 +237,8 @@ registerCommand(
   { id: "pet-1", householdId: "h1", data: { name: "Skye" } },
   null,
 );
+registerCommand("pets_delete_soft", { id: "pet-1", householdId: "h1" }, null);
+registerCommand("pets_delete_hard", { id: "pet-1", householdId: "h1" }, null);
 registerCommand("pets_delete", { id: "pet-1", householdId: "h1" }, null);
 registerCommand("pets_restore", { id: "pet-1", householdId: "h1" }, null);
 registerCommand(

@@ -17,10 +17,30 @@ import { isMacPlatform } from "@ui/keys";
 import { timeIt } from "@lib/obs/timeIt";
 import { recordPetsMutationFailure } from "@features/pets/mutationTelemetry";
 import { open as openDialog } from "@lib/ipc/dialog";
-import { sanitizeRelativePath, canonicalizeAndVerify, PathValidationError } from "./files/path";
+import { sanitizeRelativePath, PathValidationError } from "./files/path";
 import { mkdir, writeBinary } from "./files/safe-fs";
 import { presentFsError } from "@lib/ipc";
 import { revealAttachment } from "./ui/attachments";
+import { createModal } from "@ui/Modal";
+import { ENABLE_PETS_HARD_DELETE } from "./config/flags";
+
+function toDisplayName(pet: Pet): string {
+  const raw = pet.name ?? "";
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : "Unnamed pet";
+}
+
+function requiredDeleteToken(pet: Pet): { token: string; label: string } {
+  const trimmed = (pet.name ?? "").trim();
+  if (trimmed.length > 0) {
+    return { token: trimmed, label: "name" };
+  }
+  return { token: pet.id, label: "ID" };
+}
+
+function clonePet(pet: Pet): Pet {
+  return JSON.parse(JSON.stringify(pet)) as Pet;
+}
 
 function toReminderRecords(pets: Pet[]): {
   records: Array<{
@@ -122,7 +142,396 @@ export async function PetsView(container: HTMLElement) {
   let lastScroll = 0;
   let detailController: PetDetailController | null = null;
   let detailActive = false;
+  let detailPetId: string | null = null;
   let reorderLock = false;
+  const allowHardDelete = ENABLE_PETS_HARD_DELETE;
+
+  interface PendingUndoEntry {
+    pet: Pet;
+    index: number;
+    timer: number | null;
+  }
+
+  const pendingUndo = new Map<string, PendingUndoEntry>();
+
+  registerViewCleanup(container, () => {
+    for (const entry of pendingUndo.values()) {
+      if (entry.timer != null) {
+        window.clearTimeout(entry.timer);
+      }
+    }
+    pendingUndo.clear();
+  });
+
+  function clearPendingUndo(petId: string): void {
+    const entry = pendingUndo.get(petId);
+    if (!entry) return;
+    if (entry.timer != null) {
+      window.clearTimeout(entry.timer);
+    }
+    pendingUndo.delete(petId);
+  }
+
+  function confirmSoftDelete(pet: Pet): Promise<boolean> {
+    if (typeof document === "undefined") return Promise.resolve(false);
+    return new Promise<boolean>((resolve) => {
+      const modalId = Math.random().toString(36).slice(2, 8);
+      const titleId = `pets-soft-delete-title-${modalId}`;
+      const descId = `pets-soft-delete-desc-${modalId}`;
+      const modal = createModal({
+        open: true,
+        titleId,
+        descriptionId: descId,
+        onOpenChange(open) {
+          if (!open && !settled) {
+            finish(false);
+          }
+        },
+      });
+
+      modal.root.classList.add("pets-confirm__overlay");
+      modal.dialog.classList.add("pets-confirm__dialog");
+
+      const container = document.createElement("div");
+      container.className = "pets-confirm";
+
+      const title = document.createElement("h1");
+      title.id = titleId;
+      title.className = "pets-confirm__title";
+      title.textContent = `Delete ${toDisplayName(pet)}?`;
+
+      const description = document.createElement("p");
+      description.id = descId;
+      description.className = "pets-confirm__description";
+      description.textContent = "You can restore this pet from Trash.";
+
+      const actions = document.createElement("div");
+      actions.className = "pets-confirm__actions";
+
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "pets-confirm__button";
+      cancelBtn.textContent = "Cancel";
+
+      const confirmBtn = document.createElement("button");
+      confirmBtn.type = "button";
+      confirmBtn.className = "pets-confirm__button pets-confirm__button--danger";
+      confirmBtn.textContent = "Delete";
+
+      actions.append(cancelBtn, confirmBtn);
+      container.append(title, description, actions);
+      modal.dialog.append(container);
+
+      let settled = false;
+
+      function cleanup() {
+        cancelBtn.removeEventListener("click", handleCancel);
+        confirmBtn.removeEventListener("click", handleConfirm);
+      }
+
+      function closeModal() {
+        window.setTimeout(() => {
+          modal.setOpen(false);
+          if (modal.root.isConnected) {
+            modal.root.remove();
+          }
+        }, 0);
+      }
+
+      function finish(result: boolean) {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        closeModal();
+        resolve(result);
+      }
+
+      function handleCancel(event: Event) {
+        event.preventDefault();
+        finish(false);
+      }
+
+      function handleConfirm(event: Event) {
+        event.preventDefault();
+        finish(true);
+      }
+
+      cancelBtn.addEventListener("click", handleCancel);
+      confirmBtn.addEventListener("click", handleConfirm);
+
+      window.setTimeout(() => {
+        if (!settled) {
+          try {
+            confirmBtn.focus();
+          } catch {
+            /* ignore */
+          }
+        }
+      }, 0);
+    });
+  }
+
+  function confirmHardDelete(pet: Pet): Promise<boolean> {
+    if (typeof document === "undefined") return Promise.resolve(false);
+    return new Promise<boolean>((resolve) => {
+      const modalId = Math.random().toString(36).slice(2, 8);
+      const titleId = `pets-hard-delete-title-${modalId}`;
+      const descId = `pets-hard-delete-desc-${modalId}`;
+      const inputId = `pets-hard-delete-input-${modalId}`;
+      const modal = createModal({
+        open: true,
+        titleId,
+        descriptionId: descId,
+        onOpenChange(open) {
+          if (!open && !settled) {
+            finish(false);
+          }
+        },
+      });
+
+      modal.root.classList.add("pets-confirm__overlay");
+      modal.dialog.classList.add("pets-confirm__dialog");
+
+      const { token, label } = requiredDeleteToken(pet);
+
+      const container = document.createElement("div");
+      container.className = "pets-confirm";
+
+      const title = document.createElement("h1");
+      title.id = titleId;
+      title.className = "pets-confirm__title";
+      title.textContent = `Delete ${toDisplayName(pet)} permanently?`;
+
+      const description = document.createElement("p");
+      description.id = descId;
+      description.className = "pets-confirm__description";
+      description.textContent = `Type the pet’s ${label} to confirm. This action cannot be undone.`;
+
+      const inputLabel = document.createElement("label");
+      inputLabel.className = "pets-confirm__field";
+      inputLabel.setAttribute("for", inputId);
+      inputLabel.textContent = `Confirm by typing “${token}”`;
+
+      const input = document.createElement("input");
+      input.id = inputId;
+      input.type = "text";
+      input.className = "pets-confirm__input";
+      input.placeholder = token;
+
+      inputLabel.append(input);
+
+      const actions = document.createElement("div");
+      actions.className = "pets-confirm__actions";
+
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "pets-confirm__button";
+      cancelBtn.textContent = "Cancel";
+
+      const confirmBtn = document.createElement("button");
+      confirmBtn.type = "button";
+      confirmBtn.className = "pets-confirm__button pets-confirm__button--danger";
+      confirmBtn.textContent = "Delete permanently";
+      confirmBtn.disabled = true;
+
+      actions.append(cancelBtn, confirmBtn);
+      container.append(title, description, inputLabel, actions);
+      modal.dialog.append(container);
+
+      let settled = false;
+
+      function cleanup() {
+        input.removeEventListener("input", handleInput);
+        cancelBtn.removeEventListener("click", handleCancel);
+        confirmBtn.removeEventListener("click", handleConfirm);
+      }
+
+      function closeModal() {
+        window.setTimeout(() => {
+          modal.setOpen(false);
+          if (modal.root.isConnected) {
+            modal.root.remove();
+          }
+        }, 0);
+      }
+
+      function finish(result: boolean) {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        closeModal();
+        resolve(result);
+      }
+
+      function handleInput() {
+        confirmBtn.disabled = input.value.trim() !== token;
+      }
+
+      function handleCancel(event: Event) {
+        event.preventDefault();
+        finish(false);
+      }
+
+      function handleConfirm(event: Event) {
+        event.preventDefault();
+        finish(true);
+      }
+
+      input.addEventListener("input", handleInput);
+      cancelBtn.addEventListener("click", handleCancel);
+      confirmBtn.addEventListener("click", handleConfirm);
+
+      window.setTimeout(() => {
+        if (!settled) {
+          try {
+            input.focus();
+          } catch {
+            /* ignore */
+          }
+        }
+      }, 0);
+    });
+  }
+
+  function removePetFromState(petId: string): { pet: Pet; index: number } | null {
+    const index = pets.findIndex((item) => item.id === petId);
+    if (index === -1) return null;
+    const next = [...pets];
+    const [removed] = next.splice(index, 1);
+    pets = next;
+    applyFilters();
+    return { pet: removed, index };
+  }
+
+  async function restoreSoftDeletedPet(petId: string): Promise<void> {
+    const entry = pendingUndo.get(petId);
+    if (!entry) return;
+    clearPendingUndo(petId);
+    logUI("INFO", "ui.pets.restore_clicked", { pet_id: petId, household_id: hh });
+    const snapshot = clonePet(entry.pet);
+    try {
+      await petsRepo.restore(hh, petId);
+      const insertIndex = Math.max(0, Math.min(entry.index, pets.length));
+      const next = [...pets];
+      next.splice(insertIndex, 0, snapshot);
+      pets = next;
+      applyFilters();
+      reminderScheduler.rescheduleForPet(petId);
+      const context = toReminderRecords([snapshot]);
+      reminderScheduler.scheduleMany(context.records, {
+        householdId: hh,
+        petNames: context.petNames,
+      });
+      toast.show({ kind: "success", message: `Restored ${toDisplayName(snapshot)}.` });
+      logUI("INFO", "ui.pets.restored", { pet_id: petId, household_id: hh });
+    } catch (error) {
+      const normalized = await recordPetsMutationFailure("pets_restore", error, {
+        household_id: hh,
+        pet_id: petId,
+      });
+      toast.show({ kind: "error", message: normalized.message ?? "Could not restore pet." });
+      logUI("WARN", "ui.pets.restore_failed", {
+        pet_id: petId,
+        household_id: hh,
+        code: normalized.code,
+      });
+      const retryTimer = window.setTimeout(() => {
+        clearPendingUndo(petId);
+      }, 10_000);
+      pendingUndo.set(petId, { ...entry, timer: retryTimer });
+    }
+  }
+
+  async function handleSoftDelete(petId: string): Promise<void> {
+    const pet = pets.find((item) => item.id === petId) ?? pendingUndo.get(petId)?.pet;
+    if (!pet) return;
+    logUI("INFO", "ui.pets.delete_soft_clicked", { pet_id: petId, household_id: hh });
+    const confirmed = await confirmSoftDelete(pet);
+    if (!confirmed) return;
+    try {
+      await petsRepo.delete(hh, petId);
+    } catch (error) {
+      const normalized = await recordPetsMutationFailure("pets_delete_soft", error, {
+        household_id: hh,
+        pet_id: petId,
+      });
+      toast.show({ kind: "error", message: normalized.message ?? "Could not delete pet." });
+      logUI("WARN", "ui.pets.delete_soft_failed", {
+        pet_id: petId,
+        household_id: hh,
+        code: normalized.code,
+      });
+      return;
+    }
+
+    logUI("INFO", "ui.pets.deleted_soft", { pet_id: petId, household_id: hh });
+    const removal = removePetFromState(petId);
+    const snapshot = clonePet(removal?.pet ?? pet);
+    reminderScheduler.rescheduleForPet(petId);
+    if (detailActive && detailPetId === petId) {
+      showList();
+    }
+
+    clearPendingUndo(petId);
+    const timer = window.setTimeout(() => {
+      clearPendingUndo(petId);
+    }, 10_000);
+    pendingUndo.set(petId, { pet: snapshot, index: removal?.index ?? pets.length, timer });
+
+    toast.show({
+      kind: "info",
+      message: `Deleted ${toDisplayName(snapshot)}.`,
+      timeoutMs: 10_000,
+      actions: [
+        {
+          label: "Restore",
+          onSelect: () => {
+            void restoreSoftDeletedPet(petId);
+          },
+        },
+      ],
+    });
+  }
+
+  async function handleHardDelete(petId: string): Promise<void> {
+    if (!allowHardDelete) return;
+    const pet = pets.find((item) => item.id === petId) ?? pendingUndo.get(petId)?.pet;
+    if (!pet) return;
+    logUI("INFO", "ui.pets.delete_hard_clicked", { pet_id: petId, household_id: hh });
+    const confirmed = await confirmHardDelete(pet);
+    if (!confirmed) return;
+    logUI("INFO", "ui.pets.delete_hard_confirmed", { pet_id: petId, household_id: hh });
+    try {
+      await petsRepo.deleteHard(hh, petId);
+    } catch (error) {
+      const normalized = await recordPetsMutationFailure("pets_delete_hard", error, {
+        household_id: hh,
+        pet_id: petId,
+      });
+      toast.show({
+        kind: "error",
+        message: normalized.message ?? "Could not delete pet permanently.",
+      });
+      logUI("WARN", "ui.pets.delete_hard_failed", {
+        pet_id: petId,
+        household_id: hh,
+        code: normalized.code,
+      });
+      return;
+    }
+
+    logUI("INFO", "ui.pets.deleted_hard", { pet_id: petId, household_id: hh });
+    clearPendingUndo(petId);
+    removePetFromState(petId);
+    reminderScheduler.rescheduleForPet(petId);
+    if (detailActive && detailPetId === petId) {
+      showList();
+    }
+    toast.show({
+      kind: "success",
+      message: `Deleted ${toDisplayName(pet)} permanently.`,
+    });
+  }
 
   function applyFilters() {
     filters = { ...filters, models: createFilterModels(pets, filters.query) };
@@ -152,6 +561,7 @@ export async function PetsView(container: HTMLElement) {
     page.setScrollOffset(lastScroll);
     detailController = null;
     detailActive = false;
+    detailPetId = null;
   }
 
   async function refresh(affected?: string[]) {
@@ -454,6 +864,7 @@ export async function PetsView(container: HTMLElement) {
     const host = document.createElement("div");
     page.showDetail(host);
     detailActive = true;
+    detailPetId = pet.id;
 
     const persist = async () => {
       await petsRepo.update(hh, pet.id, {
@@ -469,6 +880,9 @@ export async function PetsView(container: HTMLElement) {
       async () =>
         await PetDetailView(host, pet, persist, () => {
           showList();
+        }, {
+          onDeletePet: () => handleSoftDelete(pet.id),
+          onDeletePetHard: allowHardDelete ? () => handleHardDelete(pet.id) : undefined,
         }),
       {
         successFields: () => ({ household_id: hh, pet_id: pet.id }),
@@ -500,6 +914,14 @@ export async function PetsView(container: HTMLElement) {
     onEditPet: (pet, patch) => { void handleEdit(pet, patch); },
     onChangePhoto: (pet) => { void handleChangePhoto(pet); },
     onRevealImage: (pet) => { handleRevealPhoto(pet); },
+    onDeletePet: (pet) => {
+      void handleSoftDelete(pet.id);
+    },
+    onDeletePetHard: allowHardDelete
+      ? (pet) => {
+          void handleHardDelete(pet.id);
+        }
+      : undefined,
     onReorderPet: (id, delta) => {
       void movePet(id, delta);
     },

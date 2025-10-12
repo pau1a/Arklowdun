@@ -371,7 +371,7 @@ Rendered markup hierarchy (simplified):
 
 Each row contains two states:
 
-* **Display:** name (with optional `<mark>` highlight) plus a pill showing `pet.type`, and actions (`Open`, `Edit`).
+* **Display:** name (with optional `<mark>` highlight) plus a pill showing `pet.type`, direct actions (`Open`, `Edit`), and an overflow menu for destructive affordances.
 * **Editor:** inline form with name/type inputs and `Save`/`Cancel` buttons. Inputs update an editing state map so debounced renders preserve user typing.
 
 ---
@@ -406,6 +406,7 @@ Each row contains two states:
 * Selecting `Open` stores the current scroll offset, reveals the `pets__detail` host, and mounts `PetDetailView` inside it.
 * `PetDetailView` callbacks (`persist`, `onBack`) refresh the list via `petsRepo.update()` and `petsRepo.list()` while keeping the outer shell mounted.
 * Returning to the list restores the previous scroll position.
+* The header renders a `Delete` / `Delete Permanently` toolbar next to the title. Buttons are conditionally visible based on the hard-delete flag and disable during pending requests to avoid double execution.
 
 ---
 
@@ -419,6 +420,8 @@ Each row contains two states:
 | Edit row              | Inline form toggled, save patches a single row node.                      |
 | Click “Open”          | Detail view renders in side host, scroll position preserved.              |
 | Click “Back”          | Returns to list, reinstating previous scroll offset and filter.           |
+| Delete pet            | Confirmation modal, hides card on success, shows 10 s toast with “Restore”. |
+| Delete permanently    | Requires typing confirmation, removes card immediately, no undo toast.    |
 | Switch route          | View cleanups run; reminder timers persist by design.                     |
 
 ---
@@ -428,4 +431,14 @@ Each row contains two states:
 * Rows are focusable (`role="listitem"`, `tabIndex` default from DOM). Arrow keys within the row editor move focus naturally via standard form controls.
 * Search input has `aria-label="Search pets"` for screen readers.
 * Banner updates set `aria-label="Pets banner"` and toggle `aria-hidden` appropriately.
+* Keyboard shortcuts for delete actions (`Cmd/Ctrl+Backspace`, `Cmd/Ctrl+Shift+Backspace`) remain behind a developer flag and are tracked in the rollout checklist before enabling by default.
 
+
+## 10. Delete flows
+
+* **Card menu actions:** the `⋯` overflow renders `Delete` and, when `ENABLE_PETS_HARD_DELETE` resolves true, `Delete Permanently`. The two buttons are separated by a divider and mirror the detail toolbar.
+* **Soft delete:** `Delete` opens a confirmation modal (“Delete {name}? You can restore from Trash.”). On confirm we call `petsRepo.delete()`, optimistically remove the pet from the virtualised list, cancel reminder timers, and raise an info toast with a 10 second “Restore” action. Undo invokes `petsRepo.restore()`, reinserts the cached pet at its previous index, reschedules reminders, and logs `ui.pets.restored`.
+* **Hard delete:** `Delete Permanently` requires typing the pet’s name (or ID if unnamed) before enabling confirmation. Successful confirmation logs `ui.pets.delete_hard_confirmed`, calls `petsRepo.deleteHard()`, closes any open detail view, and emits a success toast without undo. Failures surface errors and keep the card visible.
+* **Detail parity:** `PetDetailView` exposes the same buttons in a right-aligned toolbar. They dispatch the shared handlers and close the detail view after a delete succeeds.
+* **Telemetry:** the UI emits `ui.pets.delete_soft_clicked`, `ui.pets.deleted_soft`, `ui.pets.restore_clicked`, `ui.pets.restored`, `ui.pets.delete_hard_clicked`, `ui.pets.delete_hard_confirmed`, `ui.pets.deleted_hard`, and failure variants. These align with the IPC commands documented in `docs/pets/ipc.md`.
+* **Guardrails:** hard delete availability remains feature-flagged, the undo window expires automatically, and file cleanup is best-effort—DB deletion still commits even if vault removal fails.
