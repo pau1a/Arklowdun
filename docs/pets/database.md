@@ -16,6 +16,7 @@ This document describes the SQLite structures that back the Pets domain. It cove
 | `name`        | TEXT    | `NOT NULL`                                                                  | Display name in the UI.                                    |
 | `type`        | TEXT    | `NOT NULL`                                                                  | Species/breed descriptor (free-form text).                 |
 | `household_id`| TEXT    | `NOT NULL`, `REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE`  | Keeps records scoped to a household; historical dumps may spell the table `household` or `households`, and the validation test accepts whichever exists. |
+| `image_path`  | TEXT    | Nullable                                                                    | Vault-relative path to the pet’s photo stored under the `pet_image` attachment category. |
 | `created_at`  | INTEGER | `NOT NULL`                                                                  | Millisecond epoch set at insert time.                      |
 | `updated_at`  | INTEGER | `NOT NULL`                                                                  | Millisecond epoch refreshed on writes.                     |
 | `deleted_at`  | INTEGER | Nullable                                                                    | Soft-delete marker; null when active.                      |
@@ -49,6 +50,7 @@ The schema ships with the following indexes relevant to the Pets domain:
 | -------------------------------------------- | ------------------------------------------------------------------------------ |
 | `pets_household_position_idx`                | Partial **unique** index on `(household_id, position)` constrained to `deleted_at IS NULL`; preserves per-household ordering. |
 | `pets_household_updated_idx`                 | Tracks `(household_id, updated_at)` to accelerate change feeds. |
+| `pets_household_image_idx`                   | Indexes `(household_id, image_path)` for vault lookups and repair scanning. |
 | `pet_medical_pet_date_idx`                   | Orders medical history by `(pet_id, date)` for timeline rendering. |
 | `pet_medical_household_updated_idx`          | Drives household scoped syncs on medical records. |
 | `pet_medical_household_category_path_idx`    | Partial **unique** index on `(household_id, category, relative_path)` constrained to `deleted_at IS NULL AND relative_path IS NOT NULL`; prevents duplicate attachment slots. |
@@ -71,6 +73,7 @@ These assertions are codified in `tests/pets-schema.test.ts`, which uses an in-m
 
 * The UI layers may attach an in-memory `medical` array to `Pet` models, but this field is populated through separate queries – the `pets` table itself only stores the scalar columns listed above.
 * The legacy `document` column on `pet_medical` remains nullable to support older exports; new attachments exclusively use `root_key` + `relative_path`.
+* Pet profile photos live under the `pet_image` vault category; `image_path` stores the sanitised relative location (or `NULL` when no photo is present).
 
 ---
 

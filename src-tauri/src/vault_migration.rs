@@ -26,7 +26,7 @@ const EVENT_PROGRESS: &str = "vault:migration_progress";
 const EVENT_COMPLETE: &str = "vault:migration_complete";
 
 const CATEGORY_CHECK: &str =
-    "category IS NULL OR category NOT IN ('bills','policies','property_documents','inventory_items','pet_medical','vehicles','vehicle_maintenance','notes','misc')";
+    "category IS NULL OR category NOT IN ('bills','policies','property_documents','inventory_items','pet_medical','pet_image','vehicles','vehicle_maintenance','notes','misc')";
 
 const LEGACY_ROOT_CONDITION: &str = "root_key IS NOT NULL AND TRIM(root_key) != ''";
 

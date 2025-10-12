@@ -12,7 +12,7 @@ It connects the Pets module to its related subsystems — Family, Vault, Attachm
 | Area                    | Path                                       | Description                                                                                                                                                   |
 | ----------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Family**              | `../family/README.md`                      | Describes household member structure; Pets records are scoped to the same `household_id`.                                                                     |
-| **Vault & Attachments** | `../architecture/vault-enforcement.md`     | Documents attachment path sanitation, root key limits, and symlink/traversal guards. Pets attachments (category: `pet_medical`) follow the same vault policy. |
+| **Vault & Attachments** | `../architecture/vault-enforcement.md`     | Documents attachment path sanitation, root key limits, and symlink/traversal guards. Pets attachments (categories: `pet_medical`, `pet_image`) follow the same vault policy. |
 | **IPC Security**        | `../architecture/ipc-security-playbook.md` | Defines Tauri command safety guidelines; Pets IPC contracts (`pets_*`, `pet_medical_*`) comply with these constraints.                                        |
 | **Search Integration**  | `../search.md`                             | Lists Pets as an indexed entity type with the `kind: "Pet"` result format for command-palette queries.                                                        |
 | **Diagnostics**         | `../logging/diagnostics.md`                | Outlines how Pets contributes row counts and reminder queue data to diagnostic bundles.                                                                       |
@@ -29,7 +29,7 @@ These linked documents collectively define the policies and conventions that the
 
 **`pets`**
 
-* Columns: `id`, `household_id`, `name`, `type`, `position`, `created_at`, `updated_at`, `deleted_at`.
+* Columns: `id`, `household_id`, `name`, `type`, `position`, `image_path`, `created_at`, `updated_at`, `deleted_at`.
 * Constraints:
 
   * `FOREIGN KEY (household_id)` → `households(id)`
@@ -49,7 +49,7 @@ These linked documents collectively define the policies and conventions that the
 
 | Table                     | Column                      | Purpose                                                     |
 | ------------------------- | --------------------------- | ----------------------------------------------------------- |
-| **`attachments`**         | `category`, `relative_path` | `category='pet_medical'` denotes a Pets attachment.         |
+| **`attachments`**         | `category`, `relative_path` | `category='pet_medical'` denotes medical attachments; `category='pet_image'` stores profile photos. |
 | **`cascade_checkpoints`** | `table_name`                | Includes `pets` and `pet_medical` in integrity sweep order. |
 | **`shadow_read_audit`**   | `entity_kind`               | Logs Pets read access for diagnostics export.               |
 | **`schema_migrations`**   | n/a                         | Tracks migrations adding Pets tables and indexes.           |

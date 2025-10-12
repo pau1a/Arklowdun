@@ -442,6 +442,36 @@ async fn load_attachment_sources(pool: &SqlitePool) -> AppResult<Vec<ExportAttac
         }
     }
 
+    let pet_rows = sqlx::query(
+        "SELECT household_id, image_path FROM pets WHERE deleted_at IS NULL AND image_path IS NOT NULL",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "load_attachment_sources")
+            .with_context("table", "pets".to_string())
+    })?;
+
+    for row in pet_rows {
+        let household_id: String = row.try_get("household_id").unwrap_or_default();
+        if household_id.trim().is_empty() {
+            continue;
+        }
+
+        let rel: Option<String> = row.try_get("image_path").ok();
+        let Some(rel) = rel.filter(|value| !value.trim().is_empty()) else {
+            continue;
+        };
+
+        entries.push(ExportAttachmentSource {
+            table: "pets",
+            household_id,
+            category: AttachmentCategory::PetImage,
+            relative_path: rel,
+        });
+    }
+
     Ok(entries)
 }
 

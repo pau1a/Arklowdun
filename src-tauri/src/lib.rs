@@ -3297,6 +3297,402 @@ async fn search_entities(
     .await
 }
 
+#[derive(Debug, Clone)]
+struct PetImageDescriptor {
+    household_id: String,
+    image_path: Option<String>,
+}
+
+async fn load_pet_image_descriptor(pool: &SqlitePool, id: &str) -> AppResult<PetImageDescriptor> {
+    let row = sqlx::query(
+        "SELECT household_id, image_path FROM pets WHERE id = ?1 AND deleted_at IS NULL",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|err| {
+        AppError::from(err)
+            .with_context("operation", "load_pet_image_descriptor")
+            .with_context("table", "pets".to_string())
+            .with_context("id", id.to_string())
+    })?;
+
+    let Some(row) = row else {
+        return Err(AppError::new("DB/NOT_FOUND", "Record not found")
+            .with_context("table", "pets".to_string())
+            .with_context("id", id.to_string()));
+    };
+
+    let household_id: Option<String> = row.try_get("household_id").ok();
+    let image_path: Option<String> = row.try_get("image_path").ok();
+
+    let household_id = household_id
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            AppError::new(
+                crate::vault::ERR_INVALID_HOUSEHOLD,
+                "Attachment record is missing a valid household.",
+            )
+            .with_context("table", "pets".to_string())
+            .with_context("id", id.to_string())
+        })?;
+
+    Ok(PetImageDescriptor {
+        household_id,
+        image_path: image_path.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }),
+    })
+}
+
+fn resolve_pet_image_for_ipc_create(
+    vault: &Arc<Vault>,
+    active_household: &Arc<Mutex<String>>,
+    data: &Map<String, Value>,
+    operation: &'static str,
+) -> AppResult<Option<AttachmentMutationGuard>> {
+    let Some(value) = data.get("image_path") else {
+        return Ok(None);
+    };
+
+    let household_raw = data
+        .get("household_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            AppError::new(
+                crate::vault::ERR_INVALID_HOUSEHOLD,
+                "Attachments require a household id.",
+            )
+            .with_context("operation", operation)
+            .with_context("table", "pets".to_string())
+        })?;
+    let household_id = household_raw.to_string();
+
+    let relative_for_log = value.as_str().unwrap_or_default();
+
+    ensure_active_household_for_ipc(
+        active_household,
+        &household_id,
+        AttachmentCategory::PetImage,
+        relative_for_log,
+        operation,
+        "pets",
+        None,
+    )?;
+
+    let guard = match value {
+        Value::Null => {
+            AttachmentMutationGuard::new(household_id, AttachmentCategory::PetImage, None, None)
+        }
+        Value::String(raw) => {
+            if raw.trim().is_empty() {
+                AttachmentMutationGuard::new(household_id, AttachmentCategory::PetImage, None, None)
+            } else {
+                let resolved = vault
+                    .resolve(&household_id, AttachmentCategory::PetImage, raw)
+                    .map_err(|err| {
+                        err.with_context("operation", operation)
+                            .with_context("table", "pets".to_string())
+                            .with_context("household_id", household_id.clone())
+                    })?;
+                let normalized = vault
+                    .relative_from_resolved(&resolved, &household_id, AttachmentCategory::PetImage)
+                    .ok_or_else(|| {
+                        AppError::new(
+                            crate::vault::ERR_PATH_OUT_OF_VAULT,
+                            "Attachment path must stay inside the vault.",
+                        )
+                        .with_context("operation", operation)
+                        .with_context("table", "pets".to_string())
+                        .with_context("household_id", household_id.clone())
+                    })?;
+                AttachmentMutationGuard::new(
+                    household_id,
+                    AttachmentCategory::PetImage,
+                    Some(normalized),
+                    Some(resolved),
+                )
+            }
+        }
+        other => {
+            return Err(AppError::new(
+                crate::vault::ERR_FILENAME_INVALID,
+                "Attachment path must be a string.",
+            )
+            .with_context("operation", operation)
+            .with_context("table", "pets".to_string())
+            .with_context("household_id", household_id)
+            .with_context("value_type", other.to_string()));
+        }
+    };
+
+    Ok(Some(guard))
+}
+
+async fn resolve_pet_image_for_ipc_update(
+    pool: &SqlitePool,
+    vault: &Arc<Vault>,
+    active_household: &Arc<Mutex<String>>,
+    id: &str,
+    household_id: Option<&str>,
+    data: &Map<String, Value>,
+    operation: &'static str,
+) -> AppResult<Option<AttachmentMutationGuard>> {
+    if !data.contains_key("image_path") {
+        return Ok(None);
+    }
+
+    let descriptor = load_pet_image_descriptor(pool, id).await.map_err(|err| {
+        err.with_context("operation", operation)
+            .with_context("table", "pets".to_string())
+    })?;
+
+    if let Some(expected) = household_id {
+        if expected != descriptor.household_id {
+            let relative_for_log = descriptor.image_path.as_deref().unwrap_or_default();
+            if !relative_for_log.is_empty() {
+                let relative_hash = hash_path(Path::new(relative_for_log));
+                log_vault_error(
+                    &descriptor.household_id,
+                    AttachmentCategory::PetImage,
+                    relative_for_log,
+                    crate::vault::ERR_INVALID_HOUSEHOLD,
+                    "ensure_update_household",
+                );
+                return Err(AppError::new(
+                    crate::vault::ERR_INVALID_HOUSEHOLD,
+                    "Attachments require a matching household id.",
+                )
+                .with_context("operation", operation)
+                .with_context("table", "pets".to_string())
+                .with_context("id", id.to_string())
+                .with_context("household_id", expected.to_string())
+                .with_context(
+                    "category",
+                    AttachmentCategory::PetImage.as_str().to_string(),
+                )
+                .with_context("relative_path_hash", relative_hash)
+                .with_context("guard_stage", "ensure_update_household".to_string()));
+            }
+            log_vault_error(
+                &descriptor.household_id,
+                AttachmentCategory::PetImage,
+                relative_for_log,
+                crate::vault::ERR_INVALID_HOUSEHOLD,
+                "ensure_update_household",
+            );
+            return Err(AppError::new(
+                crate::vault::ERR_INVALID_HOUSEHOLD,
+                "Attachments require a matching household id.",
+            )
+            .with_context("operation", operation)
+            .with_context("table", "pets".to_string())
+            .with_context("id", id.to_string())
+            .with_context("household_id", expected.to_string())
+            .with_context(
+                "category",
+                AttachmentCategory::PetImage.as_str().to_string(),
+            )
+            .with_context("guard_stage", "ensure_update_household".to_string()));
+        }
+    }
+
+    let relative_for_log = data
+        .get("image_path")
+        .and_then(Value::as_str)
+        .or(descriptor.image_path.as_deref())
+        .unwrap_or_default();
+
+    ensure_active_household_for_ipc(
+        active_household,
+        &descriptor.household_id,
+        AttachmentCategory::PetImage,
+        relative_for_log,
+        operation,
+        "pets",
+        Some(id),
+    )?;
+
+    let guard = match data.get("image_path") {
+        Some(Value::Null) => AttachmentMutationGuard::new(
+            descriptor.household_id,
+            AttachmentCategory::PetImage,
+            None,
+            None,
+        ),
+        Some(Value::String(raw)) => {
+            if raw.trim().is_empty() {
+                AttachmentMutationGuard::new(
+                    descriptor.household_id,
+                    AttachmentCategory::PetImage,
+                    None,
+                    None,
+                )
+            } else {
+                let resolved = vault
+                    .resolve(&descriptor.household_id, AttachmentCategory::PetImage, raw)
+                    .map_err(|err| {
+                        err.with_context("operation", operation)
+                            .with_context("table", "pets".to_string())
+                            .with_context("id", id.to_string())
+                            .with_context("household_id", descriptor.household_id.clone())
+                    })?;
+                let normalized = vault
+                    .relative_from_resolved(
+                        &resolved,
+                        &descriptor.household_id,
+                        AttachmentCategory::PetImage,
+                    )
+                    .ok_or_else(|| {
+                        AppError::new(
+                            crate::vault::ERR_PATH_OUT_OF_VAULT,
+                            "Attachment path must stay inside the vault.",
+                        )
+                        .with_context("operation", operation)
+                        .with_context("table", "pets".to_string())
+                        .with_context("id", id.to_string())
+                        .with_context("household_id", descriptor.household_id.clone())
+                    })?;
+                AttachmentMutationGuard::new(
+                    descriptor.household_id,
+                    AttachmentCategory::PetImage,
+                    Some(normalized),
+                    Some(resolved),
+                )
+            }
+        }
+        Some(other) => {
+            return Err(AppError::new(
+                crate::vault::ERR_FILENAME_INVALID,
+                "Attachment path must be a string.",
+            )
+            .with_context("operation", operation)
+            .with_context("table", "pets".to_string())
+            .with_context("id", id.to_string())
+            .with_context("household_id", descriptor.household_id)
+            .with_context("value_type", other.to_string()));
+        }
+        None => unreachable!("image_path key presence checked above"),
+    };
+
+    Ok(Some(guard))
+}
+
+async fn resolve_pet_image_for_ipc_delete(
+    pool: &SqlitePool,
+    vault: &Arc<Vault>,
+    active_household: &Arc<Mutex<String>>,
+    household_id: &str,
+    id: &str,
+    operation: &'static str,
+) -> AppResult<Option<AttachmentMutationGuard>> {
+    let descriptor = load_pet_image_descriptor(pool, id).await.map_err(|err| {
+        err.with_context("operation", operation)
+            .with_context("table", "pets".to_string())
+    })?;
+
+    if descriptor.household_id != household_id {
+        let relative_for_log = descriptor.image_path.as_deref().unwrap_or_default();
+        if !relative_for_log.is_empty() {
+            let relative_hash = hash_path(Path::new(relative_for_log));
+            log_vault_error(
+                &descriptor.household_id,
+                AttachmentCategory::PetImage,
+                relative_for_log,
+                crate::vault::ERR_INVALID_HOUSEHOLD,
+                "ensure_delete_household",
+            );
+            return Err(AppError::new(
+                crate::vault::ERR_INVALID_HOUSEHOLD,
+                "Attachments require a matching household id.",
+            )
+            .with_context("operation", operation)
+            .with_context("table", "pets".to_string())
+            .with_context("id", id.to_string())
+            .with_context("household_id", household_id.to_string())
+            .with_context(
+                "category",
+                AttachmentCategory::PetImage.as_str().to_string(),
+            )
+            .with_context("relative_path_hash", relative_hash)
+            .with_context("guard_stage", "ensure_delete_household".to_string()));
+        }
+        log_vault_error(
+            &descriptor.household_id,
+            AttachmentCategory::PetImage,
+            "",
+            crate::vault::ERR_INVALID_HOUSEHOLD,
+            "ensure_delete_household",
+        );
+        return Err(AppError::new(
+            crate::vault::ERR_INVALID_HOUSEHOLD,
+            "Attachments require a matching household id.",
+        )
+        .with_context("operation", operation)
+        .with_context("table", "pets".to_string())
+        .with_context("id", id.to_string())
+        .with_context("household_id", household_id.to_string())
+        .with_context(
+            "category",
+            AttachmentCategory::PetImage.as_str().to_string(),
+        )
+        .with_context("guard_stage", "ensure_delete_household".to_string()));
+    }
+
+    let relative_for_log = descriptor.image_path.as_deref().unwrap_or_default();
+
+    ensure_active_household_for_ipc(
+        active_household,
+        &descriptor.household_id,
+        AttachmentCategory::PetImage,
+        relative_for_log,
+        operation,
+        "pets",
+        Some(id),
+    )?;
+
+    let Some(raw) = descriptor.image_path else {
+        return Ok(None);
+    };
+
+    let resolved = vault
+        .resolve(&descriptor.household_id, AttachmentCategory::PetImage, &raw)
+        .map_err(|err| {
+            err.with_context("operation", operation)
+                .with_context("table", "pets".to_string())
+                .with_context("id", id.to_string())
+                .with_context("household_id", descriptor.household_id.clone())
+        })?;
+    let normalized = vault
+        .relative_from_resolved(
+            &resolved,
+            &descriptor.household_id,
+            AttachmentCategory::PetImage,
+        )
+        .ok_or_else(|| {
+            AppError::new(
+                crate::vault::ERR_PATH_OUT_OF_VAULT,
+                "Attachment path must stay inside the vault.",
+            )
+            .with_context("operation", operation)
+            .with_context("table", "pets".to_string())
+            .with_context("id", id.to_string())
+            .with_context("household_id", descriptor.household_id.clone())
+        })?;
+
+    Ok(Some(AttachmentMutationGuard::new(
+        descriptor.household_id,
+        AttachmentCategory::PetImage,
+        Some(normalized),
+        Some(resolved),
+    )))
+}
+
 async fn resolve_attachment_for_ipc_read(
     pool: &SqlitePool,
     active_household: &Arc<Mutex<String>>,
@@ -3383,6 +3779,10 @@ fn resolve_attachment_for_ipc_create(
     data: &Map<String, Value>,
     operation: &'static str,
 ) -> AppResult<Option<AttachmentMutationGuard>> {
+    if table == "pets" {
+        return resolve_pet_image_for_ipc_create(vault, active_household, data, operation);
+    }
+
     if !ATTACHMENT_TABLES.contains(&table) {
         return Ok(None);
     }
@@ -3514,6 +3914,19 @@ async fn resolve_attachment_for_ipc_update(
     data: &Map<String, Value>,
     operation: &'static str,
 ) -> AppResult<Option<AttachmentMutationGuard>> {
+    if table == "pets" {
+        return resolve_pet_image_for_ipc_update(
+            pool,
+            vault,
+            active_household,
+            id,
+            household_id,
+            data,
+            operation,
+        )
+        .await;
+    }
+
     if !ATTACHMENT_TABLES.contains(&table) {
         return Ok(None);
     }
@@ -3703,6 +4116,18 @@ async fn resolve_attachment_for_ipc_delete(
     id: &str,
     operation: &'static str,
 ) -> AppResult<Option<AttachmentMutationGuard>> {
+    if table == "pets" {
+        return resolve_pet_image_for_ipc_delete(
+            pool,
+            vault,
+            active_household,
+            household_id,
+            id,
+            operation,
+        )
+        .await;
+    }
+
     if !ATTACHMENT_TABLES.contains(&table) {
         return Ok(None);
     }
@@ -4181,26 +4606,29 @@ async fn pets_diagnostics_counters(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> AppResult<PetsDiagnosticsCounters> {
     let pool = state.pool_clone();
-    let pets_total = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(1) FROM pets WHERE deleted_at IS NULL",
-    )
-    .fetch_one(&pool)
-    .await
-    .map_err(|err| AppError::from(err).with_context("operation", "pets_diagnostics_counters"))?;
+    let pets_total =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(1) FROM pets WHERE deleted_at IS NULL")
+            .fetch_one(&pool)
+            .await
+            .map_err(|err| {
+                AppError::from(err).with_context("operation", "pets_diagnostics_counters")
+            })?;
 
-    let pets_deleted = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(1) FROM pets WHERE deleted_at IS NOT NULL",
-    )
-    .fetch_one(&pool)
-    .await
-    .map_err(|err| AppError::from(err).with_context("operation", "pets_diagnostics_counters"))?;
+    let pets_deleted =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(1) FROM pets WHERE deleted_at IS NOT NULL")
+            .fetch_one(&pool)
+            .await
+            .map_err(|err| {
+                AppError::from(err).with_context("operation", "pets_diagnostics_counters")
+            })?;
 
-    let pet_medical_total = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(1) FROM pet_medical WHERE deleted_at IS NULL",
-    )
-    .fetch_one(&pool)
-    .await
-    .map_err(|err| AppError::from(err).with_context("operation", "pets_diagnostics_counters"))?;
+    let pet_medical_total =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(1) FROM pet_medical WHERE deleted_at IS NULL")
+            .fetch_one(&pool)
+            .await
+            .map_err(|err| {
+                AppError::from(err).with_context("operation", "pets_diagnostics_counters")
+            })?;
 
     let attachments_total = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(1) FROM pet_medical WHERE deleted_at IS NULL AND relative_path IS NOT NULL",
@@ -5167,6 +5595,119 @@ mod vault_root_key_tests {
         .await
         .expect_err("root key override should be rejected");
         assert_eq!(err.code(), crate::vault::ERR_ROOT_KEY_NOT_SUPPORTED);
+    }
+}
+
+#[cfg(test)]
+mod pet_image_guard_tests {
+    use super::*;
+    use serde_json::{Map, Value};
+    use sqlx::sqlite::SqlitePoolOptions;
+    use std::sync::{Arc, Mutex};
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn update_pet_image_normalizes_path() {
+        let dir = tempdir().expect("tempdir");
+        let vault = Arc::new(Vault::new(dir.path()));
+        let active = Arc::new(Mutex::new(String::new()));
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("connect sqlite memory");
+        sqlx::query(
+            "CREATE TABLE pets (id TEXT PRIMARY KEY, household_id TEXT NOT NULL, image_path TEXT, deleted_at INTEGER)"
+        )
+        .execute(&pool)
+        .await
+        .expect("create pets table");
+        sqlx::query(
+            "INSERT INTO pets (id, household_id, image_path, deleted_at) VALUES ('pet1','hh1','existing.jpg',NULL)"
+        )
+        .execute(&pool)
+        .await
+        .expect("insert pet row");
+
+        let mut data = Map::new();
+        data.insert(
+            "image_path".into(),
+            Value::String("photos/whiskey.jpg".into()),
+        );
+        data.insert("household_id".into(), Value::String("hh1".into()));
+
+        let guard = resolve_attachment_for_ipc_update(
+            &pool,
+            &vault,
+            &active,
+            "pets",
+            "pet1",
+            Some("hh1"),
+            &data,
+            "pets_update",
+        )
+        .await
+        .expect("resolve update guard")
+        .expect("pet image guard");
+
+        let mut update_data = data.clone();
+        prepare_attachment_update(
+            &pool,
+            "pets",
+            "pet1",
+            &mut update_data,
+            Some("hh1"),
+            Some(&guard),
+        )
+        .await
+        .expect("prepare pet image update");
+
+        assert_eq!(
+            update_data.get("image_path").and_then(Value::as_str),
+            Some("photos/whiskey.jpg"),
+        );
+    }
+
+    #[tokio::test]
+    async fn update_pet_image_rejects_invalid_type() {
+        let dir = tempdir().expect("tempdir");
+        let vault = Arc::new(Vault::new(dir.path()));
+        let active = Arc::new(Mutex::new(String::new()));
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("connect sqlite memory");
+        sqlx::query(
+            "CREATE TABLE pets (id TEXT PRIMARY KEY, household_id TEXT NOT NULL, image_path TEXT, deleted_at INTEGER)"
+        )
+        .execute(&pool)
+        .await
+        .expect("create pets table");
+        sqlx::query(
+            "INSERT INTO pets (id, household_id, image_path, deleted_at) VALUES ('pet1','hh1','existing.jpg',NULL)"
+        )
+        .execute(&pool)
+        .await
+        .expect("insert pet row");
+
+        let mut data = Map::new();
+        data.insert("image_path".into(), Value::Number(1.into()));
+        data.insert("household_id".into(), Value::String("hh1".into()));
+
+        let err = resolve_attachment_for_ipc_update(
+            &pool,
+            &vault,
+            &active,
+            "pets",
+            "pet1",
+            Some("hh1"),
+            &data,
+            "pets_update",
+        )
+        .await
+        .expect_err("non-string image path should be rejected");
+        assert_eq!(err.code(), crate::vault::ERR_FILENAME_INVALID);
     }
 }
 
