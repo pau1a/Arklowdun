@@ -9,7 +9,8 @@ import {
   PetMedicalRestoreRequestSchema,
   PetMedicalUpdateRequestSchema,
   PetsCreateRequestSchema,
-  PetsDeleteRequestSchema,
+  PetsDeleteHardRequestSchema,
+  PetsDeleteSoftRequestSchema,
   PetsListRequestSchema,
   PetsRestoreRequestSchema,
   PetsUpdateRequestSchema,
@@ -174,12 +175,22 @@ export const petsRepo = {
   },
 
   async delete(householdId: string, id: string): Promise<void> {
-    const payload = PetsDeleteRequestSchema.parse({
+    const payload = PetsDeleteSoftRequestSchema.parse({
       id,
       householdId,
       household_id: householdId,
     });
-    await call("pets_delete", payload);
+    await call("pets_delete_soft", payload);
+    clearSearchCache();
+  },
+
+  async deleteHard(householdId: string, id: string): Promise<void> {
+    const payload = PetsDeleteHardRequestSchema.parse({
+      id,
+      householdId,
+      household_id: householdId,
+    });
+    await call("pets_delete_hard", payload);
     clearSearchCache();
   },
 

@@ -41,6 +41,8 @@ export interface PetDetailViewDependencies {
   updateDiagnosticsSection?: typeof updateDiagnosticsSection;
   timeIt?: typeof timeIt;
   recordPetsMutationFailure?: typeof recordPetsMutationFailure;
+  onDeletePet?: () => Promise<void> | void;
+  onDeletePetHard?: () => Promise<void> | void;
 }
 
 export interface PetDetailController {
@@ -407,7 +409,81 @@ export async function PetDetailView(
   title.textContent = pet.name;
   title.id = detailTitleId;
 
-  header.append(backBtn, title);
+  const headerMain = document.createElement("div");
+  headerMain.className = "pet-detail__header-main";
+  headerMain.append(backBtn, title);
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "pet-detail__toolbar";
+
+  const deleteBtn = document.createElement("button");
+  deleteBtn.type = "button";
+  deleteBtn.className = "pet-detail__toolbar-btn";
+  deleteBtn.textContent = "Delete";
+
+  const hardDeleteBtn = document.createElement("button");
+  hardDeleteBtn.type = "button";
+  hardDeleteBtn.className = "pet-detail__toolbar-btn pet-detail__toolbar-btn--danger";
+  hardDeleteBtn.textContent = "Delete Permanently";
+
+  toolbar.append(deleteBtn, hardDeleteBtn);
+
+  const softDeleteHandler = deps.onDeletePet;
+  const hardDeleteHandler = deps.onDeletePetHard;
+  const hasSoftDelete = typeof softDeleteHandler === "function";
+  const hasHardDelete = typeof hardDeleteHandler === "function";
+
+  toolbar.hidden = !(hasSoftDelete || hasHardDelete);
+  deleteBtn.hidden = !hasSoftDelete;
+  deleteBtn.disabled = !hasSoftDelete;
+  hardDeleteBtn.hidden = !hasHardDelete;
+  hardDeleteBtn.disabled = !hasHardDelete;
+
+  let deleteBusy = false;
+
+  const setDeleteBusy = (value: boolean) => {
+    deleteBusy = value;
+    if (hasSoftDelete) {
+      deleteBtn.disabled = value;
+    }
+    if (hasHardDelete) {
+      hardDeleteBtn.disabled = value;
+    }
+  };
+
+  if (hasSoftDelete) {
+    deleteBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (deleteBusy) return;
+      setDeleteBusy(true);
+      void Promise.resolve(softDeleteHandler?.())
+        .catch(() => {
+          // swallow; handler is responsible for user feedback
+        })
+        .finally(() => {
+          if (!root.isConnected) return;
+          setDeleteBusy(false);
+        });
+    });
+  }
+
+  if (hasHardDelete) {
+    hardDeleteBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (deleteBusy) return;
+      setDeleteBusy(true);
+      void Promise.resolve(hardDeleteHandler?.())
+        .catch(() => {
+          // swallow; handler surfaces its own errors
+        })
+        .finally(() => {
+          if (!root.isConnected) return;
+          setDeleteBusy(false);
+        });
+    });
+  }
+
+  header.append(headerMain, toolbar);
 
   const identity = document.createElement("section");
   identity.className = "pet-detail__identity";

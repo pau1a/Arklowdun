@@ -33,3 +33,17 @@ Mark each item when there is a committed artefact demonstrating the requirement:
 - [x] Docs updated (`ui.md`, `diagnostics.md`, `ipc.md`, `plan/checklist.md`, `CHANGELOG.md`)
 
 Update the evidence column in the table above to reference PR numbers or commit hashes once each box is checked. Older PR sections remain for historical traceability even after the rollout completes.
+
+## PR9.5b – Card grid UI & delete affordances
+
+- [ ] Soft delete confirmation + undo toast (UI screenshot, telemetry log)
+- [x] Backend contract coverage updated for soft/hard delete (`tests/contracts/pets-ipc.spec.ts`)
+- [ ] Hard delete confirmation UI (modal screenshot, feature flag note)
+- [ ] Keyboard shortcuts (`Cmd/Ctrl+Backspace`, `Cmd/Ctrl+Shift+Backspace`) documented once enabled behind the dev flag
+
+## PR10 – Rollout gating & guardrails
+
+- [ ] Hard delete cascade & vault cleanup evidence (log excerpt, vault directory capture)
+  - Capture includes FK cascade verification for `pet_medical` (`schema.sql`) and vault removal logs.
+- [ ] Telemetry map updated for delete/restore events (log bundle)
+- [ ] Feature flag defaults documented for production vs. dev builds

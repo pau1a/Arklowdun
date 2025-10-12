@@ -110,6 +110,10 @@ export const PetsUpdateRequestSchema = withHouseholdId({
 
 export const PetsDeleteRequestSchema = withHouseholdId({ id: z.string() });
 
+export const PetsDeleteSoftRequestSchema = PetsDeleteRequestSchema;
+
+export const PetsDeleteHardRequestSchema = PetsDeleteRequestSchema;
+
 export const PetsRestoreRequestSchema = withHouseholdId({ id: z.string() });
 
 export const PetsListResponseSchema = z.array(PetRecordSchema);

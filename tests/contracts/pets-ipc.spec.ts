@@ -78,11 +78,32 @@ const scenarioDefinition: ScenarioDefinition = {
       Object.assign(record!, payload.data, { updated_at: Date.now() });
       return null;
     },
+    pets_delete_soft: (payload) => {
+      assert.equal(payload.household_id ?? payload.householdId, HOUSEHOLD_ID);
+      const record = pets.find((pet) => pet.id === payload.id);
+      assert.ok(record, "pet exists for soft delete");
+      record!.deleted_at = Date.now();
+      record!.updated_at = Date.now();
+      return null;
+    },
+    pets_delete_hard: (payload) => {
+      assert.equal(payload.household_id ?? payload.householdId, HOUSEHOLD_ID);
+      const index = pets.findIndex((pet) => pet.id === payload.id);
+      assert.notEqual(index, -1, "pet exists for hard delete");
+      pets.splice(index, 1);
+      for (let i = medicalRecords.length - 1; i >= 0; i -= 1) {
+        if (medicalRecords[i]!.pet_id === payload.id) {
+          medicalRecords.splice(i, 1);
+        }
+      }
+      return null;
+    },
     pets_delete: (payload) => {
       assert.equal(payload.household_id ?? payload.householdId, HOUSEHOLD_ID);
       const record = pets.find((pet) => pet.id === payload.id);
       assert.ok(record, "pet exists for delete");
       record!.deleted_at = Date.now();
+      record!.updated_at = Date.now();
       return null;
     },
     pets_restore: (payload) => {
@@ -173,6 +194,10 @@ test("pets IPC contracts round-trip through repos", async () => {
 
   await petsRepo.restore(HOUSEHOLD_ID, createdPet.id);
   assert.equal(updatedPet?.deleted_at, null);
+
+  await petsRepo.deleteHard(HOUSEHOLD_ID, createdPet.id);
+  const removedPet = pets.find((pet) => pet.id === createdPet.id);
+  assert.equal(removedPet, undefined);
 
   const medicalList = await petMedicalRepo.list({ householdId: HOUSEHOLD_ID });
   assert.equal(medicalList.length, 1);

@@ -18,8 +18,9 @@ user-facing copy.【F:src/lib/ipc/contracts/pets.ts†L1-L158】【F:src/repos.t
 |               | `pets_get`         | Fetch a single pet by ID; household scope is optional for legacy callers.【F:src/lib/ipc/contracts/pets.ts†L62-L66】 |
 |               | `pets_create`      | Insert a pet row with generated identifiers and timestamps.【F:src/lib/ipc/contracts/pets.ts†L68-L85】 |
 |               | `pets_update`      | Patch mutable pet fields (including `image_path`); rejects empty updates.【F:src/lib/ipc/contracts/pets.ts†L87-L109】【F:src/repos.ts†L119-L137】 |
-|               | `pets_delete`      | Soft delete a pet and renumber siblings via the shared command helpers.【F:src/repos.ts†L71-L114】【F:src-tauri/src/lib.rs†L657-L735】 |
-|               | `pets_restore`     | Clear `deleted_at`, bump position, and renumber siblings.【F:src/repos.ts†L71-L114】 |
+|               | `pets_delete_soft` | Soft delete a pet and renumber siblings via the shared command helpers.【F:src/repos.ts†L71-L188】【F:src-tauri/src/lib.rs†L954-L1051】 |
+|               | `pets_delete_hard` | Permanently delete a pet, cascade to child tables, and remove the vault image best-effort.【F:src/repos.ts†L189-L205】【F:src-tauri/src/lib.rs†L982-L1051】 |
+|               | `pets_restore`     | Clear `deleted_at`, bump position, and renumber siblings.【F:src/repos.ts†L71-L205】 |
 | Pet Medical   | `pet_medical_list` | List active medical records for a household with default ordering `date DESC, created_at DESC, id`.【F:src/lib/ipc/contracts/pets.ts†L113-L126】 |
 |               | `pet_medical_get`  | Fetch a medical record by ID; household scope optional for tooling.【F:src/lib/ipc/contracts/pets.ts†L126-L128】 |
 |               | `pet_medical_create`| Insert a medical record, defaulting `category` to `pet_medical`.【F:src/lib/ipc/contracts/pets.ts†L130-L149】 |
@@ -30,7 +31,9 @@ user-facing copy.【F:src/lib/ipc/contracts/pets.ts†L1-L158】【F:src/repos.t
 |               | `thumbnails_get_or_create` | Generate or reuse a cached thumbnail for a vault-backed attachment. |
 
 All commands are registered through `gen_domain_cmds!` in the Tauri backend so they participate in
-shared logging and attachment guards.【F:src-tauri/src/lib.rs†L642-L735】
+shared logging and attachment guards.【F:src-tauri/src/lib.rs†L938-L951】
+
+> Legacy: the deprecated `pets_delete` command remains registered for compatibility with older renderer builds. New code should call `pets_delete_soft` or `pets_delete_hard` instead.【F:src-tauri/src/lib.rs†L5424-L5431】
 
 ---
 
@@ -93,7 +96,7 @@ Below are the canonical shapes; optional fields may be omitted when not relevant
 }
 ```
 
-### 2.3 `pets_update`, `pets_delete`, `pets_restore`
+### 2.3 `pets_update`, `pets_delete_soft`, `pets_restore`, `pets_delete_hard`
 ```jsonc
 // Request (`pets_update`)
 {
@@ -111,7 +114,9 @@ null
 ```
 `pets_update` is also wrapped by `petsUpdateImage(householdId, id, relativePath)` so UI flows can change a photo without touching other fields.【F:src/repos.ts†L119-L137】
 
-`pets_delete` and `pets_restore` share the same response shape and require `id` plus the household scope.
+`pets_delete_soft` and `pets_restore` resolve to `null` on success after mutating the row and logging telemetry.
+
+`pets_delete_hard` accepts the same payload, cascades to `pet_medical` rows via foreign keys, and performs best-effort vault cleanup before returning `null`.
 
 ### 2.4 `pet_medical_create`
 ```jsonc
