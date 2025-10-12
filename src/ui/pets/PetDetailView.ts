@@ -514,41 +514,82 @@ export async function PetDetailView(
   };
   applyInitialFallback();
 
+  function devDebugLog(event: string, payload: Record<string, unknown>): void {
+    const nodeProcess =
+      typeof globalThis !== "undefined" ? (globalThis as any).process : undefined;
+    if (nodeProcess?.env?.NODE_ENV === "production") {
+      return;
+    }
+    try {
+      // eslint-disable-next-line no-console
+      console.log(`[pets:debug] ${event}`, payload);
+      if (typeof log === "function") {
+        log("INFO", event, payload);
+      }
+    } catch {
+      // ignore logging failures
+    }
+  }
+
   const resolveThumbnailAbsolute = async (
     relativeThumbPath: string | null | undefined,
-  ): Promise<string | null> => {
-    if (!relativeThumbPath) return null;
+  ): Promise<{
+    absolute: string | null;
+    rootTried: "appData" | "attachments" | "none";
+    trimmed: string | null;
+  }> => {
+    if (!relativeThumbPath) {
+      devDebugLog("ui.pets.avatar_thumb_no_relpath", {});
+      return { absolute: null, rootTried: "none", trimmed: null };
+    }
 
-    const errors: unknown[] = [];
+    const trimmed = relativeThumbPath.replace(/^attachments\//, "");
+    const tryRoots: Array<"appData" | "attachments"> = ["appData", "attachments"];
 
-    const tryResolve = async (root: "appData" | "attachments") => {
+    for (const root of tryRoots) {
       try {
         const { realPath } = await canonicalize(relativeThumbPath, root);
-        return realPath;
-      } catch (error) {
-        errors.push(error);
-        return null;
+        devDebugLog("ui.pets.avatar_thumb_verified", {
+          root,
+          given: relativeThumbPath,
+          real: realPath,
+        });
+        return { absolute: realPath, rootTried: root, trimmed };
+      } catch (e1) {
+        if (trimmed !== relativeThumbPath) {
+          try {
+            const { realPath } = await canonicalize(trimmed, root);
+            devDebugLog("ui.pets.avatar_thumb_verified_trimmed", {
+              root,
+              given: relativeThumbPath,
+              trimmed,
+              real: realPath,
+            });
+            return { absolute: realPath, rootTried: root, trimmed };
+          } catch (e2) {
+            devDebugLog("ui.pets.avatar_thumb_verify_failed", {
+              root,
+              given: relativeThumbPath,
+              trimmed,
+              e1: String(e1),
+              e2: String(e2),
+            });
+          }
+        } else {
+          devDebugLog("ui.pets.avatar_thumb_verify_failed", {
+            root,
+            given: relativeThumbPath,
+            e1: String(e1),
+          });
+        }
       }
-    };
-
-    const fromAppData = await tryResolve("appData");
-    if (fromAppData) {
-      return fromAppData;
     }
 
-    const fromAttachments = await tryResolve("attachments");
-    if (fromAttachments) {
-      return fromAttachments;
-    }
-
-    if (errors.length > 0) {
-      console.warn("pet detail: resolve thumbnail path failed", {
-        path: relativeThumbPath,
-        errors,
-      });
-    }
-
-    return null;
+    devDebugLog("ui.pets.avatar_thumb_all_roots_failed", {
+      given: relativeThumbPath,
+      trimmed,
+    });
+    return { absolute: null, rootTried: "none", trimmed };
   };
 
   if (isTauri && pet.image_path) {
@@ -561,17 +602,50 @@ export async function PetDetailView(
       })) as ThumbnailCommandResponse | undefined;
 
       if (response?.ok && response.relative_thumb_path) {
-        const absoluteThumbPath = await resolveThumbnailAbsolute(
-          response.relative_thumb_path,
-        );
-        const src = absoluteThumbPath ? convertFileSrcFn?.(absoluteThumbPath) : null;
+        const resolved = await resolveThumbnailAbsolute(response.relative_thumb_path);
+
+        devDebugLog("ui.pets.avatar_thumb_response", {
+          pet_id: pet.id,
+          image_path: pet.image_path ?? null,
+          household_id: householdId,
+          ok: response.ok,
+          cache_hit: response.cache_hit ?? null,
+          rel_thumb: response.relative_thumb_path,
+          resolved_abs: resolved.absolute,
+          root_used: resolved.rootTried,
+        });
+
+        const src = resolved.absolute ? convertFileSrcFn?.(resolved.absolute) : null;
+
         if (src) {
           avatar.textContent = "";
           const img = document.createElement("img");
           img.alt = `${pet.name ?? "Pet"} photo`;
           img.src = src;
+          img.title =
+            `pet_id=${pet.id}` +
+            `\nhousehold=${householdId}` +
+            `\nrel_thumb=${response.relative_thumb_path}` +
+            `\nroot=${resolved.rootTried}` +
+            `\nabs=${resolved.absolute}` +
+            `\nsrc=${src}`;
           avatar.append(img);
+        } else {
+          devDebugLog("ui.pets.avatar_thumb_missing_src", {
+            pet_id: pet.id,
+            rel_thumb: response.relative_thumb_path,
+            resolved_abs: resolved.absolute,
+            root_used: resolved.rootTried,
+            note: "convertFileSrc returned null or path failed resolution",
+          });
         }
+      } else {
+        devDebugLog("ui.pets.avatar_thumb_command_not_ok", {
+          pet_id: pet.id,
+          image_path: pet.image_path ?? null,
+          response_ok: response?.ok ?? null,
+          code: response?.code ?? null,
+        });
       }
     } catch {
       // keep initial fallback
@@ -697,13 +771,11 @@ export async function PetDetailView(
         if (response?.ok && response.relative_thumb_path) {
           const cacheHit = response.cache_hit === true;
           try {
-            const absoluteThumbPath = await resolveThumbnailAbsolute(
-              response.relative_thumb_path,
-            );
-            if (!absoluteThumbPath) {
+            const resolved = await resolveThumbnailAbsolute(response.relative_thumb_path);
+            if (!resolved.absolute) {
               throw new Error("thumbnail path could not be resolved");
             }
-            const src = convertFileSrcFn(absoluteThumbPath);
+            const src = convertFileSrcFn(resolved.absolute);
             renderThumbnailImage(slot, src);
             if (cacheHit) {
               log("INFO", "ui.pets.thumbnail_cache_hit", {
