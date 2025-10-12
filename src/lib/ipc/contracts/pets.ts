@@ -44,13 +44,15 @@ const withHouseholdId = <Schema extends z.ZodRawShape>(
     });
 };
 
+const petImagePathSchema = z.string().min(1).optional().nullable();
+
 export const PetRecordSchema = z
   .object({
     id: z.string(),
     name: z.string(),
     type: z.string(),
     household_id: z.string(),
-    image_path: z.string().nullable().optional(),
+    image_path: petImagePathSchema,
     created_at: z.number(),
     updated_at: z.number(),
     deleted_at: optionalNullableNumber,
@@ -74,7 +76,7 @@ const petCreateDataSchema = z
     household_id: z.string(),
     name: z.string().min(1),
     type: z.string().min(1),
-    image_path: z.string().nullable().optional(),
+    image_path: petImagePathSchema,
     position: z.number().int().nonnegative().optional(),
   })
   .passthrough();
@@ -85,6 +87,7 @@ const petUpdateDataSchema = petCreateDataSchema
     name: true,
     type: true,
     position: true,
+    image_path: true,
   })
   .extend({
     updated_at: z.number().optional(),
