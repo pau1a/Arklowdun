@@ -5601,6 +5601,7 @@ mod vault_root_key_tests {
 #[cfg(test)]
 mod pet_image_guard_tests {
     use super::*;
+    use crate::commands::prepare_attachment_update;
     use serde_json::{Map, Value};
     use sqlx::sqlite::SqlitePoolOptions;
     use std::sync::{Arc, Mutex};

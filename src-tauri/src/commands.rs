@@ -888,7 +888,7 @@ fn prepare_attachment_create(
     Ok(())
 }
 
-async fn prepare_attachment_update(
+pub(crate) async fn prepare_attachment_update(
     _pool: &SqlitePool,
     table: &str,
     _id: &str,

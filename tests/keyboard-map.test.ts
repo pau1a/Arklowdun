@@ -242,7 +242,7 @@ test('pets page reordering controls emit callbacks and restore focus', async () 
 
   await flushAnimationFrames(2);
 
-  const rows = Array.from(container.querySelectorAll<HTMLDivElement>('.pets__row'));
+  const rows = Array.from(container.querySelectorAll<HTMLDivElement>('.pets__card'));
   assert.equal(rows.length >= 2, true, 'expected rows to be rendered');
 
   const focusCalls: Array<string | undefined> = [];
@@ -260,7 +260,7 @@ test('pets page reordering controls emit callbacks and restore focus', async () 
   }
 
   assert.ok(
-    focusCalls.some((id) => id === 'pet-2' || id?.includes('pets__row')),
+    focusCalls.some((id) => id === 'pet-2' || id?.includes('pets__card')),
     'expected focusRow to invoke focus on the active row',
   );
 
@@ -321,7 +321,7 @@ test('pets page ignores reorder shortcuts while editing inline', async () => {
 
   await flushAnimationFrames(2);
 
-  const rows = Array.from(container.querySelectorAll<HTMLDivElement>('.pets__row'));
+  const rows = Array.from(container.querySelectorAll<HTMLDivElement>('.pets__card'));
   assert.equal(rows.length >= 2, true, 'expected rows to be rendered');
   const editBtn = Array.from(rows[1]?.querySelectorAll('button') ?? []).find(
     (button) => button.textContent === 'Edit',

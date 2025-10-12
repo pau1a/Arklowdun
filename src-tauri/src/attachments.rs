@@ -70,6 +70,53 @@ pub async fn load_attachment_descriptor(
         });
     }
 
+    if table == "pets" {
+        let row = sqlx::query(
+            "SELECT household_id, image_path FROM pets WHERE id = ?1 AND deleted_at IS NULL",
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|err| {
+            AppError::from(err)
+                .with_context("operation", "load_attachment_descriptor")
+                .with_context("table", table.to_string())
+                .with_context("id", id.to_string())
+        })?;
+
+        let Some(row) = row else {
+            return Err(AppError::new("DB/NOT_FOUND", "Record not found")
+                .with_context("table", table.to_string())
+                .with_context("id", id.to_string()));
+        };
+
+        let household_id: Option<String> = row.try_get("household_id").ok();
+        let relative_path: Option<String> = row.try_get("image_path").ok();
+
+        let household_id = household_id
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                AppError::new(
+                    ERR_INVALID_HOUSEHOLD,
+                    "Attachment record is missing a valid household.",
+                )
+            })?;
+
+        let relative_path = relative_path
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                AppError::new("IO/ENOENT", "No attachment on this record")
+                    .with_context("table", table.to_string())
+                    .with_context("id", id.to_string())
+            })?;
+
+        return Ok(AttachmentDescriptor {
+            household_id,
+            category: AttachmentCategory::PetImage,
+            relative_path,
+        });
+    }
+
     let sql = format!(
         "SELECT household_id, category, relative_path FROM {} WHERE id = ?1 AND deleted_at IS NULL",
         table
@@ -213,5 +260,93 @@ pub fn reveal_with_os(path: &Path) -> Result<(), AppError> {
             "IO/UNSUPPORTED_REVEAL",
             "Reveal not supported on this platform",
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Result;
+    use sqlx::SqlitePool;
+    use tempfile::TempDir;
+
+    async fn setup_pool(dir: &TempDir, db_name: &str) -> Result<SqlitePool> {
+        let path = dir.path().join(db_name);
+        let pool = SqlitePool::connect(&format!("sqlite://{}", path.display())).await?;
+        sqlx::query("PRAGMA foreign_keys=ON;")
+            .execute(&pool)
+            .await?;
+        crate::migrate::apply_migrations(&pool).await?;
+        Ok(pool)
+    }
+
+    async fn seed_household(pool: &SqlitePool, household_id: &str) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO household (id, name, created_at, updated_at, tz, is_default) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )
+        .bind(household_id)
+        .bind("Test Household")
+        .bind(1_i64)
+        .bind(1_i64)
+        .bind("UTC")
+        .bind(1_i64)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn pets_descriptor_maps_to_pet_image_category() -> Result<()> {
+        let dir = TempDir::new()?;
+        let pool = setup_pool(&dir, "pets_descriptor.sqlite").await?;
+        seed_household(&pool, "hh-test").await?;
+
+        sqlx::query(
+            "INSERT INTO pets (id, name, type, household_id, image_path, created_at, updated_at, position) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )
+        .bind("pet-1")
+        .bind("Whisky")
+        .bind("dog")
+        .bind("hh-test")
+        .bind("whisky.png")
+        .bind(1_i64)
+        .bind(1_i64)
+        .bind(0_i64)
+        .execute(&pool)
+        .await?;
+
+        let descriptor = load_attachment_descriptor(&pool, "pets", "pet-1").await?;
+        assert_eq!(descriptor.household_id, "hh-test");
+        assert_eq!(descriptor.category, AttachmentCategory::PetImage);
+        assert_eq!(descriptor.relative_path, "whisky.png");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn pets_descriptor_rejects_missing_path() -> Result<()> {
+        let dir = TempDir::new()?;
+        let pool = setup_pool(&dir, "pets_descriptor_missing.sqlite").await?;
+        seed_household(&pool, "hh-test").await?;
+
+        sqlx::query(
+            "INSERT INTO pets (id, name, type, household_id, image_path, created_at, updated_at, position) VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7)",
+        )
+        .bind("pet-2")
+        .bind("Porter")
+        .bind("cat")
+        .bind("hh-test")
+        .bind(1_i64)
+        .bind(1_i64)
+        .bind(0_i64)
+        .execute(&pool)
+        .await?;
+
+        let err = load_attachment_descriptor(&pool, "pets", "pet-2")
+            .await
+            .expect_err("expected missing image to be rejected");
+        assert_eq!(err.code(), "IO/ENOENT");
+
+        Ok(())
     }
 }

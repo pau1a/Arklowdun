@@ -14,7 +14,7 @@ The Pets UI consists of two principal surfaces:
 
 | Surface         | Description                                                                                         | File                         |
 | --------------- | --------------------------------------------------------------------------------------------------- | ---------------------------- |
-| **List view**   | Persistent page shell that renders the pets collection, search, inline creation, and row actions.   | `src/PetsView.ts` / `src/features/pets/PetsPage.ts` |
+| **Card grid**   | Persistent page shell that renders the pets collection, search, inline creation, and card actions.  | `src/PetsView.ts` / `src/features/pets/PetsPage.ts` |
 | **Detail view** | Full medical/reminder editor for a single pet.                                                      | `src/ui/pets/PetDetailView.ts` |
 
 The router exposes `/pets` but marks it as `display: { placement: "hidden" }`, so it does not appear in the sidebar.
@@ -57,29 +57,41 @@ export function mountPetsView(container: HTMLElement) {
 Rendered markup hierarchy (simplified):
 
 ```html
-<section class="pets">
+<section class="pets" role="region" aria-labelledby="pets-title-…">
+  <p class="sr-only" id="pets-status-…" role="status" aria-live="polite">Loading pets…</p>
+  <p class="sr-only" id="pets-list-help-…">
+    Use the arrow keys to move between pets. Press Enter to open details. Press Escape to return to the list.
+  </p>
   <header class="pets__header">
-    <h1>Pets</h1>
+    <h1 id="pets-title-…">Pets</h1>
     <div class="pets__controls">
-      <label class="sr-only" for="pets-search">Search pets</label>
-      <input class="pets__search" id="pets-search" placeholder="Search pets…" type="search">
-      <form class="pets__create" aria-describedby="pets-create-help">
+      <label class="sr-only" for="pets-search-…">Search pets</label>
+      <input class="pets__search" id="pets-search-…" placeholder="Search pets…" type="search">
+      <form class="pets__create" aria-describedby="pets-create-help-…">
         <input class="pets__input" name="pet-name" required aria-label="Pet name">
         <input class="pets__input" name="pet-type" aria-label="Pet type (optional)">
         <button class="pets__submit">Add pet</button>
-        <p class="sr-only" id="pets-create-help">
+        <p class="sr-only" id="pets-create-help-…">
           Enter a pet name and optional type, then select Add pet.
         </p>
       </form>
     </div>
   </header>
   <div class="pets__body">
-    <div class="pets__viewport" role="list">
+    <div
+      class="pets__viewport"
+      role="list"
+      tabindex="0"
+      aria-labelledby="pets-title-…"
+      aria-describedby="pets-status-… pets-list-help-…"
+    >
       <div class="pets__spacer pets__spacer--top"></div>
-      <div class="pets__items"></div>
+      <div class="pets__grid"></div>
       <div class="pets__spacer pets__spacer--bottom"></div>
     </div>
-    <div class="pets__empty">Add your first pet to keep track of their care.</div>
+    <div class="pets__empty">
+      You haven’t added any pets yet. Each will appear here with their photo and details.
+    </div>
     <div class="pets__detail"></div>
   </div>
 </section>
@@ -89,35 +101,66 @@ Key properties:
 
 * The shell is created once by `createPetsPage(container)` and persists even when the list data changes.
 * `pets__viewport` is the scroll container used by the virtualiser.
-* `pets__detail` is a hidden host where `PetDetailView` mounts when a row is opened.
+* `pets__grid` hosts the **card grid**, and only visible cards are mounted at any time.
+* `pets__detail` is a hidden host where `PetDetailView` mounts when a card is opened.
 * Fetches household via `getHouseholdIdForCalls()`.
 * Calls `petsRepo.list(orderBy: "position, created_at, id")`.
 * Stores results in local `pets` array.
-* Calls `reminderScheduler.init()` and `reminderScheduler.scheduleMany()` to queue any reminders for the fetched pets.
-* Calls `renderPets()` to generate `<li>` entries.
+* Calls `reminderScheduler.init()` and `reminderScheduler.scheduleMany()` to queue reminders for rendered pets.
+* Calls `renderPets()` to generate card elements aligned with the Family card design tokens.
 
-### 3.2 `renderPets()`
+### 3.2 Virtualised grid renderer
 
-* Clears existing `<ul>` content.
-* Iterates through cached pets, creating `<li>` entries:
+* Maintains a recycled pool of `<div class="pets__card">` nodes, mirroring Family card behaviour for focus handling and spacing.
+* Measures available width to determine columns, card dimensions, and spacer heights. Defaults: 320px height, 260px minimum width, 24px gaps.
+* Applies the PR4 windowing logic: only cards intersecting the viewport plus an 8-row buffer render.
+* Each card is marked `role="region"` with `aria-label="Pet card: <name>"`, falling back to “Unnamed pet”.
+* Query matches update `<mark>` wrappers in the name/type fields to highlight search hits.
+* `pets__grid` uses `loading="lazy"` on photos to protect scroll performance.
+
+### 3.3 Card anatomy & media handling
 
 ```html
-<li>
-  <span class="pet-name">Skye</span>
-  <span class="pet-type">Husky</span>
-  <button data-id="uuid">Open</button>
-</li>
+<div class="pets__card" role="region" aria-label="Pet card: Skye">
+  <div class="pets__card-display">
+    <div class="pets__media" data-state="ready|loading|placeholder">
+      <img class="pets__photo" loading="lazy" alt="Skye" src="…" hidden>
+      <img class="pets__placeholder" alt="" src="/assets/pets/placeholders/dog.svg">
+    </div>
+    <div class="pets__media-actions">
+      <button class="pets__photo-action">Change photo</button>
+      <button class="pets__photo-action pets__photo-action--reveal" aria-label="Reveal in folder">Reveal in folder</button>
+    </div>
+    <div class="pets__card-body">
+      <h3 class="pets__name">Skye</h3>
+      <p class="pets__type">Husky</p>
+    </div>
+    <div class="pets__actions">
+      <button class="pets__action pets__action--primary">Open</button>
+      <button class="pets__action">Edit</button>
+      <div class="pets__order">
+        <button class="pets__order-btn" aria-label="Move up">▲</button>
+        <button class="pets__order-btn" aria-label="Move down">▼</button>
+      </div>
+    </div>
+  </div>
+  <form class="pets__card-editor" hidden>
+    …
+  </form>
+</div>
 ```
 
-* No dedicated SCSS; relies on base element styles and global spacing tokens.
-* Long names are truncated using `overflow: hidden; text-overflow: ellipsis; white-space: nowrap;`.
+* Species-specific placeholders (dog/cat/other) live under `src/assets/pets/placeholders/` and are inferred from `pet.species` or `pet.type`.
+* When `image_path` is set, Tauri builds resolve to `attachments/<household_id>/pet_image/<relative>` via `canonicalizeAndVerify` + `convertFileSrc`, falling back to Blob URLs if direct loading fails.
+* `Change photo` launches a single-file dialog for images only. The renderer reads the chosen file, copies it into `attachments/<household_id>/pet_image/`, generates a sanitised name, and then calls `petsUpdateImage`. On success `page.patchPet()` updates just that card.
+* Guard failures call `presentFsError` (vault copy) and show a toast (`toast.show({ kind: "error", message: "Couldn’t update pet photo." })`).
+* `Reveal` reuses the shared attachment opener for the `pet_image` category, matching Family’s “Reveal in folder” affordance.
+* Arrow keys traverse cards, `Enter` opens details, `Escape` restores the grid, and focus rings reuse the Family card token.
 
-### 3.3 Empty state
+### 3.4 Empty state
 
-When no pets exist, the view surfaces guidance copy via `.pets__empty` and a live
-region announcing “Add your first pet to keep track of their care.” When the
-search box hides matching entries, the copy pivots to “No pets match… Clear the
-search to see everything.”
+When no pets exist, `.pets__empty` displays “You haven’t added any pets yet. Each will appear here with their photo and details.”
+The live region announces the change, and when filters hide matches the copy pivots to “No pets match… Clear the search to see everything.”
 
 ---
 

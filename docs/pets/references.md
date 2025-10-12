@@ -18,6 +18,7 @@ It connects the Pets module to its related subsystems — Family, Vault, Attachm
 | **Diagnostics**         | `../logging/diagnostics.md`                | Outlines how Pets contributes row counts and reminder queue data to diagnostic bundles.                                                                       |
 | **Database Integrity**  | `../migrations/authoring.md`               | Reference for writing and verifying Pets-related migrations (0001_baseline.sql, 0023_vault_categories.up.sql).                                                |
 | **UI Guidelines**       | `../ui/households/`                        | Contains shared style tokens and banner layout conventions used by the Pets page.                                                                             |
+| **Family card grid**    | `../family/ui-grid.md`                     | Documents the responsive card pattern mirrored by the Pets grid, including focus rings and action affordances.                                                |
 
 These linked documents collectively define the policies and conventions that the Pets domain inherits.
 
