@@ -148,6 +148,9 @@
 
 .pets__grid {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(clamp(260px, 28vw, 320px), 1fr));
+  justify-content: center;
+  justify-items: center;
   gap: var(--pets-grid-gap);
   padding: var(--pets-grid-padding);
   margin: 0;
@@ -159,6 +162,7 @@
 .pets__card {
   display: flex;
   flex-direction: column;
+  width: min(100%, clamp(260px, 32vw, 360px));
   gap: clamp(14px, 2.2vw, 22px);
   background: var(--pets-card-bg);
   border: 1px solid color-mix(in srgb, var(--pets-card-border) 85%, transparent);
