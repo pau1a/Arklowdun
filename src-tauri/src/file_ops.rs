@@ -875,8 +875,8 @@ async fn run_repair_apply<R: tauri::Runtime>(
                         &action.table_name,
                         action.row_id,
                         "relink",
-                        Some(new_category.as_str().to_string()),
-                        Some(new_relative),
+                        Some(new_category.as_str()),
+                        Some(new_relative.as_str()),
                         now,
                     )
                     .await?;
