@@ -183,6 +183,11 @@ function insertMeta(meta: HTMLElement, label: string, value: string): void {
 
 const THUMBNAIL_EDGE = 160;
 
+const isTauri =
+  (typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__) ||
+  (typeof (import.meta as any).env?.TAURI !== "undefined" &&
+    (import.meta as any).env?.TAURI != null);
+
 type ThumbnailState =
   | "idle"
   | "loading"
@@ -507,22 +512,30 @@ export async function PetDetailView(
   const applyInitialFallback = () => {
     avatar.textContent = (pet.name?.[0] ?? "?").toUpperCase();
   };
-  if (pet.image_path) {
-    const img = document.createElement("img");
-    img.alt = `${pet.name ?? "Pet"} photo`;
+  applyInitialFallback();
+
+  if (isTauri && pet.image_path) {
     try {
-      const src = convertFileSrcFn?.(pet.image_path) ?? pet.image_path;
-      if (src) {
-        img.src = src;
-        avatar.append(img);
-      } else {
-        applyInitialFallback();
+      const response = (await ipcCallFn("thumbnails_get_or_create", {
+        household_id: householdId,
+        category: "pet_image",
+        relative_path: pet.image_path,
+        max_edge: THUMBNAIL_EDGE,
+      })) as ThumbnailCommandResponse | undefined;
+
+      if (response?.ok && response.relative_thumb_path) {
+        const src = convertFileSrcFn?.(response.relative_thumb_path);
+        if (src) {
+          avatar.textContent = "";
+          const img = document.createElement("img");
+          img.alt = `${pet.name ?? "Pet"} photo`;
+          img.src = src;
+          avatar.append(img);
+        }
       }
     } catch {
-      applyInitialFallback();
+      // keep initial fallback
     }
-  } else {
-    applyInitialFallback();
   }
 
   const identityBody = document.createElement("div");
@@ -559,16 +572,12 @@ export async function PetDetailView(
   const medicalSection = document.createElement("section");
   medicalSection.className = "pet-detail__section";
 
-  const formHeading = document.createElement("h3");
-  formHeading.className = "pet-detail__section-title";
-  formHeading.textContent = "Add medical record";
-
   const addCta = document.createElement("div");
   addCta.className = "pet-detail__cta";
   const addBtn = document.createElement("button");
   addBtn.type = "button";
   addBtn.className = "pet-detail__toolbar-btn";
-  addBtn.textContent = "Add record";
+  addBtn.textContent = "Add medical record";
   addCta.append(addBtn);
 
   const historyHeading = document.createElement("h3");
@@ -988,7 +997,8 @@ export async function PetDetailView(
 
   const historyEmpty = document.createElement("p");
   historyEmpty.className = "pet-detail__empty";
-  historyEmpty.textContent = "No medical records yet. Use Add record to capture the first visit.";
+  historyEmpty.textContent =
+    "No medical records yet. Use Add medical record to capture the first visit.";
   historyEmpty.hidden = true;
 
   const historyLoading = document.createElement("p");
@@ -997,7 +1007,7 @@ export async function PetDetailView(
 
   historyContainer.append(historyStatus, historyLoading, historyEmpty, historyList);
 
-  medicalSection.append(formHeading, addCta, historyHeading, historyContainer);
+  medicalSection.append(addCta, historyHeading, historyContainer);
 
   root.append(header, identity, medicalSection);
   container.innerHTML = "";
