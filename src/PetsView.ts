@@ -1,7 +1,7 @@
 import type { Pet } from "./models";
 import { PetDetailView, type PetDetailController } from "./ui/pets/PetDetailView";
 import { getHouseholdIdForCalls } from "./db/household";
-import { petsRepo } from "./repos";
+import { petsRepo, petsUpdateImage } from "./repos";
 import { reminderScheduler } from "@features/pets/reminderScheduler";
 import { runViewCleanups, registerViewCleanup } from "./utils/viewLifecycle";
 import { createPetsPage, createFilterModels, type FilteredPet } from "@features/pets/PetsPage";
@@ -16,6 +16,10 @@ import {
 import { isMacPlatform } from "@ui/keys";
 import { timeIt } from "@lib/obs/timeIt";
 import { recordPetsMutationFailure } from "@features/pets/mutationTelemetry";
+import { open as openDialog } from "@lib/ipc/dialog";
+import { sanitizeRelativePath, canonicalizeAndVerify } from "./files/path";
+import { presentFsError } from "@lib/ipc";
+import { revealAttachment } from "./ui/attachments";
 
 function toReminderRecords(pets: Pet[]): {
   records: Array<{
@@ -61,6 +65,13 @@ interface FiltersState {
   query: string;
   models: FilteredPet[];
 }
+
+const IMAGE_DIALOG_FILTERS = [
+  {
+    name: "Images",
+    extensions: ["png", "jpg", "jpeg", "gif", "bmp", "webp", "tif", "tiff", "heic", "heif"],
+  },
+];
 
 export async function PetsView(container: HTMLElement) {
   runViewCleanups(container);
@@ -358,6 +369,71 @@ export async function PetsView(container: HTMLElement) {
     );
   }
 
+  async function handleChangePhoto(pet: Pet) {
+    const selection = await openDialog({ multiple: false, filters: IMAGE_DIALOG_FILTERS });
+    const filePath =
+      typeof selection === "string"
+        ? selection
+        : Array.isArray(selection) && selection.length > 0
+        ? selection[0]
+        : null;
+    if (!filePath) return;
+
+    try {
+      const canonical = await canonicalizeAndVerify(filePath, "attachments");
+      const relativeFull = canonical.realPath.slice(canonical.base.length).replace(/^[/\\]+/, "");
+      const expectedPrefix = `${pet.household_id}/pet_image/`;
+      if (!relativeFull.startsWith(expectedPrefix)) {
+        presentFsError({ code: "PATH_OUT_OF_VAULT", message: "Attachment path must stay inside the vault." });
+        return;
+      }
+
+      const rawRelative = relativeFull.slice(expectedPrefix.length);
+      const sanitized = sanitizeRelativePath(rawRelative);
+      await petsUpdateImage(hh, pet.id, sanitized);
+
+      const updated: Pet = { ...pet, image_path: sanitized };
+      pets = pets.map((existing) => (existing.id === pet.id ? updated : existing));
+      filters = {
+        ...filters,
+        models: filters.models.map((model) =>
+          model.pet.id === pet.id ? { ...model, pet: { ...model.pet, image_path: sanitized } } : model,
+        ),
+      };
+      page.patchPet(updated);
+      logUI("INFO", "ui.pets.photo_updated", { pet_id: pet.id, household_id: hh });
+    } catch (error) {
+      const maybe = error as { code?: string; message?: string } | undefined;
+      if (maybe?.code) {
+        const normalizedCode =
+          maybe.code === "OUTSIDE_ROOT" ||
+          maybe.code === "DOT_DOT_REJECTED" ||
+          maybe.code === "UNC_REJECTED" ||
+          maybe.code === "CROSS_VOLUME"
+            ? "PATH_OUT_OF_VAULT"
+            : maybe.code;
+        presentFsError({ code: normalizedCode as any, message: maybe.message ?? "" });
+        logUI("WARN", "ui.pets.photo_update_failed", {
+          pet_id: pet.id,
+          household_id: hh,
+          code: normalizedCode,
+        });
+      } else {
+        toast.show({ kind: "error", message: "Couldn’t update pet photo." });
+        logUI("WARN", "ui.pets.photo_update_failed", {
+          pet_id: pet.id,
+          household_id: hh,
+          code: "unknown",
+        });
+      }
+    }
+  }
+
+  function handleRevealPhoto(pet: Pet) {
+    if (!pet.image_path) return;
+    void revealAttachment("pets", pet.id);
+  }
+
   async function openDetail(pet: Pet) {
     lastScroll = page.getScrollOffset();
     const host = document.createElement("div");
@@ -407,6 +483,8 @@ export async function PetsView(container: HTMLElement) {
     onCreate: (input) => handleCreate(input),
     onOpenPet: (pet) => { void openDetail(pet); },
     onEditPet: (pet, patch) => { void handleEdit(pet, patch); },
+    onChangePhoto: (pet) => { void handleChangePhoto(pet); },
+    onRevealImage: (pet) => { handleRevealPhoto(pet); },
     onReorderPet: (id, delta) => {
       void movePet(id, delta);
     },

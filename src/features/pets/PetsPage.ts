@@ -1,4 +1,7 @@
 import { logUI } from "@lib/uiLog";
+import { convertFileSrc } from "@lib/ipc/core";
+import { canonicalizeAndVerify } from "@files/path";
+import { revealLabel } from "../../ui/attachments";
 import type { Pet } from "../../models";
 
 export interface PetsPageCallbacks {
@@ -7,6 +10,8 @@ export interface PetsPageCallbacks {
   onEditPet?: (pet: Pet, patch: { name: string; type: string }) => Promise<void> | void;
   onSearchChange?: (value: string) => void;
   onReorderPet?: (id: string, delta: number) => void;
+  onChangePhoto?: (pet: Pet) => void;
+  onRevealImage?: (pet: Pet) => void;
 }
 
 export interface FilteredPet {
@@ -21,6 +26,7 @@ export interface PetsPageInstance {
   setCallbacks(callbacks: PetsPageCallbacks): void;
   setPets(pets: Pet[]): void;
   setFilter(models: FilteredPet[]): void;
+  patchPet(pet: Pet): void;
   focusCreate(): void;
   focusSearch(): void;
   clearSearch(): void;
@@ -38,10 +44,15 @@ interface RowElements {
   row: HTMLDivElement;
   display: HTMLDivElement;
   editor: HTMLFormElement;
-  name: HTMLSpanElement;
-  typePill: HTMLSpanElement;
+  media: HTMLDivElement;
+  photo: HTMLImageElement;
+  placeholder: HTMLImageElement;
+  name: HTMLHeadingElement;
+  typeText: HTMLParagraphElement;
   openBtn: HTMLButtonElement;
   editBtn: HTMLButtonElement;
+  changePhotoBtn: HTMLButtonElement;
+  revealBtn: HTMLButtonElement;
   moveUpBtn: HTMLButtonElement;
   moveDownBtn: HTMLButtonElement;
   nameInput: HTMLInputElement;
@@ -61,8 +72,61 @@ interface EditingState {
   saving: boolean;
 }
 
-const ROW_HEIGHT = 56;
+const CARD_DEFAULT_HEIGHT = 320;
+const CARD_MIN_WIDTH = 260;
+const GRID_DEFAULT_GAP = 24;
 const BUFFER_ROWS = 8;
+
+interface LayoutMetrics {
+  columns: number;
+  cardHeight: number;
+  cardWidth: number;
+  rowGap: number;
+  columnGap: number;
+}
+
+const PLACEHOLDER_DOG = new URL("../../assets/pets/placeholders/dog.svg", import.meta.url).href;
+const PLACEHOLDER_CAT = new URL("../../assets/pets/placeholders/cat.svg", import.meta.url).href;
+const PLACEHOLDER_OTHER = new URL("../../assets/pets/placeholders/other.svg", import.meta.url).href;
+
+const imageLoadTokens = new WeakMap<HTMLImageElement, string>();
+const objectUrlCache = new WeakMap<HTMLImageElement, string>();
+
+const isTauri =
+  (typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__) ||
+  (typeof (import.meta as any).env?.TAURI !== "undefined" && (import.meta as any).env?.TAURI != null);
+
+function toDisplayName(pet: Pet): string {
+  const raw = pet.name ?? "";
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : "Unnamed pet";
+}
+
+function inferSpecies(pet: Pet): "dog" | "cat" | "other" {
+  const raw = (pet.species ?? pet.type ?? "").toLowerCase();
+  if (/dog|canine|retriever|poodle|husky/.test(raw)) return "dog";
+  if (/cat|feline|kitten|siamese/.test(raw)) return "cat";
+  return "other";
+}
+
+function placeholderFor(pet: Pet): string {
+  const species = inferSpecies(pet);
+  if (species === "dog") return PLACEHOLDER_DOG;
+  if (species === "cat") return PLACEHOLDER_CAT;
+  return PLACEHOLDER_OTHER;
+}
+
+function revokeObjectUrl(image: HTMLImageElement) {
+  const existing = objectUrlCache.get(image);
+  if (existing) {
+    try {
+      URL.revokeObjectURL(existing);
+    } catch {
+      // ignore
+    }
+    objectUrlCache.delete(image);
+  }
+}
 
 function normalise(value: string | null | undefined): string {
   return value ? value.normalize("NFC").toLowerCase() : "";
@@ -169,7 +233,7 @@ export function createPetsPage(
   topSpacer.className = "pets__spacer pets__spacer--top";
 
   const itemsHost = document.createElement("div");
-  itemsHost.className = "pets__items";
+  itemsHost.className = "pets__grid";
 
   const bottomSpacer = document.createElement("div");
   bottomSpacer.className = "pets__spacer pets__spacer--bottom";
@@ -181,7 +245,7 @@ export function createPetsPage(
   emptyState.dataset.state = "empty";
   emptyState.setAttribute("role", "status");
   emptyState.setAttribute("aria-live", "polite");
-  emptyState.textContent = "Add your first pet to keep track of their care.";
+  emptyState.textContent = "You haven’t added any pets yet. Each will appear here with their photo and details.";
   emptyState.hidden = true;
 
   const detailHost = document.createElement("div");
@@ -201,6 +265,13 @@ export function createPetsPage(
   const visibleRows = new Map<number, RowState>();
   const rowPool: HTMLDivElement[] = [];
   const editing = new Map<string, EditingState>();
+  let layout: LayoutMetrics = {
+    columns: 1,
+    cardHeight: CARD_DEFAULT_HEIGHT,
+    cardWidth: CARD_MIN_WIDTH,
+    rowGap: GRID_DEFAULT_GAP,
+    columnGap: GRID_DEFAULT_GAP,
+  };
 
   let totalPets = 0;
   let lastAnnouncement = liveStatus.textContent ?? "";
@@ -291,6 +362,20 @@ export function createPetsPage(
     scheduleRefresh();
   }
 
+  function patchPet(pet: Pet) {
+    if (!pet) return;
+    const index = models.findIndex((model) => model.pet.id === pet.id);
+    if (index === -1) return;
+    const existing = models[index];
+    const nextView: FilteredPet = { ...existing, pet: { ...existing.pet, ...pet } };
+    models[index] = nextView;
+    const state = visibleRows.get(index);
+    if (state) {
+      state.view = nextView;
+      updateRow(index, nextView);
+    }
+  }
+
   function showDetail(content: HTMLElement) {
     listViewport.hidden = true;
     emptyState.hidden = true;
@@ -336,25 +421,68 @@ export function createPetsPage(
     let cached = rowCache.get(row);
     if (cached) return cached;
 
-    row.className = "pets__row";
-    row.setAttribute("role", "listitem");
+    row.className = "pets__card";
+    row.setAttribute("role", "region");
 
     const display = document.createElement("div");
-    display.className = "pets__row-display";
+    display.className = "pets__card-display";
 
-    const text = document.createElement("div");
-    text.className = "pets__text";
+    const media = document.createElement("div");
+    media.className = "pets__media";
 
-    const name = document.createElement("span");
+    const photo = document.createElement("img");
+    photo.className = "pets__photo";
+    photo.alt = "";
+    photo.hidden = true;
+    photo.loading = "lazy";
+
+    const placeholder = document.createElement("img");
+    placeholder.className = "pets__placeholder";
+    placeholder.alt = "";
+    placeholder.src = PLACEHOLDER_OTHER;
+
+    media.append(photo, placeholder);
+
+    const mediaActions = document.createElement("div");
+    mediaActions.className = "pets__media-actions";
+
+    const changePhotoBtn = document.createElement("button");
+    changePhotoBtn.type = "button";
+    changePhotoBtn.className = "pets__photo-action";
+    changePhotoBtn.textContent = "Change photo";
+
+    const revealBtn = document.createElement("button");
+    revealBtn.type = "button";
+    revealBtn.className = "pets__photo-action pets__photo-action--reveal";
+    const revealText = revealLabel();
+    revealBtn.textContent = revealText;
+    revealBtn.setAttribute("aria-label", revealText);
+
+    mediaActions.append(changePhotoBtn, revealBtn);
+
+    const body = document.createElement("div");
+    body.className = "pets__card-body";
+
+    const name = document.createElement("h3");
     name.className = "pets__name";
 
-    const typePill = document.createElement("span");
-    typePill.className = "pets__type-pill";
+    const typeText = document.createElement("p");
+    typeText.className = "pets__type";
 
-    text.append(name, typePill);
+    body.append(name, typeText);
 
     const actions = document.createElement("div");
     actions.className = "pets__actions";
+
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.textContent = "Open";
+    openBtn.className = "pets__action pets__action--primary";
+
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.textContent = "Edit";
+    editBtn.className = "pets__action";
 
     const orderGroup = document.createElement("div");
     orderGroup.className = "pets__order";
@@ -362,32 +490,22 @@ export function createPetsPage(
     const moveUpBtn = document.createElement("button");
     moveUpBtn.type = "button";
     moveUpBtn.className = "pets__order-btn";
-    moveUpBtn.textContent = "▲";
     moveUpBtn.setAttribute("aria-label", "Move up");
+    moveUpBtn.textContent = "▲";
 
     const moveDownBtn = document.createElement("button");
     moveDownBtn.type = "button";
     moveDownBtn.className = "pets__order-btn";
-    moveDownBtn.textContent = "▼";
     moveDownBtn.setAttribute("aria-label", "Move down");
+    moveDownBtn.textContent = "▼";
 
     orderGroup.append(moveUpBtn, moveDownBtn);
+    actions.append(openBtn, editBtn, orderGroup);
 
-    const openBtn = document.createElement("button");
-    openBtn.type = "button";
-    openBtn.textContent = "Open";
-    openBtn.className = "pets__action";
-
-    const editBtn = document.createElement("button");
-    editBtn.type = "button";
-    editBtn.textContent = "Edit";
-    editBtn.className = "pets__action";
-
-    actions.append(orderGroup, openBtn, editBtn);
-    display.append(text, actions);
+    display.append(media, mediaActions, body, actions);
 
     const editor = document.createElement("form");
-    editor.className = "pets__row-editor";
+    editor.className = "pets__card-editor";
     editor.hidden = true;
 
     const editorFields = document.createElement("div");
@@ -428,10 +546,15 @@ export function createPetsPage(
       row,
       display,
       editor,
+      media,
+      photo,
+      placeholder,
       name,
-      typePill,
+      typeText,
       openBtn,
       editBtn,
+      changePhotoBtn,
+      revealBtn,
       moveUpBtn,
       moveDownBtn,
       nameInput,
@@ -455,6 +578,14 @@ export function createPetsPage(
     const state = visibleRows.get(index);
     if (!state) return;
     visibleRows.delete(index);
+    const cached = rowCache.get(state.element);
+    if (cached) {
+      revokeObjectUrl(cached.photo);
+      imageLoadTokens.delete(cached.photo);
+      cached.photo.removeAttribute("src");
+      cached.photo.hidden = true;
+      cached.placeholder.hidden = false;
+    }
     state.element.remove();
     rowPool.push(state.element);
   }
@@ -479,6 +610,57 @@ export function createPetsPage(
     }
   }
 
+  function measureLayout(): boolean {
+    let rowGap = GRID_DEFAULT_GAP;
+    let columnGap = GRID_DEFAULT_GAP;
+    if (typeof window !== "undefined") {
+      const styles = window.getComputedStyle(itemsHost);
+      const parse = (value: string | null | undefined) => {
+        if (!value) return NaN;
+        const parsed = Number.parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : NaN;
+      };
+      const nextRowGap = parse(styles.rowGap ?? styles.gap ?? "");
+      const nextColumnGap = parse(styles.columnGap ?? styles.gap ?? "");
+      if (Number.isFinite(nextRowGap)) rowGap = nextRowGap;
+      if (Number.isFinite(nextColumnGap)) columnGap = nextColumnGap;
+    }
+
+    let cardWidth = layout.cardWidth || CARD_MIN_WIDTH;
+    let cardHeight = layout.cardHeight || CARD_DEFAULT_HEIGHT;
+    const sample = itemsHost.querySelector<HTMLElement>(".pets__card");
+    if (sample) {
+      const rect = sample.getBoundingClientRect();
+      if (rect.width > 0) cardWidth = rect.width;
+      if (rect.height > 0) cardHeight = rect.height;
+    }
+
+    cardWidth = Math.max(CARD_MIN_WIDTH, cardWidth);
+    cardHeight = Math.max(160, cardHeight);
+
+    const viewportWidth = listViewport.clientWidth || 0;
+    const columns = Math.max(
+      1,
+      Math.floor((viewportWidth + columnGap) / (cardWidth + columnGap)) || 1,
+    );
+
+    const next: LayoutMetrics = { columns, cardHeight, cardWidth, rowGap, columnGap };
+    const changed =
+      layout.columns !== next.columns ||
+      Math.abs(layout.cardHeight - next.cardHeight) > 1 ||
+      Math.abs(layout.cardWidth - next.cardWidth) > 1 ||
+      Math.abs(layout.rowGap - next.rowGap) > 0.5 ||
+      Math.abs(layout.columnGap - next.columnGap) > 0.5;
+
+    layout = next;
+    return changed;
+  }
+
+  function rowsToHeight(count: number): number {
+    if (count <= 0) return 0;
+    return count * layout.cardHeight + Math.max(0, count - 1) * layout.rowGap;
+  }
+
   function updateRow(index: number, view: FilteredPet): void {
     let rowState = visibleRows.get(index);
     let row = rowState?.element;
@@ -495,10 +677,15 @@ export function createPetsPage(
       row: rowEl,
       display,
       editor,
+      media,
+      photo,
+      placeholder,
       name,
-      typePill,
+      typeText,
       openBtn,
       editBtn,
+      changePhotoBtn,
+      revealBtn,
       moveUpBtn,
       moveDownBtn,
       nameInput: editName,
@@ -510,6 +697,9 @@ export function createPetsPage(
     rowEl.dataset.index = String(index);
     rowEl.dataset.id = view.pet.id;
     rowEl.tabIndex = -1;
+
+    const displayName = toDisplayName(view.pet);
+    rowEl.setAttribute("aria-label", `Pet card: ${displayName}`);
 
     const shouldFocus = pendingFocusId === view.pet.id;
     if (shouldFocus) {
@@ -526,38 +716,159 @@ export function createPetsPage(
       });
     }
 
-    const typeValue = view.pet.type || "";
+    const typeValue = (view.pet.type ?? "").trim();
 
     const editingState = editing.get(view.pet.id);
-    if (editingState?.saving) {
-      editName.disabled = true;
-      editType.disabled = true;
-      saveBtn.disabled = true;
-      cancelBtn.disabled = true;
-    } else {
-      editName.disabled = false;
-      editType.disabled = false;
-      saveBtn.disabled = false;
-      cancelBtn.disabled = false;
-    }
+    const isSaving = Boolean(editingState?.saving);
+
+    rowEl.dataset.state = editingState ? "editing" : "view";
+
+    editName.disabled = isSaving;
+    editType.disabled = isSaving;
+    saveBtn.disabled = isSaving;
+    cancelBtn.disabled = isSaving;
+    changePhotoBtn.disabled = isSaving;
+    openBtn.disabled = isSaving;
+    editBtn.disabled = isSaving;
+
+    const fallbackName = view.pet.name ?? "";
+    editName.value = editingState?.name ?? fallbackName;
+    editType.value = editingState?.type ?? (view.pet.type ?? "");
 
     if (editingState) {
       display.hidden = true;
       editor.hidden = false;
-      editName.value = editingState.name;
-      editType.value = editingState.type;
     } else {
       display.hidden = false;
       editor.hidden = true;
-      highlight(name, view.pet.name, view.nameMatch ?? null);
-      if (typeValue) {
-        highlight(typePill, typeValue, view.typeMatch ?? null);
-        typePill.hidden = false;
+      if (fallbackName) {
+        highlight(name, fallbackName, view.nameMatch ?? null);
       } else {
-        typePill.textContent = "";
-        typePill.hidden = true;
+        name.textContent = displayName;
+      }
+      if (typeValue) {
+        highlight(typeText, typeValue, view.typeMatch ?? null);
+        typeText.dataset.empty = "false";
+        typeText.classList.remove("pets__type--empty");
+      } else {
+        typeText.textContent = "Type not set";
+        typeText.dataset.empty = "true";
+        typeText.classList.add("pets__type--empty");
       }
     }
+
+    const placeholderSrc = placeholderFor(view.pet);
+    if (placeholder.src !== placeholderSrc) {
+      placeholder.src = placeholderSrc;
+    }
+    photo.alt = displayName;
+
+    const nextPhotoKey = view.pet.image_path ?? "";
+    const previousKey = photo.dataset.photoKey ?? "";
+    const hasPhoto = Boolean(nextPhotoKey) && Boolean(view.pet.household_id);
+    revealBtn.disabled = !hasPhoto;
+    revealBtn.setAttribute("aria-disabled", hasPhoto ? "false" : "true");
+
+    if (!hasPhoto) {
+      revokeObjectUrl(photo);
+      photo.dataset.photoKey = "";
+      photo.removeAttribute("src");
+      photo.hidden = true;
+      placeholder.hidden = false;
+      media.dataset.state = "placeholder";
+      imageLoadTokens.delete(photo);
+    } else if (previousKey !== nextPhotoKey) {
+      photo.dataset.photoKey = nextPhotoKey;
+      revokeObjectUrl(photo);
+      photo.removeAttribute("src");
+      photo.hidden = true;
+      placeholder.hidden = false;
+      media.dataset.state = isTauri ? "loading" : "placeholder";
+
+      if (isTauri) {
+        const loadToken = `${view.pet.id}-${Date.now()}-${Math.random()}`;
+        imageLoadTokens.set(photo, loadToken);
+        const relPath = `attachments/${view.pet.household_id}/pet_image/${nextPhotoKey}`;
+
+        const applyLoaded = () => {
+          if (imageLoadTokens.get(photo) !== loadToken) return;
+          placeholder.hidden = true;
+          photo.hidden = false;
+          media.dataset.state = "ready";
+          imageLoadTokens.delete(photo);
+        };
+
+        void (async () => {
+          let loaded = false;
+          try {
+            const { realPath } = await canonicalizeAndVerify(relPath, "appData");
+            const trySet = (src: string) =>
+              new Promise<boolean>((resolve) => {
+                const onLoad = () => {
+                  cleanup();
+                  resolve(imageLoadTokens.get(photo) === loadToken);
+                };
+                const onError = () => {
+                  cleanup();
+                  resolve(false);
+                };
+                const cleanup = () => {
+                  photo.removeEventListener("load", onLoad);
+                  photo.removeEventListener("error", onError);
+                };
+                photo.addEventListener("load", onLoad, { once: true });
+                photo.addEventListener("error", onError, { once: true });
+                photo.src = src;
+              });
+
+            loaded = await trySet(convertFileSrc(realPath));
+            if (!loaded) {
+              try {
+                const fs = await import("@tauri-apps/plugin-fs");
+                const bytes = await fs.readFile(realPath);
+                const blob = new Blob([bytes], { type: "image/*" });
+                const objectUrl = URL.createObjectURL(blob);
+                objectUrlCache.set(photo, objectUrl);
+                loaded = await trySet(objectUrl);
+                if (!loaded) {
+                  revokeObjectUrl(photo);
+                }
+              } catch {
+                // ignore fallback failure
+              }
+            }
+          } catch {
+            loaded = false;
+          }
+
+          if (imageLoadTokens.get(photo) !== loadToken) {
+            if (!loaded) revokeObjectUrl(photo);
+            return;
+          }
+
+          if (loaded) {
+            applyLoaded();
+          } else {
+            media.dataset.state = "placeholder";
+            placeholder.hidden = false;
+            photo.hidden = true;
+            imageLoadTokens.delete(photo);
+          }
+        })();
+      }
+    } else if (!photo.hidden) {
+      media.dataset.state = "ready";
+    }
+
+    changePhotoBtn.onclick = () => {
+      if (changePhotoBtn.disabled) return;
+      callbacks.onChangePhoto?.(view.pet);
+    };
+
+    revealBtn.onclick = () => {
+      if (revealBtn.disabled) return;
+      callbacks.onRevealImage?.(view.pet);
+    };
 
     openBtn.onclick = () => callbacks.onOpenPet?.(view.pet);
     editBtn.onclick = () => {
@@ -624,7 +935,7 @@ export function createPetsPage(
 
     if (listVisible && total === 0) {
       if (!hasAnyPets) {
-        emptyMessage = "Add your first pet to keep track of their care.";
+        emptyMessage = "You haven’t added any pets yet. Each will appear here with their photo and details.";
         emptyState.dataset.state = "empty";
       } else if (hasQuery) {
         emptyMessage = `No pets match “${query}”. Clear the search to see everything.`;
@@ -661,15 +972,32 @@ export function createPetsPage(
       lastAnnouncement = announcement;
     }
 
+    if (total === 0) {
+      for (const index of Array.from(visibleRows.keys())) {
+        recycleRow(index);
+      }
+      topSpacer.style.height = "0px";
+      bottomSpacer.style.height = "0px";
+      return;
+    }
+
     const startTime =
       typeof performance !== "undefined" && typeof performance.now === "function"
         ? performance.now()
         : Date.now();
+
+    measureLayout();
+
     const viewportHeight = listViewport.clientHeight || 0;
-    const visibleCount = Math.ceil(viewportHeight / ROW_HEIGHT) + BUFFER_ROWS * 2;
     const scrollTop = listViewport.scrollTop;
-    const firstIndex = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - BUFFER_ROWS);
-    const lastIndex = Math.min(total - 1, firstIndex + visibleCount - 1);
+    const rowHeight = Math.max(1, layout.cardHeight + layout.rowGap);
+    const columns = Math.max(1, layout.columns);
+    const visibleRowEstimate = Math.ceil(viewportHeight / rowHeight) + BUFFER_ROWS * 2;
+    const totalRows = Math.max(1, Math.ceil(total / columns));
+    const firstRow = Math.max(0, Math.floor(scrollTop / rowHeight) - BUFFER_ROWS);
+    const lastRow = Math.min(totalRows - 1, firstRow + visibleRowEstimate - 1);
+    const firstIndex = Math.min(total - 1, firstRow * columns);
+    const lastIndex = Math.min(total - 1, (lastRow + 1) * columns - 1);
 
     const startMark = typeof performance !== "undefined" && performance.mark ? "pets.renderWindow:start" : null;
     const endMark = typeof performance !== "undefined" && performance.mark ? "pets.renderWindow:end" : null;
@@ -691,8 +1019,9 @@ export function createPetsPage(
       rendered += 1;
     }
 
-    const before = firstIndex * ROW_HEIGHT;
-    const after = Math.max(0, (total - lastIndex - 1) * ROW_HEIGHT);
+    const before = rowsToHeight(firstRow);
+    const afterRows = Math.max(0, totalRows - lastRow - 1);
+    const after = rowsToHeight(afterRows);
     topSpacer.style.height = `${before}px`;
     bottomSpacer.style.height = `${after}px`;
 
@@ -701,6 +1030,10 @@ export function createPetsPage(
       performance.measure("pets.renderWindow", startMark!, endMark);
       performance.clearMarks(startMark!);
       performance.clearMarks(endMark);
+    }
+
+    if (measureLayout()) {
+      scheduleRefresh();
     }
 
     if (rendered > 0) {
@@ -791,6 +1124,7 @@ export function createPetsPage(
     setCallbacks,
     setPets,
     setFilter,
+    patchPet,
     focusCreate,
     focusSearch,
     clearSearch,
