@@ -514,6 +514,21 @@ export async function PetDetailView(
   };
   applyInitialFallback();
 
+  const resolveThumbnailPath = async (
+    relativeThumbPath: string | null | undefined,
+  ): Promise<string | null> => {
+    if (!relativeThumbPath) return null;
+    const trimmed = relativeThumbPath.replace(/^attachments\//, "");
+    if (!trimmed) return null;
+    try {
+      const { realPath } = await canonicalize(trimmed, "attachments");
+      return realPath;
+    } catch (error) {
+      console.warn("pet detail: resolve thumbnail path failed", error);
+      return null;
+    }
+  };
+
   if (isTauri && pet.image_path) {
     try {
       const response = (await ipcCallFn("thumbnails_get_or_create", {
@@ -524,17 +539,9 @@ export async function PetDetailView(
       })) as ThumbnailCommandResponse | undefined;
 
       if (response?.ok && response.relative_thumb_path) {
-        let absoluteThumbPath: string | null = null;
-        try {
-          const { realPath } = await canonicalize(
-            response.relative_thumb_path,
-            "attachments",
-          );
-          absoluteThumbPath = realPath;
-        } catch {
-          absoluteThumbPath = null;
-        }
-
+        const absoluteThumbPath = await resolveThumbnailPath(
+          response.relative_thumb_path,
+        );
         const src = absoluteThumbPath ? convertFileSrcFn?.(absoluteThumbPath) : null;
         if (src) {
           avatar.textContent = "";
@@ -668,11 +675,13 @@ export async function PetDetailView(
         if (response?.ok && response.relative_thumb_path) {
           const cacheHit = response.cache_hit === true;
           try {
-            const { realPath } = await canonicalize(
+            const absoluteThumbPath = await resolveThumbnailPath(
               response.relative_thumb_path,
-              "attachments",
             );
-            const src = convertFileSrcFn(realPath);
+            if (!absoluteThumbPath) {
+              throw new Error("thumbnail path could not be resolved");
+            }
+            const src = convertFileSrcFn(absoluteThumbPath);
             renderThumbnailImage(slot, src);
             if (cacheHit) {
               log("INFO", "ui.pets.thumbnail_cache_hit", {
