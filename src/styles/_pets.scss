@@ -212,8 +212,7 @@
   opacity: 1;
 }
 
-.pets__photo,
-.pets__placeholder {
+.pets__photo {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -222,8 +221,15 @@
 }
 
 .pets__placeholder {
+  position: absolute;
+  inset: 0;
+  width: clamp(96px, 52%, 208px);
+  height: clamp(96px, 52%, 208px);
+  max-width: 100%;
+  max-height: 100%;
+  margin: auto;
   object-fit: contain;
-  padding: clamp(24px, 4vw, 42px);
+  padding: clamp(12px, 3vw, 20px);
   filter: saturate(0.7);
 }
 
