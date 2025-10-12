@@ -524,7 +524,18 @@ export async function PetDetailView(
       })) as ThumbnailCommandResponse | undefined;
 
       if (response?.ok && response.relative_thumb_path) {
-        const src = convertFileSrcFn?.(response.relative_thumb_path);
+        let absoluteThumbPath: string | null = null;
+        try {
+          const { realPath } = await canonicalize(
+            response.relative_thumb_path,
+            "appData",
+          );
+          absoluteThumbPath = realPath;
+        } catch {
+          absoluteThumbPath = null;
+        }
+
+        const src = absoluteThumbPath ? convertFileSrcFn?.(absoluteThumbPath) : null;
         if (src) {
           avatar.textContent = "";
           const img = document.createElement("img");
