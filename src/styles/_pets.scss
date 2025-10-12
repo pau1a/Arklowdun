@@ -222,6 +222,12 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.pets__media[data-state="ready"] .pets__photo {
+  opacity: 1;
 }
 
 .pets__placeholder {
@@ -235,6 +241,13 @@
   object-fit: contain;
   padding: clamp(12px, 3vw, 20px);
   filter: saturate(0.7);
+  opacity: 1;
+  transition: opacity 160ms ease;
+}
+
+.pets__media[data-state="ready"] .pets__placeholder {
+  opacity: 0;
+  visibility: hidden;
 }
 
 .pets__media-actions {

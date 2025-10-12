@@ -91,7 +91,11 @@ const PLACEHOLDER_OTHER = new URL("../../assets/pets/placeholders/other.svg", im
 
 const imageLoadTokens = new WeakMap<HTMLImageElement, string>();
 const objectUrlCache = new WeakMap<HTMLImageElement, string>();
-const IMAGE_LOAD_TIMEOUT_MS = 2000;
+const IS_WEBKIT =
+  typeof navigator !== "undefined" &&
+  /AppleWebKit/i.test(navigator.userAgent) &&
+  !/Chrome|Chromium|Edg/i.test(navigator.userAgent);
+const IMAGE_LOAD_TIMEOUT_MS = IS_WEBKIT ? 4000 : 2000;
 
 const isTauri =
   (typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__) ||
@@ -456,17 +460,18 @@ export function createPetsPage(
 
     const media = document.createElement("div");
     media.className = "pets__media";
+    media.dataset.state = "placeholder";
 
     const photo = document.createElement("img");
     photo.className = "pets__photo";
     photo.alt = "";
-    photo.hidden = true;
     photo.loading = "lazy";
 
     const placeholder = document.createElement("img");
     placeholder.className = "pets__placeholder";
     placeholder.alt = "";
     placeholder.src = PLACEHOLDER_OTHER;
+    placeholder.setAttribute("aria-hidden", "false");
 
     media.append(photo, placeholder);
 
@@ -610,8 +615,9 @@ export function createPetsPage(
       revokeObjectUrl(cached.photo);
       imageLoadTokens.delete(cached.photo);
       cached.photo.removeAttribute("src");
-      cached.photo.hidden = true;
-      cached.placeholder.hidden = false;
+      cached.photo.dataset.photoKey = "";
+      cached.media.dataset.state = "placeholder";
+      cached.placeholder.setAttribute("aria-hidden", "false");
     }
     state.element.remove();
     rowPool.push(state.element);
@@ -796,21 +802,23 @@ export function createPetsPage(
     revealBtn.disabled = !hasPhoto;
     revealBtn.setAttribute("aria-disabled", hasPhoto ? "false" : "true");
 
+    const setPlaceholderVisibility = (visible: boolean) => {
+      placeholder.setAttribute("aria-hidden", visible ? "false" : "true");
+    };
+
     if (!hasPhoto) {
       revokeObjectUrl(photo);
       photo.dataset.photoKey = "";
       photo.removeAttribute("src");
-      photo.hidden = true;
-      placeholder.hidden = false;
       media.dataset.state = "placeholder";
+      setPlaceholderVisibility(true);
       imageLoadTokens.delete(photo);
     } else if (previousKey !== nextPhotoKey) {
       photo.dataset.photoKey = nextPhotoKey;
       revokeObjectUrl(photo);
       photo.removeAttribute("src");
-      photo.hidden = true;
-      placeholder.hidden = false;
       media.dataset.state = isTauri ? "loading" : "placeholder";
+      setPlaceholderVisibility(true);
 
       if (isTauri) {
         const loadToken = `${view.pet.id}-${Date.now()}-${Math.random()}`;
@@ -819,9 +827,8 @@ export function createPetsPage(
 
         const applyLoaded = () => {
           if (imageLoadTokens.get(photo) !== loadToken) return;
-          placeholder.hidden = true;
-          photo.hidden = false;
           media.dataset.state = "ready";
+          setPlaceholderVisibility(false);
           imageLoadTokens.delete(photo);
         };
 
@@ -833,11 +840,16 @@ export function createPetsPage(
               new Promise<boolean>((resolve) => {
                 let settled = false;
                 let timer: ReturnType<typeof setTimeout> | null = null;
+                let promoteTimer: ReturnType<typeof setInterval> | null = null;
+                let promoteChecks = 0;
                 const cleanup = () => {
                   photo.removeEventListener("load", onLoad);
                   photo.removeEventListener("error", onError);
                   if (timer != null) {
                     clearTimeout(timer);
+                  }
+                  if (promoteTimer != null) {
+                    clearInterval(promoteTimer);
                   }
                 };
                 const settle = (value: boolean) => {
@@ -867,11 +879,21 @@ export function createPetsPage(
                 }
                 photo.addEventListener("load", onLoad, { once: true });
                 photo.addEventListener("error", onError, { once: true });
+                photo.removeAttribute("src");
                 photo.src = src;
 
                 if (promoteIfDecoded()) {
                   return;
                 }
+
+                promoteTimer = setInterval(() => {
+                  if (promoteIfDecoded()) {
+                    return;
+                  }
+                  if (++promoteChecks > 80) {
+                    settle(false);
+                  }
+                }, 50);
 
                 const maybeDecode = (photo as HTMLImageElement & {
                   decode?: () => Promise<void>;
@@ -896,12 +918,38 @@ export function createPetsPage(
               try {
                 const fs = await import("@tauri-apps/plugin-fs");
                 const bytes = await fs.readFile(realPath);
-                const blob = new Blob([bytes], { type: mimeFromExt(realPath) });
-                const objectUrl = URL.createObjectURL(blob);
-                objectUrlCache.set(photo, objectUrl);
-                loaded = await trySet(objectUrl, { timeoutMs: IMAGE_LOAD_TIMEOUT_MS });
-                if (!loaded) {
-                  revokeObjectUrl(photo);
+                const byteLength =
+                  bytes instanceof Uint8Array
+                    ? bytes.byteLength
+                    : Array.isArray(bytes)
+                    ? bytes.length
+                    : (bytes as ArrayBufferLike).byteLength ?? 0;
+
+                if (!bytes || byteLength === 0) {
+                  throw new Error("EMPTY_IMAGE_BYTES");
+                }
+
+                if (IS_WEBKIT) {
+                  const buffer =
+                    bytes instanceof Uint8Array
+                      ? bytes
+                      : Array.isArray(bytes)
+                      ? Uint8Array.from(bytes)
+                      : new Uint8Array(bytes as ArrayBufferLike);
+                  let binary = "";
+                  for (let i = 0; i < buffer.length; i += 1) {
+                    binary += String.fromCharCode(buffer[i]);
+                  }
+                  const dataUrl = `data:${mimeFromExt(realPath)};base64,${btoa(binary)}`;
+                  loaded = await trySet(dataUrl, { timeoutMs: IMAGE_LOAD_TIMEOUT_MS });
+                } else {
+                  const blob = new Blob([bytes], { type: mimeFromExt(realPath) });
+                  const objectUrl = URL.createObjectURL(blob);
+                  objectUrlCache.set(photo, objectUrl);
+                  loaded = await trySet(objectUrl, { timeoutMs: IMAGE_LOAD_TIMEOUT_MS });
+                  if (!loaded) {
+                    revokeObjectUrl(photo);
+                  }
                 }
               } catch {
                 // ignore fallback failure
@@ -920,14 +968,17 @@ export function createPetsPage(
             applyLoaded();
           } else {
             media.dataset.state = "placeholder";
-            placeholder.hidden = false;
-            photo.hidden = true;
+            setPlaceholderVisibility(true);
             imageLoadTokens.delete(photo);
           }
         })();
       }
-    } else if (!photo.hidden) {
+    } else if (photo.currentSrc) {
       media.dataset.state = "ready";
+      setPlaceholderVisibility(false);
+    } else {
+      media.dataset.state = "placeholder";
+      setPlaceholderVisibility(true);
     }
 
     changePhotoBtn.onclick = () => {
