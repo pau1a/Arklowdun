@@ -91,6 +91,7 @@ const PLACEHOLDER_OTHER = new URL("../../assets/pets/placeholders/other.svg", im
 
 const imageLoadTokens = new WeakMap<HTMLImageElement, string>();
 const objectUrlCache = new WeakMap<HTMLImageElement, string>();
+const IMAGE_LOAD_TIMEOUT_MS = 2000;
 
 const isTauri =
   (typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__) ||
@@ -802,8 +803,19 @@ export function createPetsPage(
           let loaded = false;
           try {
             const { realPath } = await canonicalizeAndVerify(relPath, "appData");
-            const trySet = (src: string) =>
+            const trySet = (src: string, opts?: { timeoutMs?: number }) =>
               new Promise<boolean>((resolve) => {
+                let settled = false;
+                let timer: ReturnType<typeof setTimeout> | null = null;
+                const cleanup = () => {
+                  if (settled) return;
+                  settled = true;
+                  photo.removeEventListener("load", onLoad);
+                  photo.removeEventListener("error", onError);
+                  if (timer != null) {
+                    clearTimeout(timer);
+                  }
+                };
                 const onLoad = () => {
                   cleanup();
                   resolve(imageLoadTokens.get(photo) === loadToken);
@@ -812,16 +824,19 @@ export function createPetsPage(
                   cleanup();
                   resolve(false);
                 };
-                const cleanup = () => {
-                  photo.removeEventListener("load", onLoad);
-                  photo.removeEventListener("error", onError);
-                };
+                const timeoutMs = opts?.timeoutMs ?? 0;
+                if (timeoutMs > 0) {
+                  timer = setTimeout(() => {
+                    cleanup();
+                    resolve(false);
+                  }, timeoutMs);
+                }
                 photo.addEventListener("load", onLoad, { once: true });
                 photo.addEventListener("error", onError, { once: true });
                 photo.src = src;
               });
 
-            loaded = await trySet(convertFileSrc(realPath));
+            loaded = await trySet(convertFileSrc(realPath), { timeoutMs: IMAGE_LOAD_TIMEOUT_MS });
             if (!loaded) {
               try {
                 const fs = await import("@tauri-apps/plugin-fs");
@@ -829,7 +844,7 @@ export function createPetsPage(
                 const blob = new Blob([bytes], { type: "image/*" });
                 const objectUrl = URL.createObjectURL(blob);
                 objectUrlCache.set(photo, objectUrl);
-                loaded = await trySet(objectUrl);
+                loaded = await trySet(objectUrl, { timeoutMs: IMAGE_LOAD_TIMEOUT_MS });
                 if (!loaded) {
                   revokeObjectUrl(photo);
                 }
