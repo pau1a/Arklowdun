@@ -117,6 +117,32 @@ function placeholderFor(pet: Pet): string {
   return PLACEHOLDER_OTHER;
 }
 
+function mimeFromExt(path: string): string {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  switch (ext) {
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "png":
+      return "image/png";
+    case "gif":
+      return "image/gif";
+    case "webp":
+      return "image/webp";
+    case "bmp":
+      return "image/bmp";
+    case "tif":
+    case "tiff":
+      return "image/tiff";
+    case "heic":
+      return "image/heic";
+    case "heif":
+      return "image/heif";
+    default:
+      return "application/octet-stream";
+  }
+}
+
 function revokeObjectUrl(image: HTMLImageElement) {
   const existing = objectUrlCache.get(image);
   if (existing) {
@@ -808,32 +834,61 @@ export function createPetsPage(
                 let settled = false;
                 let timer: ReturnType<typeof setTimeout> | null = null;
                 const cleanup = () => {
-                  if (settled) return;
-                  settled = true;
                   photo.removeEventListener("load", onLoad);
                   photo.removeEventListener("error", onError);
                   if (timer != null) {
                     clearTimeout(timer);
                   }
                 };
-                const onLoad = () => {
+                const settle = (value: boolean) => {
+                  if (settled) return;
+                  settled = true;
                   cleanup();
-                  resolve(imageLoadTokens.get(photo) === loadToken);
+                  resolve(value);
+                };
+                const promoteIfDecoded = () => {
+                  if (photo.complete && photo.naturalWidth > 0 && photo.naturalHeight > 0) {
+                    settle(imageLoadTokens.get(photo) === loadToken);
+                    return true;
+                  }
+                  return false;
+                };
+                const onLoad = () => {
+                  settle(imageLoadTokens.get(photo) === loadToken);
                 };
                 const onError = () => {
-                  cleanup();
-                  resolve(false);
+                  settle(false);
                 };
                 const timeoutMs = opts?.timeoutMs ?? 0;
                 if (timeoutMs > 0) {
                   timer = setTimeout(() => {
-                    cleanup();
-                    resolve(false);
+                    settle(false);
                   }, timeoutMs);
                 }
                 photo.addEventListener("load", onLoad, { once: true });
                 photo.addEventListener("error", onError, { once: true });
                 photo.src = src;
+
+                if (promoteIfDecoded()) {
+                  return;
+                }
+
+                const maybeDecode = (photo as HTMLImageElement & {
+                  decode?: () => Promise<void>;
+                }).decode;
+                if (typeof maybeDecode === "function") {
+                  maybeDecode
+                    .call(photo)
+                    .then(() => {
+                      if (imageLoadTokens.get(photo) !== loadToken) {
+                        return;
+                      }
+                      promoteIfDecoded();
+                    })
+                    .catch(() => {
+                      // ignore decode failure; onload/onerror handlers will handle fallback
+                    });
+                }
               });
 
             loaded = await trySet(convertFileSrc(realPath), { timeoutMs: IMAGE_LOAD_TIMEOUT_MS });
@@ -841,7 +896,7 @@ export function createPetsPage(
               try {
                 const fs = await import("@tauri-apps/plugin-fs");
                 const bytes = await fs.readFile(realPath);
-                const blob = new Blob([bytes], { type: "image/*" });
+                const blob = new Blob([bytes], { type: mimeFromExt(realPath) });
                 const objectUrl = URL.createObjectURL(blob);
                 objectUrlCache.set(photo, objectUrl);
                 loaded = await trySet(objectUrl, { timeoutMs: IMAGE_LOAD_TIMEOUT_MS });
