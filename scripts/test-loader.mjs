@@ -23,8 +23,20 @@ if (configResult.resultType === 'failed') {
 
 const extensions = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
 
+const STUB_MODULES = new Map([
+  ['@tauri-apps/api/event', new URL('../tests/stubs/tauri-event.ts', import.meta.url)],
+  ['@tauri-apps/api/core', new URL('../tests/stubs/tauri-core.ts', import.meta.url)],
+  ['@tauri-apps/api/path', new URL('../tests/stubs/tauri-path.ts', import.meta.url)],
+  ['@tauri-apps/plugin-fs', new URL('../tests/stubs/tauri-fs.ts', import.meta.url)],
+]);
+
 export async function resolve(specifier, context, defaultResolve) {
   let nextSpecifier = specifier;
+
+  const stub = STUB_MODULES.get(specifier);
+  if (stub) {
+    return { url: stub.href, format: 'module', shortCircuit: true };
+  }
 
   if (matchPath) {
     const mapped = matchPath(specifier, undefined, existsSync, extensions);

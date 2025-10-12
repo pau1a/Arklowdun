@@ -27,8 +27,8 @@ function ensureContainer(): HTMLElement {
     container = document.createElement('div');
     container.id = 'ui-toast-region';
     container.className = 'toast-region';
-    container.setAttribute('role', 'status');
-    container.setAttribute('aria-live', 'polite');
+    container.setAttribute('role', 'alert');
+    container.setAttribute('aria-live', 'assertive');
     container.setAttribute('aria-atomic', 'true');
     document.body.appendChild(container);
   }

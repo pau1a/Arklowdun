@@ -72,24 +72,53 @@ export function createPetsPage(
   container: HTMLElement,
   initialCallbacks: PetsPageCallbacks = {},
 ): PetsPageInstance {
+  const idSuffix = Math.random().toString(36).slice(2, 8);
+  const titleId = `pets-title-${idSuffix}`;
+  const searchId = `pets-search-${idSuffix}`;
+  const createAssistId = `pets-create-help-${idSuffix}`;
+  const liveStatusId = `pets-status-${idSuffix}`;
+  const listHelpId = `pets-list-help-${idSuffix}`;
+
   const root = document.createElement("section");
   root.className = "pets";
+  root.setAttribute("role", "region");
+  root.setAttribute("aria-labelledby", titleId);
+
+  const liveStatus = document.createElement("p");
+  liveStatus.className = "sr-only";
+  liveStatus.id = liveStatusId;
+  liveStatus.setAttribute("role", "status");
+  liveStatus.setAttribute("aria-live", "polite");
+  liveStatus.textContent = "Loading pets…";
+
+  const listHelp = document.createElement("p");
+  listHelp.className = "sr-only";
+  listHelp.id = listHelpId;
+  listHelp.textContent =
+    "Use the arrow keys to move between pets. Press Enter to open details. Press Escape to return to the list.";
 
   const header = document.createElement("header");
   header.className = "pets__header";
 
   const title = document.createElement("h1");
+  title.id = titleId;
   title.textContent = "Pets";
 
   const search = document.createElement("input");
   search.type = "search";
   search.placeholder = "Search pets…";
   search.className = "pets__search";
-  search.setAttribute("aria-label", "Search pets");
+  search.id = searchId;
+
+  const searchLabel = document.createElement("label");
+  searchLabel.className = "sr-only";
+  searchLabel.htmlFor = searchId;
+  searchLabel.textContent = "Search pets";
 
   const createForm = document.createElement("form");
   createForm.className = "pets__create";
   createForm.autocomplete = "off";
+  createForm.setAttribute("aria-describedby", createAssistId);
 
   const nameInput = document.createElement("input");
   nameInput.type = "text";
@@ -97,23 +126,31 @@ export function createPetsPage(
   nameInput.placeholder = "Name";
   nameInput.className = "pets__input";
   nameInput.name = "pet-name";
+  nameInput.setAttribute("aria-label", "Pet name");
 
   const typeInput = document.createElement("input");
   typeInput.type = "text";
-  typeInput.placeholder = "Type";
+  typeInput.placeholder = "Type (optional)";
   typeInput.className = "pets__input";
   typeInput.name = "pet-type";
+  typeInput.setAttribute("aria-label", "Pet type (optional)");
 
   const createButton = document.createElement("button");
   createButton.type = "submit";
-  createButton.textContent = "Add";
+  createButton.textContent = "Add pet";
   createButton.className = "pets__submit";
 
   createForm.append(nameInput, typeInput, createButton);
 
+  const createAssist = document.createElement("p");
+  createAssist.className = "sr-only";
+  createAssist.id = createAssistId;
+  createAssist.textContent = "Enter a pet name and optional type, then select Add pet.";
+  createForm.append(createAssist);
+
   const controls = document.createElement("div");
   controls.className = "pets__controls";
-  controls.append(search, createForm);
+  controls.append(searchLabel, search, createForm);
 
   header.append(title, controls);
 
@@ -124,6 +161,9 @@ export function createPetsPage(
   listViewport.className = "pets__viewport";
   listViewport.tabIndex = 0;
   listViewport.setAttribute("role", "list");
+  listViewport.setAttribute("aria-labelledby", titleId);
+  listViewport.setAttribute("aria-describedby", `${liveStatusId} ${listHelpId}`);
+  listViewport.setAttribute("aria-hidden", "false");
 
   const topSpacer = document.createElement("div");
   topSpacer.className = "pets__spacer pets__spacer--top";
@@ -138,15 +178,21 @@ export function createPetsPage(
 
   const emptyState = document.createElement("div");
   emptyState.className = "pets__empty";
-  emptyState.textContent = "No pets yet";
+  emptyState.dataset.state = "empty";
+  emptyState.setAttribute("role", "status");
+  emptyState.setAttribute("aria-live", "polite");
+  emptyState.textContent = "Add your first pet to keep track of their care.";
   emptyState.hidden = true;
 
   const detailHost = document.createElement("div");
   detailHost.className = "pets__detail";
   detailHost.hidden = true;
+  detailHost.setAttribute("role", "region");
+  detailHost.setAttribute("aria-label", "Pet details");
+  detailHost.setAttribute("aria-hidden", "true");
 
   body.append(listViewport, emptyState, detailHost);
-  root.append(header, body);
+  root.append(header, body, liveStatus, listHelp);
 
   container.innerHTML = "";
   container.append(root);
@@ -155,6 +201,10 @@ export function createPetsPage(
   const visibleRows = new Map<number, RowState>();
   const rowPool: HTMLDivElement[] = [];
   const editing = new Map<string, EditingState>();
+
+  let totalPets = 0;
+  let lastAnnouncement = liveStatus.textContent ?? "";
+  let lastEmptyMessage = "";
 
   let callbacks = { ...initialCallbacks };
   let models: FilteredPet[] = [];
@@ -198,9 +248,8 @@ export function createPetsPage(
     callbacks = { ...callbacks, ...next };
   }
 
-  function setPets(_next: Pet[]): void {
-    // The virtualised list relies on the filtered models array.
-    // Retain the method for API compatibility but no internal state is required.
+  function setPets(next: Pet[]): void {
+    totalPets = Array.isArray(next) ? next.length : 0;
   }
 
   function setFilter(next: FilteredPet[]): void {
@@ -247,16 +296,18 @@ export function createPetsPage(
     emptyState.hidden = true;
     detailHost.hidden = false;
     detailHost.replaceChildren(content);
+    listViewport.setAttribute("aria-hidden", "true");
+    detailHost.setAttribute("aria-hidden", "false");
+    liveStatus.textContent = "Showing pet details.";
+    lastAnnouncement = liveStatus.textContent ?? "";
   }
 
   function showList() {
     detailHost.hidden = true;
     listViewport.hidden = false;
-    if (models.length === 0) {
-      emptyState.hidden = false;
-    } else {
-      emptyState.hidden = true;
-    }
+    listViewport.setAttribute("aria-hidden", "false");
+    detailHost.setAttribute("aria-hidden", "true");
+    refresh();
   }
 
   function getScrollOffset(): number {
@@ -565,11 +616,55 @@ export function createPetsPage(
 
   function refresh(): void {
     const total = models.length;
+    const listVisible = !listViewport.hidden;
+    const query = search.value.trim();
+    const hasQuery = query.length > 0;
+    const hasAnyPets = totalPets > 0;
+    let emptyMessage: string | null = null;
+
+    if (listVisible && total === 0) {
+      if (!hasAnyPets) {
+        emptyMessage = "Add your first pet to keep track of their care.";
+        emptyState.dataset.state = "empty";
+      } else if (hasQuery) {
+        emptyMessage = `No pets match “${query}”. Clear the search to see everything.`;
+        emptyState.dataset.state = "no-results";
+      } else {
+        emptyMessage = "No pets available.";
+        emptyState.dataset.state = "empty";
+      }
+    }
+
+    if (listVisible && emptyMessage) {
+      emptyState.hidden = false;
+      if (emptyMessage !== lastEmptyMessage) {
+        emptyState.textContent = emptyMessage;
+        lastEmptyMessage = emptyMessage;
+      }
+    } else {
+      if (!emptyState.hidden) {
+        emptyState.hidden = true;
+      }
+      if (listVisible) {
+        lastEmptyMessage = "";
+      }
+    }
+
+    const announcement = !listVisible
+      ? lastAnnouncement
+      : emptyMessage ??
+          (hasQuery
+            ? `${total} ${total === 1 ? "pet matches" : "pets match"} “${query}”.`
+            : `${total} ${total === 1 ? "pet" : "pets"} available.`);
+    if (announcement && announcement !== lastAnnouncement) {
+      liveStatus.textContent = announcement;
+      lastAnnouncement = announcement;
+    }
+
     const startTime =
       typeof performance !== "undefined" && typeof performance.now === "function"
         ? performance.now()
         : Date.now();
-    emptyState.hidden = total > 0;
     const viewportHeight = listViewport.clientHeight || 0;
     const visibleCount = Math.ceil(viewportHeight / ROW_HEIGHT) + BUFFER_ROWS * 2;
     const scrollTop = listViewport.scrollTop;
