@@ -528,7 +528,7 @@ export async function PetDetailView(
         try {
           const { realPath } = await canonicalize(
             response.relative_thumb_path,
-            "appData",
+            "attachments",
           );
           absoluteThumbPath = realPath;
         } catch {
@@ -670,7 +670,7 @@ export async function PetDetailView(
           try {
             const { realPath } = await canonicalize(
               response.relative_thumb_path,
-              "appData",
+              "attachments",
             );
             const src = convertFileSrcFn(realPath);
             renderThumbnailImage(slot, src);
