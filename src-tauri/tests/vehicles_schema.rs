@@ -12,7 +12,7 @@ use arklowdun_lib::{
     db, events_tz_backfill::BackfillCoordinator, files_indexer::FilesIndexer,
     household_active::StoreHandle, migrate, pets::metrics::PetAttachmentMetrics, vault::Vault,
     vault_migration::VaultMigrationManager, vehicles_create, vehicles_delete, vehicles_get,
-    vehicles_restore, vehicles_update, AppState,
+    vehicles_list, vehicles_restore, vehicles_update, AppState,
 };
 
 fn build_app(state: AppState) -> App<tauri::test::MockRuntime> {
@@ -66,12 +66,8 @@ fn as_object(value: Value) -> Map<String, Value> {
     value.as_object().cloned().expect("expected object")
 }
 
-#[tokio::test]
-async fn vehicles_round_trip_fields_preserved() -> Result<()> {
-    let dir = TempDir::new()?;
-    let (app, _pool, _db_path) = build_app_state(&dir).await?;
-
-    let payload = json!({
+fn sample_vehicle_payload() -> Map<String, Value> {
+    as_object(json!({
         "household_id": "default",
         "name": "Fleet Car",
         "make": "Tesla",
@@ -130,10 +126,15 @@ async fn vehicles_round_trip_fields_preserved() -> Result<()> {
         "notes": "Seeded from integration test",
         "reg": "REG-ROUND-1",
         "vin": "ROUNDTRIPVIN00001",
-    });
+    }))
+}
 
-    let mut map = as_object(payload);
-    let created = vehicles_create(app.state(), map.clone()).await?;
+#[tokio::test]
+async fn vehicles_round_trip_fields_preserved() -> Result<()> {
+    let dir = TempDir::new()?;
+    let (app, _pool, _db_path) = build_app_state(&dir).await?;
+
+    let created = vehicles_create(app.state(), sample_vehicle_payload()).await?;
     let id = created
         .get("id")
         .and_then(Value::as_str)
@@ -166,6 +167,40 @@ async fn vehicles_round_trip_fields_preserved() -> Result<()> {
     vehicles_update(app.state(), id.clone(), update, Some("default".into())).await?;
     vehicles_delete(app.state(), "default".into(), id.clone()).await?;
     vehicles_restore(app.state(), "default".into(), id.clone()).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn vehicles_list_includes_extended_fields() -> Result<()> {
+    let dir = TempDir::new()?;
+    let (app, _pool, _db_path) = build_app_state(&dir).await?;
+
+    let created = vehicles_create(app.state(), sample_vehicle_payload()).await?;
+    let id = created
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("id present")
+        .to_string();
+
+    let list = vehicles_list(app.state(), "default".into())
+        .await
+        .map_err(anyhow::Error::from)?;
+
+    let vehicle = list
+        .into_iter()
+        .find(|item| item.id == id)
+        .expect("vehicle listed");
+
+    assert_eq!(vehicle.reg.as_deref(), Some("REG-ROUND-1"));
+    assert_eq!(vehicle.vin.as_deref(), Some("ROUNDTRIPVIN00001"));
+    assert_eq!(vehicle.has_spare_key, Some(true));
+    assert_eq!(vehicle.next_service_due, Some(1706659200000_i64));
+    assert_eq!(vehicle.tags.as_deref(), Some("[\"electric\",\"fleet\"]"));
+    assert_eq!(
+        vehicle.hero_image_path.as_deref(),
+        Some("images/veh_default_01.jpg")
+    );
+
     Ok(())
 }
 

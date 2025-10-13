@@ -1383,7 +1383,7 @@ pub struct HouseholdSummary {
 
 // Typed list for Dashboard (rich fields)
 #[tauri::command]
-async fn vehicles_list(
+pub async fn vehicles_list(
     state: State<'_, AppState>,
     household_id: String,
 ) -> AppResult<Vec<Vehicle>> {
