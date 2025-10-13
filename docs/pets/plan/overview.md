@@ -130,6 +130,7 @@ These placeholders exist purely for traceability and future planning, not curren
 | PR8    | TBD            | Diagnostics counters integrated.                      |
 | PR9    | TBD            | Accessibility audit complete.                         |
 | PR10   | TBD            | Tests & fixtures hardened; Intel + ARM CI matrix green. |
+| PR11   | TBD            | Header inputs removed; create-in-modal.               |
 
 All PR checklists are to be created incrementally under `/docs/pets/plan/`.
 

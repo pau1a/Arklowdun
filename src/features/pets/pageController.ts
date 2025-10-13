@@ -4,8 +4,6 @@ export interface PetsListController {
   focusCreate(): void;
   focusSearch(): void;
   submitCreateForm(): boolean;
-  clearSearch(): void;
-  getSearchValue(): string;
   focusRow(id: string): void;
 }
 

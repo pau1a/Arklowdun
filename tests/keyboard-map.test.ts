@@ -163,8 +163,6 @@ test('pets controller queues focus requests until list registers', async () => {
     focusCreate: () => {},
     focusSearch: () => {},
     submitCreateForm: () => false,
-    clearSearch: () => {},
-    getSearchValue: () => '',
     focusRow: () => {},
   };
 
@@ -179,8 +177,6 @@ test('pets controller queues focus requests until list registers', async () => {
     focusCreate: () => actions.push('create'),
     focusSearch: () => actions.push('search'),
     submitCreateForm: () => false,
-    clearSearch: () => {},
-    getSearchValue: () => '',
     focusRow: () => {},
   };
 

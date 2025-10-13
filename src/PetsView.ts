@@ -22,6 +22,7 @@ import { mkdir, writeBinary } from "./files/safe-fs";
 import { presentFsError } from "@lib/ipc";
 import { revealAttachment } from "./ui/attachments";
 import { createModal } from "@ui/Modal";
+import createButton, { type ButtonElement } from "@ui/Button";
 import { ENABLE_PETS_HARD_DELETE } from "./config/flags";
 
 function toDisplayName(pet: Pet): string {
@@ -98,14 +99,14 @@ export async function PetsView(container: HTMLElement) {
   runViewCleanups(container);
 
   let listController: PetsListController | null = null;
+  let addPetModal: ReturnType<typeof createModal> | null = null;
+  let pendingCreateOpen = false;
   const page = createPetsPage(container);
 
   listController = {
-    focusCreate: () => page.focusCreate(),
+    focusCreate: () => openAddPetModal(),
     focusSearch: () => page.focusSearch(),
     submitCreateForm: () => page.submitCreateForm(),
-    clearSearch: () => page.clearSearch(),
-    getSearchValue: () => page.getSearchValue(),
     focusRow: (id) => page.focusRow(id),
   };
   registerPetsListController(listController);
@@ -121,6 +122,15 @@ export async function PetsView(container: HTMLElement) {
       unregisterPetsListController(listController);
       listController = null;
     }
+    if (addPetModal) {
+      try {
+        addPetModal.setOpen(false);
+      } catch {
+        /* ignore */
+      }
+      addPetModal = null;
+    }
+    pendingCreateOpen = false;
   });
 
   const hh = await getHouseholdIdForCalls();
@@ -138,13 +148,334 @@ export async function PetsView(container: HTMLElement) {
 
   let pets: Pet[] = await loadPets();
   let filters: FiltersState = { query: "", models: [] };
-  let searchHandle: number | undefined;
   let lastScroll = 0;
   let detailController: PetDetailController | null = null;
   let detailActive = false;
   let detailPetId: string | null = null;
   let reorderLock = false;
   const allowHardDelete = ENABLE_PETS_HARD_DELETE;
+
+  const createModalSeed = Math.random().toString(36).slice(2, 8);
+  const createModalTitleId = `pets-create-title-${createModalSeed}`;
+  const createModalDescriptionId = `pets-create-desc-${createModalSeed}`;
+  const createModalStatusId = `pets-create-status-${createModalSeed}`;
+  const createModalNameId = `pets-create-name-${createModalSeed}`;
+  const createModalSpeciesId = `pets-create-species-${createModalSeed}`;
+  const createModalBreedId = `pets-create-breed-${createModalSeed}`;
+
+  interface CreateFieldControl {
+    wrapper: HTMLDivElement;
+    input: HTMLInputElement;
+    error: HTMLParagraphElement;
+  }
+
+  let createForm: HTMLFormElement;
+  let createStatus: HTMLParagraphElement | null = null;
+  let createSubmitButton: ButtonElement;
+  let createCancelButton: ButtonElement;
+  let createNameField: CreateFieldControl;
+  let createSpeciesField: CreateFieldControl;
+  let createBreedField: CreateFieldControl;
+  let createSubmitting = false;
+
+  function clearFieldError(control: CreateFieldControl) {
+    control.error.textContent = "";
+    control.error.hidden = true;
+    control.input.removeAttribute("aria-invalid");
+    const describedBy = control.input.getAttribute("aria-describedby");
+    if (describedBy) {
+      const tokens = describedBy
+        .split(/\s+/)
+        .filter((token) => token && token !== control.error.id);
+      if (tokens.length > 0) {
+        control.input.setAttribute("aria-describedby", tokens.join(" "));
+      } else {
+        control.input.removeAttribute("aria-describedby");
+      }
+    }
+  }
+
+  function setFieldError(control: CreateFieldControl, message: string) {
+    control.error.textContent = message;
+    control.error.hidden = false;
+    control.input.setAttribute("aria-invalid", "true");
+    const describedBy = control.input.getAttribute("aria-describedby");
+    const tokens = new Set((describedBy ?? "").split(/\s+/).filter(Boolean));
+    tokens.add(control.error.id);
+    control.input.setAttribute("aria-describedby", Array.from(tokens).join(" "));
+    createStatus?.setAttribute("data-active", "true");
+    if (createStatus) {
+      createStatus.textContent = message;
+    }
+  }
+
+  function buildField(
+    labelText: string,
+    id: string,
+    opts: { required?: boolean; maxLength: number },
+  ): CreateFieldControl {
+    const wrapper = document.createElement("div");
+    wrapper.className = "pets-create-modal__field";
+
+    const label = document.createElement("label");
+    label.className = "pets-create-modal__label";
+    label.htmlFor = id;
+    label.textContent = labelText;
+
+    const input = document.createElement("input");
+    input.className = "pets-create-modal__input";
+    input.id = id;
+    input.type = "text";
+    input.autocomplete = "off";
+    input.maxLength = opts.maxLength;
+    if (opts.required) {
+      input.required = true;
+    }
+
+    const error = document.createElement("p");
+    error.className = "pets-create-modal__error";
+    error.id = `${id}-error`;
+    error.hidden = true;
+
+    const control: CreateFieldControl = { wrapper, input, error };
+
+    input.addEventListener("input", () => {
+      clearFieldError(control);
+      if (createStatus) {
+        createStatus.textContent = "";
+        createStatus.removeAttribute("data-active");
+      }
+    });
+
+    wrapper.append(label, input, error);
+    return control;
+  }
+
+  function resetCreateForm() {
+    if (!createForm) return;
+    createForm.reset();
+    if (createStatus) {
+      createStatus.textContent = "";
+      createStatus.removeAttribute("data-active");
+    }
+    if (createNameField) clearFieldError(createNameField);
+    if (createSpeciesField) clearFieldError(createSpeciesField);
+    if (createBreedField) clearFieldError(createBreedField);
+  }
+
+  function setCreateSubmitting(submitting: boolean) {
+    createSubmitting = submitting;
+    if (createNameField) createNameField.input.disabled = submitting;
+    if (createSpeciesField) createSpeciesField.input.disabled = submitting;
+    if (createBreedField) createBreedField.input.disabled = submitting;
+    createSubmitButton?.update({ label: submitting ? "Creating…" : "Create", disabled: submitting });
+    createCancelButton?.update({ disabled: submitting });
+    if (createForm) {
+      if (submitting) createForm.setAttribute("aria-busy", "true");
+      else createForm.removeAttribute("aria-busy");
+    }
+  }
+
+  function validateCreateForm(): {
+    values: { name: string; species: string | null; breed: string | null };
+    hasError: boolean;
+    firstInvalid: HTMLInputElement | null;
+  } {
+    const nameValue = createNameField.input.value.trim();
+    const speciesValue = createSpeciesField.input.value.trim();
+    const breedValue = createBreedField.input.value.trim();
+
+    clearFieldError(createNameField);
+    clearFieldError(createSpeciesField);
+    clearFieldError(createBreedField);
+    if (createStatus) {
+      createStatus.textContent = "";
+      createStatus.removeAttribute("data-active");
+    }
+
+    let hasError = false;
+    let firstInvalid: HTMLInputElement | null = null;
+
+    if (!nameValue) {
+      setFieldError(createNameField, "Enter a name.");
+      hasError = true;
+      if (!firstInvalid) firstInvalid = createNameField.input;
+    } else if (nameValue.length > 120) {
+      setFieldError(createNameField, "Name can’t be longer than 120 characters.");
+      hasError = true;
+      if (!firstInvalid) firstInvalid = createNameField.input;
+    }
+
+    if (speciesValue.length > 64) {
+      setFieldError(createSpeciesField, "Species can’t be longer than 64 characters.");
+      hasError = true;
+      if (!firstInvalid) firstInvalid = createSpeciesField.input;
+    }
+
+    if (breedValue.length > 64) {
+      setFieldError(createBreedField, "Breed can’t be longer than 64 characters.");
+      hasError = true;
+      if (!firstInvalid) firstInvalid = createBreedField.input;
+    }
+
+    return {
+      values: {
+        name: nameValue,
+        species: speciesValue ? speciesValue : null,
+        breed: breedValue ? breedValue : null,
+      },
+      hasError,
+      firstInvalid,
+    };
+  }
+
+  addPetModal = createModal({
+    open: false,
+    titleId: createModalTitleId,
+    descriptionId: createModalDescriptionId,
+    initialFocus: () => createNameField?.input ?? null,
+    onOpenChange(open) {
+      if (createSubmitting && !open) {
+        addPetModal?.setOpen(true);
+        return;
+      }
+      if (open) {
+        resetCreateForm();
+        setCreateSubmitting(false);
+        logUI("INFO", "pets.modal_open", { household_id: hh });
+      } else {
+        setCreateSubmitting(false);
+        resetCreateForm();
+      }
+    },
+  });
+
+  addPetModal.root.classList.add("pets-create-modal__overlay");
+  addPetModal.dialog.classList.add("pets-create-modal");
+
+  const createHeader = document.createElement("header");
+  createHeader.className = "pets-create-modal__header";
+
+  const createTitle = document.createElement("h2");
+  createTitle.id = createModalTitleId;
+  createTitle.className = "pets-create-modal__title";
+  createTitle.textContent = "Add a pet";
+  createHeader.append(createTitle);
+
+  const createBody = document.createElement("div");
+  createBody.className = "pets-create-modal__body";
+
+  const createDescription = document.createElement("p");
+  createDescription.id = createModalDescriptionId;
+  createDescription.className = "pets-create-modal__description";
+  createDescription.textContent = "Create a pet record. Only the name is required.";
+
+  createForm = document.createElement("form");
+  createForm.className = "pets-create-modal__form";
+  createForm.noValidate = true;
+
+  createNameField = buildField("Name", createModalNameId, { required: true, maxLength: 120 });
+  createSpeciesField = buildField("Species", createModalSpeciesId, { maxLength: 64 });
+  createBreedField = buildField("Breed", createModalBreedId, { maxLength: 64 });
+
+  createForm.append(
+    createNameField.wrapper,
+    createSpeciesField.wrapper,
+    createBreedField.wrapper,
+  );
+
+  const createFooter = document.createElement("div");
+  createFooter.className = "pets-create-modal__footer";
+
+  createCancelButton = createButton({
+    label: "Cancel",
+    onClick: (event) => {
+      event.preventDefault();
+      if (createSubmitting) return;
+      addPetModal?.setOpen(false);
+    },
+  });
+
+  createSubmitButton = createButton({
+    label: "Create",
+    variant: "primary",
+    type: "submit",
+  });
+
+  createFooter.append(createCancelButton, createSubmitButton);
+  createForm.append(createFooter);
+
+  createStatus = document.createElement("p");
+  createStatus.id = createModalStatusId;
+  createStatus.className = "sr-only";
+  createStatus.setAttribute("role", "status");
+  createStatus.setAttribute("aria-live", "polite");
+
+  createBody.append(createDescription, createForm);
+  addPetModal.dialog.append(createHeader, createBody, createStatus);
+
+  createForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (createSubmitting) return;
+    const { values, hasError, firstInvalid } = validateCreateForm();
+    if (hasError) {
+      firstInvalid?.focus();
+      return;
+    }
+    logUI("INFO", "pets.create_submitted", { household_id: hh });
+    setCreateSubmitting(true);
+    let shouldRefocusName = false;
+    void Promise.resolve(
+      handleCreate({
+        name: values.name,
+        species: values.species ?? undefined,
+        breed: values.breed ?? undefined,
+      }),
+    )
+      .then((created) => {
+        logUI("INFO", "pets.create_success", { household_id: hh, pet_id: created.id });
+        toast.show({ kind: "success", message: "Pet created" });
+        addPetModal?.setOpen(false);
+        resetCreateForm();
+        page.focusRow(created.id);
+      })
+      .catch((error) => {
+        shouldRefocusName = true;
+        const maybe = error as { code?: string | null } | null;
+        const code = typeof maybe?.code === "string" ? maybe.code : "unknown";
+        logUI("WARN", "pets.create_error", { household_id: hh, code });
+        toast.show({
+          kind: "error",
+          message: "Couldn’t create the pet. Try again or check your connection.",
+        });
+        if (createStatus) {
+          createStatus.textContent = "Couldn’t create the pet. Try again or check your connection.";
+          createStatus.setAttribute("data-active", "true");
+        }
+      })
+      .finally(() => {
+        setCreateSubmitting(false);
+        if (shouldRefocusName) {
+          createNameField.input.focus();
+        }
+      });
+  });
+
+  if (pendingCreateOpen) {
+    pendingCreateOpen = false;
+    openAddPetModal();
+  }
+
+  function openAddPetModal(): void {
+    if (!addPetModal) {
+      pendingCreateOpen = true;
+      return;
+    }
+    if (addPetModal.isOpen()) return;
+    pendingCreateOpen = false;
+    page.focusCreate();
+    addPetModal.setOpen(true);
+  }
 
   interface PendingUndoEntry {
     pet: Pet;
@@ -536,7 +867,7 @@ export async function PetsView(container: HTMLElement) {
   function applyFilters() {
     filters = { ...filters, models: createFilterModels(pets, filters.query) };
     page.setPets(pets);
-    page.setFilter(filters.models);
+    page.setFilter(filters.models, { query: filters.query });
   }
 
   function consumeFocusAnchor(): "search" | "create" | null {
@@ -675,17 +1006,9 @@ export async function PetsView(container: HTMLElement) {
         detailController.focusMedicalDate();
         logUI("INFO", "ui.pets.kbd_shortcut", { key: "N", scope: "detail" });
       } else {
-        page.focusCreate();
+        openAddPetModal();
         logUI("INFO", "ui.pets.kbd_shortcut", { key: "N", scope: "list" });
       }
-      return;
-    }
-
-    if (key === "/" && !event.altKey && !primaryModifier && !event.shiftKey) {
-      if (isEditableTarget) return;
-      event.preventDefault();
-      page.focusSearch();
-      logUI("INFO", "ui.pets.kbd_shortcut", { key: "/", scope: detailActive ? "detail" : "list" });
       return;
     }
 
@@ -695,12 +1018,8 @@ export async function PetsView(container: HTMLElement) {
         detailController.handleEscape();
         logUI("INFO", "ui.pets.kbd_shortcut", { key: "Escape", scope: "detail" });
       } else {
-        if (page.getSearchValue()) {
-          page.clearSearch();
-        } else {
-          const active = document.activeElement as HTMLElement | null;
-          active?.blur?.();
-        }
+        const active = document.activeElement as HTMLElement | null;
+        active?.blur?.();
         logUI("INFO", "ui.pets.kbd_shortcut", { key: "Escape", scope: "list" });
       }
       return;
@@ -720,14 +1039,20 @@ export async function PetsView(container: HTMLElement) {
     }
   }
 
-  async function handleCreate(input: { name: string; type: string }): Promise<Pet> {
+  async function handleCreate(
+    input: { name: string; species?: string | null; breed?: string | null },
+  ): Promise<Pet> {
     return await timeIt(
       "list.create",
       async () => {
         try {
+          const speciesValue = input.species?.trim() ?? "";
+          const breedValue = input.breed?.trim() ?? "";
           const created = await petsRepo.create(hh, {
             name: input.name,
-            type: input.type,
+            type: speciesValue,
+            species: speciesValue ? speciesValue : null,
+            breed: breedValue ? breedValue : null,
             position: pets.length,
           } as Partial<Pet>);
           pets = [...pets, created];
@@ -900,7 +1225,7 @@ export async function PetsView(container: HTMLElement) {
   const focusAction = consumeFocusAnchor();
   if (focusAction === "create") {
     requestAnimationFrame(() => {
-      page.focusCreate();
+      openAddPetModal();
     });
   } else if (focusAction === "search") {
     requestAnimationFrame(() => {
@@ -909,7 +1234,7 @@ export async function PetsView(container: HTMLElement) {
   }
 
   page.setCallbacks({
-    onCreate: (input) => handleCreate(input),
+    onRequestCreate: () => openAddPetModal(),
     onOpenPet: (pet) => { void openDetail(pet); },
     onEditPet: (pet, patch) => { void handleEdit(pet, patch); },
     onChangePhoto: (pet) => { void handleChangePhoto(pet); },
@@ -925,13 +1250,6 @@ export async function PetsView(container: HTMLElement) {
     onReorderPet: (id, delta) => {
       void movePet(id, delta);
     },
-    onSearchChange: (value: string) => {
-      if (searchHandle) window.clearTimeout(searchHandle);
-      searchHandle = window.setTimeout(() => {
-        filters = { ...filters, query: value.trim() };
-        applyFilters();
-      }, 200);
-    },
   });
 
   if (typeof document !== "undefined") {
@@ -941,10 +1259,4 @@ export async function PetsView(container: HTMLElement) {
     });
   }
 
-  registerViewCleanup(container, () => {
-    if (searchHandle) {
-      window.clearTimeout(searchHandle);
-      searchHandle = undefined;
-    }
-  });
 }
