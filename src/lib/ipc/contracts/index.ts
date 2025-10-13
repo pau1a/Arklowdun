@@ -274,6 +274,7 @@ const memberAttachmentsListRequest = z
     member_id: z.string().optional(),
     memberId: z.string().optional(),
   })
+  .passthrough()
   .superRefine((value, ctx) => {
     if (typeof value.member_id === "string" || typeof value.memberId === "string") {
       return;
@@ -322,8 +323,7 @@ const eventCreateData = z
     exdates: z.string().optional(),
     reminder: z.number().nullable().optional(),
     series_parent_id: z.string().nullable().optional(),
-  })
-  .passthrough();
+  });
 
 const eventUpdateData = eventCreateData
   .extend({
@@ -507,7 +507,7 @@ const epochMs = z.number().int().nullable().optional();
 const moneyPence = z.number().int().nullable().optional();
 const intOptional = z.number().int().nullable().optional();
 
-const vehicleCreateData = z
+const vehicleCreateBase = z
   .object({
     household_id: z.string(),
     name: z.string().min(1),
@@ -593,7 +593,9 @@ const vehicleCreateData = z
       .optional(),
     vin: z.string().length(17).optional(),
   })
-  .superRefine((value, ctx) => {
+  .passthrough();
+
+const vehicleCreateData = vehicleCreateBase.superRefine((value, ctx) => {
     if (!value.reg && !value.vin) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -601,10 +603,9 @@ const vehicleCreateData = z
         path: ["reg"],
       });
     }
-  })
-  .passthrough();
+  });
 
-const vehicleUpdateData = vehicleCreateData.partial().extend({
+const vehicleUpdateData = vehicleCreateBase.partial().extend({
   name: z.string().min(1).optional(),
   household_id: z.string().optional(),
 });

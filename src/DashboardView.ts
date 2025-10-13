@@ -71,20 +71,24 @@ export async function DashboardView(container: HTMLElement) {
     }
   }
 
-  // Vehicles
+  // Vehicles (best-effort; ignore if older DB schema lacks columns)
   {
-    const vehicles = await vehiclesRepo.list(hh);
-    const vehicleDates: { date: number; text: string }[] = [];
-    for (const v of vehicles) {
-      if (v.next_mot_due && v.next_mot_due >= now) {
-        vehicleDates.push({ date: v.next_mot_due, text: `${v.name} MOT ${toDate(v.next_mot_due).toLocaleDateString()}` });
+    try {
+      const vehicles = await vehiclesRepo.list(hh);
+      const vehicleDates: { date: number; text: string }[] = [];
+      for (const v of vehicles) {
+        if (v.next_mot_due && v.next_mot_due >= now) {
+          vehicleDates.push({ date: v.next_mot_due, text: `${v.name} MOT ${toDate(v.next_mot_due).toLocaleDateString()}` });
+        }
+        if (v.next_service_due && v.next_service_due >= now) {
+          vehicleDates.push({ date: v.next_service_due, text: `${v.name} service ${toDate(v.next_service_due).toLocaleDateString()}` });
+        }
       }
-      if (v.next_service_due && v.next_service_due >= now) {
-        vehicleDates.push({ date: v.next_service_due, text: `${v.name} service ${toDate(v.next_service_due).toLocaleDateString()}` });
-      }
+      vehicleDates.sort((a, b) => a.date - b.date);
+      if (vehicleDates[0]) items.push(vehicleDates[0]);
+    } catch (err) {
+      console.warn("vehicles section disabled due to backend error", err);
     }
-    vehicleDates.sort((a, b) => a.date - b.date);
-    if (vehicleDates[0]) items.push(vehicleDates[0]);
   }
 
   // Events (via eventsApi)

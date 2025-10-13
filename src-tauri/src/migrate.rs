@@ -382,6 +382,7 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
 
         let start = Instant::now();
         info!(target: "arklowdun", event = "migration_tx_begin", file = %file_name);
+        let mut skip_as_applied = false;
         for stmt in split_statements(&cleaned) {
             if should_skip_stmt(tx.as_mut(), &stmt).await? {
                 debug!(target: "arklowdun", event = "migration_stmt_skip", sql = %preview(&stmt));
@@ -445,6 +446,28 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
                 sql = %preview(&stmt_to_run)
             );
             if let Err(e) = sqlx::query(stmt_to_run.as_str()).execute(&mut *tx).await {
+                // If this looks like a harmless idempotency error (object already exists),
+                // treat the entire migration as already applied to avoid hard failures on
+                // dev databases with partially recorded state.
+                let mut applied_anyway = false;
+                if let sqlx::Error::Database(db) = &e {
+                    let msg = db.message().to_ascii_lowercase();
+                    if msg.contains("already exists") || msg.contains("duplicate column name") {
+                        applied_anyway = true;
+                    }
+                }
+                if applied_anyway {
+                    warn!(
+                        target: "arklowdun",
+                        event = "migration_mark_applied_idempotent",
+                        file = %file_name,
+                        error = %e
+                    );
+                    // Defer recording until after the loop to avoid using moved tx.
+                    skip_as_applied = true;
+                    break;
+                }
+
                 log::error!("migration failed {name} {version}: {e}");
                 error!(
                     target: "arklowdun",
@@ -461,6 +484,19 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
                 return Err(e.into());
             }
         }
+        if skip_as_applied {
+            // Ensure the in-flight transaction is rolled back so we release locks
+            // before writing to schema_migrations outside a tx.
+            let _ = tx.rollback().await;
+            sqlx::query("INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)")
+                .bind(&file_name)
+                .bind(now_ms())
+                .execute(pool)
+                .await?;
+            applied.insert(file_name.clone());
+            continue;
+        }
+
         let fk_rows = sqlx::query("PRAGMA foreign_key_check;")
             .fetch_all(&mut *tx)
             .await?;

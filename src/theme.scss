@@ -96,9 +96,8 @@ h1, h2, h3 { letter-spacing: -0.01em; }
   --radius-pill: 9999px;
   --shadow-base: 0 1px 2px rgba(15, 23, 42, 0.05);
 
-  /* Make the app's page background transparent so top bar/sidebar areas
-     don’t pick up a base fill color. */
-  background-color: transparent;
+  /* Fill with the theme background to avoid transparent window artifacts */
+  background-color: var(--color-background);
   color: var(--color-text);
   font-family: var(--font-family-base);
   font-size: var(--font-size-base);

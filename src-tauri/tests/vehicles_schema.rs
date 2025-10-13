@@ -1,3 +1,6 @@
+#![recursion_limit = "512"]
+#![allow(macro_expanded_macro_exports_accessed_by_absolute_paths)]
+
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, RwLock};
@@ -16,15 +19,11 @@ use arklowdun_lib::{
 };
 
 fn build_app(state: AppState) -> App<tauri::test::MockRuntime> {
+    // These tests call the command fns directly (not via IPC), so we don't
+    // need to generate a Tauri IPC handler here. Removing it avoids depending
+    // on the internal __cmd__* macros in this crate's scope.
     tauri::test::mock_builder()
         .manage(state)
-        .invoke_handler(tauri::generate_handler![
-            vehicles_get,
-            vehicles_create,
-            vehicles_update,
-            vehicles_delete,
-            vehicles_restore
-        ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("build tauri app")
 }
