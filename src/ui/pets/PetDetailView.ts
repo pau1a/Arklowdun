@@ -20,6 +20,69 @@ type Nullable<T> = T | null | undefined;
 
 const PET_MEDICAL_CATEGORY = "pet_medical" as const;
 
+// Minimal helpers to make avatar image loading resilient on WebKit.
+const IS_WEBKIT =
+  typeof navigator !== "undefined" &&
+  /AppleWebKit/i.test(navigator.userAgent) &&
+  !/Chrome|Chromium|Edg/i.test(navigator.userAgent);
+const AVATAR_IMAGE_TIMEOUT_MS = IS_WEBKIT ? 4000 : 2000;
+const FORCE_DATA_URL =
+  typeof window !== "undefined" &&
+  Boolean((window as unknown as { __ARKLOWDUN_FORCE_DATA_URL__?: boolean }).__ARKLOWDUN_FORCE_DATA_URL__);
+
+function mimeFromExt(path: string): string {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  switch (ext) {
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "png":
+      return "image/png";
+    case "gif":
+      return "image/gif";
+    case "webp":
+      return "image/webp";
+    case "bmp":
+      return "image/bmp";
+    case "tif":
+    case "tiff":
+      return "image/tiff";
+    case "heic":
+      return "image/heic";
+    case "heif":
+      return "image/heif";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+async function buildUrlFromAbsolute(absPath: string): Promise<string> {
+  const fs = await import("@tauri-apps/plugin-fs");
+  const bytes = await fs.readFile(absPath);
+  const byteLength =
+    bytes instanceof Uint8Array
+      ? bytes.byteLength
+      : Array.isArray(bytes)
+      ? bytes.length
+      : (bytes as ArrayBufferLike).byteLength ?? 0;
+  if (!bytes || byteLength === 0) {
+    throw new Error("EMPTY_IMAGE_BYTES");
+  }
+  if (IS_WEBKIT || FORCE_DATA_URL) {
+    const buffer =
+      bytes instanceof Uint8Array
+        ? bytes
+        : Array.isArray(bytes)
+        ? Uint8Array.from(bytes)
+        : new Uint8Array(bytes as ArrayBufferLike);
+    let binary = "";
+    for (let i = 0; i < buffer.length; i += 1) binary += String.fromCharCode(buffer[i]);
+    return `data:${mimeFromExt(absPath)};base64,${btoa(binary)}`;
+  }
+  const blob = new Blob([bytes], { type: mimeFromExt(absPath) });
+  return URL.createObjectURL(blob);
+}
+
 type GetHouseholdIdForCallsFn = () => Promise<string>;
 type OpenAttachmentFn = (table: string, id: string) => Promise<boolean>;
 type RevealAttachmentFn = (table: string, id: string) => Promise<boolean>;
@@ -314,7 +377,7 @@ function renderThumbnailError(slot: HTMLDivElement): void {
   renderThumbnailMessage(slot, "Preview failed", "error");
 }
 
-function renderThumbnailImage(slot: HTMLDivElement, src: string): void {
+function renderThumbnailImage(slot: HTMLDivElement, src: string): HTMLImageElement {
   slot.dataset.thumbnailState = "loaded";
   slot.innerHTML = "";
   const img = document.createElement("img");
@@ -324,6 +387,7 @@ function renderThumbnailImage(slot: HTMLDivElement, src: string): void {
   img.decoding = "async";
   img.src = src;
   slot.append(img);
+  return img;
 }
 
 export async function PetDetailView(
@@ -615,26 +679,69 @@ export async function PetDetailView(
           root_used: resolved.rootTried,
         });
 
-        const src = resolved.absolute ? convertFileSrcFn?.(resolved.absolute) : null;
-
-        if (src) {
-          avatar.textContent = "";
+        const abs = resolved.absolute;
+        const relForAppData = (() => {
+          const raw = response.relative_thumb_path;
+          const trimmed = resolved.trimmed ?? raw.replace(/^attachments\//, "");
+          return `attachments/${trimmed}`;
+        })();
+        const mountAvatar = async () => {
+          if (!abs) return;
           const img = document.createElement("img");
           img.alt = `${pet.name ?? "Pet"} photo`;
-          img.src = src;
-          img.title =
-            `pet_id=${pet.id}` +
-            `\nhousehold=${householdId}` +
-            `\nrel_thumb=${response.relative_thumb_path}` +
-            `\nroot=${resolved.rootTried}` +
-            `\nabs=${resolved.absolute}` +
-            `\nsrc=${src}`;
-          avatar.append(img);
+          img.decoding = "async";
+          img.loading = "eager";
+          try {
+            const url =
+              (response as unknown as { thumb_data_url?: string | null })?.thumb_data_url ||
+              (await buildUrlFromAbsolute(abs));
+            img.src = url;
+            img.title =
+              `pet_id=${pet.id}` +
+              `\nhousehold=${householdId}` +
+              `\nrel_thumb=${response.relative_thumb_path}` +
+              `\nroot=${resolved.rootTried}` +
+              `\nabs=${abs}` +
+              `\nsrc=${url}`;
+            // Only clear the fallback once we have a valid URL
+            avatar.textContent = "";
+            avatar.append(img);
+          } catch (e) {
+            try {
+              const fs = await import("@tauri-apps/plugin-fs");
+              const bytes = await fs.readFile(relForAppData, { dir: "AppData" as any });
+              const buffer =
+                bytes instanceof Uint8Array
+                  ? bytes
+                  : Array.isArray(bytes)
+                  ? Uint8Array.from(bytes)
+                  : new Uint8Array(bytes as ArrayBufferLike);
+              let binary = "";
+              for (let i = 0; i < buffer.length; i += 1) binary += String.fromCharCode(buffer[i]);
+              img.src = `data:${mimeFromExt(abs)};base64,${btoa(binary)}`;
+              img.title =
+                `pet_id=${pet.id}` +
+                `\nhousehold=${householdId}` +
+                `\nrel_thumb=${response.relative_thumb_path}` +
+                `\nroot=${resolved.rootTried}` +
+                `\nabs=${abs}` +
+                `\nsrc=data:`;
+              avatar.textContent = "";
+              avatar.append(img);
+            } catch (e2) {
+              console.warn("avatar load failed (both paths)", e, e2);
+              // Leave the initial fallback letter in place
+            }
+          }
+        };
+
+        if (abs) {
+          void mountAvatar();
         } else {
           devDebugLog("ui.pets.avatar_thumb_missing_src", {
             pet_id: pet.id,
             rel_thumb: response.relative_thumb_path,
-            resolved_abs: resolved.absolute,
+            resolved_abs: abs,
             root_used: resolved.rootTried,
             note: "convertFileSrc returned null or path failed resolution",
           });
@@ -775,8 +882,46 @@ export async function PetDetailView(
             if (!resolved.absolute) {
               throw new Error("thumbnail path could not be resolved");
             }
-            const src = convertFileSrcFn(resolved.absolute);
-            renderThumbnailImage(slot, src);
+            const abs = resolved.absolute;
+            const relForAppData = (() => {
+              const raw = response.relative_thumb_path;
+              const trimmed = resolved.trimmed ?? raw.replace(/^attachments\//, "");
+              return `attachments/${trimmed}`;
+            })();
+            let firstUrl: string;
+            try {
+              firstUrl =
+                (response as unknown as { thumb_data_url?: string | null })?.thumb_data_url ||
+                (await buildUrlFromAbsolute(abs));
+            } catch (errAbs) {
+              const fs = await import("@tauri-apps/plugin-fs");
+              const bytes = await fs.readFile(relForAppData, { dir: "AppData" as any });
+              const buffer =
+                bytes instanceof Uint8Array
+                  ? bytes
+                  : Array.isArray(bytes)
+                  ? Uint8Array.from(bytes)
+                  : new Uint8Array(bytes as ArrayBufferLike);
+              let binary = "";
+              for (let i = 0; i < buffer.length; i += 1) binary += String.fromCharCode(buffer[i]);
+              firstUrl = `data:${mimeFromExt(abs)};base64,${btoa(binary)}`;
+            }
+            const img = renderThumbnailImage(slot, firstUrl);
+            img.addEventListener(
+              "error",
+              () => {
+                // Fallback: read bytes and use a data URL (WebKit-safe)
+                void (async () => {
+                  try {
+                    img.src = await buildUrlFromAbsolute(abs);
+                  } catch (fallbackErr) {
+                    console.warn("thumbnail bytes fallback failed", fallbackErr);
+                    renderThumbnailError(slot);
+                  }
+                })();
+              },
+              { once: true },
+            );
             if (cacheHit) {
               log("INFO", "ui.pets.thumbnail_cache_hit", {
                 medical_id: record.id,
