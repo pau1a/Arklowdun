@@ -941,7 +941,6 @@ gen_domain_cmds!(
     policies,
     property_documents,
     inventory_items,
-    vehicles,
     vehicle_maintenance,
     pets,
     pet_medical,
