@@ -34,6 +34,7 @@ use tracing_subscriber::{
     EnvFilter,
 };
 use ts_rs::TS;
+use base64::Engine; // for .encode on base64 engines
 
 use crate::{
     attachment_category::AttachmentCategory,
@@ -4504,6 +4505,8 @@ pub struct ThumbnailsGetOrCreateResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub relative_thumb_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumb_data_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_hit: Option<bool>,
@@ -4594,9 +4597,16 @@ async fn thumbnails_get_or_create(
             path = %request.relative_path,
         );
         metrics.record_thumbnail_cache_hit();
+        // read the cached thumbnail bytes to provide a data URL for WebKit callers
+        let bytes = tokio::fs::read(&full_thumb).await.ok();
+        let thumb_data_url = bytes.map(|b| {
+            let enc = base64::engine::general_purpose::STANDARD.encode(b);
+            format!("data:image/jpeg;base64,{}", enc)
+        });
         return Ok(ThumbnailsGetOrCreateResponse {
             ok: true,
             relative_thumb_path: Some(thumb_display),
+            thumb_data_url,
             code: None,
             cache_hit: Some(true),
             width: None,
@@ -4721,9 +4731,16 @@ async fn thumbnails_get_or_create(
                 height,
                 ms = duration_ms,
             );
+            // read the generated thumbnail bytes for a data URL
+            let bytes = tokio::fs::read(&full_thumb).await.ok();
+            let thumb_data_url = bytes.map(|b| {
+                let enc = base64::engine::general_purpose::STANDARD.encode(b);
+                format!("data:image/jpeg;base64,{}", enc)
+            });
             Ok(ThumbnailsGetOrCreateResponse {
                 ok: true,
                 relative_thumb_path: Some(thumb_display),
+                thumb_data_url,
                 code: None,
                 cache_hit: Some(false),
                 width: Some(width),
@@ -4734,6 +4751,7 @@ async fn thumbnails_get_or_create(
         ThumbnailBuildResult::Unsupported => Ok(ThumbnailsGetOrCreateResponse {
             ok: false,
             relative_thumb_path: None,
+            thumb_data_url: None,
             code: Some("UNSUPPORTED".to_string()),
             cache_hit: None,
             width: None,

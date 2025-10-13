@@ -7,6 +7,7 @@ import {
 import type { Pet, PetMedicalRecord } from "../../models";
 import { petMedicalRepo, petsRepo } from "../../repos";
 import { toast } from "../../ui/Toast";
+import { createModal } from "../Modal";
 import { logUI } from "@lib/uiLog";
 import { open as openDialog } from "@lib/ipc/dialog";
 import * as ipcCall from "../../lib/ipc/call";
@@ -18,6 +19,69 @@ import { recordPetsMutationFailure } from "@features/pets/mutationTelemetry";
 type Nullable<T> = T | null | undefined;
 
 const PET_MEDICAL_CATEGORY = "pet_medical" as const;
+
+// Minimal helpers to make avatar image loading resilient on WebKit.
+const IS_WEBKIT =
+  typeof navigator !== "undefined" &&
+  /AppleWebKit/i.test(navigator.userAgent) &&
+  !/Chrome|Chromium|Edg/i.test(navigator.userAgent);
+const AVATAR_IMAGE_TIMEOUT_MS = IS_WEBKIT ? 4000 : 2000;
+const FORCE_DATA_URL =
+  typeof window !== "undefined" &&
+  Boolean((window as unknown as { __ARKLOWDUN_FORCE_DATA_URL__?: boolean }).__ARKLOWDUN_FORCE_DATA_URL__);
+
+function mimeFromExt(path: string): string {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  switch (ext) {
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "png":
+      return "image/png";
+    case "gif":
+      return "image/gif";
+    case "webp":
+      return "image/webp";
+    case "bmp":
+      return "image/bmp";
+    case "tif":
+    case "tiff":
+      return "image/tiff";
+    case "heic":
+      return "image/heic";
+    case "heif":
+      return "image/heif";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+async function buildUrlFromAbsolute(absPath: string): Promise<string> {
+  const fs = await import("@tauri-apps/plugin-fs");
+  const bytes = await fs.readFile(absPath);
+  const byteLength =
+    bytes instanceof Uint8Array
+      ? bytes.byteLength
+      : Array.isArray(bytes)
+      ? bytes.length
+      : (bytes as ArrayBufferLike).byteLength ?? 0;
+  if (!bytes || byteLength === 0) {
+    throw new Error("EMPTY_IMAGE_BYTES");
+  }
+  if (IS_WEBKIT || FORCE_DATA_URL) {
+    const buffer =
+      bytes instanceof Uint8Array
+        ? bytes
+        : Array.isArray(bytes)
+        ? Uint8Array.from(bytes)
+        : new Uint8Array(bytes as ArrayBufferLike);
+    let binary = "";
+    for (let i = 0; i < buffer.length; i += 1) binary += String.fromCharCode(buffer[i]);
+    return `data:${mimeFromExt(absPath)};base64,${btoa(binary)}`;
+  }
+  const blob = new Blob([bytes], { type: mimeFromExt(absPath) });
+  return URL.createObjectURL(blob);
+}
 
 type GetHouseholdIdForCallsFn = () => Promise<string>;
 type OpenAttachmentFn = (table: string, id: string) => Promise<boolean>;
@@ -155,6 +219,19 @@ function restoreFocus(container: HTMLElement, snapshot: FocusSnapshot): void {
   next?.focus();
 }
 
+function focusElementSafely(element: HTMLElement): void {
+  element.focus();
+  if (typeof queueMicrotask === "function") {
+    queueMicrotask(() => {
+      element.focus();
+    });
+  } else {
+    setTimeout(() => {
+      element.focus();
+    }, 0);
+  }
+}
+
 function insertMeta(meta: HTMLElement, label: string, value: string): void {
   const dt = document.createElement("dt");
   dt.textContent = label;
@@ -168,6 +245,11 @@ function insertMeta(meta: HTMLElement, label: string, value: string): void {
 }
 
 const THUMBNAIL_EDGE = 160;
+
+const isTauri =
+  (typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__) ||
+  (typeof (import.meta as any).env?.TAURI !== "undefined" &&
+    (import.meta as any).env?.TAURI != null);
 
 type ThumbnailState =
   | "idle"
@@ -295,7 +377,7 @@ function renderThumbnailError(slot: HTMLDivElement): void {
   renderThumbnailMessage(slot, "Preview failed", "error");
 }
 
-function renderThumbnailImage(slot: HTMLDivElement, src: string): void {
+function renderThumbnailImage(slot: HTMLDivElement, src: string): HTMLImageElement {
   slot.dataset.thumbnailState = "loaded";
   slot.innerHTML = "";
   const img = document.createElement("img");
@@ -305,6 +387,7 @@ function renderThumbnailImage(slot: HTMLDivElement, src: string): void {
   img.decoding = "async";
   img.src = src;
   slot.append(img);
+  return img;
 }
 
 export async function PetDetailView(
@@ -490,7 +573,191 @@ export async function PetDetailView(
 
   const avatar = document.createElement("div");
   avatar.className = "pet-detail__avatar";
-  avatar.textContent = (pet.name?.[0] ?? "?").toUpperCase();
+  const applyInitialFallback = () => {
+    avatar.textContent = (pet.name?.[0] ?? "?").toUpperCase();
+  };
+  applyInitialFallback();
+
+  function devDebugLog(event: string, payload: Record<string, unknown>): void {
+    const nodeProcess =
+      typeof globalThis !== "undefined" ? (globalThis as any).process : undefined;
+    if (nodeProcess?.env?.NODE_ENV === "production") {
+      return;
+    }
+    try {
+      // eslint-disable-next-line no-console
+      console.log(`[pets:debug] ${event}`, payload);
+      if (typeof log === "function") {
+        log("INFO", event, payload);
+      }
+    } catch {
+      // ignore logging failures
+    }
+  }
+
+  const resolveThumbnailAbsolute = async (
+    relativeThumbPath: string | null | undefined,
+  ): Promise<{
+    absolute: string | null;
+    rootTried: "appData" | "attachments" | "none";
+    trimmed: string | null;
+  }> => {
+    if (!relativeThumbPath) {
+      devDebugLog("ui.pets.avatar_thumb_no_relpath", {});
+      return { absolute: null, rootTried: "none", trimmed: null };
+    }
+
+    const trimmed = relativeThumbPath.replace(/^attachments\//, "");
+    const tryRoots: Array<"appData" | "attachments"> = ["appData", "attachments"];
+
+    for (const root of tryRoots) {
+      try {
+        const { realPath } = await canonicalize(relativeThumbPath, root);
+        devDebugLog("ui.pets.avatar_thumb_verified", {
+          root,
+          given: relativeThumbPath,
+          real: realPath,
+        });
+        return { absolute: realPath, rootTried: root, trimmed };
+      } catch (e1) {
+        if (trimmed !== relativeThumbPath) {
+          try {
+            const { realPath } = await canonicalize(trimmed, root);
+            devDebugLog("ui.pets.avatar_thumb_verified_trimmed", {
+              root,
+              given: relativeThumbPath,
+              trimmed,
+              real: realPath,
+            });
+            return { absolute: realPath, rootTried: root, trimmed };
+          } catch (e2) {
+            devDebugLog("ui.pets.avatar_thumb_verify_failed", {
+              root,
+              given: relativeThumbPath,
+              trimmed,
+              e1: String(e1),
+              e2: String(e2),
+            });
+          }
+        } else {
+          devDebugLog("ui.pets.avatar_thumb_verify_failed", {
+            root,
+            given: relativeThumbPath,
+            e1: String(e1),
+          });
+        }
+      }
+    }
+
+    devDebugLog("ui.pets.avatar_thumb_all_roots_failed", {
+      given: relativeThumbPath,
+      trimmed,
+    });
+    return { absolute: null, rootTried: "none", trimmed };
+  };
+
+  if (isTauri && pet.image_path) {
+    try {
+      const response = (await ipcCallFn("thumbnails_get_or_create", {
+        household_id: householdId,
+        category: "pet_image",
+        relative_path: pet.image_path,
+        max_edge: THUMBNAIL_EDGE,
+      })) as ThumbnailCommandResponse | undefined;
+
+      if (response?.ok && response.relative_thumb_path) {
+        const resolved = await resolveThumbnailAbsolute(response.relative_thumb_path);
+
+        devDebugLog("ui.pets.avatar_thumb_response", {
+          pet_id: pet.id,
+          image_path: pet.image_path ?? null,
+          household_id: householdId,
+          ok: response.ok,
+          cache_hit: response.cache_hit ?? null,
+          rel_thumb: response.relative_thumb_path,
+          resolved_abs: resolved.absolute,
+          root_used: resolved.rootTried,
+        });
+
+        const abs = resolved.absolute;
+        const relForAppData = (() => {
+          const raw = response.relative_thumb_path;
+          const trimmed = resolved.trimmed ?? raw.replace(/^attachments\//, "");
+          return `attachments/${trimmed}`;
+        })();
+        const mountAvatar = async () => {
+          if (!abs) return;
+          const img = document.createElement("img");
+          img.alt = `${pet.name ?? "Pet"} photo`;
+          img.decoding = "async";
+          img.loading = "eager";
+          try {
+            const url =
+              (response as unknown as { thumb_data_url?: string | null })?.thumb_data_url ||
+              (await buildUrlFromAbsolute(abs));
+            img.src = url;
+            img.title =
+              `pet_id=${pet.id}` +
+              `\nhousehold=${householdId}` +
+              `\nrel_thumb=${response.relative_thumb_path}` +
+              `\nroot=${resolved.rootTried}` +
+              `\nabs=${abs}` +
+              `\nsrc=${url}`;
+            // Only clear the fallback once we have a valid URL
+            avatar.textContent = "";
+            avatar.append(img);
+          } catch (e) {
+            try {
+              const fs = await import("@tauri-apps/plugin-fs");
+              const bytes = await fs.readFile(relForAppData, { dir: "AppData" as any });
+              const buffer =
+                bytes instanceof Uint8Array
+                  ? bytes
+                  : Array.isArray(bytes)
+                  ? Uint8Array.from(bytes)
+                  : new Uint8Array(bytes as ArrayBufferLike);
+              let binary = "";
+              for (let i = 0; i < buffer.length; i += 1) binary += String.fromCharCode(buffer[i]);
+              img.src = `data:${mimeFromExt(abs)};base64,${btoa(binary)}`;
+              img.title =
+                `pet_id=${pet.id}` +
+                `\nhousehold=${householdId}` +
+                `\nrel_thumb=${response.relative_thumb_path}` +
+                `\nroot=${resolved.rootTried}` +
+                `\nabs=${abs}` +
+                `\nsrc=data:`;
+              avatar.textContent = "";
+              avatar.append(img);
+            } catch (e2) {
+              console.warn("avatar load failed (both paths)", e, e2);
+              // Leave the initial fallback letter in place
+            }
+          }
+        };
+
+        if (abs) {
+          void mountAvatar();
+        } else {
+          devDebugLog("ui.pets.avatar_thumb_missing_src", {
+            pet_id: pet.id,
+            rel_thumb: response.relative_thumb_path,
+            resolved_abs: abs,
+            root_used: resolved.rootTried,
+            note: "convertFileSrc returned null or path failed resolution",
+          });
+        }
+      } else {
+        devDebugLog("ui.pets.avatar_thumb_command_not_ok", {
+          pet_id: pet.id,
+          image_path: pet.image_path ?? null,
+          response_ok: response?.ok ?? null,
+          code: response?.code ?? null,
+        });
+      }
+    } catch {
+      // keep initial fallback
+    }
+  }
 
   const identityBody = document.createElement("div");
   identityBody.className = "pet-detail__identity-body";
@@ -526,78 +793,13 @@ export async function PetDetailView(
   const medicalSection = document.createElement("section");
   medicalSection.className = "pet-detail__section";
 
-  const formHeading = document.createElement("h3");
-  formHeading.className = "pet-detail__section-title";
-  formHeading.textContent = "Add medical record";
-
-  const form = document.createElement("form");
-  form.className = "pet-detail__form";
-  form.autocomplete = "off";
-  form.setAttribute("aria-describedby", formHelpId);
-
-  const fieldsRow = document.createElement("div");
-  fieldsRow.className = "pet-detail__form-row";
-
-  const dateField = document.createElement("label");
-  dateField.className = "pet-detail__field";
-  dateField.textContent = "Date";
-  const dateInput = document.createElement("input");
-  dateInput.type = "date";
-  dateInput.required = true;
-  dateInput.id = "pet-medical-date";
-  dateInput.name = "date";
-  dateField.append(dateInput);
-
-  const descField = document.createElement("label");
-  descField.className = "pet-detail__field";
-  descField.textContent = "Description";
-  const descInput = document.createElement("textarea");
-  descInput.required = true;
-  descInput.name = "description";
-  descInput.rows = 2;
-  descInput.className = "pet-detail__textarea";
-  descField.append(descInput);
-
-  fieldsRow.append(dateField, descField);
-
-  const secondaryRow = document.createElement("div");
-  secondaryRow.className = "pet-detail__form-row";
-
-  const reminderField = document.createElement("label");
-  reminderField.className = "pet-detail__field";
-  reminderField.textContent = "Reminder";
-  const reminderInput = document.createElement("input");
-  reminderInput.type = "date";
-  reminderInput.name = "reminder";
-  reminderField.append(reminderInput);
-
-  const documentField = document.createElement("label");
-  documentField.className = "pet-detail__field";
-  documentField.textContent = "Attachment path";
-  const documentInput = document.createElement("input");
-  documentInput.type = "text";
-  documentInput.name = "document";
-  documentInput.placeholder = "e.g. vet/records.pdf";
-  documentField.append(documentInput);
-
-  secondaryRow.append(reminderField, documentField);
-
-  const submitRow = document.createElement("div");
-  submitRow.className = "pet-detail__actions";
-  const submitBtn = document.createElement("button");
-  submitBtn.type = "submit";
-  submitBtn.className = "pet-detail__submit";
-  submitBtn.textContent = "Add record";
-  submitBtn.disabled = true;
-  submitRow.append(submitBtn);
-
-  form.append(fieldsRow, secondaryRow, submitRow);
-
-  const formAssist = document.createElement("p");
-  formAssist.className = "sr-only";
-  formAssist.id = formHelpId;
-  formAssist.textContent = "Date and description are required. Reminder and attachment path are optional.";
-  form.append(formAssist);
+  const addCta = document.createElement("div");
+  addCta.className = "pet-detail__cta";
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "pet-detail__toolbar-btn";
+  addBtn.textContent = "Add medical record";
+  addCta.append(addBtn);
 
   const historyHeading = document.createElement("h3");
   historyHeading.className = "pet-detail__section-title";
@@ -676,12 +878,50 @@ export async function PetDetailView(
         if (response?.ok && response.relative_thumb_path) {
           const cacheHit = response.cache_hit === true;
           try {
-            const { realPath } = await canonicalize(
-              response.relative_thumb_path,
-              "appData",
+            const resolved = await resolveThumbnailAbsolute(response.relative_thumb_path);
+            if (!resolved.absolute) {
+              throw new Error("thumbnail path could not be resolved");
+            }
+            const abs = resolved.absolute;
+            const relForAppData = (() => {
+              const raw = response.relative_thumb_path;
+              const trimmed = resolved.trimmed ?? raw.replace(/^attachments\//, "");
+              return `attachments/${trimmed}`;
+            })();
+            let firstUrl: string;
+            try {
+              firstUrl =
+                (response as unknown as { thumb_data_url?: string | null })?.thumb_data_url ||
+                (await buildUrlFromAbsolute(abs));
+            } catch (errAbs) {
+              const fs = await import("@tauri-apps/plugin-fs");
+              const bytes = await fs.readFile(relForAppData, { dir: "AppData" as any });
+              const buffer =
+                bytes instanceof Uint8Array
+                  ? bytes
+                  : Array.isArray(bytes)
+                  ? Uint8Array.from(bytes)
+                  : new Uint8Array(bytes as ArrayBufferLike);
+              let binary = "";
+              for (let i = 0; i < buffer.length; i += 1) binary += String.fromCharCode(buffer[i]);
+              firstUrl = `data:${mimeFromExt(abs)};base64,${btoa(binary)}`;
+            }
+            const img = renderThumbnailImage(slot, firstUrl);
+            img.addEventListener(
+              "error",
+              () => {
+                // Fallback: read bytes and use a data URL (WebKit-safe)
+                void (async () => {
+                  try {
+                    img.src = await buildUrlFromAbsolute(abs);
+                  } catch (fallbackErr) {
+                    console.warn("thumbnail bytes fallback failed", fallbackErr);
+                    renderThumbnailError(slot);
+                  }
+                })();
+              },
+              { once: true },
             );
-            const src = convertFileSrcFn(realPath);
-            renderThumbnailImage(slot, src);
             if (cacheHit) {
               log("INFO", "ui.pets.thumbnail_cache_hit", {
                 medical_id: record.id,
@@ -1016,7 +1256,8 @@ export async function PetDetailView(
 
   const historyEmpty = document.createElement("p");
   historyEmpty.className = "pet-detail__empty";
-  historyEmpty.textContent = "No medical records yet. Add one above to build a history.";
+  historyEmpty.textContent =
+    "No medical records yet. Use Add medical record to capture the first visit.";
   historyEmpty.hidden = true;
 
   const historyLoading = document.createElement("p");
@@ -1025,72 +1266,30 @@ export async function PetDetailView(
 
   historyContainer.append(historyStatus, historyLoading, historyEmpty, historyList);
 
-  medicalSection.append(formHeading, form, historyHeading, historyContainer);
+  medicalSection.append(addCta, historyHeading, historyContainer);
 
   root.append(header, identity, medicalSection);
   container.innerHTML = "";
   container.append(root);
 
   let records: PetMedicalRecord[] = [];
-  let creating = false;
-  let sanitizedDocumentPath: string | undefined;
   const pendingDeletes = new Set<string>();
   let lastHistoryAnnouncement = "Loading medical history…";
+  let historyLoaded = false;
 
-  function validateDocumentField(opts: { report?: boolean } = {}): boolean {
-    const raw = documentInput.value;
-    const trimmed = raw.trim();
-    sanitizedDocumentPath = undefined;
+  type AddRecordDrawerController = {
+    isOpen(): boolean;
+    focusDate(): void;
+    submit(): boolean;
+    close(): void;
+  };
 
-    if (trimmed.length === 0) {
-      documentInput.setCustomValidity("");
-      documentInput.dataset.errorCode = "";
-      if (opts.report) documentInput.reportValidity();
-      return true;
-    }
+  let addRecordDrawer: AddRecordDrawerController | null = null;
 
-    try {
-      sanitizedDocumentPath = sanitizePath(trimmed);
-      documentInput.setCustomValidity("");
-      documentInput.dataset.errorCode = "";
-      if (opts.report) documentInput.reportValidity();
-      return true;
-    } catch (error) {
-      if (error instanceof PathValidationError) {
-        const message =
-          ERROR_MESSAGES[error.code] ??
-          (error.code === "EMPTY"
-            ? "Attachment path is required."
-            : error.message || "Attachment path is invalid.");
-        documentInput.setCustomValidity(message);
-        documentInput.dataset.errorCode = error.code;
-      } else {
-        documentInput.setCustomValidity("Attachment path is invalid.");
-        documentInput.dataset.errorCode = "UNKNOWN";
-      }
-      if (opts.report) documentInput.reportValidity();
-      return false;
-    }
-  }
-
-  function updateSubmitState() {
-    const hasRequired = dateInput.value.trim().length > 0 && descInput.value.trim().length > 0;
-    const pathValid = validateDocumentField();
-    submitBtn.disabled = creating || !hasRequired || !pathValid;
-  }
-
-  function focusDateField(): void {
-    dateInput.focus();
-    if (typeof queueMicrotask === "function") {
-      queueMicrotask(() => {
-        dateInput.focus();
-      });
-    } else {
-      setTimeout(() => {
-        dateInput.focus();
-      }, 0);
-    }
-  }
+  addBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    openAddRecordDrawer({ focusDate: true });
+  });
 
   function renderRecords() {
     if (thumbnailObserver) {
@@ -1351,139 +1550,345 @@ export async function PetDetailView(
     }
   }
 
-  dateInput.addEventListener("input", updateSubmitState);
-  descInput.addEventListener("input", updateSubmitState);
-  documentInput.addEventListener("input", updateSubmitState);
-  reminderInput.addEventListener("input", () => {
-    const reminder = parseDateInput(reminderInput.value);
-    if (reminder != null && dateInput.value && reminder < parseDateInput(dateInput.value)!) {
-      reminderInput.setCustomValidity("Reminder must be on or after the visit date.");
-    } else {
-      reminderInput.setCustomValidity("");
+  function openAddRecordDrawer(options: { focusDate?: boolean } = {}): AddRecordDrawerController {
+    if (addRecordDrawer?.isOpen()) {
+      if (options.focusDate) {
+        addRecordDrawer.focusDate();
+      }
+      return addRecordDrawer;
     }
-    updateSubmitState();
-  });
 
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    if (creating) return;
-    const dateValue = parseDateInput(dateInput.value);
-    const description = descInput.value.trim();
-    if (!dateValue || description.length === 0) {
-      updateSubmitState();
-      return;
-    }
-    const reminderValue = parseDateInput(reminderInput.value);
-    if (!validateDocumentField({ report: true })) {
-      updateSubmitState();
-      return;
-    }
-    const relativePath = sanitizedDocumentPath;
+    let dateInput: HTMLInputElement;
+    let descInput: HTMLTextAreaElement;
+    let reminderInput: HTMLInputElement;
+    let documentInput: HTMLInputElement;
+    let submitBtn: HTMLButtonElement;
+    let cancelBtn: HTMLButtonElement;
+    let sanitizedDocumentPath: string | undefined;
+    let creating = false;
 
-    creating = true;
-    updateSubmitState();
-    const snapshot = snapshotFocus(historyContainer);
-    historyContainer.setAttribute("aria-busy", "true");
-    void (async () => {
+    const titleId = `pet-add-record-title-${detailSuffix}`;
+    const drawer = createModal({
+      open: true,
+      titleId,
+      descriptionId: formHelpId,
+      initialFocus: () => dateInput ?? null,
+      onOpenChange(open) {
+        if (!open) {
+          addRecordDrawer = null;
+          if (addBtn.isConnected) {
+            window.setTimeout(() => {
+              try {
+                addBtn.focus();
+              } catch {
+                /* noop */
+              }
+            }, 0);
+          }
+        }
+      },
+    });
+    drawer.root.classList.add("pet-drawer__overlay");
+    drawer.dialog.classList.add("pet-drawer");
+
+    const header = document.createElement("div");
+    header.className = "pet-drawer__header";
+    const title = document.createElement("h2");
+    title.id = titleId;
+    title.textContent = "Add medical record";
+    header.append(title);
+
+    const form = document.createElement("form");
+    form.className = "pet-drawer__form";
+    form.autocomplete = "off";
+    form.setAttribute("aria-describedby", formHelpId);
+
+    const assist = document.createElement("p");
+    assist.className = "sr-only";
+    assist.id = formHelpId;
+    assist.textContent =
+      "Date and description are required. Reminder and attachment path are optional.";
+
+    const buildField = (labelText: string, field: HTMLElement) => {
+      const wrap = document.createElement("label");
+      wrap.className = "pet-drawer__field";
+      wrap.textContent = labelText;
+      wrap.append(field);
+      return wrap;
+    };
+
+    dateInput = document.createElement("input");
+    dateInput.type = "date";
+    dateInput.required = true;
+    dateInput.value = toDateInputValue(Date.now());
+
+    descInput = document.createElement("textarea");
+    descInput.required = true;
+    descInput.rows = 3;
+
+    reminderInput = document.createElement("input");
+    reminderInput.type = "date";
+
+    documentInput = document.createElement("input");
+    documentInput.type = "text";
+    documentInput.placeholder = "e.g. vet/records.pdf";
+
+    const actions = document.createElement("div");
+    actions.className = "pet-drawer__actions";
+    cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.textContent = "Cancel";
+    submitBtn = document.createElement("button");
+    submitBtn.type = "submit";
+    submitBtn.className = "pet-detail__toolbar-btn";
+    submitBtn.textContent = "Add record";
+    actions.append(cancelBtn, submitBtn);
+
+    form.append(
+      buildField("Date", dateInput),
+      buildField("Description", descInput),
+      buildField("Reminder", reminderInput),
+      buildField("Attachment path", documentInput),
+      assist,
+      actions,
+    );
+
+    drawer.dialog.append(header, form);
+
+    const updateReminderValidity = () => {
+      const reminder = parseDateInput(reminderInput.value);
+      const visit = parseDateInput(dateInput.value);
+      if (reminder != null && visit != null && reminder < visit) {
+        reminderInput.setCustomValidity("Reminder must be on or after the visit date.");
+      } else {
+        reminderInput.setCustomValidity("");
+      }
+    };
+
+    const validateDocumentField = (opts: { report?: boolean } = {}) => {
+      const raw = documentInput.value;
+      const trimmed = raw.trim();
+      sanitizedDocumentPath = undefined;
+
+      if (trimmed.length === 0) {
+        documentInput.setCustomValidity("");
+        documentInput.dataset.errorCode = "";
+        if (opts.report) documentInput.reportValidity();
+        return true;
+      }
+
       try {
-        const created = await timeItFn(
-          "detail.medical_create",
-          async () => {
-            try {
-              const inserted = await medicalRepo.create(householdId, {
-                pet_id: pet.id,
-                date: dateValue,
-                description,
-                reminder: reminderValue ?? undefined,
-                relative_path: relativePath,
-                category: PET_MEDICAL_CATEGORY,
-              });
-              await petsRepoApi.update(householdId, pet.id, {
-                updated_at: Date.now(),
-              } as Partial<Pet>);
-              return inserted;
-            } catch (error) {
-              const normalized = await recordMutationFailure("pet_medical_create", error, {
+        sanitizedDocumentPath = sanitizePath(trimmed);
+        documentInput.setCustomValidity("");
+        documentInput.dataset.errorCode = "";
+        if (opts.report) documentInput.reportValidity();
+        return true;
+      } catch (error) {
+        if (error instanceof PathValidationError) {
+          const message =
+            ERROR_MESSAGES[error.code] ??
+            (error.code === "EMPTY"
+              ? "Attachment path is required."
+              : error.message || "Attachment path is invalid.");
+          documentInput.setCustomValidity(message);
+          documentInput.dataset.errorCode = error.code;
+        } else {
+          documentInput.setCustomValidity("Attachment path is invalid.");
+          documentInput.dataset.errorCode = "UNKNOWN";
+        }
+        if (opts.report) documentInput.reportValidity();
+        return false;
+      }
+    };
+
+    const updateSubmitState = () => {
+      const hasRequired = dateInput.value.trim().length > 0 && descInput.value.trim().length > 0;
+      const pathValid = validateDocumentField();
+      submitBtn.disabled = creating || !hasRequired || !pathValid;
+      cancelBtn.disabled = creating;
+    };
+
+    const closeDrawer = () => {
+      drawer.setOpen(false);
+    };
+
+    cancelBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (creating) return;
+      closeDrawer();
+    });
+
+    dateInput.addEventListener("input", () => {
+      updateReminderValidity();
+      updateSubmitState();
+    });
+    descInput.addEventListener("input", updateSubmitState);
+    documentInput.addEventListener("input", updateSubmitState);
+    reminderInput.addEventListener("input", () => {
+      updateReminderValidity();
+      updateSubmitState();
+    });
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (creating) return;
+
+      const dateValue = parseDateInput(dateInput.value);
+      const description = descInput.value.trim();
+      if (!dateValue || description.length === 0) {
+        updateSubmitState();
+        return;
+      }
+
+      const reminderValue = parseDateInput(reminderInput.value);
+      if (!validateDocumentField({ report: true })) {
+        updateSubmitState();
+        return;
+      }
+
+      const relativePath = sanitizedDocumentPath;
+      creating = true;
+      updateSubmitState();
+      const snapshot = snapshotFocus(historyContainer);
+      historyContainer.setAttribute("aria-busy", "true");
+      void (async () => {
+        try {
+          const created = await timeItFn(
+            "detail.medical_create",
+            async () => {
+              try {
+                const inserted = await medicalRepo.create(householdId, {
+                  pet_id: pet.id,
+                  date: dateValue,
+                  description,
+                  reminder: reminderValue ?? undefined,
+                  relative_path: relativePath,
+                  category: PET_MEDICAL_CATEGORY,
+                });
+                await petsRepoApi.update(householdId, pet.id, {
+                  updated_at: Date.now(),
+                } as Partial<Pet>);
+                return inserted;
+              } catch (error) {
+                const normalized = await recordMutationFailure("pet_medical_create", error, {
+                  household_id: householdId,
+                  pet_id: pet.id,
+                });
+                throw normalized;
+              }
+            },
+            {
+              successFields: (createdRecord) => ({
                 household_id: householdId,
                 pet_id: pet.id,
-              });
-              throw normalized;
-            }
-          },
-          {
-            successFields: (createdRecord) => ({
-              household_id: householdId,
-              pet_id: pet.id,
-              record_id: createdRecord.id,
-            }),
-            errorFields: () => ({ household_id: householdId, pet_id: pet.id }),
-          },
-        );
-        records = sortRecords([created, ...records]);
-        renderRecords();
-        restoreFocus(historyContainer, snapshot);
-        toastApi.show({ kind: "success", message: "Medical record added." });
-        log("INFO", "ui.pets.medical_create_success", {
-          id: created.id,
-          pet_id: pet.id,
-          household_id: householdId,
-        });
-        form.reset();
-        reminderInput.setCustomValidity("");
-        updateSubmitState();
-        await onChange?.();
-        scheduleDiagnosticsUpdate();
-        focusDateField();
-      } catch (err) {
-        const { message, code } = resolveError(err, "Could not save medical record.");
-        toastApi.show({ kind: "error", message });
-        log("WARN", "ui.pets.medical_create_fail", {
-          pet_id: pet.id,
-          household_id: householdId,
-          code,
-        });
-      } finally {
-        creating = false;
-        updateSubmitState();
-        historyContainer.setAttribute("aria-busy", "false");
-      }
-    })();
-  });
-
-  try {
-    const fetched = await medicalRepo.list({
-      householdId,
-      petId: pet.id,
-      orderBy: "date DESC, created_at DESC, id",
+                record_id: createdRecord.id,
+              }),
+              errorFields: () => ({ household_id: householdId, pet_id: pet.id }),
+            },
+          );
+          records = sortRecords([created, ...records]);
+          renderRecords();
+          restoreFocus(historyContainer, snapshot);
+          toastApi.show({ kind: "success", message: "Medical record added." });
+          log("INFO", "ui.pets.medical_create_success", {
+            id: created.id,
+            pet_id: pet.id,
+            household_id: householdId,
+          });
+          await onChange?.();
+          scheduleDiagnosticsUpdate();
+          closeDrawer();
+        } catch (err) {
+          const { message, code } = resolveError(err, "Could not save medical record.");
+          toastApi.show({ kind: "error", message });
+          log("WARN", "ui.pets.medical_create_fail", {
+            pet_id: pet.id,
+            household_id: householdId,
+            code,
+          });
+        } finally {
+          creating = false;
+          updateSubmitState();
+          historyContainer.setAttribute("aria-busy", "false");
+        }
+      })();
     });
-    records = sortRecords(fetched.filter((record) => record.pet_id === pet.id));
-  } catch (err) {
-    const { message } = resolveError(err, "Could not load medical records.");
-    toastApi.show({ kind: "error", message });
-    records = [];
-  } finally {
-    historyLoading.remove();
-    renderRecords();
-    historyContainer.setAttribute("aria-busy", "false");
-    scheduleDiagnosticsUpdate();
+
+    addRecordDrawer = {
+      isOpen: () => drawer.isOpen(),
+      focusDate() {
+        focusElementSafely(dateInput);
+      },
+      submit() {
+        if (!drawer.isOpen()) return false;
+        const valid = form.reportValidity();
+        if (!valid) {
+          return false;
+        }
+        form.requestSubmit();
+        return true;
+      },
+      close: closeDrawer,
+    };
+
+    updateReminderValidity();
+    updateSubmitState();
+
+    log("INFO", "ui.pets.medical_add_opened", {
+      pet_id: pet.id,
+      household_id: householdId,
+    });
+
+    if (options.focusDate) {
+      focusElementSafely(dateInput);
+    }
+
+    return addRecordDrawer;
   }
 
-  updateSubmitState();
-  dateInput.value = toDateInputValue(Date.now());
-  updateSubmitState();
+  async function reloadMedicalHistory(opts: { announce?: boolean } = {}): Promise<void> {
+    const { announce = true } = opts;
+    const statusMessage = historyLoaded ? "Updating medical history…" : "Loading medical history…";
+    if (announce) {
+      historyStatus.textContent = statusMessage;
+      lastHistoryAnnouncement = statusMessage;
+    }
+    historyContainer.setAttribute("aria-busy", "true");
+
+    try {
+      const fetched = await medicalRepo.list({
+        householdId,
+        petId: pet.id,
+        orderBy: "date DESC, created_at DESC, id",
+      });
+      records = sortRecords(fetched.filter((record) => record.pet_id === pet.id));
+    } catch (err) {
+      const { message } = resolveError(err, "Could not load medical records.");
+      toastApi.show({ kind: "error", message });
+      records = [];
+    } finally {
+      if (!historyLoaded && historyLoading.isConnected) {
+        historyLoading.remove();
+      }
+      historyLoaded = true;
+      renderRecords();
+      historyContainer.setAttribute("aria-busy", "false");
+      scheduleDiagnosticsUpdate();
+    }
+  }
+
+  await reloadMedicalHistory();
 
   return {
     focusMedicalDate() {
-      focusDateField();
+      openAddRecordDrawer({ focusDate: true });
     },
     submitMedicalForm() {
-      const isValid = form.checkValidity();
-      if (!isValid) {
-        form.reportValidity();
+      if (!addRecordDrawer || !addRecordDrawer.isOpen()) {
+        openAddRecordDrawer({ focusDate: true });
         return false;
       }
-      form.requestSubmit();
-      return true;
+      return addRecordDrawer.submit();
     },
     handleEscape() {
       onBack();
