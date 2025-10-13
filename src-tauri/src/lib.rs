@@ -942,6 +942,7 @@ gen_domain_cmds!(
     property_documents,
     inventory_items,
     vehicle_maintenance,
+    vehicles,
     pets,
     pet_medical,
     family_members,
