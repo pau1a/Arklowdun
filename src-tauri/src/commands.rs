@@ -1,5 +1,5 @@
 use serde_json::{json, Map, Value};
-use sqlx::{sqlite::SqliteRow, Column, Row, SqlitePool, TypeInfo, ValueRef};
+use sqlx::{sqlite::SqliteRow, Column, Executor, Row, Sqlite, SqlitePool, TypeInfo, ValueRef};
 
 use crate::attachment_category::AttachmentCategory;
 use crate::vault;
@@ -694,12 +694,16 @@ async fn get(
 }
 
 // TXN: domain=OUT OF SCOPE tables=*
-async fn create(
+async fn create<'a, E>(
     pool: &SqlitePool,
+    executor: E,
     table: &str,
     mut data: Map<String, Value>,
     attachment: Option<&AttachmentMutationGuard>,
-) -> AppResult<Value> {
+) -> AppResult<Value>
+where
+    E: Executor<'a, Database = Sqlite>,
+{
     if table == "events" {
         return create_event(pool, data).await;
     }
@@ -731,7 +735,7 @@ async fn create(
         })?;
         query = bind_value(query, value);
     }
-    query.execute(pool).await.map_err(AppError::from)?;
+    query.execute(executor).await.map_err(AppError::from)?;
     Ok(Value::Object(data))
 }
 
@@ -968,14 +972,18 @@ pub(crate) async fn prepare_attachment_update(
 }
 
 // TXN: domain=OUT OF SCOPE tables=*
-async fn update(
+async fn update<'a, E>(
     pool: &SqlitePool,
+    executor: E,
     table: &str,
     id: &str,
     mut data: Map<String, Value>,
     household_id: Option<&str>,
     attachment: Option<&AttachmentMutationGuard>,
-) -> AppResult<()> {
+) -> AppResult<()>
+where
+    E: Executor<'a, Database = Sqlite>,
+{
     if table == "events" {
         let hh = household_id.ok_or_else(|| {
             AppError::new(
@@ -1015,7 +1023,7 @@ async fn update(
         let hh = household_id.unwrap_or("");
         query = query.bind(hh).bind(id);
     }
-    query.execute(pool).await.map_err(AppError::from)?;
+    query.execute(executor).await.map_err(AppError::from)?;
     Ok(())
 }
 
@@ -1151,7 +1159,7 @@ pub async fn create_command(
         None
     };
 
-    match create(pool, table, data, attachment.as_ref()).await {
+    match create(pool, pool, table, data, attachment.as_ref()).await {
         Ok(value) => {
             if let Some(scope) = scope.as_ref() {
                 let member_id = value.get("id").and_then(Value::as_str);
@@ -1200,7 +1208,17 @@ pub async fn update_command(
         None
     };
 
-    match update(pool, table, id, data, household_id, attachment.as_ref()).await {
+    match update(
+        pool,
+        pool,
+        table,
+        id,
+        data,
+        household_id,
+        attachment.as_ref(),
+    )
+    .await
+    {
         Ok(()) => {
             if let Some(scope) = scope.as_ref() {
                 scope.success(

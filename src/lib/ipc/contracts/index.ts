@@ -501,17 +501,106 @@ const petsDiagnosticsCountersResponse = z
   })
   .passthrough();
 
+const stringOptional = z.string().optional();
+const stringNullable = z.string().nullable().optional();
+const epochMs = z.number().int().nullable().optional();
+const moneyPence = z.number().int().nullable().optional();
+const intOptional = z.number().int().nullable().optional();
+
 const vehicleCreateData = z
   .object({
     household_id: z.string(),
     name: z.string().min(1),
-    make: z.string().optional(),
-    model: z.string().optional(),
-    reg: z.string().optional(),
-    vin: z.string().optional(),
-    next_mot_due: z.number().nullable().optional(),
-    next_service_due: z.number().nullable().optional(),
-    position: z.number().optional(),
+    position: z.number().int().optional(),
+    make: stringOptional,
+    model: stringOptional,
+    trim: stringOptional,
+    model_year: intOptional,
+    colour_primary: stringOptional,
+    colour_secondary: stringOptional,
+    body_type: stringOptional,
+    doors: intOptional,
+    seats: intOptional,
+    transmission: stringOptional,
+    drivetrain: stringOptional,
+    fuel_type_primary: stringOptional,
+    fuel_type_secondary: stringOptional,
+    engine_cc: intOptional,
+    engine_kw: intOptional,
+    emissions_co2_gkm: intOptional,
+    euro_emissions_standard: stringOptional,
+    mot_date: epochMs,
+    service_date: epochMs,
+    mot_reminder: epochMs,
+    service_reminder: epochMs,
+    mot_last_date: epochMs,
+    mot_expiry_date: epochMs,
+    ved_expiry_date: epochMs,
+    insurance_provider: stringOptional,
+    insurance_policy_number: stringOptional,
+    insurance_start_date: epochMs,
+    insurance_end_date: epochMs,
+    breakdown_provider: stringOptional,
+    breakdown_expiry_date: epochMs,
+    ownership_status: stringOptional,
+    purchase_date: epochMs,
+    purchase_price: moneyPence,
+    seller_name: stringOptional,
+    seller_notes: stringOptional,
+    odometer_at_purchase: intOptional,
+    finance_lender: stringOptional,
+    finance_agreement_number: stringOptional,
+    finance_monthly_payment: moneyPence,
+    lease_start_date: epochMs,
+    lease_end_date: epochMs,
+    contract_mileage_limit: intOptional,
+    sold_date: epochMs,
+    sold_price: moneyPence,
+    odometer_unit: stringOptional,
+    odometer_current: intOptional,
+    odometer_updated_at: epochMs,
+    service_interval_miles: intOptional,
+    service_interval_months: intOptional,
+    last_service_date: epochMs,
+    next_service_due_date: epochMs,
+    next_service_due_miles: intOptional,
+    cambelt_due_date: epochMs,
+    cambelt_due_miles: intOptional,
+    brake_fluid_due_date: epochMs,
+    coolant_due_date: epochMs,
+    tyre_size_front: stringOptional,
+    tyre_size_rear: stringOptional,
+    tyre_pressure_front_psi: intOptional,
+    tyre_pressure_rear_psi: intOptional,
+    oil_grade: stringOptional,
+    next_mot_due: epochMs,
+    next_service_due: epochMs,
+    next_ved_due: epochMs,
+    next_insurance_due: epochMs,
+    primary_driver_id: stringOptional,
+    additional_driver_ids: stringNullable,
+    key_count: intOptional,
+    has_spare_key: z.boolean().optional(),
+    hero_image_path: stringOptional,
+    default_attachment_root_key: stringOptional,
+    default_attachment_folder_relpath: stringOptional,
+    status: stringOptional,
+    tags: stringNullable,
+    notes: stringOptional,
+    reg: z
+      .string()
+      .regex(/^[A-Z0-9 -]+$/)
+      .optional(),
+    vin: z.string().length(17).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (!value.reg && !value.vin) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "At least one of reg or vin must be provided",
+        path: ["reg"],
+      });
+    }
   })
   .passthrough();
 

@@ -1,5 +1,6 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use anyhow::{Context, Result as AnyResult};
+use base64::Engine;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use image::codecs::jpeg::JpegEncoder;
 use image::GenericImageView;
@@ -33,8 +34,7 @@ use tracing_subscriber::{
     util::SubscriberInitExt,
     EnvFilter,
 };
-use ts_rs::TS;
-use base64::Engine; // for .encode on base64 engines
+use ts_rs::TS; // for .encode on base64 engines
 
 use crate::{
     attachment_category::AttachmentCategory,
@@ -996,38 +996,34 @@ async fn pets_delete_hard(
         let household_id = household_id.clone();
         let id = id.clone();
         async move {
-            let mut tx = pool
-                .begin()
-                .await
-                .map_err(|err| {
-                    AppError::from(err)
-                        .with_context("operation", "pets_delete_hard")
-                        .with_context("table", "pets".to_string())
-                        .with_context("household_id", household_id.clone())
-                        .with_context("id", id.clone())
-                })?;
+            let mut tx = pool.begin().await.map_err(|err| {
+                AppError::from(err)
+                    .with_context("operation", "pets_delete_hard")
+                    .with_context("table", "pets".to_string())
+                    .with_context("household_id", household_id.clone())
+                    .with_context("id", id.clone())
+            })?;
 
-            let row = sqlx::query("SELECT image_path FROM pets WHERE id = ?1 AND household_id = ?2")
-                .bind(&id)
-                .bind(&household_id)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(|err| {
-                    AppError::from(err)
-                        .with_context("operation", "pets_delete_hard")
-                        .with_context("table", "pets".to_string())
-                        .with_context("household_id", household_id.clone())
-                        .with_context("id", id.clone())
-                })?;
+            let row =
+                sqlx::query("SELECT image_path FROM pets WHERE id = ?1 AND household_id = ?2")
+                    .bind(&id)
+                    .bind(&household_id)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(|err| {
+                        AppError::from(err)
+                            .with_context("operation", "pets_delete_hard")
+                            .with_context("table", "pets".to_string())
+                            .with_context("household_id", household_id.clone())
+                            .with_context("id", id.clone())
+                    })?;
 
             let Some(row) = row else {
-                return Err(
-                    AppError::new("DB/NOT_FOUND", "Record not found")
-                        .with_context("operation", "pets_delete_hard")
-                        .with_context("table", "pets".to_string())
-                        .with_context("household_id", household_id.clone())
-                        .with_context("id", id.clone()),
-                );
+                return Err(AppError::new("DB/NOT_FOUND", "Record not found")
+                    .with_context("operation", "pets_delete_hard")
+                    .with_context("table", "pets".to_string())
+                    .with_context("household_id", household_id.clone())
+                    .with_context("id", id.clone()));
             };
 
             let image_path = row
@@ -1126,6 +1122,9 @@ pub struct Vehicle {
     #[serde(default)]
     pub household_id: String,
     pub name: String,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub position: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub make: Option<String>,
@@ -1134,16 +1133,229 @@ pub struct Vehicle {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub reg: Option<String>,
+    pub trim: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub model_year: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub vin: Option<String>,
+    pub colour_primary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub colour_secondary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub body_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub doors: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub seats: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub transmission: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub drivetrain: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub fuel_type_primary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub fuel_type_secondary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub engine_cc: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub engine_kw: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub emissions_co2_gkm: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub euro_emissions_standard: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub mot_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub service_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub mot_reminder: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub service_reminder: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub mot_last_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub mot_expiry_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub ved_expiry_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub insurance_provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub insurance_policy_number: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub insurance_start_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub insurance_end_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub breakdown_provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub breakdown_expiry_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ownership_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub purchase_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub purchase_price: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub seller_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub seller_notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub odometer_at_purchase: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub finance_lender: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub finance_agreement_number: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub finance_monthly_payment: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub lease_start_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub lease_end_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub contract_mileage_limit: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub sold_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub sold_price: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub odometer_unit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub odometer_current: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub odometer_updated_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub service_interval_miles: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub service_interval_months: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub last_service_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub next_service_due_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub next_service_due_miles: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub cambelt_due_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub cambelt_due_miles: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub brake_fluid_due_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub coolant_due_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tyre_size_front: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tyre_size_rear: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub tyre_pressure_front_psi: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub tyre_pressure_rear_psi: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub oil_grade: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "number")]
     pub next_mot_due: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "number")]
     pub next_service_due: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub next_ved_due: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub next_insurance_due: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub primary_driver_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub additional_driver_ids: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub key_count: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub has_spare_key: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub hero_image_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub default_attachment_root_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub default_attachment_folder_relpath: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tags: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub vin: Option<String>,
     #[serde(default)]
     #[ts(type = "number")]
     pub created_at: i64,
@@ -1154,9 +1366,6 @@ pub struct Vehicle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "number")]
     pub deleted_at: Option<i64>,
-    #[serde(default)]
-    #[ts(type = "number")]
-    pub position: i64,
 }
 
 #[derive(Serialize, Deserialize, Clone, sqlx::FromRow)]
@@ -1183,7 +1392,7 @@ async fn vehicles_list(
         let household_id = household_id;
         async move {
             sqlx::query_as::<_, Vehicle>(
-                "SELECT id, household_id, name, make, model, reg, vin,\n         COALESCE(next_mot_due, mot_date)         AS next_mot_due,\n         COALESCE(next_service_due, service_date) AS next_service_due,\n         created_at, updated_at, deleted_at, position\n    FROM vehicles\n   WHERE household_id = ? AND deleted_at IS NULL\n   ORDER BY position, created_at, id",
+                "SELECT\n        id,\n        household_id,\n        name,\n        position,\n        make,\n        model,\n        trim,\n        model_year,\n        colour_primary,\n        colour_secondary,\n        body_type,\n        doors,\n        seats,\n        transmission,\n        drivetrain,\n        fuel_type_primary,\n        fuel_type_secondary,\n        engine_cc,\n        engine_kw,\n        emissions_co2_gkm,\n        euro_emissions_standard,\n        mot_date,\n        service_date,\n        mot_reminder,\n        service_reminder,\n        mot_last_date,\n        mot_expiry_date,\n        ved_expiry_date,\n        insurance_provider,\n        insurance_policy_number,\n        insurance_start_date,\n        insurance_end_date,\n        breakdown_provider,\n        breakdown_expiry_date,\n        ownership_status,\n        purchase_date,\n        purchase_price,\n        seller_name,\n        seller_notes,\n        odometer_at_purchase,\n        finance_lender,\n        finance_agreement_number,\n        finance_monthly_payment,\n        lease_start_date,\n        lease_end_date,\n        contract_mileage_limit,\n        sold_date,\n        sold_price,\n        odometer_unit,\n        odometer_current,\n        odometer_updated_at,\n        service_interval_miles,\n        service_interval_months,\n        last_service_date,\n        next_service_due_date,\n        next_service_due_miles,\n        cambelt_due_date,\n        cambelt_due_miles,\n        brake_fluid_due_date,\n        coolant_due_date,\n        tyre_size_front,\n        tyre_size_rear,\n        tyre_pressure_front_psi,\n        tyre_pressure_rear_psi,\n        oil_grade,\n        COALESCE(next_mot_due, mot_date) AS next_mot_due,\n        COALESCE(next_service_due, service_date) AS next_service_due,\n        next_ved_due,\n        next_insurance_due,\n        primary_driver_id,\n        additional_driver_ids,\n        key_count,\n        has_spare_key,\n        hero_image_path,\n        default_attachment_root_key,\n        default_attachment_folder_relpath,\n        status,\n        tags,\n        notes,\n        reg,\n        vin,\n        created_at,\n        updated_at,\n        deleted_at\n    FROM vehicles\n   WHERE household_id = ? AND deleted_at IS NULL\n   ORDER BY position, created_at, id",
             )
             .bind(household_id.clone())
             .fetch_all(&pool)
@@ -1200,7 +1409,7 @@ async fn vehicles_list(
 
 // Generic CRUD wrappers so legacy UI continues to work
 #[tauri::command]
-async fn vehicles_get(
+pub async fn vehicles_get(
     state: State<'_, AppState>,
     household_id: Option<String>,
     id: String,
@@ -1215,21 +1424,44 @@ async fn vehicles_get(
 }
 
 #[tauri::command]
-async fn vehicles_create(
+pub async fn vehicles_create(
     state: State<'_, AppState>,
     data: serde_json::Map<String, serde_json::Value>,
 ) -> AppResult<serde_json::Value> {
     let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool_clone();
     dispatch_async_app_result(move || {
+        let pool = pool.clone();
         let data = data;
-        async move { commands::create_command(&pool, "vehicles", data, None).await }
+        async move {
+            let mut tx = pool.begin().await.map_err(|err| {
+                AppError::from(err)
+                    .with_context("operation", "vehicles_create_begin")
+                    .with_context("table", "vehicles")
+            })?;
+            match commands::create(&pool, &mut tx, "vehicles", data, None).await {
+                Ok(value) => {
+                    tx.commit().await.map_err(|err| {
+                        AppError::from(err)
+                            .with_context("operation", "vehicles_create_commit")
+                            .with_context("table", "vehicles")
+                    })?;
+                    Ok(value)
+                }
+                Err(err) => {
+                    let _ = tx.rollback().await;
+                    Err(err
+                        .with_context("operation", "create")
+                        .with_context("table", "vehicles"))
+                }
+            }
+        }
     })
     .await
 }
 
 #[tauri::command]
-async fn vehicles_update(
+pub async fn vehicles_update(
     state: State<'_, AppState>,
     id: String,
     data: serde_json::Map<String, serde_json::Value>,
@@ -1238,19 +1470,52 @@ async fn vehicles_update(
     let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool_clone();
     dispatch_async_app_result(move || {
-        let id = id;
+        let pool = pool.clone();
         let data = data;
+        let id = id;
         let household_id = household_id;
         async move {
-            commands::update_command(&pool, "vehicles", &id, data, household_id.as_deref(), None)
-                .await
+            let mut tx = pool.begin().await.map_err(|err| {
+                AppError::from(err)
+                    .with_context("operation", "vehicles_update_begin")
+                    .with_context("table", "vehicles")
+                    .with_context("id", id.clone())
+            })?;
+            match commands::update(
+                &pool,
+                &mut tx,
+                "vehicles",
+                &id,
+                data,
+                household_id.as_deref(),
+                None,
+            )
+            .await
+            {
+                Ok(()) => {
+                    tx.commit().await.map_err(|err| {
+                        AppError::from(err)
+                            .with_context("operation", "vehicles_update_commit")
+                            .with_context("table", "vehicles")
+                            .with_context("id", id.clone())
+                    })?;
+                    Ok(())
+                }
+                Err(err) => {
+                    let _ = tx.rollback().await;
+                    Err(err
+                        .with_context("operation", "update")
+                        .with_context("table", "vehicles")
+                        .with_context("id", id))
+                }
+            }
         }
     })
     .await
 }
 
 #[tauri::command]
-async fn vehicles_delete(
+pub async fn vehicles_delete(
     state: State<'_, AppState>,
     household_id: String,
     id: String,
@@ -1266,7 +1531,7 @@ async fn vehicles_delete(
 }
 
 #[tauri::command]
-async fn vehicles_restore(
+pub async fn vehicles_restore(
     state: State<'_, AppState>,
     household_id: String,
     id: String,
