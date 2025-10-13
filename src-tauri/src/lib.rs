@@ -1431,31 +1431,8 @@ pub async fn vehicles_create(
     let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool_clone();
     dispatch_async_app_result(move || {
-        let pool = pool.clone();
         let data = data;
-        async move {
-            let mut tx = pool.begin().await.map_err(|err| {
-                AppError::from(err)
-                    .with_context("operation", "vehicles_create_begin")
-                    .with_context("table", "vehicles")
-            })?;
-            match commands::create(&pool, &mut tx, "vehicles", data, None).await {
-                Ok(value) => {
-                    tx.commit().await.map_err(|err| {
-                        AppError::from(err)
-                            .with_context("operation", "vehicles_create_commit")
-                            .with_context("table", "vehicles")
-                    })?;
-                    Ok(value)
-                }
-                Err(err) => {
-                    let _ = tx.rollback().await;
-                    Err(err
-                        .with_context("operation", "create")
-                        .with_context("table", "vehicles"))
-                }
-            }
-        }
+        async move { commands::create_command(&pool, "vehicles", data, None).await }
     })
     .await
 }
@@ -1470,45 +1447,12 @@ pub async fn vehicles_update(
     let _permit = guard::ensure_db_writable(&state)?;
     let pool = state.pool_clone();
     dispatch_async_app_result(move || {
-        let pool = pool.clone();
         let data = data;
         let id = id;
         let household_id = household_id;
         async move {
-            let mut tx = pool.begin().await.map_err(|err| {
-                AppError::from(err)
-                    .with_context("operation", "vehicles_update_begin")
-                    .with_context("table", "vehicles")
-                    .with_context("id", id.clone())
-            })?;
-            match commands::update(
-                &pool,
-                &mut tx,
-                "vehicles",
-                &id,
-                data,
-                household_id.as_deref(),
-                None,
-            )
-            .await
-            {
-                Ok(()) => {
-                    tx.commit().await.map_err(|err| {
-                        AppError::from(err)
-                            .with_context("operation", "vehicles_update_commit")
-                            .with_context("table", "vehicles")
-                            .with_context("id", id.clone())
-                    })?;
-                    Ok(())
-                }
-                Err(err) => {
-                    let _ = tx.rollback().await;
-                    Err(err
-                        .with_context("operation", "update")
-                        .with_context("table", "vehicles")
-                        .with_context("id", id))
-                }
-            }
+            let household_ref = household_id.as_ref().map(|value| value.as_str());
+            commands::update_command(&pool, "vehicles", &id, data, household_ref, None).await
         }
     })
     .await
