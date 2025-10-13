@@ -1,5 +1,5 @@
 use serde_json::{json, Map, Value};
-use sqlx::{sqlite::SqliteRow, Column, Row, SqlitePool, TypeInfo, ValueRef};
+use sqlx::{sqlite::SqliteRow, Column, Executor, Row, Sqlite, SqlitePool, TypeInfo, ValueRef};
 
 use crate::attachment_category::AttachmentCategory;
 use crate::vault;
@@ -14,7 +14,7 @@ use crate::{
     time::now_ms,
     time_errors::TimeErrorCode,
     time_shadow::ShadowAudit,
-    AppError, AppResult, Event, EventsListRangeResponse,
+    AppError, AppResult, Event, EventsListRangeResponse, Vehicle,
 };
 use chrono::{DateTime, Duration, Utc};
 use chrono_tz::Tz as ChronoTz;
@@ -675,6 +675,9 @@ async fn list(
     limit: Option<i64>,
     offset: Option<i64>,
 ) -> AppResult<Vec<Value>> {
+    if table == "vehicles" {
+        return list_vehicles(pool, household_id).await;
+    }
     let rows = repo::list_active(pool, table, household_id, order_by, limit, offset)
         .await
         .map_err(AppError::from)?;
@@ -687,19 +690,432 @@ async fn get(
     household_id: Option<&str>,
     id: &str,
 ) -> AppResult<Option<Value>> {
+    if table == "vehicles" {
+        let hh = household_id.ok_or_else(|| {
+            AppError::new(
+                "COMMANDS/MISSING_HOUSEHOLD",
+                "Missing household id for vehicles_get",
+            )
+        })?;
+        return get_vehicle(pool, hh, id).await;
+    }
     let row = repo::get_active(pool, table, household_id, id)
         .await
         .map_err(AppError::from)?;
     Ok(row.map(row_to_value))
 }
 
+async fn vehicle_has_trim(pool: &SqlitePool) -> AppResult<bool> {
+    let exists: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM pragma_table_info('vehicles') WHERE name='trim'",
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::from)?;
+    Ok(exists.is_some())
+}
+
+async fn list_vehicles(pool: &SqlitePool, household_id: &str) -> AppResult<Vec<Value>> {
+    let has_trim = vehicle_has_trim(pool).await?;
+    let sql = if has_trim {
+        "SELECT
+        id,
+        household_id,
+        name,
+        position,
+        make,
+        model,
+        trim,
+        model_year,
+        colour_primary,
+        colour_secondary,
+        body_type,
+        doors,
+        seats,
+        transmission,
+        drivetrain,
+        fuel_type_primary,
+        fuel_type_secondary,
+        engine_cc,
+        engine_kw,
+        emissions_co2_gkm,
+        euro_emissions_standard,
+        mot_date,
+        service_date,
+        mot_reminder,
+        service_reminder,
+        mot_last_date,
+        mot_expiry_date,
+        ved_expiry_date,
+        insurance_provider,
+        insurance_policy_number,
+        insurance_start_date,
+        insurance_end_date,
+        breakdown_provider,
+        breakdown_expiry_date,
+        ownership_status,
+        purchase_date,
+        purchase_price,
+        seller_name,
+        seller_notes,
+        odometer_at_purchase,
+        finance_lender,
+        finance_agreement_number,
+        finance_monthly_payment,
+        lease_start_date,
+        lease_end_date,
+        contract_mileage_limit,
+        sold_date,
+        sold_price,
+        odometer_unit,
+        odometer_current,
+        odometer_updated_at,
+        service_interval_miles,
+        service_interval_months,
+        last_service_date,
+        next_service_due_date,
+        next_service_due_miles,
+        cambelt_due_date,
+        cambelt_due_miles,
+        brake_fluid_due_date,
+        coolant_due_date,
+        tyre_size_front,
+        tyre_size_rear,
+        tyre_pressure_front_psi,
+        tyre_pressure_rear_psi,
+        oil_grade,
+        COALESCE(next_mot_due, mot_date) AS next_mot_due,
+        COALESCE(next_service_due, service_date) AS next_service_due,
+        next_ved_due,
+        next_insurance_due,
+        primary_driver_id,
+        additional_driver_ids,
+        key_count,
+        has_spare_key,
+        hero_image_path,
+        default_attachment_root_key,
+        default_attachment_folder_relpath,
+        status,
+        tags,
+        notes,
+        reg,
+        vin,
+        created_at,
+        updated_at,
+        deleted_at
+    FROM vehicles
+   WHERE household_id = ?1 AND deleted_at IS NULL
+   ORDER BY position, created_at, id"
+    } else {
+        "SELECT
+        id,
+        household_id,
+        name,
+        position,
+        make,
+        model,
+        NULL AS trim,
+        model_year,
+        colour_primary,
+        colour_secondary,
+        body_type,
+        doors,
+        seats,
+        transmission,
+        drivetrain,
+        fuel_type_primary,
+        fuel_type_secondary,
+        engine_cc,
+        engine_kw,
+        emissions_co2_gkm,
+        euro_emissions_standard,
+        mot_date,
+        service_date,
+        mot_reminder,
+        service_reminder,
+        mot_last_date,
+        mot_expiry_date,
+        ved_expiry_date,
+        insurance_provider,
+        insurance_policy_number,
+        insurance_start_date,
+        insurance_end_date,
+        breakdown_provider,
+        breakdown_expiry_date,
+        ownership_status,
+        purchase_date,
+        purchase_price,
+        seller_name,
+        seller_notes,
+        odometer_at_purchase,
+        finance_lender,
+        finance_agreement_number,
+        finance_monthly_payment,
+        lease_start_date,
+        lease_end_date,
+        contract_mileage_limit,
+        sold_date,
+        sold_price,
+        odometer_unit,
+        odometer_current,
+        odometer_updated_at,
+        service_interval_miles,
+        service_interval_months,
+        last_service_date,
+        next_service_due_date,
+        next_service_due_miles,
+        cambelt_due_date,
+        cambelt_due_miles,
+        brake_fluid_due_date,
+        coolant_due_date,
+        tyre_size_front,
+        tyre_size_rear,
+        tyre_pressure_front_psi,
+        tyre_pressure_rear_psi,
+        oil_grade,
+        COALESCE(next_mot_due, mot_date) AS next_mot_due,
+        COALESCE(next_service_due, service_date) AS next_service_due,
+        next_ved_due,
+        next_insurance_due,
+        primary_driver_id,
+        additional_driver_ids,
+        key_count,
+        has_spare_key,
+        hero_image_path,
+        default_attachment_root_key,
+        default_attachment_folder_relpath,
+        status,
+        tags,
+        notes,
+        reg,
+        vin,
+        created_at,
+        updated_at,
+        deleted_at
+    FROM vehicles
+   WHERE household_id = ?1 AND deleted_at IS NULL
+   ORDER BY position, created_at, id"
+    };
+
+    let rows = sqlx::query_as::<_, Vehicle>(sql)
+    .bind(household_id)
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::from)?;
+
+    rows.into_iter()
+        .map(|vehicle| vehicle_to_value(vehicle))
+        .collect()
+}
+
+async fn get_vehicle(pool: &SqlitePool, household_id: &str, id: &str) -> AppResult<Option<Value>> {
+    let has_trim = vehicle_has_trim(pool).await?;
+    let sql = if has_trim {
+        "SELECT
+        id,
+        household_id,
+        name,
+        position,
+        make,
+        model,
+        trim,
+        model_year,
+        colour_primary,
+        colour_secondary,
+        body_type,
+        doors,
+        seats,
+        transmission,
+        drivetrain,
+        fuel_type_primary,
+        fuel_type_secondary,
+        engine_cc,
+        engine_kw,
+        emissions_co2_gkm,
+        euro_emissions_standard,
+        mot_date,
+        service_date,
+        mot_reminder,
+        service_reminder,
+        mot_last_date,
+        mot_expiry_date,
+        ved_expiry_date,
+        insurance_provider,
+        insurance_policy_number,
+        insurance_start_date,
+        insurance_end_date,
+        breakdown_provider,
+        breakdown_expiry_date,
+        ownership_status,
+        purchase_date,
+        purchase_price,
+        seller_name,
+        seller_notes,
+        odometer_at_purchase,
+        finance_lender,
+        finance_agreement_number,
+        finance_monthly_payment,
+        lease_start_date,
+        lease_end_date,
+        contract_mileage_limit,
+        sold_date,
+        sold_price,
+        odometer_unit,
+        odometer_current,
+        odometer_updated_at,
+        service_interval_miles,
+        service_interval_months,
+        last_service_date,
+        next_service_due_date,
+        next_service_due_miles,
+        cambelt_due_date,
+        cambelt_due_miles,
+        brake_fluid_due_date,
+        coolant_due_date,
+        tyre_size_front,
+        tyre_size_rear,
+        tyre_pressure_front_psi,
+        tyre_pressure_rear_psi,
+        oil_grade,
+        COALESCE(next_mot_due, mot_date) AS next_mot_due,
+        COALESCE(next_service_due, service_date) AS next_service_due,
+        next_ved_due,
+        next_insurance_due,
+        primary_driver_id,
+        additional_driver_ids,
+        key_count,
+        has_spare_key,
+        hero_image_path,
+        default_attachment_root_key,
+        default_attachment_folder_relpath,
+        status,
+        tags,
+        notes,
+        reg,
+        vin,
+        created_at,
+        updated_at,
+        deleted_at
+    FROM vehicles
+   WHERE id = ?1 AND household_id = ?2 AND deleted_at IS NULL"
+    } else {
+        "SELECT
+        id,
+        household_id,
+        name,
+        position,
+        make,
+        model,
+        NULL AS trim,
+        model_year,
+        colour_primary,
+        colour_secondary,
+        body_type,
+        doors,
+        seats,
+        transmission,
+        drivetrain,
+        fuel_type_primary,
+        fuel_type_secondary,
+        engine_cc,
+        engine_kw,
+        emissions_co2_gkm,
+        euro_emissions_standard,
+        mot_date,
+        service_date,
+        mot_reminder,
+        service_reminder,
+        mot_last_date,
+        mot_expiry_date,
+        ved_expiry_date,
+        insurance_provider,
+        insurance_policy_number,
+        insurance_start_date,
+        insurance_end_date,
+        breakdown_provider,
+        breakdown_expiry_date,
+        ownership_status,
+        purchase_date,
+        purchase_price,
+        seller_name,
+        seller_notes,
+        odometer_at_purchase,
+        finance_lender,
+        finance_agreement_number,
+        finance_monthly_payment,
+        lease_start_date,
+        lease_end_date,
+        contract_mileage_limit,
+        sold_date,
+        sold_price,
+        odometer_unit,
+        odometer_current,
+        odometer_updated_at,
+        service_interval_miles,
+        service_interval_months,
+        last_service_date,
+        next_service_due_date,
+        next_service_due_miles,
+        cambelt_due_date,
+        cambelt_due_miles,
+        brake_fluid_due_date,
+        coolant_due_date,
+        tyre_size_front,
+        tyre_size_rear,
+        tyre_pressure_front_psi,
+        tyre_pressure_rear_psi,
+        oil_grade,
+        COALESCE(next_mot_due, mot_date) AS next_mot_due,
+        COALESCE(next_service_due, service_date) AS next_service_due,
+        next_ved_due,
+        next_insurance_due,
+        primary_driver_id,
+        additional_driver_ids,
+        key_count,
+        has_spare_key,
+        hero_image_path,
+        default_attachment_root_key,
+        default_attachment_folder_relpath,
+        status,
+        tags,
+        notes,
+        reg,
+        vin,
+        created_at,
+        updated_at,
+        deleted_at
+    FROM vehicles
+   WHERE id = ?1 AND household_id = ?2 AND deleted_at IS NULL"
+    };
+
+    let row = sqlx::query_as::<_, Vehicle>(sql)
+    .bind(id)
+    .bind(household_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::from)?;
+
+    Ok(row.map(|vehicle| vehicle_to_value(vehicle)).transpose()?)
+}
+
+fn vehicle_to_value(vehicle: Vehicle) -> AppResult<Value> {
+    serde_json::to_value(vehicle).map_err(|err| {
+        AppError::new("COMMANDS/SERIALIZE_VEHICLE", "Failed to serialize vehicle")
+            .with_context("error", err.to_string())
+    })
+}
+
 // TXN: domain=OUT OF SCOPE tables=*
-async fn create(
+async fn create<'a, E>(
     pool: &SqlitePool,
+    executor: E,
     table: &str,
     mut data: Map<String, Value>,
     attachment: Option<&AttachmentMutationGuard>,
-) -> AppResult<Value> {
+) -> AppResult<Value>
+where
+    E: Executor<'a, Database = Sqlite>,
+{
     if table == "events" {
         return create_event(pool, data).await;
     }
@@ -731,7 +1147,7 @@ async fn create(
         })?;
         query = bind_value(query, value);
     }
-    query.execute(pool).await.map_err(AppError::from)?;
+    query.execute(executor).await.map_err(AppError::from)?;
     Ok(Value::Object(data))
 }
 
@@ -968,14 +1384,18 @@ pub(crate) async fn prepare_attachment_update(
 }
 
 // TXN: domain=OUT OF SCOPE tables=*
-async fn update(
+async fn update<'a, E>(
     pool: &SqlitePool,
+    executor: E,
     table: &str,
     id: &str,
     mut data: Map<String, Value>,
     household_id: Option<&str>,
     attachment: Option<&AttachmentMutationGuard>,
-) -> AppResult<()> {
+) -> AppResult<()>
+where
+    E: Executor<'a, Database = Sqlite>,
+{
     if table == "events" {
         let hh = household_id.ok_or_else(|| {
             AppError::new(
@@ -1015,7 +1435,7 @@ async fn update(
         let hh = household_id.unwrap_or("");
         query = query.bind(hh).bind(id);
     }
-    query.execute(pool).await.map_err(AppError::from)?;
+    query.execute(executor).await.map_err(AppError::from)?;
     Ok(())
 }
 
@@ -1151,7 +1571,7 @@ pub async fn create_command(
         None
     };
 
-    match create(pool, table, data, attachment.as_ref()).await {
+    match create(pool, pool, table, data, attachment.as_ref()).await {
         Ok(value) => {
             if let Some(scope) = scope.as_ref() {
                 let member_id = value.get("id").and_then(Value::as_str);
@@ -1200,7 +1620,17 @@ pub async fn update_command(
         None
     };
 
-    match update(pool, table, id, data, household_id, attachment.as_ref()).await {
+    match update(
+        pool,
+        pool,
+        table,
+        id,
+        data,
+        household_id,
+        attachment.as_ref(),
+    )
+    .await
+    {
         Ok(()) => {
             if let Some(scope) = scope.as_ref() {
                 scope.success(

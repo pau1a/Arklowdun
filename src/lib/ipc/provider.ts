@@ -56,6 +56,17 @@ function resolveAdapterName(): AdapterName {
     return "tauri";
   }
 
+  // In non-production dev/preview browser sessions, default to the fake adapter
+  // so the UI can boot without Tauri present (e.g. opening http://localhost:1420).
+  const isDev = mode !== "production";
+  if (isDev) {
+    console.warn(
+      "[ipc] no Tauri bridge detected — defaulting to fake adapter in %s mode",
+      mode,
+    );
+    return "fake";
+  }
+
   const messageParts = [
     "No IPC adapter detected.",
     "Set VITE_IPC_ADAPTER=fake for browser or Playwright runs.",

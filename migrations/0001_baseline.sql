@@ -243,24 +243,97 @@ CREATE TABLE shopping_items (
   deleted_at INTEGER
 );
 
+-- NOTE: Date/time columns use INTEGER epoch milliseconds. Monetary values use INTEGER pence.
+-- JSON array fields are stored as TEXT containing encoded JSON.
+-- Vehicles columns follow baseline conventions:
+-- * Date/time fields stored as INTEGER epoch milliseconds
+-- * Monetary values stored as INTEGER pence
+-- * JSON collections stored as TEXT (encoded arrays)
 CREATE TABLE vehicles (
   id TEXT PRIMARY KEY,
+  household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
   name TEXT NOT NULL,
+  reg TEXT,
+  vin TEXT,
+  position INTEGER NOT NULL DEFAULT 0,
+  make TEXT,
+  model TEXT,
+  trim TEXT,
+  model_year INTEGER,
+  colour_primary TEXT,
+  colour_secondary TEXT,
+  body_type TEXT,
+  doors INTEGER,
+  seats INTEGER,
+  transmission TEXT,
+  drivetrain TEXT,
+  fuel_type_primary TEXT,
+  fuel_type_secondary TEXT,
+  engine_cc INTEGER,
+  engine_kw INTEGER,
+  emissions_co2_gkm INTEGER,
+  euro_emissions_standard TEXT,
   mot_date INTEGER,
   service_date INTEGER,
   mot_reminder INTEGER,
   service_reminder INTEGER,
-  household_id TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  mot_last_date INTEGER,
+  mot_expiry_date INTEGER,
+  ved_expiry_date INTEGER,
+  insurance_provider TEXT,
+  insurance_policy_number TEXT,
+  insurance_start_date INTEGER,
+  insurance_end_date INTEGER,
+  breakdown_provider TEXT,
+  breakdown_expiry_date INTEGER,
+  ownership_status TEXT,
+  purchase_date INTEGER,
+  purchase_price INTEGER,
+  seller_name TEXT,
+  seller_notes TEXT,
+  odometer_at_purchase INTEGER,
+  finance_lender TEXT,
+  finance_agreement_number TEXT,
+  finance_monthly_payment INTEGER,
+  lease_start_date INTEGER,
+  lease_end_date INTEGER,
+  contract_mileage_limit INTEGER,
+  sold_date INTEGER,
+  sold_price INTEGER,
+  odometer_unit TEXT DEFAULT 'mi',
+  odometer_current INTEGER,
+  odometer_updated_at INTEGER,
+  service_interval_miles INTEGER,
+  service_interval_months INTEGER,
+  last_service_date INTEGER,
+  next_service_due_date INTEGER,
+  next_service_due_miles INTEGER,
+  cambelt_due_date INTEGER,
+  cambelt_due_miles INTEGER,
+  brake_fluid_due_date INTEGER,
+  coolant_due_date INTEGER,
+  tyre_size_front TEXT,
+  tyre_size_rear TEXT,
+  tyre_pressure_front_psi INTEGER,
+  tyre_pressure_rear_psi INTEGER,
+  oil_grade TEXT,
+  next_mot_due INTEGER,
+  next_service_due INTEGER,
+  next_ved_due INTEGER,
+  next_insurance_due INTEGER,
+  primary_driver_id TEXT,
+  additional_driver_ids TEXT,
+  key_count INTEGER,
+  has_spare_key INTEGER,
+  hero_image_path TEXT,
+  default_attachment_root_key TEXT,
+  default_attachment_folder_relpath TEXT,
+  status TEXT DEFAULT 'active',
+  tags TEXT,
+  notes TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  deleted_at INTEGER,
-  position INTEGER NOT NULL DEFAULT 0,
-  make TEXT,
-  model TEXT,
-  reg TEXT,
-  vin TEXT,
-  next_mot_due INTEGER,
-  next_service_due INTEGER
+  deleted_at INTEGER
 );
 
 CREATE TABLE vehicle_maintenance (
@@ -275,7 +348,18 @@ CREATE TABLE vehicle_maintenance (
   updated_at INTEGER NOT NULL,
   deleted_at INTEGER,
   root_key TEXT,
-  relative_path TEXT
+  relative_path TEXT,
+  category TEXT NOT NULL DEFAULT 'vehicle_maintenance' CHECK (category IN (
+    'bills',
+    'policies',
+    'property_documents',
+    'inventory_items',
+    'pet_medical',
+    'vehicles',
+    'vehicle_maintenance',
+    'notes',
+    'misc'
+  ))
 );
 
 -- NOTE: Legacy views are intentionally not created in the baseline to keep
@@ -303,7 +387,19 @@ CREATE INDEX idx_bills_household_due ON bills(household_id, due_date);
 CREATE INDEX idx_events_household_active ON events(household_id, updated_at) WHERE deleted_at IS NULL;
 CREATE INDEX idx_events_household_rrule ON events(household_id, rrule);
 CREATE INDEX idx_events_household_title ON events(household_id, title);
-CREATE INDEX idx_vehicles_household_updated ON vehicles(household_id, updated_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_vehicles_household_reg
+  ON vehicles(household_id, reg)
+  WHERE reg IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_vehicles_household_vin
+  ON vehicles(household_id, vin)
+  WHERE vin IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_vehicles_due_dates
+  ON vehicles(next_mot_due, next_service_due, ved_expiry_date);
+
+CREATE INDEX IF NOT EXISTS idx_vehicles_updated
+  ON vehicles(household_id, updated_at);
 CREATE UNIQUE INDEX inventory_items_household_file_idx ON inventory_items(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
 CREATE UNIQUE INDEX inventory_items_household_position_idx ON inventory_items(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX inventory_items_household_updated_idx ON inventory_items(household_id, updated_at);
@@ -325,7 +421,8 @@ CREATE UNIQUE INDEX property_documents_household_position_idx ON property_docume
 CREATE INDEX property_documents_household_updated_idx ON property_documents(household_id, updated_at);
 CREATE UNIQUE INDEX shopping_household_position_idx ON shopping_items(household_id, position) WHERE deleted_at IS NULL;
 CREATE INDEX shopping_scope_idx ON shopping_items(household_id, deleted_at, position);
-CREATE UNIQUE INDEX vehicle_maintenance_household_file_idx ON vehicle_maintenance(household_id, root_key, relative_path) WHERE deleted_at IS NULL AND root_key IS NOT NULL AND relative_path IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS vehicle_maintenance_household_category_path_idx
+  ON vehicle_maintenance(household_id, category, relative_path);
 CREATE INDEX vehicle_maintenance_household_updated_idx ON vehicle_maintenance(household_id, updated_at);
 CREATE INDEX vehicle_maintenance_vehicle_date_idx ON vehicle_maintenance(vehicle_id, date);
 CREATE UNIQUE INDEX vehicles_household_position_idx ON vehicles(household_id, position) WHERE deleted_at IS NULL;

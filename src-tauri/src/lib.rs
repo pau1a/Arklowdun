@@ -1,5 +1,11 @@
+#![allow(macro_expanded_macro_exports_accessed_by_absolute_paths)]
+#![recursion_limit = "512"]
+// The above crate attributes address two compiler diagnostics:
+// - absolute-path access to macro_export items expanded in this crate (tauri __cmd__ helpers)
+// - deep json! expansions in tests that exceed the default recursion limit
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use anyhow::{Context, Result as AnyResult};
+use base64::Engine;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use image::codecs::jpeg::JpegEncoder;
 use image::GenericImageView;
@@ -33,8 +39,7 @@ use tracing_subscriber::{
     util::SubscriberInitExt,
     EnvFilter,
 };
-use ts_rs::TS;
-use base64::Engine; // for .encode on base64 engines
+use ts_rs::TS; // for .encode on base64 engines
 
 use crate::{
     attachment_category::AttachmentCategory,
@@ -647,302 +652,320 @@ pub fn log_vault_error(
     );
 }
 
-macro_rules! gen_domain_cmds {
+// (old gen_domain_cmds macro removed)
+
+// Variant that namespaces each table's commands into its own module to
+// avoid duplicate `__cmd__*` macro definitions in the containing module.
+macro_rules! gen_domain_cmds_ns {
     ( $( $table:ident ),+ $(,)? ) => {
         paste! {
             $(
-                #[tauri::command]
-                async fn [<$table _list>](
-                    state: State<'_, AppState>,
-                    household_id: String,
-                    order_by: Option<String>,
-                    limit: Option<i64>,
-                    offset: Option<i64>,
-                ) -> AppResult<Vec<serde_json::Value>> {
-                    let pool = state.pool_clone();
-                    dispatch_async_app_result(move || {
-                        let order_by = order_by;
-                        let household_id = household_id;
-                        async move {
-                            commands::list_command(
-                                &pool,
-                                stringify!($table),
-                                &household_id,
-                                order_by.as_deref(),
-                                limit,
-                                offset,
-                            )
-                            .await
-                        }
-                    })
-                    .await
-                }
+                mod [<__gen_ $table>] {
+                    use super::*;
 
-                #[tauri::command]
-                async fn [<$table _get>](
-                    state: State<'_, AppState>,
-                    household_id: Option<String>,
-                    id: String,
-                ) -> AppResult<Option<serde_json::Value>> {
-                    let pool = state.pool_clone();
-                    dispatch_async_app_result(move || {
-                        let household_id = household_id;
-                        let id = id;
-                        async move {
-                            let hh = household_id.as_deref();
-                            commands::get_command(
-                                &pool,
-                                stringify!($table),
-                                hh,
-                                &id,
-                            )
-                            .await
-                        }
-                    })
-                    .await
-                }
-
-                #[tauri::command]
-                async fn [<$table _create>](
-                    state: State<'_, AppState>,
-                    data: serde_json::Map<String, serde_json::Value>,
-                ) -> AppResult<serde_json::Value> {
-                    let family_scope_info = if stringify!($table) == "family_members" {
-                        let household = data
-                            .get("household_id")
-                            .and_then(|value| value.as_str())
-                            .map(|value| value.to_string());
-                        let member = data
-                            .get("id")
-                            .and_then(|value| value.as_str())
-                            .map(|value| value.to_string());
-                        Some((household, member))
-                    } else {
-                        None
-                    };
-                    let _permit = match guard::ensure_db_writable(&state) {
-                        Ok(permit) => permit,
-                        Err(err) => {
-                            if let Some((household, member)) = family_scope_info.clone() {
-                                let scope = crate::family_logging::LogScope::new(
-                                    "family_members_create",
-                                    household,
-                                    member,
-                                );
-                                scope.fail(&err);
+                    #[tauri::command]
+                    pub async fn [<$table _list>](
+                        state: State<'_, AppState>,
+                        household_id: String,
+                        order_by: Option<String>,
+                        limit: Option<i64>,
+                        offset: Option<i64>,
+                    ) -> AppResult<Vec<serde_json::Value>> {
+                        let pool = state.pool_clone();
+                        dispatch_async_app_result(move || {
+                            let order_by = order_by;
+                            let household_id = household_id;
+                            async move {
+                                commands::list_command(
+                                    &pool,
+                                    stringify!($table),
+                                    &household_id,
+                                    order_by.as_deref(),
+                                    limit,
+                                    offset,
+                                )
+                                .await
                             }
-                            return Err(err);
-                        }
-                    };
-                    let pool = state.pool_clone();
-                    let vault = state.vault();
-                    let active_household = state.active_household_id.clone();
-                    dispatch_async_app_result(move || {
-                        let data = data;
-                        let vault = vault.clone();
-                        let pool = pool.clone();
-                        let active_household = active_household.clone();
-                        async move {
-                            let guard = resolve_attachment_for_ipc_create(
-                                &vault,
-                                &active_household,
-                                stringify!($table),
-                                &data,
-                                concat!(stringify!($table), "_create"),
-                            )?;
-                            commands::create_command(
-                                &pool,
-                                stringify!($table),
-                                data,
-                                guard,
-                            )
-                            .await
-                        }
-                    })
-                    .await
+                        })
+                        .await
+                    }
+
+                    #[tauri::command]
+                    pub async fn [<$table _get>](
+                        state: State<'_, AppState>,
+                        household_id: Option<String>,
+                        id: String,
+                    ) -> AppResult<Option<serde_json::Value>> {
+                        let pool = state.pool_clone();
+                        dispatch_async_app_result(move || {
+                            let household_id = household_id;
+                            let id = id;
+                            async move {
+                                let hh = household_id.as_deref();
+                                commands::get_command(
+                                    &pool,
+                                    stringify!($table),
+                                    hh,
+                                    &id,
+                                )
+                                .await
+                            }
+                        })
+                        .await
+                    }
+
+                    #[tauri::command]
+                    pub async fn [<$table _create>](
+                        state: State<'_, AppState>,
+                        data: serde_json::Map<String, serde_json::Value>,
+                    ) -> AppResult<serde_json::Value> {
+                        let family_scope_info = if stringify!($table) == "family_members" {
+                            let household = data
+                                .get("household_id")
+                                .and_then(|value| value.as_str())
+                                .map(|value| value.to_string());
+                            let member = data
+                                .get("id")
+                                .and_then(|value| value.as_str())
+                                .map(|value| value.to_string());
+                            Some((household, member))
+                        } else {
+                            None
+                        };
+                        let _permit = match guard::ensure_db_writable(&state) {
+                            Ok(permit) => permit,
+                            Err(err) => {
+                                if let Some((household, member)) = family_scope_info.clone() {
+                                    let scope = crate::family_logging::LogScope::new(
+                                        "family_members_create",
+                                        household,
+                                        member,
+                                    );
+                                    scope.fail(&err);
+                                }
+                                return Err(err);
+                            }
+                        };
+                        let pool = state.pool_clone();
+                        let vault = state.vault();
+                        let active_household = state.active_household_id.clone();
+                        dispatch_async_app_result(move || {
+                            let data = data;
+                            let vault = vault.clone();
+                            let pool = pool.clone();
+                            let active_household = active_household.clone();
+                            async move {
+                                let guard = resolve_attachment_for_ipc_create(
+                                    &vault,
+                                    &active_household,
+                                    stringify!($table),
+                                    &data,
+                                    concat!(stringify!($table), "_create"),
+                                )?;
+                                commands::create_command(
+                                    &pool,
+                                    stringify!($table),
+                                    data,
+                                    guard,
+                                )
+                                .await
+                            }
+                        })
+                        .await
+                    }
+
+                    #[tauri::command]
+                    pub async fn [<$table _update>](
+                        state: State<'_, AppState>,
+                        id: String,
+                        data: serde_json::Map<String, serde_json::Value>,
+                        household_id: Option<String>,
+                    ) -> AppResult<()> {
+                        let family_scope_info = if stringify!($table) == "family_members" {
+                            let household = household_id
+                                .clone()
+                                .or_else(|| {
+                                    data.get("household_id")
+                                        .and_then(|value| value.as_str())
+                                        .map(|value| value.to_string())
+                                });
+                            Some((household, Some(id.clone())))
+                        } else {
+                            None
+                        };
+                        let _permit = match guard::ensure_db_writable(&state) {
+                            Ok(permit) => permit,
+                            Err(err) => {
+                                if let Some((household, member)) = family_scope_info.clone() {
+                                    let scope = crate::family_logging::LogScope::new(
+                                        "family_members_update",
+                                        household,
+                                        member,
+                                    );
+                                    scope.fail(&err);
+                                }
+                                return Err(err);
+                            }
+                        };
+                        let pool = state.pool_clone();
+                        let vault = state.vault();
+                        let active_household = state.active_household_id.clone();
+                        dispatch_async_app_result(move || {
+                            let household_id = household_id;
+                            let id = id;
+                            let data = data;
+                            let vault = vault.clone();
+                            let pool = pool.clone();
+                            let active_household = active_household.clone();
+                            async move {
+                                let hh = household_id.as_deref();
+                                let guard = resolve_attachment_for_ipc_update(
+                                    &pool,
+                                    &vault,
+                                    &active_household,
+                                    stringify!($table),
+                                    &id,
+                                    hh,
+                                    &data,
+                                    concat!(stringify!($table), "_update"),
+                                )
+                                .await?;
+                                commands::update_command(
+                                    &pool,
+                                    stringify!($table),
+                                    &id,
+                                    data,
+                                    hh,
+                                    guard,
+                                )
+                                .await
+                            }
+                        })
+                        .await
+                    }
+
+                    #[tauri::command]
+                    pub async fn [<$table _delete>](
+                        state: State<'_, AppState>,
+                        household_id: String,
+                        id: String,
+                    ) -> AppResult<()> {
+                        let family_scope_info = if stringify!($table) == "family_members" {
+                            Some((Some(household_id.clone()), Some(id.clone())))
+                        } else {
+                            None
+                        };
+                        let _permit = match guard::ensure_db_writable(&state) {
+                            Ok(permit) => permit,
+                            Err(err) => {
+                                if let Some((household, member)) = family_scope_info.clone() {
+                                    let scope = crate::family_logging::LogScope::new(
+                                        "family_members_delete",
+                                        household,
+                                        member,
+                                    );
+                                    scope.fail(&err);
+                                }
+                                return Err(err);
+                            }
+                        };
+                        let pool = state.pool_clone();
+                        let vault = state.vault();
+                        let active_household = state.active_household_id.clone();
+                        dispatch_async_app_result(move || {
+                            let household_id = household_id;
+                            let id = id;
+                            let pool = pool.clone();
+                            let vault = vault.clone();
+                            let active_household = active_household.clone();
+                            async move {
+                                let guard = resolve_attachment_for_ipc_delete(
+                                    &pool,
+                                    &vault,
+                                    &active_household,
+                                    stringify!($table),
+                                    &household_id,
+                                    &id,
+                                    concat!(stringify!($table), "_delete"),
+                                )
+                                .await?;
+                                commands::delete_command(
+                                    &pool,
+                                    stringify!($table),
+                                    &household_id,
+                                    &id,
+                                    guard,
+                                )
+                                .await
+                            }
+                        })
+                        .await
+                    }
+
+                    #[tauri::command]
+                    pub async fn [<$table _restore>](
+                        state: State<'_, AppState>,
+                        household_id: String,
+                        id: String,
+                    ) -> AppResult<()> {
+                        let family_scope_info = if stringify!($table) == "family_members" {
+                            Some((Some(household_id.clone()), Some(id.clone())))
+                        } else {
+                            None
+                        };
+                        let _permit = match guard::ensure_db_writable(&state) {
+                            Ok(permit) => permit,
+                            Err(err) => {
+                                if let Some((household, member)) = family_scope_info.clone() {
+                                    let scope = crate::family_logging::LogScope::new(
+                                        "family_members_restore",
+                                        household,
+                                        member,
+                                    );
+                                    scope.fail(&err);
+                                }
+                                return Err(err);
+                            }
+                        };
+                        let pool = state.pool_clone();
+                        dispatch_async_app_result(move || {
+                            let household_id = household_id;
+                            let id = id;
+                            async move {
+                                commands::restore_command(
+                                    &pool,
+                                    stringify!($table),
+                                    &household_id,
+                                    &id,
+                                )
+                                .await
+                            }
+                        })
+                        .await
+                    }
                 }
 
-                #[tauri::command]
-                async fn [<$table _update>](
-                    state: State<'_, AppState>,
-                    id: String,
-                    data: serde_json::Map<String, serde_json::Value>,
-                    household_id: Option<String>,
-                ) -> AppResult<()> {
-                    let family_scope_info = if stringify!($table) == "family_members" {
-                        let household = household_id
-                            .clone()
-                            .or_else(|| {
-                                data.get("household_id")
-                                    .and_then(|value| value.as_str())
-                                    .map(|value| value.to_string())
-                            });
-                        Some((household, Some(id.clone())))
-                    } else {
-                        None
-                    };
-                    let _permit = match guard::ensure_db_writable(&state) {
-                        Ok(permit) => permit,
-                        Err(err) => {
-                            if let Some((household, member)) = family_scope_info.clone() {
-                                let scope = crate::family_logging::LogScope::new(
-                                    "family_members_update",
-                                    household,
-                                    member,
-                                );
-                                scope.fail(&err);
-                            }
-                            return Err(err);
-                        }
-                    };
-                    let pool = state.pool_clone();
-                    let vault = state.vault();
-                    let active_household = state.active_household_id.clone();
-                    dispatch_async_app_result(move || {
-                        let household_id = household_id;
-                        let id = id;
-                        let data = data;
-                        let vault = vault.clone();
-                        let pool = pool.clone();
-                        let active_household = active_household.clone();
-                        async move {
-                            let hh = household_id.as_deref();
-                            let guard = resolve_attachment_for_ipc_update(
-                                &pool,
-                                &vault,
-                                &active_household,
-                                stringify!($table),
-                                &id,
-                                hh,
-                                &data,
-                                concat!(stringify!($table), "_update"),
-                            )
-                            .await?;
-                            commands::update_command(
-                                &pool,
-                                stringify!($table),
-                                &id,
-                                data,
-                                hh,
-                                guard,
-                            )
-                            .await
-                        }
-                    })
-                    .await
-                }
-
-                #[tauri::command]
-                async fn [<$table _delete>](
-                    state: State<'_, AppState>,
-                    household_id: String,
-                    id: String,
-                ) -> AppResult<()> {
-                    let family_scope_info = if stringify!($table) == "family_members" {
-                        Some((Some(household_id.clone()), Some(id.clone())))
-                    } else {
-                        None
-                    };
-                    let _permit = match guard::ensure_db_writable(&state) {
-                        Ok(permit) => permit,
-                        Err(err) => {
-                            if let Some((household, member)) = family_scope_info.clone() {
-                                let scope = crate::family_logging::LogScope::new(
-                                    "family_members_delete",
-                                    household,
-                                    member,
-                                );
-                                scope.fail(&err);
-                            }
-                            return Err(err);
-                        }
-                    };
-                    let pool = state.pool_clone();
-                    let vault = state.vault();
-                    let active_household = state.active_household_id.clone();
-                    dispatch_async_app_result(move || {
-                        let household_id = household_id;
-                        let id = id;
-                        let pool = pool.clone();
-                        let vault = vault.clone();
-                        let active_household = active_household.clone();
-                        async move {
-                            let guard = resolve_attachment_for_ipc_delete(
-                                &pool,
-                                &vault,
-                                &active_household,
-                                stringify!($table),
-                                &household_id,
-                                &id,
-                                concat!(stringify!($table), "_delete"),
-                            )
-                            .await?;
-                            commands::delete_command(
-                                &pool,
-                                stringify!($table),
-                                &household_id,
-                                &id,
-                                guard,
-                            )
-                            .await
-                        }
-                    })
-                    .await
-                }
-
-                #[tauri::command]
-                async fn [<$table _restore>](
-                    state: State<'_, AppState>,
-                    household_id: String,
-                    id: String,
-                ) -> AppResult<()> {
-                    let family_scope_info = if stringify!($table) == "family_members" {
-                        Some((Some(household_id.clone()), Some(id.clone())))
-                    } else {
-                        None
-                    };
-                    let _permit = match guard::ensure_db_writable(&state) {
-                        Ok(permit) => permit,
-                        Err(err) => {
-                            if let Some((household, member)) = family_scope_info.clone() {
-                                let scope = crate::family_logging::LogScope::new(
-                                    "family_members_restore",
-                                    household,
-                                    member,
-                                );
-                                scope.fail(&err);
-                            }
-                            return Err(err);
-                        }
-                    };
-                    let pool = state.pool_clone();
-                    dispatch_async_app_result(move || {
-                        let household_id = household_id;
-                        let id = id;
-                        async move {
-                            commands::restore_command(
-                                &pool,
-                                stringify!($table),
-                                &household_id,
-                                &id,
-                            )
-                            .await
-                        }
-                    })
-                    .await
-                }
+                pub use [<__gen_ $table>]::{
+                    [<$table _list>],
+                    [<$table _get>],
+                    [<$table _create>],
+                    [<$table _update>],
+                    [<$table _delete>],
+                    [<$table _restore>],
+                };
             )+
         }
     };
 }
-
-gen_domain_cmds!(
+// Use a namespaced variant to avoid duplicate `__cmd__*` macro names
+// when expanding Tauri commands from within a macro.
+gen_domain_cmds_ns!(
     bills,
     policies,
     property_documents,
     inventory_items,
-    // vehicles is handled below (typed list + explicit CRUD wrappers)
     vehicle_maintenance,
+    vehicles,
     pets,
     pet_medical,
     family_members,
@@ -996,38 +1019,34 @@ async fn pets_delete_hard(
         let household_id = household_id.clone();
         let id = id.clone();
         async move {
-            let mut tx = pool
-                .begin()
-                .await
-                .map_err(|err| {
-                    AppError::from(err)
-                        .with_context("operation", "pets_delete_hard")
-                        .with_context("table", "pets".to_string())
-                        .with_context("household_id", household_id.clone())
-                        .with_context("id", id.clone())
-                })?;
+            let mut tx = pool.begin().await.map_err(|err| {
+                AppError::from(err)
+                    .with_context("operation", "pets_delete_hard")
+                    .with_context("table", "pets".to_string())
+                    .with_context("household_id", household_id.clone())
+                    .with_context("id", id.clone())
+            })?;
 
-            let row = sqlx::query("SELECT image_path FROM pets WHERE id = ?1 AND household_id = ?2")
-                .bind(&id)
-                .bind(&household_id)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(|err| {
-                    AppError::from(err)
-                        .with_context("operation", "pets_delete_hard")
-                        .with_context("table", "pets".to_string())
-                        .with_context("household_id", household_id.clone())
-                        .with_context("id", id.clone())
-                })?;
+            let row =
+                sqlx::query("SELECT image_path FROM pets WHERE id = ?1 AND household_id = ?2")
+                    .bind(&id)
+                    .bind(&household_id)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(|err| {
+                        AppError::from(err)
+                            .with_context("operation", "pets_delete_hard")
+                            .with_context("table", "pets".to_string())
+                            .with_context("household_id", household_id.clone())
+                            .with_context("id", id.clone())
+                    })?;
 
             let Some(row) = row else {
-                return Err(
-                    AppError::new("DB/NOT_FOUND", "Record not found")
-                        .with_context("operation", "pets_delete_hard")
-                        .with_context("table", "pets".to_string())
-                        .with_context("household_id", household_id.clone())
-                        .with_context("id", id.clone()),
-                );
+                return Err(AppError::new("DB/NOT_FOUND", "Record not found")
+                    .with_context("operation", "pets_delete_hard")
+                    .with_context("table", "pets".to_string())
+                    .with_context("household_id", household_id.clone())
+                    .with_context("id", id.clone()));
             };
 
             let image_path = row
@@ -1126,6 +1145,9 @@ pub struct Vehicle {
     #[serde(default)]
     pub household_id: String,
     pub name: String,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub position: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub make: Option<String>,
@@ -1134,16 +1156,229 @@ pub struct Vehicle {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub reg: Option<String>,
+    pub trim: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub model_year: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub vin: Option<String>,
+    pub colour_primary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub colour_secondary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub body_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub doors: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub seats: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub transmission: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub drivetrain: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub fuel_type_primary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub fuel_type_secondary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub engine_cc: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub engine_kw: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub emissions_co2_gkm: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub euro_emissions_standard: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub mot_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub service_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub mot_reminder: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub service_reminder: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub mot_last_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub mot_expiry_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub ved_expiry_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub insurance_provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub insurance_policy_number: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub insurance_start_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub insurance_end_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub breakdown_provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub breakdown_expiry_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ownership_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub purchase_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub purchase_price: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub seller_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub seller_notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub odometer_at_purchase: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub finance_lender: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub finance_agreement_number: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub finance_monthly_payment: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub lease_start_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub lease_end_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub contract_mileage_limit: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub sold_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub sold_price: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub odometer_unit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub odometer_current: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub odometer_updated_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub service_interval_miles: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub service_interval_months: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub last_service_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub next_service_due_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub next_service_due_miles: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub cambelt_due_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub cambelt_due_miles: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub brake_fluid_due_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub coolant_due_date: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tyre_size_front: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tyre_size_rear: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub tyre_pressure_front_psi: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub tyre_pressure_rear_psi: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub oil_grade: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "number")]
     pub next_mot_due: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "number")]
     pub next_service_due: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub next_ved_due: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub next_insurance_due: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub primary_driver_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub additional_driver_ids: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub key_count: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub has_spare_key: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub hero_image_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub default_attachment_root_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub default_attachment_folder_relpath: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tags: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub vin: Option<String>,
     #[serde(default)]
     #[ts(type = "number")]
     pub created_at: i64,
@@ -1154,9 +1389,6 @@ pub struct Vehicle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "number")]
     pub deleted_at: Option<i64>,
-    #[serde(default)]
-    #[ts(type = "number")]
-    pub position: i64,
 }
 
 #[derive(Serialize, Deserialize, Clone, sqlx::FromRow)]
@@ -1170,115 +1402,6 @@ pub struct HouseholdSummary {
     pub tz: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-}
-
-// Typed list for Dashboard (rich fields)
-#[tauri::command]
-async fn vehicles_list(
-    state: State<'_, AppState>,
-    household_id: String,
-) -> AppResult<Vec<Vehicle>> {
-    let pool = state.pool_clone();
-    dispatch_async_app_result(move || {
-        let household_id = household_id;
-        async move {
-            sqlx::query_as::<_, Vehicle>(
-                "SELECT id, household_id, name, make, model, reg, vin,\n         COALESCE(next_mot_due, mot_date)         AS next_mot_due,\n         COALESCE(next_service_due, service_date) AS next_service_due,\n         created_at, updated_at, deleted_at, position\n    FROM vehicles\n   WHERE household_id = ? AND deleted_at IS NULL\n   ORDER BY position, created_at, id",
-            )
-            .bind(household_id.clone())
-            .fetch_all(&pool)
-            .await
-            .map_err(|err| {
-                AppError::from(err)
-                    .with_context("operation", "vehicles_list")
-                    .with_context("household_id", household_id)
-            })
-        }
-    })
-    .await
-}
-
-// Generic CRUD wrappers so legacy UI continues to work
-#[tauri::command]
-async fn vehicles_get(
-    state: State<'_, AppState>,
-    household_id: Option<String>,
-    id: String,
-) -> AppResult<Option<serde_json::Value>> {
-    let pool = state.pool_clone();
-    dispatch_async_app_result(move || {
-        let household_id = household_id;
-        let id = id;
-        async move { commands::get_command(&pool, "vehicles", household_id.as_deref(), &id).await }
-    })
-    .await
-}
-
-#[tauri::command]
-async fn vehicles_create(
-    state: State<'_, AppState>,
-    data: serde_json::Map<String, serde_json::Value>,
-) -> AppResult<serde_json::Value> {
-    let _permit = guard::ensure_db_writable(&state)?;
-    let pool = state.pool_clone();
-    dispatch_async_app_result(move || {
-        let data = data;
-        async move { commands::create_command(&pool, "vehicles", data, None).await }
-    })
-    .await
-}
-
-#[tauri::command]
-async fn vehicles_update(
-    state: State<'_, AppState>,
-    id: String,
-    data: serde_json::Map<String, serde_json::Value>,
-    household_id: Option<String>,
-) -> AppResult<()> {
-    let _permit = guard::ensure_db_writable(&state)?;
-    let pool = state.pool_clone();
-    dispatch_async_app_result(move || {
-        let id = id;
-        let data = data;
-        let household_id = household_id;
-        async move {
-            commands::update_command(&pool, "vehicles", &id, data, household_id.as_deref(), None)
-                .await
-        }
-    })
-    .await
-}
-
-#[tauri::command]
-async fn vehicles_delete(
-    state: State<'_, AppState>,
-    household_id: String,
-    id: String,
-) -> AppResult<()> {
-    let _permit = guard::ensure_db_writable(&state)?;
-    let pool = state.pool_clone();
-    dispatch_async_app_result(move || {
-        let household_id = household_id;
-        let id = id;
-        async move { commands::delete_command(&pool, "vehicles", &household_id, &id, None).await }
-    })
-    .await
-}
-
-#[tauri::command]
-async fn vehicles_restore(
-    state: State<'_, AppState>,
-    household_id: String,
-    id: String,
-) -> AppResult<()> {
-    let _permit = guard::ensure_db_writable(&state)?;
-    let pool = state.pool_clone();
-    dispatch_async_app_result(move || {
-        let household_id = household_id;
-        let id = id;
-        async move { commands::restore_command(&pool, "vehicles", &household_id, &id).await }
-    })
-    .await
 }
 
 #[derive(Serialize, Deserialize, Clone, TS, Debug)]
@@ -5554,10 +5677,31 @@ pub fn run() {
                 );
             }
             #[allow(clippy::needless_borrow)]
-            let (pool, db_path) =
+            let (mut pool, db_path) =
                 tauri::async_runtime::block_on(crate::db::open_sqlite_pool(&handle))?;
             // ORDER MATTERS: 1) apply schema; 2) ensure idx; 3) refuse missing UTC; 4) refuse legacy cols.
             tauri::async_runtime::block_on(crate::db::apply_migrations(&pool))?;
+            // Hard-sync schema to canonical if this DB predates newer columns
+            // (e.g., vehicles.trim). User requested we don't support old DBs.
+            let needs_rebuild = tauri::async_runtime::block_on(async {
+                if !table_exists(&pool, "vehicles").await {
+                    return true;
+                }
+                let cols = table_columns(&pool, "vehicles").await;
+                !cols.contains("trim")
+            });
+            if needs_rebuild {
+                tracing::warn!(
+                    target: "arklowdun",
+                    event = "db_schema_outdated",
+                    "Rebuilding schema to latest (dropping old dev data)"
+                );
+                crate::db::schema_rebuild::rebuild_schema_baseline(&db_path)
+                    .expect("rebuild schema to latest");
+                pool = tauri::async_runtime::block_on(crate::db::connect_sqlite_pool(&db_path))
+                    .expect("reopen sqlite after schema rebuild");
+                tauri::async_runtime::block_on(crate::db::apply_migrations(&pool))?;
+            }
             tauri::async_runtime::block_on(crate::migration_guard::ensure_events_indexes(&pool))
                 .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
             tauri::async_runtime::block_on(crate::migration_guard::enforce_events_backfill_guard(

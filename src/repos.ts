@@ -151,9 +151,24 @@ export const petsRepo = {
   },
 
   async create(householdId: string, data: Partial<Pet>): Promise<Pet> {
-    const payload = PetsCreateRequestSchema.parse({
-      data: { ...data, household_id: householdId },
-    });
+    // Only send columns that exist on the backend schema to avoid unknown-column errors.
+    const allowed: Record<string, unknown> = {
+      household_id: householdId,
+    };
+    if (typeof data.name === "string") allowed.name = data.name;
+    // Accept either `type` (canonical) or `species` from callers; default to `type`.
+    const typeValue = (data as any).type ?? (data as any).species;
+    if (typeof typeValue === "string" && typeValue.trim().length > 0) {
+      allowed.type = typeValue;
+    }
+    if (typeof (data as any).position === "number") {
+      allowed.position = (data as any).position;
+    }
+    if ("image_path" in (data as any)) {
+      allowed.image_path = (data as any).image_path as unknown;
+    }
+
+    const payload = PetsCreateRequestSchema.parse({ data: allowed });
     const response = await call("pets_create", payload);
     clearSearchCache();
     return response;
@@ -296,19 +311,20 @@ export const familyRepo = {
   ...familyMembersRepo,
   async create(input: FamilyMemberCreateRequest): Promise<FamilyMember> {
     const payload = FamilyMemberCreateRequestSchema.parse(input);
-    const args = {
-      householdId: payload.householdId,
+    // Backend expects snake_case under a `data` envelope.
+    const data = {
+      household_id: payload.householdId,
       name: payload.name,
       position: payload.position,
       notes: payload.notes ?? null,
     } satisfies Record<string, unknown>;
-    const response = await call("family_members_create", args);
+    const response = await call("family_members_create", { data });
     if (response == null) {
       const error: Error & { code?: string; context?: unknown } = new Error(
         "family_members_create returned null/undefined",
       );
       error.code = "IPC_NULL_RESPONSE";
-      error.context = { args };
+      error.context = { data };
       throw error;
     }
     return response as FamilyMember;
