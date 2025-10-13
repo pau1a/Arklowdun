@@ -14,7 +14,7 @@ The Pets UI consists of two principal surfaces:
 
 | Surface         | Description                                                                                         | File                         |
 | --------------- | --------------------------------------------------------------------------------------------------- | ---------------------------- |
-| **Card grid**   | Persistent page shell that renders the pets collection, search, inline creation, and card actions.  | `src/PetsView.ts` / `src/features/pets/PetsPage.ts` |
+| **Card grid**   | Persistent page shell that renders the pets collection, header actions, and card interactions.       | `src/PetsView.ts` / `src/features/pets/PetsPage.ts` |
 | **Detail view** | Full medical/reminder editor for a single pet.                                                      | `src/ui/pets/PetDetailView.ts` |
 
 The router exposes `/pets` but marks it as `display: { placement: "hidden" }`, so it does not appear in the sidebar.
@@ -63,18 +63,9 @@ Rendered markup hierarchy (simplified):
     Use the arrow keys to move between pets. Press Enter to open details. Press Escape to return to the list.
   </p>
   <header class="pets__header">
-    <h1 id="pets-title-…">Pets</h1>
-    <div class="pets__controls">
-      <label class="sr-only" for="pets-search-…">Search pets</label>
-      <input class="pets__search" id="pets-search-…" placeholder="Search pets…" type="search">
-      <form class="pets__create" aria-describedby="pets-create-help-…">
-        <input class="pets__input" name="pet-name" required aria-label="Pet name">
-        <input class="pets__input" name="pet-type" aria-label="Pet type (optional)">
-        <button class="pets__submit">Add pet</button>
-        <p class="sr-only" id="pets-create-help-…">
-          Enter a pet name and optional type, then select Add pet.
-        </p>
-      </form>
+    <h1 class="pets__title" id="pets-title-…">Pets</h1>
+    <div class="pets__actions">
+      <button class="btn btn--accent pets__add-button" type="button">Add pet</button>
     </div>
   </header>
   <div class="pets__body">
@@ -100,6 +91,7 @@ Rendered markup hierarchy (simplified):
 Key properties:
 
 * The shell is created once by `createPetsPage(container)` and persists even when the list data changes.
+* `pets__actions` exposes the **Add pet** button; it opens the modal creation flow described below. There is no local search input.
 * `pets__viewport` is the scroll container used by the virtualiser.
 * `pets__grid` hosts the **card grid**, and only visible cards are mounted at any time.
 * `pets__detail` is a hidden host where `PetDetailView` mounts when a card is opened.
@@ -166,19 +158,32 @@ The live region announces the change, and when filters hide matches the copy piv
 
 ## 4. Pet creation
 
-The creation form is injected at the bottom of the list each render.
+Selecting **Add pet** launches a modal dialog anchored to the header action.
+The modal follows the shared overlay semantics (`role="dialog"`, `aria-modal="true"`) and restores focus to the launch button on close.
+
+**Form layout:**
+
+* Title: “Add a pet”
+* Helper copy: “Create a pet record. Only the name is required.”
+* Fields:
+  * **Name** — required, 1–120 characters.
+  * **Species** — optional, up to 64 characters.
+  * **Breed** — optional, up to 64 characters.
+* Footer buttons:
+  * **Create** (primary)
+  * **Cancel** (ghost)
+
+Focus lands on **Name** when the modal opens. Pressing **Escape** or **Cancel** closes the dialog and returns focus to the **Add pet** button.
+Validation errors are written to a polite live region (`#pets-create-status-…`) and the first invalid field receives focus.
 
 **Handler flow:**
 
-1. User submits the form.
-2. Handler reads `#pet-name` and `#pet-type`.
-3. Calls `petsRepo.create()` with these values and `household_id`.
-4. On success, appends returned pet to cached array and re-renders.
-5. Calls `reminderScheduler.scheduleMany()` for the new pet (updating pet-name cache even if no reminders exist).
-6. Does **not** wrap in `try/catch`; any rejection results in an uncaught promise warning in the console.
-
-**Ordering rule:**
-New pets are assigned `position = pets.length` (based on current in-memory list).
+1. User opens the modal, emitting `pets.modal_open`.
+2. Submitting the form triggers client validation. If invalid, errors render inline and the modal stays open.
+3. When valid, controls disable, the primary button reads “Creating…”, and `pets.create_submitted` logs with the household id.
+4. `handleCreate({ name, species, breed })` calls `petsRepo.create()` with trimmed values (`type` mirrors `species`) and assigns `position = pets.length`.
+5. On success the modal closes, the new pet is appended to state, reminders are scheduled, `pets.create_success` logs with the new id, and a “Pet created” toast displays.
+6. On failure the modal stays open, controls re-enable, `pets.create_error` logs the error code, and an error toast plus live-region copy advise the user.
 
 ---
 

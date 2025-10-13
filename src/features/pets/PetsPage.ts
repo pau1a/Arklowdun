@@ -3,12 +3,12 @@ import { convertFileSrc } from "@lib/ipc/core";
 import { canonicalizeAndVerify } from "@files/path";
 import { revealLabel } from "../../ui/attachments";
 import type { Pet } from "../../models";
+import createButton from "@ui/Button";
 
 export interface PetsPageCallbacks {
-  onCreate?: (input: { name: string; type: string }) => Promise<Pet> | Pet;
+  onRequestCreate?: () => void;
   onOpenPet?: (pet: Pet) => void;
   onEditPet?: (pet: Pet, patch: { name: string; type: string }) => Promise<void> | void;
-  onSearchChange?: (value: string) => void;
   onReorderPet?: (id: string, delta: number) => void;
   onChangePhoto?: (pet: Pet) => void;
   onRevealImage?: (pet: Pet) => void;
@@ -27,12 +27,10 @@ export interface PetsPageInstance {
   readonly listViewport: HTMLDivElement;
   setCallbacks(callbacks: PetsPageCallbacks): void;
   setPets(pets: Pet[]): void;
-  setFilter(models: FilteredPet[]): void;
+  setFilter(models: FilteredPet[], options?: { query?: string }): void;
   patchPet(pet: Pet): void;
   focusCreate(): void;
   focusSearch(): void;
-  clearSearch(): void;
-  getSearchValue(): string;
   submitCreateForm(): boolean;
   focusRow(id: string): void;
   showDetail(content: HTMLElement): void;
@@ -177,8 +175,6 @@ export function createPetsPage(
 ): PetsPageInstance {
   const idSuffix = Math.random().toString(36).slice(2, 8);
   const titleId = `pets-title-${idSuffix}`;
-  const searchId = `pets-search-${idSuffix}`;
-  const createAssistId = `pets-create-help-${idSuffix}`;
   const liveStatusId = `pets-status-${idSuffix}`;
   const listHelpId = `pets-list-help-${idSuffix}`;
 
@@ -205,57 +201,25 @@ export function createPetsPage(
 
   const title = document.createElement("h1");
   title.id = titleId;
+  title.className = "pets__title";
   title.textContent = "Pets";
 
-  const search = document.createElement("input");
-  search.type = "search";
-  search.placeholder = "Search pets…";
-  search.className = "pets__search";
-  search.id = searchId;
+  const actions = document.createElement("div");
+  actions.className = "pets__actions";
 
-  const searchLabel = document.createElement("label");
-  searchLabel.className = "sr-only";
-  searchLabel.htmlFor = searchId;
-  searchLabel.textContent = "Search pets";
+  const addButton = createButton({
+    label: "Add pet",
+    variant: "primary",
+    className: "pets__add-button",
+    onClick: (event) => {
+      event.preventDefault();
+      callbacks.onRequestCreate?.();
+    },
+  });
 
-  const createForm = document.createElement("form");
-  createForm.className = "pets__create";
-  createForm.autocomplete = "off";
-  createForm.setAttribute("aria-describedby", createAssistId);
+  actions.append(addButton);
 
-  const nameInput = document.createElement("input");
-  nameInput.type = "text";
-  nameInput.required = true;
-  nameInput.placeholder = "Name";
-  nameInput.className = "pets__input";
-  nameInput.name = "pet-name";
-  nameInput.setAttribute("aria-label", "Pet name");
-
-  const typeInput = document.createElement("input");
-  typeInput.type = "text";
-  typeInput.placeholder = "Type (optional)";
-  typeInput.className = "pets__input";
-  typeInput.name = "pet-type";
-  typeInput.setAttribute("aria-label", "Pet type (optional)");
-
-  const createButton = document.createElement("button");
-  createButton.type = "submit";
-  createButton.textContent = "Add pet";
-  createButton.className = "pets__submit";
-
-  createForm.append(nameInput, typeInput, createButton);
-
-  const createAssist = document.createElement("p");
-  createAssist.className = "sr-only";
-  createAssist.id = createAssistId;
-  createAssist.textContent = "Enter a pet name and optional type, then select Add pet.";
-  createForm.append(createAssist);
-
-  const controls = document.createElement("div");
-  controls.className = "pets__controls";
-  controls.append(searchLabel, search, createForm);
-
-  header.append(title, controls);
+  header.append(title, actions);
 
   const body = document.createElement("div");
   body.className = "pets__body";
@@ -313,6 +277,7 @@ export function createPetsPage(
   };
 
   let totalPets = 0;
+  let activeQuery = "";
   let lastAnnouncement = liveStatus.textContent ?? "";
   let lastEmptyMessage = "";
 
@@ -394,37 +359,24 @@ export function createPetsPage(
     totalPets = Array.isArray(next) ? next.length : 0;
   }
 
-  function setFilter(next: FilteredPet[]): void {
+  function setFilter(next: FilteredPet[], options: { query?: string } = {}): void {
     models = next;
+    activeQuery = options.query?.trim() ?? "";
     refresh();
   }
 
   function focusCreate() {
-    nameInput.focus();
+    addButton.focus();
   }
 
   function focusSearch() {
-    search.focus();
-    search.select();
-  }
-
-  function clearSearch() {
-    if (!search.value) return;
-    search.value = "";
-    callbacks.onSearchChange?.("");
-  }
-
-  function getSearchValue(): string {
-    return search.value;
+    if (typeof listViewport.focus === "function") {
+      listViewport.focus({ preventScroll: true });
+    }
   }
 
   function submitCreateForm(): boolean {
-    const isValid = createForm.checkValidity();
-    if (!isValid) {
-      createForm.reportValidity();
-      return false;
-    }
-    createForm.requestSubmit();
+    callbacks.onRequestCreate?.();
     return true;
   }
 
@@ -1199,7 +1151,7 @@ export function createPetsPage(
   function refresh(): void {
     const total = models.length;
     const listVisible = !listViewport.hidden;
-    const query = search.value.trim();
+    const query = activeQuery;
     const hasQuery = query.length > 0;
     const hasAnyPets = totalPets > 0;
     let emptyMessage: string | null = null;
@@ -1209,7 +1161,7 @@ export function createPetsPage(
         emptyMessage = "You haven’t added any pets yet. Each will appear here with their photo and details.";
         emptyState.dataset.state = "empty";
       } else if (hasQuery) {
-        emptyMessage = `No pets match “${query}”. Clear the search to see everything.`;
+        emptyMessage = "No pets match the current search.";
         emptyState.dataset.state = "no-results";
       } else {
         emptyMessage = "No pets available.";
@@ -1364,31 +1316,6 @@ export function createPetsPage(
   listViewport.addEventListener("scroll", scheduleRefresh, { passive: true });
   listViewport.addEventListener("keydown", handleOrderKey, true);
 
-  search.addEventListener("input", () => {
-    callbacks.onSearchChange?.(search.value);
-  });
-
-  createForm.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const name = nameInput.value.trim();
-    if (!name) {
-      nameInput.focus();
-      return;
-    }
-    const type = typeInput.value.trim();
-    createButton.disabled = true;
-    createButton.textContent = "Adding…";
-    void Promise.resolve(callbacks.onCreate?.({ name, type })).then((created) => {
-      if (!created) return;
-      nameInput.value = "";
-      typeInput.value = "";
-      nameInput.focus();
-    }).finally(() => {
-      createButton.disabled = false;
-      createButton.textContent = "Add";
-    });
-  });
-
   return {
     element: root,
     listViewport,
@@ -1398,8 +1325,6 @@ export function createPetsPage(
     patchPet,
     focusCreate,
     focusSearch,
-    clearSearch,
-    getSearchValue,
     submitCreateForm,
     focusRow,
     showDetail,

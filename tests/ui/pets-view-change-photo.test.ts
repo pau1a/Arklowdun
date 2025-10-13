@@ -30,8 +30,6 @@ vi.mock('@features/pets/PetsPage', () => {
       patchPet: vi.fn(),
       focusCreate: vi.fn(),
       focusSearch: vi.fn(),
-      clearSearch: vi.fn(),
-      getSearchValue: vi.fn(() => ''),
       submitCreateForm: vi.fn(() => false),
       focusRow: vi.fn(),
       showDetail: vi.fn(),
