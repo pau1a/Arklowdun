@@ -652,7 +652,7 @@ macro_rules! gen_domain_cmds {
         paste! {
             $(
                 #[tauri::command]
-                async fn [<$table _list>](
+                pub async fn [<$table _list>](
                     state: State<'_, AppState>,
                     household_id: String,
                     order_by: Option<String>,
@@ -679,7 +679,7 @@ macro_rules! gen_domain_cmds {
                 }
 
                 #[tauri::command]
-                async fn [<$table _get>](
+                pub async fn [<$table _get>](
                     state: State<'_, AppState>,
                     household_id: Option<String>,
                     id: String,
@@ -703,7 +703,7 @@ macro_rules! gen_domain_cmds {
                 }
 
                 #[tauri::command]
-                async fn [<$table _create>](
+                pub async fn [<$table _create>](
                     state: State<'_, AppState>,
                     data: serde_json::Map<String, serde_json::Value>,
                 ) -> AppResult<serde_json::Value> {
@@ -763,7 +763,7 @@ macro_rules! gen_domain_cmds {
                 }
 
                 #[tauri::command]
-                async fn [<$table _update>](
+                pub async fn [<$table _update>](
                     state: State<'_, AppState>,
                     id: String,
                     data: serde_json::Map<String, serde_json::Value>,
@@ -833,7 +833,7 @@ macro_rules! gen_domain_cmds {
                 }
 
                 #[tauri::command]
-                async fn [<$table _delete>](
+                pub async fn [<$table _delete>](
                     state: State<'_, AppState>,
                     household_id: String,
                     id: String,
@@ -891,7 +891,7 @@ macro_rules! gen_domain_cmds {
                 }
 
                 #[tauri::command]
-                async fn [<$table _restore>](
+                pub async fn [<$table _restore>](
                     state: State<'_, AppState>,
                     household_id: String,
                     id: String,
@@ -941,7 +941,7 @@ gen_domain_cmds!(
     policies,
     property_documents,
     inventory_items,
-    // vehicles is handled below (typed list + explicit CRUD wrappers)
+    vehicles,
     vehicle_maintenance,
     pets,
     pet_medical,
@@ -1379,115 +1379,6 @@ pub struct HouseholdSummary {
     pub tz: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-}
-
-// Typed list for Dashboard (rich fields)
-#[tauri::command]
-pub async fn vehicles_list(
-    state: State<'_, AppState>,
-    household_id: String,
-) -> AppResult<Vec<Vehicle>> {
-    let pool = state.pool_clone();
-    dispatch_async_app_result(move || {
-        let household_id = household_id;
-        async move {
-            sqlx::query_as::<_, Vehicle>(
-                "SELECT\n        id,\n        household_id,\n        name,\n        position,\n        make,\n        model,\n        trim,\n        model_year,\n        colour_primary,\n        colour_secondary,\n        body_type,\n        doors,\n        seats,\n        transmission,\n        drivetrain,\n        fuel_type_primary,\n        fuel_type_secondary,\n        engine_cc,\n        engine_kw,\n        emissions_co2_gkm,\n        euro_emissions_standard,\n        mot_date,\n        service_date,\n        mot_reminder,\n        service_reminder,\n        mot_last_date,\n        mot_expiry_date,\n        ved_expiry_date,\n        insurance_provider,\n        insurance_policy_number,\n        insurance_start_date,\n        insurance_end_date,\n        breakdown_provider,\n        breakdown_expiry_date,\n        ownership_status,\n        purchase_date,\n        purchase_price,\n        seller_name,\n        seller_notes,\n        odometer_at_purchase,\n        finance_lender,\n        finance_agreement_number,\n        finance_monthly_payment,\n        lease_start_date,\n        lease_end_date,\n        contract_mileage_limit,\n        sold_date,\n        sold_price,\n        odometer_unit,\n        odometer_current,\n        odometer_updated_at,\n        service_interval_miles,\n        service_interval_months,\n        last_service_date,\n        next_service_due_date,\n        next_service_due_miles,\n        cambelt_due_date,\n        cambelt_due_miles,\n        brake_fluid_due_date,\n        coolant_due_date,\n        tyre_size_front,\n        tyre_size_rear,\n        tyre_pressure_front_psi,\n        tyre_pressure_rear_psi,\n        oil_grade,\n        COALESCE(next_mot_due, mot_date) AS next_mot_due,\n        COALESCE(next_service_due, service_date) AS next_service_due,\n        next_ved_due,\n        next_insurance_due,\n        primary_driver_id,\n        additional_driver_ids,\n        key_count,\n        has_spare_key,\n        hero_image_path,\n        default_attachment_root_key,\n        default_attachment_folder_relpath,\n        status,\n        tags,\n        notes,\n        reg,\n        vin,\n        created_at,\n        updated_at,\n        deleted_at\n    FROM vehicles\n   WHERE household_id = ? AND deleted_at IS NULL\n   ORDER BY position, created_at, id",
-            )
-            .bind(household_id.clone())
-            .fetch_all(&pool)
-            .await
-            .map_err(|err| {
-                AppError::from(err)
-                    .with_context("operation", "vehicles_list")
-                    .with_context("household_id", household_id)
-            })
-        }
-    })
-    .await
-}
-
-// Generic CRUD wrappers so legacy UI continues to work
-#[tauri::command]
-pub async fn vehicles_get(
-    state: State<'_, AppState>,
-    household_id: Option<String>,
-    id: String,
-) -> AppResult<Option<serde_json::Value>> {
-    let pool = state.pool_clone();
-    dispatch_async_app_result(move || {
-        let household_id = household_id;
-        let id = id;
-        async move { commands::get_command(&pool, "vehicles", household_id.as_deref(), &id).await }
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn vehicles_create(
-    state: State<'_, AppState>,
-    data: serde_json::Map<String, serde_json::Value>,
-) -> AppResult<serde_json::Value> {
-    let _permit = guard::ensure_db_writable(&state)?;
-    let pool = state.pool_clone();
-    dispatch_async_app_result(move || {
-        let data = data;
-        async move { commands::create_command(&pool, "vehicles", data, None).await }
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn vehicles_update(
-    state: State<'_, AppState>,
-    id: String,
-    data: serde_json::Map<String, serde_json::Value>,
-    household_id: Option<String>,
-) -> AppResult<()> {
-    let _permit = guard::ensure_db_writable(&state)?;
-    let pool = state.pool_clone();
-    dispatch_async_app_result(move || {
-        let data = data;
-        let id = id;
-        let household_id = household_id;
-        async move {
-            let household_ref = household_id.as_ref().map(|value| value.as_str());
-            commands::update_command(&pool, "vehicles", &id, data, household_ref, None).await
-        }
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn vehicles_delete(
-    state: State<'_, AppState>,
-    household_id: String,
-    id: String,
-) -> AppResult<()> {
-    let _permit = guard::ensure_db_writable(&state)?;
-    let pool = state.pool_clone();
-    dispatch_async_app_result(move || {
-        let household_id = household_id;
-        let id = id;
-        async move { commands::delete_command(&pool, "vehicles", &household_id, &id, None).await }
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn vehicles_restore(
-    state: State<'_, AppState>,
-    household_id: String,
-    id: String,
-) -> AppResult<()> {
-    let _permit = guard::ensure_db_writable(&state)?;
-    let pool = state.pool_clone();
-    dispatch_async_app_result(move || {
-        let household_id = household_id;
-        let id = id;
-        async move { commands::restore_command(&pool, "vehicles", &household_id, &id).await }
-    })
-    .await
 }
 
 #[derive(Serialize, Deserialize, Clone, TS, Debug)]

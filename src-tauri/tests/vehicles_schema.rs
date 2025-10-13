@@ -12,7 +12,7 @@ use arklowdun_lib::{
     db, events_tz_backfill::BackfillCoordinator, files_indexer::FilesIndexer,
     household_active::StoreHandle, migrate, pets::metrics::PetAttachmentMetrics, vault::Vault,
     vault_migration::VaultMigrationManager, vehicles_create, vehicles_delete, vehicles_get,
-    vehicles_list, vehicles_restore, vehicles_update, AppState,
+    vehicles_list, vehicles_restore, vehicles_update, AppState, Vehicle,
 };
 
 fn build_app(state: AppState) -> App<tauri::test::MockRuntime> {
@@ -182,9 +182,14 @@ async fn vehicles_list_includes_extended_fields() -> Result<()> {
         .expect("id present")
         .to_string();
 
-    let list = vehicles_list(app.state(), "default".into())
+    let list_json = vehicles_list(app.state(), "default".into(), None, None, None)
         .await
         .map_err(anyhow::Error::from)?;
+
+    let list: Vec<Vehicle> = list_json
+        .into_iter()
+        .map(|value| serde_json::from_value(value).map_err(anyhow::Error::from))
+        .collect::<Result<_, _>>()?;
 
     let vehicle = list
         .into_iter()
