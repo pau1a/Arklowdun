@@ -118,7 +118,12 @@ pub fn rebuild_schema_baseline(dest: &Path) -> AppResult<()> {
     let baseline = MIGRATIONS_DIR
         .files()
         .find(|f| f.path().file_name().and_then(|n| n.to_str()) == Some("0001_baseline.sql"))
-        .ok_or_else(|| AppError::new("DB_SCHEMA_REBUILD/BASELINE_MISSING", "Baseline migration not found"))?;
+        .ok_or_else(|| {
+            AppError::new(
+                "DB_SCHEMA_REBUILD/BASELINE_MISSING",
+                "Baseline migration not found",
+            )
+        })?;
 
     let sql = baseline.contents_utf8().ok_or_else(|| {
         AppError::new(

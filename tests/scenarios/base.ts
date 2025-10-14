@@ -682,11 +682,13 @@ export function createScenario(config: ScenarioConfig): ScenarioDefinition {
       return vehicle ? { ...vehicle } : null;
     },
     vehicles_create: (payload, ctx) => {
-      const args = (payload as { data?: Partial<Vehicle> }).data ?? (payload as any);
+      const params = payload as { householdId?: string; data?: Partial<Vehicle> };
+      const args = params.data ?? (payload as any);
+      const householdId = params.householdId ?? (args?.household_id as string) ?? state.activeHouseholdId;
       const now = Math.floor(ctx.clock.now().getTime() / 1000);
       const vehicle: Vehicle = {
         id: nextId(state, "vehicle", ctx.rng.next()),
-        household_id: args?.household_id as string ?? state.activeHouseholdId,
+        household_id: householdId,
         name: (args?.name as string) ?? "Vehicle",
         make: (args?.make as string) ?? "",
         model: (args?.model as string) ?? "",
@@ -711,7 +713,7 @@ export function createScenario(config: ScenarioConfig): ScenarioDefinition {
         Object.assign(vehicle, data);
         vehicle.updated_at = Math.floor(ctx.clock.now().getTime() / 1000);
       }
-      return null;
+      return vehicle ? { ...vehicle } : null;
     },
     vehicles_delete: (payload, ctx) => {
       const id = (payload as { id?: string }).id ?? (payload as any)?.args?.id;
@@ -719,7 +721,7 @@ export function createScenario(config: ScenarioConfig): ScenarioDefinition {
       if (vehicle) {
         vehicle.deleted_at = Math.floor(ctx.clock.now().getTime() / 1000);
       }
-      return null;
+      return { ok: true };
     },
     vehicles_restore: (payload) => {
       const id = (payload as { id?: string }).id ?? (payload as any)?.args?.id;
@@ -727,7 +729,7 @@ export function createScenario(config: ScenarioConfig): ScenarioDefinition {
       if (vehicle) {
         vehicle.deleted_at = undefined;
       }
-      return null;
+      return vehicle ? { ...vehicle } : null;
     },
   } satisfies ScenarioHandlers;
 

@@ -506,14 +506,16 @@ const stringNullable = z.string().nullable().optional();
 const epochMs = z.number().int().nullable().optional();
 const moneyPence = z.number().int().nullable().optional();
 const intOptional = z.number().int().nullable().optional();
+const odometerUnit = z.enum(["mi", "km"]);
+const vehicleStatus = z.enum(["active", "archived", "sold"]);
 
 const vehicleCreateBase = z
   .object({
     household_id: z.string(),
     name: z.string().min(1),
     position: z.number().int().optional(),
-    make: stringOptional,
-    model: stringOptional,
+    make: z.string().min(1),
+    model: z.string().min(1),
     trim: stringOptional,
     model_year: intOptional,
     colour_primary: stringOptional,
@@ -556,7 +558,7 @@ const vehicleCreateBase = z
     contract_mileage_limit: intOptional,
     sold_date: epochMs,
     sold_price: moneyPence,
-    odometer_unit: stringOptional,
+    odometer_unit: odometerUnit.optional(),
     odometer_current: intOptional,
     odometer_updated_at: epochMs,
     service_interval_miles: intOptional,
@@ -584,7 +586,7 @@ const vehicleCreateBase = z
     hero_image_path: stringOptional,
     default_attachment_root_key: stringOptional,
     default_attachment_folder_relpath: stringOptional,
-    status: stringOptional,
+    status: vehicleStatus.optional(),
     tags: stringNullable,
     notes: stringOptional,
     reg: z
@@ -593,21 +595,23 @@ const vehicleCreateBase = z
       .optional(),
     vin: z.string().length(17).optional(),
   })
-  .passthrough();
+  .strict();
 
 const vehicleCreateData = vehicleCreateBase.superRefine((value, ctx) => {
-    if (!value.reg && !value.vin) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "At least one of reg or vin must be provided",
-        path: ["reg"],
-      });
-    }
-  });
+  if (!value.reg && !value.vin) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "At least one of reg or vin must be provided",
+      path: ["reg"],
+    });
+  }
+});
 
 const vehicleUpdateData = vehicleCreateBase.partial().extend({
   name: z.string().min(1).optional(),
   household_id: z.string().optional(),
+  reg: z.union([z.string().regex(/^[A-Z0-9 -]+$/), z.null()]).optional(),
+  vin: z.union([z.string().length(17), z.null()]).optional(),
 });
 
 function contract<Req extends z.ZodTypeAny, Res extends z.ZodTypeAny>(config: {
@@ -934,21 +938,29 @@ export const contracts = {
   vehicle_maintenance_restore: contract({ request: flexibleRequest, response: flexibleRequest }),
   vehicles_list: contract({ request: householdScopedRequest, response: z.array(z.custom<Vehicle>()) }),
   vehicles_get: contract({
-    request: householdScopedRequest.extend({ id: z.string() }),
+    request: householdScopedRequest.extend({ id: z.string() }).strict(),
     response: z.custom<Vehicle>().nullable(),
   }),
   vehicles_create: contract({
-    request: z.object({ data: vehicleCreateData }).passthrough(),
+    request: z
+      .object({ householdId: z.string(), data: vehicleCreateData })
+      .strict(),
     response: z.custom<Vehicle>(),
   }),
   vehicles_update: contract({
     request: z
-      .object({ id: z.string(), data: vehicleUpdateData, householdId: z.string() })
-      .passthrough(),
-    response: z.null(),
+      .object({ householdId: z.string(), id: z.string(), data: vehicleUpdateData })
+      .strict(),
+    response: z.custom<Vehicle>(),
   }),
-  vehicles_delete: contract({ request: entityScopedRequest, response: z.null() }),
-  vehicles_restore: contract({ request: entityScopedRequest, response: z.null() }),
+  vehicles_delete: contract({
+    request: entityScopedRequest.strict(),
+    response: z.object({ ok: z.literal(true) }).strict(),
+  }),
+  vehicles_restore: contract({
+    request: entityScopedRequest.strict(),
+    response: z.custom<Vehicle>(),
+  }),
   categories_list: contract({ request: flexibleRequest, response: z.array(flexibleRequest) }),
   categories_get: contract({ request: flexibleRequest, response: flexibleRequest.nullable() }),
   categories_create: contract({ request: flexibleRequest, response: flexibleRequest }),

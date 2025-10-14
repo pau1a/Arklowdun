@@ -133,14 +133,14 @@ async fn vehicles_round_trip_fields_preserved() -> Result<()> {
     let dir = TempDir::new()?;
     let (app, _pool, _db_path) = build_app_state(&dir).await?;
 
-    let created = vehicles_create(app.state(), sample_vehicle_payload()).await?;
+    let created = vehicles_create(app.state(), "default".into(), sample_vehicle_payload()).await?;
     let id = created
         .get("id")
         .and_then(Value::as_str)
         .expect("id present")
         .to_string();
 
-    let fetched = vehicles_get(app.state(), Some("default".into()), id.clone())
+    let fetched = vehicles_get(app.state(), "default".into(), id.clone())
         .await?
         .expect("vehicle returned");
 
@@ -163,7 +163,7 @@ async fn vehicles_round_trip_fields_preserved() -> Result<()> {
     // Ensure we can update and soft delete / restore without error.
     let mut update = Map::new();
     update.insert("notes".into(), Value::from("Updated"));
-    vehicles_update(app.state(), id.clone(), update, Some("default".into())).await?;
+    vehicles_update(app.state(), "default".into(), id.clone(), update).await?;
     vehicles_delete(app.state(), "default".into(), id.clone()).await?;
     vehicles_restore(app.state(), "default".into(), id.clone()).await?;
     Ok(())
@@ -174,7 +174,7 @@ async fn vehicles_list_includes_extended_fields() -> Result<()> {
     let dir = TempDir::new()?;
     let (app, _pool, _db_path) = build_app_state(&dir).await?;
 
-    let created = vehicles_create(app.state(), sample_vehicle_payload()).await?;
+    let created = vehicles_create(app.state(), "default".into(), sample_vehicle_payload()).await?;
     let id = created
         .get("id")
         .and_then(Value::as_str)
@@ -222,24 +222,45 @@ async fn vehicles_unique_indices_enforced() -> Result<()> {
         }))
     };
 
-    vehicles_create(app.state(), base("UNI-001", "VINUNIQUETEST001")).await?;
+    vehicles_create(
+        app.state(),
+        "default".into(),
+        base("UNI-001", "VINUNIQUETEST001"),
+    )
+    .await?;
 
-    let dup_reg = vehicles_create(app.state(), base("UNI-001", "VINUNIQUETEST002"))
-        .await
-        .expect_err("duplicate reg should fail");
-    assert_eq!(dup_reg.code(), "Sqlite/2067");
+    let dup_reg = vehicles_create(
+        app.state(),
+        "default".into(),
+        base("UNI-001", "VINUNIQUETEST002"),
+    )
+    .await
+    .expect_err("duplicate reg should fail");
+    assert_eq!(dup_reg.code(), "DUPLICATE_REG");
     assert_eq!(
-        dup_reg.context().get("constraint"),
+        dup_reg.context().get("constraint_name"),
         Some(&"uq_vehicles_household_reg".to_string())
     );
-
-    let dup_vin = vehicles_create(app.state(), base("UNI-002", "VINUNIQUETEST001"))
-        .await
-        .expect_err("duplicate vin should fail");
-    assert_eq!(dup_vin.code(), "Sqlite/2067");
     assert_eq!(
-        dup_vin.context().get("constraint"),
+        dup_reg.context().get("sqlite_code"),
+        Some(&"2067".to_string())
+    );
+
+    let dup_vin = vehicles_create(
+        app.state(),
+        "default".into(),
+        base("UNI-002", "VINUNIQUETEST001"),
+    )
+    .await
+    .expect_err("duplicate vin should fail");
+    assert_eq!(dup_vin.code(), "DUPLICATE_VIN");
+    assert_eq!(
+        dup_vin.context().get("constraint_name"),
         Some(&"uq_vehicles_household_vin".to_string())
+    );
+    assert_eq!(
+        dup_vin.context().get("sqlite_code"),
+        Some(&"2067".to_string())
     );
 
     Ok(())
@@ -252,6 +273,7 @@ async fn household_delete_cascades_vehicle_records() -> Result<()> {
 
     let created = vehicles_create(
         app.state(),
+        "default".into(),
         as_object(json!({
             "household_id": "default",
             "name": "Cascade",
