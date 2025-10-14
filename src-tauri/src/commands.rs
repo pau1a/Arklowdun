@@ -1113,9 +1113,6 @@ fn vehicle_to_value(vehicle: Vehicle) -> AppResult<Value> {
 #[derive(Debug, Clone)]
 struct VehicleState {
     household_id: String,
-    name: String,
-    make: Option<String>,
-    model: Option<String>,
     reg: Option<String>,
     vin: Option<String>,
     deleted_at: Option<i64>,
@@ -1286,7 +1283,7 @@ fn map_vehicle_db_error(err: AppError) -> AppError {
 async fn vehicle_state(pool: &SqlitePool, id: &str) -> AppResult<Option<VehicleState>> {
     let record = sqlx::query::<Sqlite>(
         r#"
-            SELECT household_id, name, make, model, reg, vin, deleted_at
+            SELECT household_id, reg, vin, deleted_at
             FROM vehicles
             WHERE id = ?1
         "#,
@@ -1298,11 +1295,6 @@ async fn vehicle_state(pool: &SqlitePool, id: &str) -> AppResult<Option<VehicleS
 
     Ok(record.map(|row| VehicleState {
         household_id: row.try_get::<String, _>("household_id").unwrap_or_default(),
-        name: row.try_get::<String, _>("name").unwrap_or_default(),
-        make: row.try_get::<Option<String>, _>("make").unwrap_or_default(),
-        model: row
-            .try_get::<Option<String>, _>("model")
-            .unwrap_or_default(),
         reg: row.try_get::<Option<String>, _>("reg").unwrap_or_default(),
         vin: row.try_get::<Option<String>, _>("vin").unwrap_or_default(),
         deleted_at: row
