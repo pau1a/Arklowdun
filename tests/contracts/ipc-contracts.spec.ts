@@ -105,7 +105,23 @@ const scenarioDefinition: ScenarioDefinition = {
       return notesResponse;
     },
     vehicles_create: async (payload) => {
+      assert.equal(payload.householdId, "h1");
       assert.equal(payload.data.household_id, "h1");
+      return vehiclesResponse;
+    },
+    vehicles_update: async (payload) => {
+      assert.equal(payload.householdId, "h1");
+      assert.equal(payload.id, "veh-1");
+      return vehiclesResponse;
+    },
+    vehicles_delete: async (payload) => {
+      assert.equal(payload.householdId, "h1");
+      assert.equal(payload.id, "veh-1");
+      return { ok: true };
+    },
+    vehicles_restore: async (payload) => {
+      assert.equal(payload.householdId, "h1");
+      assert.equal(payload.id, "veh-1");
       return vehiclesResponse;
     },
     pets_list: async (payload) => {
@@ -219,7 +235,25 @@ registerCommand(
 );
 registerCommand(
   "vehicles_create",
-  { data: { household_id: "h1", name: "Car" } },
+  {
+    householdId: "h1",
+    data: { household_id: "h1", name: "Car", make: "Ford", model: "Focus", reg: "REG-1" },
+  },
+  vehiclesResponse,
+);
+registerCommand(
+  "vehicles_update",
+  {
+    householdId: "h1",
+    id: "veh-1",
+    data: { name: "Car", make: "Ford", model: "Focus", reg: "REG-2" },
+  },
+  vehiclesResponse,
+);
+registerCommand("vehicles_delete", { householdId: "h1", id: "veh-1" }, { ok: true });
+registerCommand(
+  "vehicles_restore",
+  { householdId: "h1", id: "veh-1" },
   vehiclesResponse,
 );
 registerCommand(

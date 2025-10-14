@@ -1,5 +1,7 @@
 use serde_json::{json, Map, Value};
-use sqlx::{sqlite::SqliteRow, Column, Executor, Row, Sqlite, SqlitePool, TypeInfo, ValueRef};
+use sqlx::{
+    sqlite::SqliteRow, Column, Executor, Row, Sqlite, SqlitePool, Transaction, TypeInfo, ValueRef,
+};
 
 use crate::attachment_category::AttachmentCategory;
 use crate::vault;
@@ -1102,6 +1104,699 @@ fn vehicle_to_value(vehicle: Vehicle) -> AppResult<Value> {
     serde_json::to_value(vehicle).map_err(|err| {
         AppError::new("COMMANDS/SERIALIZE_VEHICLE", "Failed to serialize vehicle")
             .with_context("error", err.to_string())
+    })
+}
+
+#[derive(Debug, Clone)]
+struct VehicleState {
+    household_id: String,
+    name: String,
+    make: Option<String>,
+    model: Option<String>,
+    reg: Option<String>,
+    vin: Option<String>,
+    deleted_at: Option<i64>,
+}
+
+fn normalize_vehicle_reg(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let collapsed = trimmed
+        .split_whitespace()
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if collapsed.is_empty() {
+        return None;
+    }
+    Some(collapsed.to_uppercase())
+}
+
+fn normalize_vehicle_vin(raw: &str) -> AppResult<Option<String>> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let normalized = trimmed.to_uppercase();
+    if normalized.len() != 17 {
+        return Err(AppError::new(
+            "VALIDATION_VIN_INVALID",
+            "Vehicle VIN must be exactly 17 characters.",
+        ));
+    }
+    if normalized
+        .chars()
+        .any(|ch| ch == 'I' || ch == 'O' || ch == 'Q')
+    {
+        return Err(AppError::new(
+            "VALIDATION_VIN_INVALID",
+            "Vehicle VIN cannot contain the letters I, O, or Q.",
+        ));
+    }
+    if !normalized.chars().all(|ch| ch.is_ascii_alphanumeric()) {
+        return Err(AppError::new(
+            "VALIDATION_VIN_INVALID",
+            "Vehicle VIN must be alphanumeric.",
+        ));
+    }
+    Ok(Some(normalized))
+}
+
+fn extract_required_string(data: &Map<String, Value>, field: &str) -> AppResult<String> {
+    let value = data.get(field).ok_or_else(|| {
+        AppError::new(
+            "VALIDATION_REQUIRED_FIELD",
+            format!("Field '{field}' is required."),
+        )
+        .with_context("field", field.to_string())
+    })?;
+    match value {
+        Value::String(s) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                Err(AppError::new(
+                    "VALIDATION_REQUIRED_FIELD",
+                    format!("Field '{field}' cannot be empty."),
+                )
+                .with_context("field", field.to_string()))
+            } else {
+                Ok(trimmed.to_string())
+            }
+        }
+        _ => Err(AppError::new(
+            "VALIDATION_REQUIRED_FIELD",
+            format!("Field '{field}' must be a string."),
+        )
+        .with_context("field", field.to_string())),
+    }
+}
+
+fn extract_optional_string(data: &Map<String, Value>, field: &str) -> AppResult<Option<String>> {
+    match data.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(s)) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(trimmed.to_string()))
+            }
+        }
+        Some(_) => Err(
+            AppError::new(
+                "VALIDATION_TYPE_MISMATCH",
+                format!("Field '{field}' must be a string or null."),
+            )
+            .with_context("field", field.to_string()),
+        ),
+    }
+}
+
+fn ensure_vehicle_household_matches(
+    provided: &str,
+    expected: &str,
+    operation: &'static str,
+) -> AppResult<()> {
+    if provided != expected {
+        return Err(AppError::new(
+            "HOUSEHOLD_SCOPE_VIOLATION",
+            "Vehicle belongs to a different household.",
+        )
+        .with_context("operation", operation)
+        .with_context("household_id", provided.to_string()));
+    }
+    Ok(())
+}
+
+fn map_vehicle_db_error(mut err: AppError) -> AppError {
+    let code = err.code().to_string();
+    let contexts = err.context().clone();
+    if code == "Sqlite/2067" {
+        if let Some(constraint) = contexts.get("constraint").cloned() {
+            let (new_code, message) = match constraint.as_str() {
+                "uq_vehicles_household_reg" => (
+                    "DUPLICATE_REG",
+                    "A vehicle with this registration already exists.",
+                ),
+                "uq_vehicles_household_vin" => (
+                    "DUPLICATE_VIN",
+                    "A vehicle with this VIN already exists.",
+                ),
+                _ => (
+                    "SQL_CONSTRAINT_VIOLATION",
+                    "Vehicle update violated a database constraint.",
+                ),
+            };
+            let mut mapped = AppError::new(new_code, message)
+                .with_context("sqlite_code", "2067".to_string())
+                .with_context("constraint_name", constraint);
+            for (key, value) in contexts {
+                if key != "constraint" {
+                    mapped = mapped.with_context(key, value);
+                }
+            }
+            mapped.cause = Some(Box::new(err));
+            return mapped;
+        }
+    }
+
+    if code.starts_with("Sqlite/") {
+        let sqlite_code = code.trim_start_matches("Sqlite/").to_string();
+        let mut mapped = AppError::new(
+            "SQL_CONSTRAINT_VIOLATION",
+            "Vehicle operation violated a database constraint.",
+        )
+        .with_context("sqlite_code", sqlite_code);
+        if let Some(constraint) = contexts.get("constraint") {
+            mapped = mapped.with_context("constraint_name", constraint.clone());
+        }
+        for (key, value) in contexts {
+            if key != "constraint" {
+                mapped = mapped.with_context(key, value);
+            }
+        }
+        mapped.cause = Some(Box::new(err));
+        return mapped;
+    }
+    err
+}
+
+async fn vehicle_state(pool: &SqlitePool, id: &str) -> AppResult<Option<VehicleState>> {
+    let record = sqlx::query!(
+        r#"
+            SELECT household_id, name, make, model, reg, vin, deleted_at
+            FROM vehicles
+            WHERE id = ?1
+        "#,
+        id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::from)?;
+
+    Ok(record.map(|row| VehicleState {
+        household_id: row.household_id,
+        name: row.name,
+        make: row.make,
+        model: row.model,
+        reg: row.reg,
+        vin: row.vin,
+        deleted_at: row.deleted_at,
+    }))
+}
+
+async fn vehicle_missing_error(
+    pool: &SqlitePool,
+    id: &str,
+    household_id: &str,
+    operation: &'static str,
+) -> AppError {
+    match vehicle_state(pool, id).await {
+        Ok(Some(existing)) => {
+            if existing.household_id != household_id {
+                AppError::new(
+                    "HOUSEHOLD_SCOPE_VIOLATION",
+                    "Vehicle belongs to a different household.",
+                )
+                .with_context("operation", operation)
+                .with_context("id", id.to_string())
+                .with_context("household_id", household_id.to_string())
+            } else {
+                AppError::new("VEHICLE_NOT_FOUND", "Vehicle not found.")
+                    .with_context("operation", operation)
+                    .with_context("id", id.to_string())
+                    .with_context("household_id", household_id.to_string())
+            }
+        }
+        Ok(None) => AppError::new("VEHICLE_NOT_FOUND", "Vehicle not found.")
+            .with_context("operation", operation)
+            .with_context("id", id.to_string())
+            .with_context("household_id", household_id.to_string()),
+        Err(err) => err,
+    }
+}
+
+fn apply_vehicle_required_fields(
+    data: &mut Map<String, Value>,
+    household_id: &str,
+) -> AppResult<()> {
+    if let Some(existing) = data.get("household_id") {
+        match existing {
+            Value::String(current) if current == household_id => {}
+            Value::String(_) | Value::Null => {
+                return Err(AppError::new(
+                    "HOUSEHOLD_SCOPE_VIOLATION",
+                    "Vehicle household id does not match the request scope.",
+                ));
+            }
+            _ => {
+                return Err(AppError::new(
+                    "VALIDATION_TYPE_MISMATCH",
+                    "household_id must be a string.",
+                ));
+            }
+        }
+    }
+
+    let name = extract_required_string(data, "name")?;
+    let make = extract_required_string(data, "make")?;
+    let model = extract_required_string(data, "model")?;
+
+    data.insert("name".into(), Value::String(name));
+    data.insert("make".into(), Value::String(make));
+    data.insert("model".into(), Value::String(model));
+    data.insert(
+        "household_id".into(),
+        Value::String(household_id.to_string()),
+    );
+
+    let reg = extract_optional_string(data, "reg")?;
+    let vin_raw = extract_optional_string(data, "vin")?;
+
+    let normalized_reg = reg.and_then(|value| normalize_vehicle_reg(&value));
+    let normalized_vin = match vin_raw {
+        Some(ref vin) => normalize_vehicle_vin(vin)?,
+        None => None,
+    };
+
+    if normalized_reg.is_none() && normalized_vin.is_none() {
+        return Err(AppError::new(
+            "VALIDATION_REG_OR_VIN_REQUIRED",
+            "Provide a registration number or VIN.",
+        ));
+    }
+
+    match normalized_reg {
+        Some(value) => {
+            data.insert("reg".into(), Value::String(value));
+        }
+        None => {
+            data.insert("reg".into(), Value::Null);
+        }
+    }
+
+    match normalized_vin {
+        Some(value) => {
+            data.insert("vin".into(), Value::String(value));
+        }
+        None => {
+            data.insert("vin".into(), Value::Null);
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_vehicle_update_payload(
+    data: &mut Map<String, Value>,
+    existing: &VehicleState,
+) -> AppResult<()> {
+    if let Some(value) = data.get("household_id") {
+        match value {
+            Value::String(s) if s == &existing.household_id => {
+                data.remove("household_id");
+            }
+            Value::String(_) | Value::Null => {
+                return Err(AppError::new(
+                    "HOUSEHOLD_SCOPE_VIOLATION",
+                    "Cannot move vehicle to a different household.",
+                ));
+            }
+            _ => {
+                return Err(AppError::new(
+                    "VALIDATION_TYPE_MISMATCH",
+                    "household_id must be a string.",
+                ));
+            }
+        }
+    }
+
+    if let Some(Value::Null) = data.get("name") {
+        return Err(AppError::new(
+            "VALIDATION_REQUIRED_FIELD",
+            "Vehicle name cannot be null.",
+        ));
+    }
+    if let Some(Value::Null) = data.get("make") {
+        return Err(AppError::new(
+            "VALIDATION_REQUIRED_FIELD",
+            "Vehicle make cannot be null.",
+        ));
+    }
+    if let Some(Value::Null) = data.get("model") {
+        return Err(AppError::new(
+            "VALIDATION_REQUIRED_FIELD",
+            "Vehicle model cannot be null.",
+        ));
+    }
+
+    if let Some(Value::String(value)) = data.get_mut("name") {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err(AppError::new(
+                "VALIDATION_REQUIRED_FIELD",
+                "Vehicle name cannot be empty.",
+            ));
+        }
+        *value = trimmed.to_string();
+    }
+
+    if let Some(Value::String(value)) = data.get_mut("make") {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err(AppError::new(
+                "VALIDATION_REQUIRED_FIELD",
+                "Vehicle make cannot be empty.",
+            ));
+        }
+        *value = trimmed.to_string();
+    }
+
+    if let Some(Value::String(value)) = data.get_mut("model") {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err(AppError::new(
+                "VALIDATION_REQUIRED_FIELD",
+                "Vehicle model cannot be empty.",
+            ));
+        }
+        *value = trimmed.to_string();
+    }
+
+    if let Some(entry) = data.get_mut("reg") {
+        match entry {
+            Value::Null => {}
+            Value::String(raw) => {
+                if let Some(normalized) = normalize_vehicle_reg(raw) {
+                    *entry = Value::String(normalized);
+                } else {
+                    *entry = Value::Null;
+                }
+            }
+            _ => {
+                return Err(AppError::new(
+                    "VALIDATION_TYPE_MISMATCH",
+                    "Registration must be a string or null.",
+                ));
+            }
+        }
+    }
+
+    if let Some(entry) = data.get_mut("vin") {
+        match entry {
+            Value::Null => {}
+            Value::String(raw) => {
+                let normalized = normalize_vehicle_vin(raw.as_str())?;
+                if let Some(vin) = normalized {
+                    *entry = Value::String(vin);
+                } else {
+                    *entry = Value::Null;
+                }
+            }
+            _ => {
+                return Err(AppError::new(
+                    "VALIDATION_TYPE_MISMATCH",
+                    "VIN must be a string or null.",
+                ));
+            }
+        }
+    }
+
+    let final_reg = match data.get("reg") {
+        Some(Value::String(value)) => Some(value.clone()),
+        Some(Value::Null) => None,
+        _ => existing.reg.clone(),
+    };
+    let final_vin = match data.get("vin") {
+        Some(Value::String(value)) => Some(value.clone()),
+        Some(Value::Null) => None,
+        _ => existing.vin.clone(),
+    };
+
+    if final_reg.is_none() && final_vin.is_none() {
+        return Err(AppError::new(
+            "VALIDATION_REG_OR_VIN_REQUIRED",
+            "Vehicles require a registration number or VIN.",
+        ));
+    }
+
+    Ok(())
+}
+
+pub async fn vehicles_create(
+    pool: &SqlitePool,
+    household_id: &str,
+    mut data: Map<String, Value>,
+) -> AppResult<Value> {
+    apply_vehicle_required_fields(&mut data, household_id)?;
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|err| AppError::from(err).with_context("operation", "vehicles_create"))?;
+
+    let inserted = create(pool, &mut tx, "vehicles", data, None)
+        .await
+        .map_err(|err| {
+            map_vehicle_db_error(err)
+                .with_context("operation", "vehicles_create")
+                .with_context("household_id", household_id.to_string())
+        })?;
+
+    tx.commit()
+        .await
+        .map_err(|err| AppError::from(err).with_context("operation", "vehicles_create"))?;
+
+    let obj = inserted
+        .as_object()
+        .cloned()
+        .ok_or_else(|| AppError::new("VEHICLE_NOT_FOUND", "Vehicle insert result missing."))?;
+    let id = obj
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| AppError::new("VEHICLE_NOT_FOUND", "Vehicle insert missing id."))?;
+
+    let vehicle = get_vehicle(pool, household_id, id).await?;
+    vehicle.ok_or_else(|| {
+        AppError::new("VEHICLE_NOT_FOUND", "Vehicle not found after insert.")
+            .with_context("operation", "vehicles_create")
+            .with_context("id", id.to_string())
+            .with_context("household_id", household_id.to_string())
+    })
+}
+
+pub async fn vehicles_update(
+    pool: &SqlitePool,
+    id: &str,
+    mut data: Map<String, Value>,
+    household_id: &str,
+) -> AppResult<Value> {
+    let existing = vehicle_state(pool, id)
+        .await?
+        .ok_or_else(|| {
+            AppError::new("VEHICLE_NOT_FOUND", "Vehicle not found.")
+                .with_context("operation", "vehicles_update")
+                .with_context("id", id.to_string())
+                .with_context("household_id", household_id.to_string())
+        })?;
+
+    ensure_vehicle_household_matches(&existing.household_id, household_id, "vehicles_update")?;
+    if existing.deleted_at.is_some() {
+        return Err(AppError::new("VEHICLE_NOT_FOUND", "Vehicle is deleted.")
+            .with_context("operation", "vehicles_update")
+            .with_context("id", id.to_string())
+            .with_context("household_id", household_id.to_string()));
+    }
+
+    validate_vehicle_update_payload(&mut data, &existing)?;
+
+    if data.is_empty() {
+        return Err(AppError::new(
+            "VALIDATION_NO_FIELDS",
+            "No fields provided for update.",
+        ));
+    }
+
+    data.remove("id");
+    data.remove("created_at");
+    let now = now_ms();
+    data.insert("updated_at".into(), Value::from(now));
+
+    let cols: Vec<String> = data.keys().cloned().collect();
+    let set_clause: Vec<String> = cols.iter().map(|c| format!("{c} = ?")).collect();
+    let sql = format!(
+        "UPDATE vehicles SET {} WHERE household_id = ? AND id = ?",
+        set_clause.join(",")
+    );
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|err| AppError::from(err).with_context("operation", "vehicles_update"))?;
+
+    let mut query = sqlx::query(&sql);
+    for column in &cols {
+        let value = data.get(column).expect("column exists");
+        query = bind_value(query, value);
+    }
+    let result = query
+        .bind(household_id)
+        .bind(id)
+        .execute(&mut tx)
+        .await;
+
+    let execute_result = match result {
+        Ok(res) => res,
+        Err(err) => {
+            tx.rollback().await.ok();
+            return Err(map_vehicle_db_error(AppError::from(err))
+                .with_context("operation", "vehicles_update")
+                .with_context("id", id.to_string())
+                .with_context("household_id", household_id.to_string()));
+        }
+    };
+
+    if execute_result.rows_affected() == 0 {
+        tx.rollback().await.ok();
+        return Err(
+            vehicle_missing_error(pool, id, household_id, "vehicles_update").await,
+        );
+    }
+
+    repo::renumber_positions(&mut tx, "vehicles", household_id)
+        .await
+        .map_err(|err| {
+            AppError::from(err).with_context("operation", "vehicles_update").with_context(
+                "household_id",
+                household_id.to_string(),
+            )
+        })?;
+
+    tx.commit()
+        .await
+        .map_err(|err| AppError::from(err).with_context("operation", "vehicles_update"))?;
+
+    let vehicle = get_vehicle(pool, household_id, id).await?;
+    vehicle.ok_or_else(|| {
+        AppError::new("VEHICLE_NOT_FOUND", "Vehicle not found after update.")
+            .with_context("operation", "vehicles_update")
+            .with_context("id", id.to_string())
+            .with_context("household_id", household_id.to_string())
+    })
+}
+
+pub async fn vehicles_delete(
+    pool: &SqlitePool,
+    household_id: &str,
+    id: &str,
+) -> AppResult<Value> {
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|err| AppError::from(err).with_context("operation", "vehicles_delete"))?;
+    let now = now_ms();
+    let result = sqlx::query(
+        "UPDATE vehicles SET deleted_at = ?, updated_at = ? WHERE household_id = ? AND id = ?",
+    )
+    .bind(now)
+    .bind(now)
+    .bind(household_id)
+    .bind(id)
+    .execute(&mut tx)
+    .await;
+
+    let res = match result {
+        Ok(value) => value,
+        Err(err) => {
+            tx.rollback().await.ok();
+            return Err(map_vehicle_db_error(AppError::from(err))
+                .with_context("operation", "vehicles_delete")
+                .with_context("id", id.to_string())
+                .with_context("household_id", household_id.to_string()));
+        }
+    };
+
+    if res.rows_affected() == 0 {
+        tx.rollback().await.ok();
+        return Err(
+            vehicle_missing_error(pool, id, household_id, "vehicles_delete").await,
+        );
+    }
+
+    repo::renumber_positions(&mut tx, "vehicles", household_id)
+        .await
+        .map_err(|err| {
+            AppError::from(err).with_context("operation", "vehicles_delete").with_context(
+                "household_id",
+                household_id.to_string(),
+            )
+        })?;
+
+    tx.commit()
+        .await
+        .map_err(|err| AppError::from(err).with_context("operation", "vehicles_delete"))?;
+
+    Ok(json!({ "ok": true }))
+}
+
+pub async fn vehicles_restore(
+    pool: &SqlitePool,
+    household_id: &str,
+    id: &str,
+) -> AppResult<Value> {
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|err| AppError::from(err).with_context("operation", "vehicles_restore"))?;
+    let now = now_ms();
+    let result = sqlx::query(
+        "UPDATE vehicles SET deleted_at = NULL, updated_at = ? WHERE household_id = ? AND id = ?",
+    )
+    .bind(now)
+    .bind(household_id)
+    .bind(id)
+    .execute(&mut tx)
+    .await;
+
+    let res = match result {
+        Ok(value) => value,
+        Err(err) => {
+            tx.rollback().await.ok();
+            return Err(map_vehicle_db_error(AppError::from(err))
+                .with_context("operation", "vehicles_restore")
+                .with_context("id", id.to_string())
+                .with_context("household_id", household_id.to_string()));
+        }
+    };
+
+    if res.rows_affected() == 0 {
+        tx.rollback().await.ok();
+        return Err(
+            vehicle_missing_error(pool, id, household_id, "vehicles_restore").await,
+        );
+    }
+
+    repo::renumber_positions(&mut tx, "vehicles", household_id)
+        .await
+        .map_err(|err| {
+            AppError::from(err).with_context("operation", "vehicles_restore").with_context(
+                "household_id",
+                household_id.to_string(),
+            )
+        })?;
+
+    tx.commit()
+        .await
+        .map_err(|err| AppError::from(err).with_context("operation", "vehicles_restore"))?;
+
+    let vehicle = get_vehicle(pool, household_id, id).await?;
+    vehicle.ok_or_else(|| {
+        AppError::new("VEHICLE_NOT_FOUND", "Vehicle not found after restore.")
+            .with_context("operation", "vehicles_restore")
+            .with_context("id", id.to_string())
+            .with_context("household_id", household_id.to_string())
     })
 }
 

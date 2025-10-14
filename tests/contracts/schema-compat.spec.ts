@@ -27,13 +27,20 @@ test("household_list tolerates records without colour fields", () => {
 test("vehicles_create gracefully handles missing optional maintenance dates", () => {
   const contract = getContract("vehicles_create");
   assert.doesNotThrow(() =>
-    contract.request.parse({ data: { household_id: "h1", name: "Car" } }),
+    contract.request.parse({
+      householdId: "h1",
+      data: { household_id: "h1", name: "Car", make: "Ford", model: "Focus", reg: "REG-1" },
+    }),
   );
   assert.doesNotThrow(() =>
     contract.request.parse({
+      householdId: "h1",
       data: {
         household_id: "h1",
         name: "Car",
+        make: "Ford",
+        model: "Focus",
+        vin: "VINVINVINVINVINV",
         next_mot_due: 1000,
         next_service_due: null,
       },

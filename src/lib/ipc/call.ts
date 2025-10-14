@@ -16,6 +16,16 @@ const ERROR_MESSAGE_OVERRIDES: Record<string, string> = {
   "SQLX/UNIQUE": "Duplicate entry detected.",
   "SQLX/NOTNULL": "Required field missing.",
   "PATH_OUT_OF_VAULT": "File path outside vault boundary.",
+  VEHICLE_NOT_FOUND: "Vehicle not found.",
+  HOUSEHOLD_SCOPE_VIOLATION: "Vehicle belongs to a different household.",
+  VALIDATION_REG_OR_VIN_REQUIRED: "Provide a registration number or VIN.",
+  VALIDATION_VIN_INVALID: "Vehicle VIN is invalid.",
+  DUPLICATE_REG: "A vehicle with this registration already exists.",
+  DUPLICATE_VIN: "A vehicle with this VIN already exists.",
+  SQL_CONSTRAINT_VIOLATION: "Vehicle update failed due to a database constraint.",
+  VALIDATION_REQUIRED_FIELD: "A required vehicle field is missing.",
+  VALIDATION_TYPE_MISMATCH: "Vehicle field contains an invalid value.",
+  VALIDATION_NO_FIELDS: "No vehicle fields were provided for the update.",
   [FALLBACK_CODE]: "Unexpected error occurred.",
 };
 

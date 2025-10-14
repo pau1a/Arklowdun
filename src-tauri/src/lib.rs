@@ -965,7 +965,6 @@ gen_domain_cmds_ns!(
     property_documents,
     inventory_items,
     vehicle_maintenance,
-    vehicles,
     pets,
     pet_medical,
     family_members,
@@ -973,6 +972,119 @@ gen_domain_cmds_ns!(
     expenses,
     shopping_items,
 );
+
+#[tauri::command]
+pub async fn vehicles_list(
+    state: State<'_, AppState>,
+    household_id: String,
+    order_by: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> AppResult<Vec<serde_json::Value>> {
+    let pool = state.pool_clone();
+    dispatch_async_app_result(move || {
+        let pool = pool.clone();
+        let household_id = household_id.clone();
+        async move {
+            commands::list_command(
+                &pool,
+                "vehicles",
+                &household_id,
+                order_by.as_deref(),
+                limit,
+                offset,
+            )
+            .await
+        }
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn vehicles_get(
+    state: State<'_, AppState>,
+    household_id: String,
+    id: String,
+) -> AppResult<Option<serde_json::Value>> {
+    let pool = state.pool_clone();
+    dispatch_async_app_result(move || {
+        let pool = pool.clone();
+        let household_id = household_id.clone();
+        let id = id.clone();
+        async move { commands::get_vehicle(&pool, &household_id, &id).await }
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn vehicles_create(
+    state: State<'_, AppState>,
+    household_id: String,
+    data: serde_json::Map<String, serde_json::Value>,
+) -> AppResult<serde_json::Value> {
+    let _permit = guard::ensure_db_writable(&state)?;
+    let pool = state.pool_clone();
+    dispatch_async_app_result(move || {
+        let pool = pool.clone();
+        let household_id = household_id.clone();
+        let data = data.clone();
+        async move { commands::vehicles_create(&pool, &household_id, data).await }
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn vehicles_update(
+    state: State<'_, AppState>,
+    household_id: String,
+    id: String,
+    data: serde_json::Map<String, serde_json::Value>,
+) -> AppResult<serde_json::Value> {
+    let _permit = guard::ensure_db_writable(&state)?;
+    let pool = state.pool_clone();
+    dispatch_async_app_result(move || {
+        let pool = pool.clone();
+        let household_id = household_id.clone();
+        let id = id.clone();
+        let data = data.clone();
+        async move { commands::vehicles_update(&pool, &id, data, &household_id).await }
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn vehicles_delete(
+    state: State<'_, AppState>,
+    household_id: String,
+    id: String,
+) -> AppResult<serde_json::Value> {
+    let _permit = guard::ensure_db_writable(&state)?;
+    let pool = state.pool_clone();
+    dispatch_async_app_result(move || {
+        let pool = pool.clone();
+        let household_id = household_id.clone();
+        let id = id.clone();
+        async move { commands::vehicles_delete(&pool, &household_id, &id).await }
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn vehicles_restore(
+    state: State<'_, AppState>,
+    household_id: String,
+    id: String,
+) -> AppResult<serde_json::Value> {
+    let _permit = guard::ensure_db_writable(&state)?;
+    let pool = state.pool_clone();
+    dispatch_async_app_result(move || {
+        let pool = pool.clone();
+        let household_id = household_id.clone();
+        let id = id.clone();
+        async move { commands::vehicles_restore(&pool, &household_id, &id).await }
+    })
+    .await
+}
 
 #[tauri::command]
 async fn pets_delete_soft(
