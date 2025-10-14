@@ -1,6 +1,6 @@
 use serde_json::{Map, Value};
 use sqlx::sqlite::SqliteRow;
-use sqlx::{Column, Executor, Row, SqlitePool, TypeInfo, ValueRef};
+use sqlx::{Column, Executor, Row, Sqlite, SqlitePool, TypeInfo, ValueRef};
 
 use crate::db::with_tx;
 use crate::time::now_ms;
@@ -420,7 +420,7 @@ pub mod items {
         WHERE id IN (SELECT id FROM ordered)
         "#,
                 );
-                tx.execute(sqlx::query(&renumber_sql).bind(&household_id))
+                tx.execute(sqlx::query::<Sqlite>(&renumber_sql).bind(&household_id))
                     .await?;
                 Ok(())
             })
@@ -450,7 +450,12 @@ pub mod items {
                      WHERE household_id = ? AND id = ?"
                 );
                 let res = tx
-                    .execute(sqlx::query(&sql).bind(now).bind(&household_id).bind(&id))
+                    .execute(
+                        sqlx::query::<Sqlite>(&sql)
+                            .bind(now)
+                            .bind(&household_id)
+                            .bind(&id),
+                    )
                     .await?;
                 if res.rows_affected() == 0 {
                     anyhow::bail!("id not found");
@@ -471,7 +476,7 @@ pub mod items {
         WHERE id IN (SELECT id FROM ordered)
         "#,
                 );
-                tx.execute(sqlx::query(&renumber_sql).bind(&household_id))
+                tx.execute(sqlx::query::<Sqlite>(&renumber_sql).bind(&household_id))
                     .await?;
                 Ok(())
             })
@@ -506,7 +511,10 @@ where
         WHERE id IN (SELECT id FROM ordered)
         "#
     );
-    sqlx::query(&sql).bind(household_id).execute(exec).await?;
+    sqlx::query::<Sqlite>(&sql)
+        .bind(household_id)
+        .execute(exec)
+        .await?;
     Ok(())
 }
 

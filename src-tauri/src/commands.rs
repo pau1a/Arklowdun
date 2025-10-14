@@ -1,6 +1,6 @@
 use serde_json::{json, Map, Value};
 use sqlx::{
-    sqlite::SqliteRow, Column, Executor, Row, Sqlite, SqlitePool, Transaction, TypeInfo, ValueRef,
+    sqlite::SqliteRow, Column, Executor, Row, Sqlite, SqlitePool, TypeInfo, ValueRef,
 };
 
 use crate::attachment_category::AttachmentCategory;
@@ -1556,7 +1556,7 @@ pub async fn vehicles_create(
 ) -> AppResult<Value> {
     apply_vehicle_required_fields(&mut data, household_id)?;
 
-    let mut tx: Transaction<'_, Sqlite> = pool
+    let mut tx = pool
         .begin()
         .await
         .map_err(|err| AppError::from(err).with_context("operation", "vehicles_create"))?;
@@ -1590,7 +1590,7 @@ pub async fn vehicles_create(
         query = bind_value(query, value);
     }
 
-    if let Err(err) = query.execute(&mut tx).await {
+    if let Err(err) = query.execute(&mut *tx).await {
         tx.rollback().await.ok();
         return Err(map_vehicle_db_error(AppError::from(err))
             .with_context("operation", "vehicles_create")
@@ -1652,7 +1652,7 @@ pub async fn vehicles_update(
         set_clause.join(",")
     );
 
-    let mut tx: Transaction<'_, Sqlite> = pool
+    let mut tx = pool
         .begin()
         .await
         .map_err(|err| AppError::from(err).with_context("operation", "vehicles_update"))?;
@@ -1662,7 +1662,11 @@ pub async fn vehicles_update(
         let value = data.get(column).expect("column exists");
         query = bind_value(query, value);
     }
-    let result = query.bind(household_id).bind(id).execute(&mut tx).await;
+    let result = query
+        .bind(household_id)
+        .bind(id)
+        .execute(&mut *tx)
+        .await;
 
     let execute_result = match result {
         Ok(res) => res,
@@ -1680,7 +1684,7 @@ pub async fn vehicles_update(
         return Err(vehicle_missing_error(pool, id, household_id, "vehicles_update").await);
     }
 
-    repo::renumber_positions(&mut tx, "vehicles", household_id)
+    repo::renumber_positions(&mut *tx, "vehicles", household_id)
         .await
         .map_err(|err| {
             AppError::from(err)
@@ -1702,7 +1706,7 @@ pub async fn vehicles_update(
 }
 
 pub async fn vehicles_delete(pool: &SqlitePool, household_id: &str, id: &str) -> AppResult<Value> {
-    let mut tx: Transaction<'_, Sqlite> = pool
+    let mut tx = pool
         .begin()
         .await
         .map_err(|err| AppError::from(err).with_context("operation", "vehicles_delete"))?;
@@ -1714,7 +1718,7 @@ pub async fn vehicles_delete(pool: &SqlitePool, household_id: &str, id: &str) ->
     .bind(now)
     .bind(household_id)
     .bind(id)
-    .execute(&mut tx)
+    .execute(&mut *tx)
     .await;
 
     let res = match result {
@@ -1733,7 +1737,7 @@ pub async fn vehicles_delete(pool: &SqlitePool, household_id: &str, id: &str) ->
         return Err(vehicle_missing_error(pool, id, household_id, "vehicles_delete").await);
     }
 
-    repo::renumber_positions(&mut tx, "vehicles", household_id)
+    repo::renumber_positions(&mut *tx, "vehicles", household_id)
         .await
         .map_err(|err| {
             AppError::from(err)
@@ -1749,7 +1753,7 @@ pub async fn vehicles_delete(pool: &SqlitePool, household_id: &str, id: &str) ->
 }
 
 pub async fn vehicles_restore(pool: &SqlitePool, household_id: &str, id: &str) -> AppResult<Value> {
-    let mut tx: Transaction<'_, Sqlite> = pool
+    let mut tx = pool
         .begin()
         .await
         .map_err(|err| AppError::from(err).with_context("operation", "vehicles_restore"))?;
@@ -1760,7 +1764,7 @@ pub async fn vehicles_restore(pool: &SqlitePool, household_id: &str, id: &str) -
     .bind(now)
     .bind(household_id)
     .bind(id)
-    .execute(&mut tx)
+    .execute(&mut *tx)
     .await;
 
     let res = match result {
@@ -1779,7 +1783,7 @@ pub async fn vehicles_restore(pool: &SqlitePool, household_id: &str, id: &str) -
         return Err(vehicle_missing_error(pool, id, household_id, "vehicles_restore").await);
     }
 
-    repo::renumber_positions(&mut tx, "vehicles", household_id)
+    repo::renumber_positions(&mut *tx, "vehicles", household_id)
         .await
         .map_err(|err| {
             AppError::from(err)
@@ -1834,7 +1838,7 @@ where
         cols.join(","),
         placeholders.join(",")
     );
-    let mut query = sqlx::query(&sql);
+    let mut query = sqlx::query::<Sqlite>(&sql);
     for c in &cols {
         let value = data.get(c).ok_or_else(|| {
             AppError::new("COMMANDS/MISSING_FIELD", "Payload missing value for column")
@@ -1915,7 +1919,7 @@ async fn create_event(pool: &SqlitePool, mut data: Map<String, Value>) -> AppRes
         placeholders.join(",")
     );
 
-    let mut query = sqlx::query(&sql);
+    let mut query = sqlx::query::<Sqlite>(&sql);
     for &col in &cols {
         let value = data.get(col).ok_or_else(|| {
             AppError::new("COMMANDS/MISSING_FIELD", "Payload missing value for column")
@@ -2116,7 +2120,7 @@ where
             set_clause.join(",")
         )
     };
-    let mut query = sqlx::query(&sql);
+    let mut query = sqlx::query::<Sqlite>(&sql);
     for c in &cols {
         let value = data.get(c).ok_or_else(|| {
             AppError::new("COMMANDS/MISSING_FIELD", "Payload missing value for column")
