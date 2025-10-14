@@ -708,12 +708,11 @@ async fn get(
 }
 
 async fn vehicle_has_trim(pool: &SqlitePool) -> AppResult<bool> {
-    let exists: Option<i64> = sqlx::query_scalar(
-        "SELECT 1 FROM pragma_table_info('vehicles') WHERE name='trim'",
-    )
-    .fetch_optional(pool)
-    .await
-    .map_err(AppError::from)?;
+    let exists: Option<i64> =
+        sqlx::query_scalar("SELECT 1 FROM pragma_table_info('vehicles') WHERE name='trim'")
+            .fetch_optional(pool)
+            .await
+            .map_err(AppError::from)?;
     Ok(exists.is_some())
 }
 
@@ -899,11 +898,11 @@ async fn list_vehicles(pool: &SqlitePool, household_id: &str) -> AppResult<Vec<V
    ORDER BY position, created_at, id"
     };
 
-    let rows = sqlx::query_as::<_, Vehicle>(sql)
-    .bind(household_id)
-    .fetch_all(pool)
-    .await
-    .map_err(AppError::from)?;
+    let rows = sqlx::query_as::<Sqlite, Vehicle>(sql)
+        .bind(household_id)
+        .fetch_all(pool)
+        .await
+        .map_err(AppError::from)?;
 
     rows.into_iter()
         .map(|vehicle| vehicle_to_value(vehicle))
@@ -1095,11 +1094,11 @@ pub(crate) async fn get_vehicle(
     };
 
     let row = sqlx::query_as::<_, Vehicle>(sql)
-    .bind(id)
-    .bind(household_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(AppError::from)?;
+        .bind(id)
+        .bind(household_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(AppError::from)?;
 
     Ok(row.map(|vehicle| vehicle_to_value(vehicle)).transpose()?)
 }
@@ -1208,13 +1207,11 @@ fn extract_optional_string(data: &Map<String, Value>, field: &str) -> AppResult<
                 Ok(Some(trimmed.to_string()))
             }
         }
-        Some(_) => Err(
-            AppError::new(
-                "VALIDATION_TYPE_MISMATCH",
-                format!("Field '{field}' must be a string or null."),
-            )
-            .with_context("field", field.to_string()),
-        ),
+        Some(_) => Err(AppError::new(
+            "VALIDATION_TYPE_MISMATCH",
+            format!("Field '{field}' must be a string or null."),
+        )
+        .with_context("field", field.to_string())),
     }
 }
 
@@ -1244,10 +1241,9 @@ fn map_vehicle_db_error(err: AppError) -> AppError {
                     "DUPLICATE_REG",
                     "A vehicle with this registration already exists.",
                 ),
-                "uq_vehicles_household_vin" => (
-                    "DUPLICATE_VIN",
-                    "A vehicle with this VIN already exists.",
-                ),
+                "uq_vehicles_household_vin" => {
+                    ("DUPLICATE_VIN", "A vehicle with this VIN already exists.")
+                }
                 _ => (
                     "SQL_CONSTRAINT_VIOLATION",
                     "Vehicle update violated a database constraint.",
@@ -1288,7 +1284,7 @@ fn map_vehicle_db_error(err: AppError) -> AppError {
 }
 
 async fn vehicle_state(pool: &SqlitePool, id: &str) -> AppResult<Option<VehicleState>> {
-    let record = sqlx::query(
+    let record = sqlx::query::<Sqlite>(
         r#"
             SELECT household_id, name, make, model, reg, vin, deleted_at
             FROM vehicles
@@ -1300,30 +1296,18 @@ async fn vehicle_state(pool: &SqlitePool, id: &str) -> AppResult<Option<VehicleS
     .await
     .map_err(AppError::from)?;
 
-    Ok(record.map(|row| {
-        VehicleState {
-            household_id: row
-                .try_get::<String, _>("household_id")
-                .unwrap_or_default(),
-            name: row
-                .try_get::<String, _>("name")
-                .unwrap_or_default(),
-            make: row
-                .try_get::<Option<String>, _>("make")
-                .unwrap_or_default(),
-            model: row
-                .try_get::<Option<String>, _>("model")
-                .unwrap_or_default(),
-            reg: row
-                .try_get::<Option<String>, _>("reg")
-                .unwrap_or_default(),
-            vin: row
-                .try_get::<Option<String>, _>("vin")
-                .unwrap_or_default(),
-            deleted_at: row
-                .try_get::<Option<i64>, _>("deleted_at")
-                .unwrap_or_default(),
-        }
+    Ok(record.map(|row| VehicleState {
+        household_id: row.try_get::<String, _>("household_id").unwrap_or_default(),
+        name: row.try_get::<String, _>("name").unwrap_or_default(),
+        make: row.try_get::<Option<String>, _>("make").unwrap_or_default(),
+        model: row
+            .try_get::<Option<String>, _>("model")
+            .unwrap_or_default(),
+        reg: row.try_get::<Option<String>, _>("reg").unwrap_or_default(),
+        vin: row.try_get::<Option<String>, _>("vin").unwrap_or_default(),
+        deleted_at: row
+            .try_get::<Option<i64>, _>("deleted_at")
+            .unwrap_or_default(),
     }))
 }
 
@@ -1600,7 +1584,7 @@ pub async fn vehicles_create(
         placeholders
     );
 
-    let mut query = sqlx::query(&sql);
+    let mut query = sqlx::query::<Sqlite>(&sql);
     for column in &columns {
         let value = data.get(column).expect("column exists");
         query = bind_value(query, value);
@@ -1608,11 +1592,9 @@ pub async fn vehicles_create(
 
     if let Err(err) = query.execute(&mut tx).await {
         tx.rollback().await.ok();
-        return Err(
-            map_vehicle_db_error(AppError::from(err))
-                .with_context("operation", "vehicles_create")
-                .with_context("household_id", household_id.to_string()),
-        );
+        return Err(map_vehicle_db_error(AppError::from(err))
+            .with_context("operation", "vehicles_create")
+            .with_context("household_id", household_id.to_string()));
     }
 
     tx.commit()
@@ -1634,14 +1616,12 @@ pub async fn vehicles_update(
     mut data: Map<String, Value>,
     household_id: &str,
 ) -> AppResult<Value> {
-    let existing = vehicle_state(pool, id)
-        .await?
-        .ok_or_else(|| {
-            AppError::new("VEHICLE_NOT_FOUND", "Vehicle not found.")
-                .with_context("operation", "vehicles_update")
-                .with_context("id", id.to_string())
-                .with_context("household_id", household_id.to_string())
-        })?;
+    let existing = vehicle_state(pool, id).await?.ok_or_else(|| {
+        AppError::new("VEHICLE_NOT_FOUND", "Vehicle not found.")
+            .with_context("operation", "vehicles_update")
+            .with_context("id", id.to_string())
+            .with_context("household_id", household_id.to_string())
+    })?;
 
     ensure_vehicle_household_matches(&existing.household_id, household_id, "vehicles_update")?;
     if existing.deleted_at.is_some() {
@@ -1677,16 +1657,12 @@ pub async fn vehicles_update(
         .await
         .map_err(|err| AppError::from(err).with_context("operation", "vehicles_update"))?;
 
-    let mut query = sqlx::query(&sql);
+    let mut query = sqlx::query::<Sqlite>(&sql);
     for column in &cols {
         let value = data.get(column).expect("column exists");
         query = bind_value(query, value);
     }
-    let result = query
-        .bind(household_id)
-        .bind(id)
-        .execute(&mut tx)
-        .await;
+    let result = query.bind(household_id).bind(id).execute(&mut tx).await;
 
     let execute_result = match result {
         Ok(res) => res,
@@ -1701,18 +1677,15 @@ pub async fn vehicles_update(
 
     if execute_result.rows_affected() == 0 {
         tx.rollback().await.ok();
-        return Err(
-            vehicle_missing_error(pool, id, household_id, "vehicles_update").await,
-        );
+        return Err(vehicle_missing_error(pool, id, household_id, "vehicles_update").await);
     }
 
     repo::renumber_positions(&mut tx, "vehicles", household_id)
         .await
         .map_err(|err| {
-            AppError::from(err).with_context("operation", "vehicles_update").with_context(
-                "household_id",
-                household_id.to_string(),
-            )
+            AppError::from(err)
+                .with_context("operation", "vehicles_update")
+                .with_context("household_id", household_id.to_string())
         })?;
 
     tx.commit()
@@ -1728,17 +1701,13 @@ pub async fn vehicles_update(
     })
 }
 
-pub async fn vehicles_delete(
-    pool: &SqlitePool,
-    household_id: &str,
-    id: &str,
-) -> AppResult<Value> {
+pub async fn vehicles_delete(pool: &SqlitePool, household_id: &str, id: &str) -> AppResult<Value> {
     let mut tx: Transaction<'_, Sqlite> = pool
         .begin()
         .await
         .map_err(|err| AppError::from(err).with_context("operation", "vehicles_delete"))?;
     let now = now_ms();
-    let result = sqlx::query(
+    let result = sqlx::query::<Sqlite>(
         "UPDATE vehicles SET deleted_at = ?, updated_at = ? WHERE household_id = ? AND id = ?",
     )
     .bind(now)
@@ -1761,18 +1730,15 @@ pub async fn vehicles_delete(
 
     if res.rows_affected() == 0 {
         tx.rollback().await.ok();
-        return Err(
-            vehicle_missing_error(pool, id, household_id, "vehicles_delete").await,
-        );
+        return Err(vehicle_missing_error(pool, id, household_id, "vehicles_delete").await);
     }
 
     repo::renumber_positions(&mut tx, "vehicles", household_id)
         .await
         .map_err(|err| {
-            AppError::from(err).with_context("operation", "vehicles_delete").with_context(
-                "household_id",
-                household_id.to_string(),
-            )
+            AppError::from(err)
+                .with_context("operation", "vehicles_delete")
+                .with_context("household_id", household_id.to_string())
         })?;
 
     tx.commit()
@@ -1782,17 +1748,13 @@ pub async fn vehicles_delete(
     Ok(json!({ "ok": true }))
 }
 
-pub async fn vehicles_restore(
-    pool: &SqlitePool,
-    household_id: &str,
-    id: &str,
-) -> AppResult<Value> {
+pub async fn vehicles_restore(pool: &SqlitePool, household_id: &str, id: &str) -> AppResult<Value> {
     let mut tx: Transaction<'_, Sqlite> = pool
         .begin()
         .await
         .map_err(|err| AppError::from(err).with_context("operation", "vehicles_restore"))?;
     let now = now_ms();
-    let result = sqlx::query(
+    let result = sqlx::query::<Sqlite>(
         "UPDATE vehicles SET deleted_at = NULL, updated_at = ? WHERE household_id = ? AND id = ?",
     )
     .bind(now)
@@ -1814,18 +1776,15 @@ pub async fn vehicles_restore(
 
     if res.rows_affected() == 0 {
         tx.rollback().await.ok();
-        return Err(
-            vehicle_missing_error(pool, id, household_id, "vehicles_restore").await,
-        );
+        return Err(vehicle_missing_error(pool, id, household_id, "vehicles_restore").await);
     }
 
     repo::renumber_positions(&mut tx, "vehicles", household_id)
         .await
         .map_err(|err| {
-            AppError::from(err).with_context("operation", "vehicles_restore").with_context(
-                "household_id",
-                household_id.to_string(),
-            )
+            AppError::from(err)
+                .with_context("operation", "vehicles_restore")
+                .with_context("household_id", household_id.to_string())
         })?;
 
     tx.commit()

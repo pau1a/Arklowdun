@@ -488,11 +488,13 @@ pub async fn apply_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
             // Ensure the in-flight transaction is rolled back so we release locks
             // before writing to schema_migrations outside a tx.
             let _ = tx.rollback().await;
-            sqlx::query("INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)")
-                .bind(&file_name)
-                .bind(now_ms())
-                .execute(pool)
-                .await?;
+            sqlx::query(
+                "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+            )
+            .bind(&file_name)
+            .bind(now_ms())
+            .execute(pool)
+            .await?;
             applied.insert(file_name.clone());
             continue;
         }

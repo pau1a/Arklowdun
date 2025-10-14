@@ -222,35 +222,46 @@ async fn vehicles_unique_indices_enforced() -> Result<()> {
         }))
     };
 
-    vehicles_create(app.state(), "default".into(), base("UNI-001", "VINUNIQUETEST001")).await?;
+    vehicles_create(
+        app.state(),
+        "default".into(),
+        base("UNI-001", "VINUNIQUETEST001"),
+    )
+    .await?;
 
     let dup_reg = vehicles_create(
         app.state(),
         "default".into(),
         base("UNI-001", "VINUNIQUETEST002"),
     )
-        .await
-        .expect_err("duplicate reg should fail");
+    .await
+    .expect_err("duplicate reg should fail");
     assert_eq!(dup_reg.code(), "DUPLICATE_REG");
     assert_eq!(
         dup_reg.context().get("constraint_name"),
         Some(&"uq_vehicles_household_reg".to_string())
     );
-    assert_eq!(dup_reg.context().get("sqlite_code"), Some(&"2067".to_string()));
+    assert_eq!(
+        dup_reg.context().get("sqlite_code"),
+        Some(&"2067".to_string())
+    );
 
     let dup_vin = vehicles_create(
         app.state(),
         "default".into(),
         base("UNI-002", "VINUNIQUETEST001"),
     )
-        .await
-        .expect_err("duplicate vin should fail");
+    .await
+    .expect_err("duplicate vin should fail");
     assert_eq!(dup_vin.code(), "DUPLICATE_VIN");
     assert_eq!(
         dup_vin.context().get("constraint_name"),
         Some(&"uq_vehicles_household_vin".to_string())
     );
-    assert_eq!(dup_vin.context().get("sqlite_code"), Some(&"2067".to_string()));
+    assert_eq!(
+        dup_vin.context().get("sqlite_code"),
+        Some(&"2067".to_string())
+    );
 
     Ok(())
 }
