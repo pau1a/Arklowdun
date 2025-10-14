@@ -420,7 +420,7 @@ pub mod items {
         WHERE id IN (SELECT id FROM ordered)
         "#,
                 );
-                tx.execute(sqlx::query::<Sqlite>(&renumber_sql).bind(&household_id))
+                tx.execute(sqlx::query::<sqlx::Sqlite>(&renumber_sql).bind(&household_id))
                     .await?;
                 Ok(())
             })
@@ -451,7 +451,7 @@ pub mod items {
                 );
                 let res = tx
                     .execute(
-                        sqlx::query::<Sqlite>(&sql)
+                        sqlx::query::<sqlx::Sqlite>(&sql)
                             .bind(now)
                             .bind(&household_id)
                             .bind(&id),
@@ -476,7 +476,7 @@ pub mod items {
         WHERE id IN (SELECT id FROM ordered)
         "#,
                 );
-                tx.execute(sqlx::query::<Sqlite>(&renumber_sql).bind(&household_id))
+                tx.execute(sqlx::query::<sqlx::Sqlite>(&renumber_sql).bind(&household_id))
                     .await?;
                 Ok(())
             })
